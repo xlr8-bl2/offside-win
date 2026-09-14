@@ -168,6 +168,69 @@ export async function loadLeagueModel(leagueId: number): Promise<LoadedLeagueMod
   };
 }
 
+/**
+ * Expected corners for a fixture from a model loaded out of D1.
+ *
+ * The fitting path and the serving path need the same arithmetic from different
+ * shapes, and reconstructing a fitted-model object at serving time just to reuse
+ * one function is the kind of indirection that hides bugs. These take the loaded
+ * shape directly.
+ */
+export function expectedCornersFrom(
+  model: LoadedLeagueModel,
+  homeTeamId: number,
+  awayTeamId: number,
+): { home: number; away: number; dispersion: number } {
+  const base = model.rates.corners.leagueMean;
+  const h = model.rates.teams.get(homeTeamId);
+  const a = model.rates.teams.get(awayTeamId);
+
+  // Effects are stored as absolute rates; convert back to multipliers against
+  // the league mean so an unseen team lands on average rather than on zero.
+  const hFor = h && base > 0 ? h.corners_for / base : 1;
+  const hAgainst = h && base > 0 ? h.corners_against / base : 1;
+  const aFor = a && base > 0 ? a.corners_for / base : 1;
+  const aAgainst = a && base > 0 ? a.corners_against / base : 1;
+
+  const share = model.rates.corners.homeShare;
+  return {
+    home: base * hFor * aAgainst * 2 * share,
+    away: base * aFor * hAgainst * 2 * (1 - share),
+    dispersion: model.rates.corners.dispersion,
+  };
+}
+
+/**
+ * Expected red cards. The referee multiplier only applies once the sample gate
+ * is cleared — §13's worked example is a referee with eleven games getting no
+ * tendency assessment — and is bounded, because an unbounded multiplier on an
+ * event this rare is a liability rather than a signal.
+ */
+export function expectedRedsFrom(
+  model: LoadedLeagueModel,
+  homeTeamId: number,
+  awayTeamId: number,
+  referee: RefereeRate | null,
+): { total: number; refereeApplied: boolean } {
+  const base = model.rates.reds.leagueMean;
+  const h = model.rates.teams.get(homeTeamId);
+  const a = model.rates.teams.get(awayTeamId);
+  const hFor = h && base > 0 ? h.reds_for / base : 1;
+  const aFor = a && base > 0 ? a.reds_for / base : 1;
+
+  let total = base * hFor + base * aFor;
+  let refereeApplied = false;
+
+  if (referee && referee.matches >= config.gates.refereeMatches && base > 0) {
+    const mult = referee.reds_per / (2 * base);
+    if (Number.isFinite(mult) && mult > 0) {
+      total *= Math.max(0.6, Math.min(1.8, mult));
+      refereeApplied = true;
+    }
+  }
+  return { total: Math.max(0, total), refereeApplied };
+}
+
 export async function loadRefereeRate(refereeId: number | null): Promise<RefereeRate | null> {
   if (refereeId === null) return null;
   const rows = await select<RefereeRate>(

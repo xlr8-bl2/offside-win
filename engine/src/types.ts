@@ -137,6 +137,12 @@ export interface MatchRow {
   away_yellows: number | null;
   home_reds: number | null;
   away_reds: number | null;
+  home_possession: number | null;
+  away_possession: number | null;
+  home_shots: number | null;
+  away_shots: number | null;
+  home_sot: number | null;
+  away_sot: number | null;
   referee_id: number | null;
 }
 

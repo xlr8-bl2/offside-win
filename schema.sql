@@ -43,6 +43,15 @@ CREATE TABLE IF NOT EXISTS match (
   away_yellows  INTEGER,
   home_reds     INTEGER,
   away_reds     INTEGER,
+  -- Style signal. Free to capture: the same stats payload already fetched for
+  -- xG carries these, and they turn §4.2's matchup read from a stub into a
+  -- computation.
+  home_possession REAL,
+  away_possession REAL,
+  home_shots    INTEGER,
+  away_shots    INTEGER,
+  home_sot      INTEGER,
+  away_sot      INTEGER,
   referee_id    INTEGER,
   stats_fetched INTEGER NOT NULL DEFAULT 0, -- 0 = stats endpoint not yet pulled
   updated_at    INTEGER NOT NULL

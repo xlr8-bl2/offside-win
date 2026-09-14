@@ -28,6 +28,9 @@ const ALIASES = {
   corners: ['corners', 'corner_kicks', 'cornerKicks', 'corners.total', 'corners_total'],
   yellows: ['yellow_cards', 'yellowCards', 'yellows', 'cards.yellow', 'yellow'],
   reds: ['red_cards', 'redCards', 'reds', 'cards.red', 'red'],
+  possession: ['possession', 'ball_possession', 'possession_pct', 'possession.percent', 'possessionPct'],
+  shots: ['shots', 'shots_total', 'total_shots', 'shotsTotal', 'shots.total'],
+  sot: ['shots_on_target', 'shotsOnTarget', 'shots_on_goal', 'sot', 'shots.on_target'],
 } as const;
 
 /** Find the home/away halves of a stats payload whatever they are called. */
@@ -69,6 +72,12 @@ export interface ExtractedStats {
   away_yellows: number | null;
   home_reds: number | null;
   away_reds: number | null;
+  home_possession: number | null;
+  away_possession: number | null;
+  home_shots: number | null;
+  away_shots: number | null;
+  home_sot: number | null;
+  away_sot: number | null;
 }
 
 export const EMPTY_STATS: ExtractedStats = {
@@ -81,6 +90,12 @@ export const EMPTY_STATS: ExtractedStats = {
   away_yellows: null,
   home_reds: null,
   away_reds: null,
+  home_possession: null,
+  away_possession: null,
+  home_shots: null,
+  away_shots: null,
+  home_sot: null,
+  away_sot: null,
 };
 
 export function extractStats(payload: unknown): ExtractedStats {
@@ -114,7 +129,20 @@ export function extractStats(payload: unknown): ExtractedStats {
     away_yellows: metric(s.away, ALIASES.yellows),
     home_reds: metric(s.home, ALIASES.reds),
     away_reds: metric(s.away, ALIASES.reds),
+    home_possession: normalisePossession(metric(s.home, ALIASES.possession)),
+    away_possession: normalisePossession(metric(s.away, ALIASES.possession)),
+    home_shots: metric(s.home, ALIASES.shots),
+    away_shots: metric(s.away, ALIASES.shots),
+    home_sot: metric(s.home, ALIASES.sot),
+    away_sot: metric(s.away, ALIASES.sot),
   };
+}
+
+/** Possession arrives as either 54 or 0.54 depending on the feed. */
+function normalisePossession(v: number | null): number | null {
+  if (v === null || !Number.isFinite(v) || v <= 0) return null;
+  const pct = v <= 1 ? v * 100 : v;
+  return pct > 5 && pct < 95 ? pct : null;
 }
 
 /**
@@ -371,7 +399,9 @@ export async function fetchMissingStats(limit = 4000): Promise<{ fetched: number
       'match',
       [
         'id', 'home_xg', 'away_xg', 'xg_estimated', 'home_corners', 'away_corners',
-        'home_yellows', 'away_yellows', 'home_reds', 'away_reds', 'stats_fetched', 'updated_at',
+        'home_yellows', 'away_yellows', 'home_reds', 'away_reds',
+        'home_possession', 'away_possession', 'home_shots', 'away_shots',
+        'home_sot', 'away_sot', 'stats_fetched', 'updated_at',
       ],
       batch.splice(0),
       {
@@ -380,7 +410,10 @@ export async function fetchMissingStats(limit = 4000): Promise<{ fetched: number
           'xg_estimated = excluded.xg_estimated, home_corners = excluded.home_corners, ' +
           'away_corners = excluded.away_corners, home_yellows = excluded.home_yellows, ' +
           'away_yellows = excluded.away_yellows, home_reds = excluded.home_reds, ' +
-          'away_reds = excluded.away_reds, stats_fetched = 1, updated_at = excluded.updated_at',
+          'away_reds = excluded.away_reds, home_possession = excluded.home_possession, ' +
+          'away_possession = excluded.away_possession, home_shots = excluded.home_shots, ' +
+          'away_shots = excluded.away_shots, home_sot = excluded.home_sot, ' +
+          'away_sot = excluded.away_sot, stats_fetched = 1, updated_at = excluded.updated_at',
       },
     );
   };
@@ -426,7 +459,8 @@ export async function loadMatches(leagueId: number, sinceEpoch?: number): Promis
     `SELECT id, league_id, season_id, kickoff, home_team_id, away_team_id,
             home_goals, away_goals, home_xg, away_xg, xg_estimated,
             home_corners, away_corners, home_yellows, away_yellows,
-            home_reds, away_reds, referee_id
+            home_reds, away_reds, home_possession, away_possession,
+            home_shots, away_shots, home_sot, away_sot, referee_id
      FROM match
      WHERE league_id = ? AND home_goals IS NOT NULL ${sinceEpoch ? 'AND kickoff >= ?' : ''}
      ORDER BY kickoff ASC`,

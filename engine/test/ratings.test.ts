@@ -3,6 +3,16 @@ import assert from 'node:assert/strict';
 import { fitDixonColes, defaultFitOptions, expectedGoals, tau } from '../src/ratings/dixoncoles.ts';
 import type { MatchRow } from '../src/types.ts';
 
+/** Columns a synthetic match does not exercise. */
+const NO_STATS = {
+  home_xg: null, away_xg: null, xg_estimated: null,
+  home_corners: null, away_corners: null,
+  home_yellows: null, away_yellows: null, home_reds: null, away_reds: null,
+  home_possession: null, away_possession: null,
+  home_shots: null, away_shots: null, home_sot: null, away_sot: null,
+  referee_id: null,
+} as const;
+
 /** Deterministic PRNG so a failure is always reproducible. */
 function mulberry32(seed: number) {
   return () => {
@@ -63,16 +73,7 @@ function syntheticSeason(
           away_team_id: j + 1,
           home_goals: poisson(lh, rnd),
           away_goals: poisson(la, rnd),
-          home_xg: null,
-          away_xg: null,
-          xg_estimated: null,
-          home_corners: null,
-          away_corners: null,
-          home_yellows: null,
-          away_yellows: null,
-          home_reds: null,
-          away_reds: null,
-          referee_id: null,
+          ...NO_STATS,
         });
       }
     }
@@ -208,9 +209,7 @@ function seasonWithRho(nTeams: number, seasons: number, rho: number, seed: numbe
           kickoff: now - (nTeams * nTeams * seasons - day) * 3600 * 8,
           home_team_id: i + 1, away_team_id: j + 1,
           home_goals: x, away_goals: y,
-          home_xg: null, away_xg: null, xg_estimated: null,
-          home_corners: null, away_corners: null, home_yellows: null,
-          away_yellows: null, home_reds: null, away_reds: null, referee_id: null,
+          ...NO_STATS,
         });
       }
     }
@@ -270,20 +269,14 @@ test('shrinkage pulls thin-sample teams toward the league mean', () => {
     rows.push({
       id: id++, league_id: 1, season_id: 1, kickoff: now - i * 86400,
       home_team_id: (i % 6) + 1, away_team_id: ((i + 3) % 6) + 1,
-      home_goals: 1, away_goals: 1,
-      home_xg: null, away_xg: null, xg_estimated: null,
-      home_corners: null, away_corners: null, home_yellows: null,
-      away_yellows: null, home_reds: null, away_reds: null, referee_id: null,
+      home_goals: 1, away_goals: 1, ...NO_STATS,
     });
   }
   for (let i = 0; i < 2; i++) {
     rows.push({
       id: id++, league_id: 1, season_id: 1, kickoff: now - i * 86400,
       home_team_id: 99, away_team_id: (i % 6) + 1,
-      home_goals: 5, away_goals: 0,
-      home_xg: null, away_xg: null, xg_estimated: null,
-      home_corners: null, away_corners: null, home_yellows: null,
-      away_yellows: null, home_reds: null, away_reds: null, referee_id: null,
+      home_goals: 5, away_goals: 0, ...NO_STATS,
     });
   }
 
