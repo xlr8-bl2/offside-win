@@ -28,8 +28,28 @@ guessing or zeroing.
 
 **The first real job is to run the `probe` workflow and read its log.** It prints the actual field
 shapes and which endpoints the account's tier serves. Then tighten those alias lists against what
-came back, and set a repository variable `PITCH_SCALE_MAX` from the observed range so §6.3 stops
-reporting itself as unusable.
+came back.
+
+### What the probe found when it was finally run
+
+The alias lists largely survived contact. `expected_goals` and `xg.actual` both arrive on finished
+matches and both are in the list; `xg.estimated` is a **flag, not a value**. Cards come back `null`
+even on a finished match, so `extractCardsFromIncidents` is not a fallback for odd feeds — it is the
+only path that ever populates cards, and the incidents feed does carry them.
+
+**`PITCH_SCALE_MAX` cannot be set, and the instruction to set it should not be followed.** The
+probe measured `pitch_condition` across 400 upcoming fixtures: it is populated on **none** of them.
+It carries a number only on fixtures already played, which is exactly when §6.3 can no longer use
+it. So there is no observed range to read a scale from, and §6.3 is inert for want of data rather
+than for want of configuration. Setting the variable to a guessed maximum would activate a real
+price adjustment on a field that is always absent at pricing time. Leave it unset; the factor
+correctly reports itself unavailable. Revisit only if the provider starts populating it pre-match.
+
+**Odds are served, but only near kickoff.** An early sample said 0 of 30 leagues carried any odds,
+including the Premier League, which reads like a tier problem and is not one: it was sampling each
+league's *first* fixture in a five-day window. Sampling each league's *soonest* fixture instead
+gives 24 of 30 leagues priced — La Liga, the Championship and the Carabao Cup all at 62 rows. Before
+concluding anything about entitlement from an empty `results: []`, check how far out the fixture is.
 
 ## The user
 
@@ -53,7 +73,7 @@ bootstrap  30-90 min full history, ratings, first board
 backtest   manual    the only evidence the model works — run it
 ```
 
-## Three things worth not re-deriving
+## Things worth not re-deriving
 
 **Actions is blocked on the original account** (`xlr8-bl`). Runs there end in seconds with no
 runner, no logs and no steps. That is why the project moved accounts. It is not a code problem.
@@ -67,6 +87,17 @@ leave the file untouched is not enough, which is why the first sync registered o
 it happened to change. All eight have since been touched, so this should not recur. If a new
 workflow ever 404s on dispatch, this is the reason, and the fix is a one-line edit to it on the
 default branch — not permissions and not secrets.
+
+**The root package.json must forward every script a workflow calls.** `bootstrap` died immediately
+on `Missing script: "migrate"`: the root forwarded probe, history, ratings, slate, settle and
+backtest to the engine workspace but not migrate, though `engine/package.json` defines it. `deploy`
+applies the schema through wrangler instead, so it never noticed, and the gap stayed invisible until
+a workflow actually ran. Fixed, but check the whole list if a new entry point is ever added.
+
+**D1 caps bound parameters at 100 per query, not SQLite's much larger limit.** `insertMany` chunks
+on total parameters — the right shape — but with a ceiling of 480, so the first bulk write of the
+backfill went out at 480 parameters and came back `7500: too many SQL variables`. Every bulk write
+in the engine would have hit it. The cap now comes from `config.d1.maxParams`.
 
 **The backtest is the claim.** The model must beat both a naive Poisson and the league base rate on
 log loss. Until it has run, the model page says outright there is no evidence any of this works —
