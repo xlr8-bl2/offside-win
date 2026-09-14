@@ -28,6 +28,12 @@ export const config = {
     token: process.env.CF_API_TOKEN ?? '',
     /** D1 REST caps statements per batch; stay well under it. */
     batchSize: num('D1_BATCH', 40),
+    /**
+     * D1 caps *bound parameters per query* at 100 — far below SQLite's own
+     * SQLITE_MAX_VARIABLE_NUMBER, and the ceiling that actually bites when
+     * chunking multi-row inserts. Overridable so a raised cap needs no release.
+     */
+    maxParams: num('D1_MAX_PARAMS', 100),
   },
 
   /**
