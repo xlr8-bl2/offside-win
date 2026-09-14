@@ -7,7 +7,7 @@ import { probe } from './probe.ts';
 import { fitAllLeagues } from './ratings/fit.ts';
 import { runSettle } from './settle.ts';
 import { pruneBoard, runSlate } from './slate.ts';
-import { d1Stats, migrate } from './store.ts';
+import { d1Stats, migrate, select } from './store.ts';
 
 /**
  * Entry points for the scheduled workflows.
@@ -19,7 +19,18 @@ import { d1Stats, migrate } from './store.ts';
  *   slate     — reprice the next few days and publish the board
  *   settle    — grade finished picks and refresh calibration
  *   backtest  — walk-forward evaluation
+ *
+ * Every entry point applies the schema first and the slate cold-starts itself,
+ * so the only manual act in bringing this up is setting four secrets. Requiring
+ * someone to press buttons in a fixed order is a setup step that can be got
+ * wrong, and a system that can bootstrap itself should.
  */
+
+/** CREATE TABLE IF NOT EXISTS throughout, so this is safe to run every time. */
+async function ensureSchema(): Promise<void> {
+  const sql = readFileSync(new URL('../../schema.sql', import.meta.url), 'utf8');
+  await migrate(sql);
+}
 
 const commands: Record<string, () => Promise<unknown>> = {
   async probe() {
@@ -29,24 +40,42 @@ const commands: Record<string, () => Promise<unknown>> = {
 
   async migrate() {
     requireEnv();
-    const sql = readFileSync(new URL('../../schema.sql', import.meta.url), 'utf8');
-    await migrate(sql);
+    await ensureSchema();
     console.log('Schema applied.');
   },
 
   async history() {
     requireEnv();
+    await ensureSchema();
     return backfillHistory({ full: process.env.FULL_BACKFILL === 'true' });
   },
 
   async ratings() {
     requireEnv();
+    await ensureSchema();
     console.log('Fitting ratings...');
     return fitAllLeagues();
   },
 
   async slate() {
     requireEnv();
+    await ensureSchema();
+
+    // Cold start. With no fitted ratings the slate would publish nothing, and
+    // would go on publishing nothing every half hour until a human noticed. So
+    // it builds what it needs instead of waiting to be told.
+    //
+    // The first pass is deliberately shallow — one season, and a capped stats
+    // fetch — so it finishes inside a scheduled run rather than colliding with
+    // the next one. The nightly ratings job deepens it from there.
+    const fitted = await select<{ n: number }>('SELECT COUNT(*) AS n FROM rating_meta');
+    if ((fitted[0]?.n ?? 0) === 0) {
+      console.log('No fitted ratings found — cold-starting before pricing anything.\n');
+      await backfillHistory({ full: false, seasons: 1, statsWindowDays: 200, statsLimit: 1200 });
+      await fitAllLeagues();
+      console.log('\nCold start complete. Tonight\'s ratings run will deepen the history.\n');
+    }
+
     const report = await runSlate();
     await pruneBoard();
     return report;
@@ -54,11 +83,13 @@ const commands: Record<string, () => Promise<unknown>> = {
 
   async settle() {
     requireEnv();
+    await ensureSchema();
     return runSettle();
   },
 
   async backtest() {
     requireEnv();
+    await ensureSchema();
     return runBacktest();
   },
 };

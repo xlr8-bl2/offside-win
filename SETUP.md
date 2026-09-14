@@ -3,7 +3,8 @@
 Nothing here needs a computer. Wrangler only ever runs inside a workflow, so the database and the
 Worker are both created from a browser. Roughly 15 minutes.
 
-Work through it in order — later steps need values from earlier ones.
+Work through it in order — later steps need values from earlier ones. After the secrets are in,
+the system starts itself; there is nothing to run by hand.
 
 ---
 
@@ -103,69 +104,33 @@ That is the entire configuration. Nothing is set on Cloudflare's side.
 
 ---
 
-## 5. Check the provider works
+## 5. Wait
 
-**Actions** tab. If it offers a green "I understand my workflows, go ahead and enable them" button,
-press it.
+That is the whole setup. Nothing else needs pressing.
 
-Run **probe** → *Run workflow*.
+Within half an hour the pricing job runs on its schedule, finds an empty database, and builds what
+it needs: it creates the tables, backfills a season of matches, fits the team ratings, then prices
+the board. The site publishes itself on its own daily schedule.
 
-It needs only `BSD_API_KEY`, so it is the cheapest way to find out whether your key works before
-anything else depends on it. When it finishes, open the run and read the log. You are looking for:
+| When | What happens |
+|---|---|
+| within 30 min | first pricing run — creates tables, backfills, fits ratings, prices the board |
+| within a day | site published, history deepened to three seasons, results graded |
+| every 30 min after | reprices as team news lands |
 
-- **Print inferred shapes** — the field names and types the provider actually returns.
-- **Endpoint availability** — which endpoints your tier serves. Some are expected to be missing on
-  the free tier; the model reports them as unavailable rather than guessing, and picks them up on
-  its own if you ever upgrade.
+### Checking on it
 
-If this fails with an authentication error, the key is wrong. Fix it before going further.
+**Actions** tab on the repo shows the runs. Green is fine. The first pricing run takes far longer
+than the others because it is doing the backfill — that is expected, not a hang.
 
----
+Once the site is up, `/api/health` reports how many fixtures are priced and how long ago the data
+was computed.
 
-## 6. Deploy the site
+### If you want to skip the wait
 
-Run **deploy** → *Run workflow*.
-
-This creates the tables and publishes the Worker. When it finishes, the URL appears near the end of
-the log — something like `https://offside-win.<your-subdomain>.workers.dev`.
-
-The site will be empty. That is correct; there is no data yet.
-
----
-
-## 7. Load the data
-
-Run **bootstrap** → *Run workflow*.
-
-Leave the inputs at their defaults unless you want fewer seasons of history. This is the slow one —
-**expect 30 to 90 minutes**, most of it backfilling match history and fetching per-match statistics.
-
-It runs four steps in order, and the order is load-bearing:
-
-```
-migrate  → create the tables
-history  → backfill finished matches and their stats
-ratings  → fit the team ratings
-slate    → price the next 72 hours and publish the board
-```
-
-Running the slate before ratings exist publishes nothing on purpose: without our own numbers there
-is no opinion worth publishing, so those leagues are skipped rather than falling back to the
-bookmaker's price dressed up as analysis.
-
-Reload the site when it finishes.
-
----
-
-## 8. It now runs itself
-
-| Workflow | When | What |
-|---|---|---|
-| `slate` | every 30 min | reprices the next 72h, republishes the board |
-| `settle` | hourly | grades finished picks, updates calibration |
-| `ratings` | daily, 04:00 UTC | backfills new results and refits |
-| `backtest` | manual | walk-forward evaluation — run this to find out if the model is any good |
-| `deploy` | on push | schema and Worker |
+Every workflow can also be run by hand from the Actions tab — `probe` to check your provider key
+in about a minute, `deploy` to publish the site immediately, `bootstrap` to do the full deep load
+now rather than overnight. None of it is required.
 
 ---
 

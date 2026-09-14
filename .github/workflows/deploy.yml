@@ -3,10 +3,18 @@ name: deploy
 # The repo was empty when this branch was first pushed, so GitHub promoted that
 # branch to default rather than creating `main`. Both are listed so deploy fires
 # on whichever is current, and renaming the default later needs no edit here.
+#
+# The daily schedule is what makes this self-starting. A repository created by
+# import receives no push, so a push-only trigger would leave the site
+# unpublished indefinitely while the data quietly loaded behind it. Deploying is
+# idempotent — same schema, same Worker — so running it daily costs a minute and
+# removes a manual step that can be forgotten.
 on:
   push:
     branches: [main, 'claude/**']
     paths: ['worker/**', 'public/**', 'schema.sql', '.github/workflows/deploy.yml']
+  schedule:
+    - cron: '15 3 * * *'
   workflow_dispatch:
 
 concurrency:

@@ -3,6 +3,11 @@ name: slate
 # Reprices the next 72 hours and republishes the board. Frequent because the
 # edge appears when team news lands: a confirmed lineup an hour before kickoff
 # is the moment provisional picks become real ones.
+#
+# On the very first run there are no fitted ratings, so this backfills a season
+# and fits them before pricing anything — otherwise it would publish nothing,
+# every half hour, until somebody noticed. That first run takes far longer than
+# the rest, hence the timeout.
 on:
   schedule:
     - cron: '*/30 * * * *'
@@ -15,7 +20,7 @@ concurrency:
 jobs:
   slate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

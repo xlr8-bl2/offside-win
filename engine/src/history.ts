@@ -255,7 +255,20 @@ export interface BackfillReport {
   requests: number;
 }
 
-export async function backfillHistory(opts: { full?: boolean } = {}): Promise<BackfillReport> {
+export interface BackfillOptions {
+  full?: boolean;
+  /**
+   * Overrides for a cold start, which wants a shallow first pass it can finish
+   * inside one scheduled run. These are parameters rather than environment
+   * writes because `config` reads the environment once at module load — setting
+   * process.env at call time looks like it works and silently does nothing.
+   */
+  seasons?: number;
+  statsWindowDays?: number;
+  statsLimit?: number;
+}
+
+export async function backfillHistory(opts: BackfillOptions = {}): Promise<BackfillReport> {
   const leagues = await discoverLeagues();
   const now = Math.floor(Date.now() / 1000);
   const report: BackfillReport = {
@@ -284,7 +297,7 @@ export async function backfillHistory(opts: { full?: boolean } = {}): Promise<Ba
   );
 
   for (const league of leagues) {
-    const seasonIds = await currentSeasonIds(league.id, config.history.seasons);
+    const seasonIds = await currentSeasonIds(league.id, opts.seasons ?? config.history.seasons);
     const seasons = seasonIds.length ? seasonIds : [league.season_id].filter((s): s is number => s !== null);
 
     // Incremental runs only need matches since the newest one already stored.
@@ -362,7 +375,7 @@ export async function backfillHistory(opts: { full?: boolean } = {}): Promise<Ba
     console.log(`  ${league.name}: ${written} matches`);
   }
 
-  const statsReport = await fetchMissingStats();
+  const statsReport = await fetchMissingStats(opts.statsLimit, opts.statsWindowDays);
   report.statsFetched = statsReport.fetched;
   report.statsFailed = statsReport.failed;
   report.requests = bsdStats.requests;
@@ -376,8 +389,12 @@ export async function backfillHistory(opts: { full?: boolean } = {}): Promise<Ba
  * Bounded by a window because a five-year-old match's corner count adds
  * nothing a decayed fit will notice.
  */
-export async function fetchMissingStats(limit = 4000): Promise<{ fetched: number; failed: number }> {
-  const cutoff = Math.floor(Date.now() / 1000) - config.history.statsWindowDays * 86400;
+export async function fetchMissingStats(
+  limit = 4000,
+  windowDays?: number,
+): Promise<{ fetched: number; failed: number }> {
+  const cutoff =
+    Math.floor(Date.now() / 1000) - (windowDays ?? config.history.statsWindowDays) * 86400;
   const pending = await select<{ id: number; home_team_id: number }>(
     `SELECT id, home_team_id FROM match
      WHERE stats_fetched = 0 AND kickoff >= ?

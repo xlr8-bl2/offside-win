@@ -5,7 +5,10 @@ name: ratings
 # Runs on a public repo, so standard-runner minutes are free and uncapped.
 on:
   schedule:
-    - cron: '0 4 * * *'
+    # Twice daily rather than nightly: after a cold start the slate holds only a
+    # shallow season, and this is what deepens it. Waiting a full day for the
+    # model to reach its real accuracy is a poor first impression.
+    - cron: '0 4,16 * * *'
   workflow_dispatch:
     inputs:
       full_backfill:
