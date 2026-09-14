@@ -55,9 +55,16 @@ export const config = {
     xi: num('RATING_XI', 0.0065),
     /** Dixon-Coles low-score dependence. FITTED. Negative in every real league. */
     rho: num('RATING_RHO', -0.11),
+    /**
+     * Prior strength for ρ, counted in low-score matches. ρ is informed only by
+     * 0-0, 1-0, 0-1 and 1-1 results, so one league-season identifies it to about
+     * ±0.07 — as large as the effect. Without this the fitter adopts noise, and
+     * a positive ρ is actively worse than no correction.
+     */
+    rhoPriorMatches: num('RATING_RHO_PRIOR', 200),
     /** Optimiser controls. */
-    maxIter: num('RATING_MAX_ITER', 400),
-    tolerance: num('RATING_TOL', 1e-7),
+    maxIter: num('RATING_MAX_ITER', 2500),
+    tolerance: num('RATING_TOL', 2e-4),
     /**
      * Shrinkage prior strength, in effective matches. A team with this many
      * weighted matches sits halfway between its own form and the league mean.
