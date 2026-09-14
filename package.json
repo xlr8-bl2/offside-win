@@ -1,0 +1,19 @@
+{
+  "name": "offside-win",
+  "private": true,
+  "type": "module",
+  "workspaces": ["engine", "worker"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "probe": "npm -w engine run probe",
+    "history": "npm -w engine run history",
+    "ratings": "npm -w engine run ratings",
+    "slate": "npm -w engine run slate",
+    "settle": "npm -w engine run settle",
+    "backtest": "npm -w engine run backtest",
+    "test": "npm -w engine test",
+    "typecheck": "npm -w engine run typecheck && npm -w worker run typecheck",
+    "dev": "npm -w worker run dev",
+    "deploy": "npm -w worker run deploy"
+  }
+}

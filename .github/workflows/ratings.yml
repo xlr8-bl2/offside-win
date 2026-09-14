@@ -1,0 +1,43 @@
+name: ratings
+
+# The heavy job. Backfills finished matches, pulls their stats, then refits
+# Dixon-Coles ratings and the corner/card rate models per league.
+# Runs on a public repo, so standard-runner minutes are free and uncapped.
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      full_backfill:
+        description: 'Re-pull all history rather than only new matches'
+        type: boolean
+        default: false
+
+concurrency:
+  group: engine-write
+  cancel-in-progress: false
+
+jobs:
+  ratings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+      - name: Backfill match history
+        env:
+          BSD_API_KEY: ${{ secrets.BSD_API_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_D1_DATABASE_ID: ${{ secrets.CF_D1_DATABASE_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          FULL_BACKFILL: ${{ inputs.full_backfill }}
+        run: npm run history
+      - name: Fit ratings
+        env:
+          BSD_API_KEY: ${{ secrets.BSD_API_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_D1_DATABASE_ID: ${{ secrets.CF_D1_DATABASE_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: npm run ratings

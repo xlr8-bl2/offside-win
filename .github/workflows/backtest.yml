@@ -1,0 +1,33 @@
+name: backtest
+
+# Walk-forward evaluation. Manual, because it is the job that decides whether
+# the model ships, not a thing to run on a timer.
+on:
+  workflow_dispatch:
+    inputs:
+      label:
+        description: 'Label for this backtest run'
+        type: string
+        default: 'manual'
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+      - env:
+          BSD_API_KEY: ${{ secrets.BSD_API_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_D1_DATABASE_ID: ${{ secrets.CF_D1_DATABASE_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          BACKTEST_LABEL: ${{ inputs.label }}
+        run: npm run backtest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backtest-report
+          path: engine/backtest-report.json
+          if-no-files-found: warn
