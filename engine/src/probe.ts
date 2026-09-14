@@ -43,6 +43,23 @@ function sketch(v: unknown, depth = 0): unknown {
   return typeof v;
 }
 
+/**
+ * How many odds rows the provider serves for a fixture. -1 marks a failed
+ * request, which is a different thing from a fixture that is genuinely unpriced
+ * and must not be counted as one.
+ */
+async function oddsCount(eventId: number): Promise<number> {
+  const res = await bsdRaw<{ count?: unknown; results?: unknown }>('/api/v2/odds/', {
+    event_id: eventId,
+    limit: 50,
+  });
+  if (!res.ok) return -1;
+  const count = (res.data as { count?: unknown }).count;
+  if (typeof count === 'number') return count;
+  const results = (res.data as { results?: unknown }).results;
+  return Array.isArray(results) ? results.length : 0;
+}
+
 async function probeOne(label: string, path: string, params?: Record<string, string | number>) {
   const res = await bsdRaw(path, params);
   if (!res.ok) {
@@ -83,11 +100,66 @@ export async function probe(): Promise<void> {
   writeFileSync(`${OUT}/events.raw.json`, JSON.stringify(events.slice(0, 50), null, 2));
   console.log(`\n${events.length} events in the next 5 days`);
 
-  // Prefer one that already has odds, then one with weather populated.
-  let target = events.find((e) => e.weather != null) ?? events[0];
-  if (!target) {
+  const firstEvent = events[0];
+  if (!firstEvent) {
     console.log('No upcoming events found — cannot probe fixture-scoped endpoints.');
     return;
+  }
+
+  // Which leagues actually carry odds. The engine prices off de-vigged odds, so
+  // a league serving none is a league it cannot price at all — and that is a
+  // property of the league and our tier, not of whichever fixture happened to
+  // sort first. Sample one fixture per league so the answer is about coverage.
+  const leagueName = new Map(leagues.map((l) => [Number(l.id), String(l.name ?? '')]));
+  const byLeague = new Map<number, Record<string, unknown>>();
+  for (const e of events) {
+    const lid = Number(e.league_id);
+    if (Number.isFinite(lid) && !byLeague.has(lid)) byLeague.set(lid, e);
+  }
+
+  console.log('\nOdds coverage (one fixture sampled per league):');
+  const coverage: { league_id: number; league: string; event_id: number; odds: number }[] = [];
+  for (const [lid, e] of [...byLeague].slice(0, 30)) {
+    const n = await oddsCount(Number(e.id));
+    const name = leagueName.get(lid) ?? String(lid);
+    coverage.push({ league_id: lid, league: name, event_id: Number(e.id), odds: n });
+    console.log(`  ${name.slice(0, 34).padEnd(36)} ${n < 0 ? 'request failed' : `${n} odds rows`}`);
+  }
+  writeFileSync(`${OUT}/_odds_coverage.json`, JSON.stringify(coverage, null, 2));
+  const priced = coverage.filter((c) => c.odds > 0);
+  console.log(`  → ${priced.length}/${coverage.length} sampled leagues carry odds`);
+
+  // pitch_condition is recorded but uninterpretable until its scale is known.
+  // A range is an aggregate rather than a payload value, so it is safe to print
+  // from a public job — and it is what PITCH_SCALE_MAX needs.
+  const pitch = events.map((e) => Number(e.pitch_condition)).filter((n) => Number.isFinite(n));
+  if (pitch.length) {
+    const distinct = [...new Set(pitch)].sort((a, b) => a - b);
+    console.log(
+      `\npitch_condition: reported on ${pitch.length}/${events.length} fixtures, ` +
+        `range ${Math.min(...pitch)}..${Math.max(...pitch)}, ` +
+        `${distinct.length} distinct [${distinct.slice(0, 20).join(', ')}]`,
+    );
+  } else {
+    console.log(`\npitch_condition: reported on 0/${events.length} upcoming fixtures.`);
+  }
+
+  // Probe whichever fixture exercises the most code: a priced one first, then
+  // weather, then a named referee. The previous selection only ever checked
+  // weather, so it reliably landed on unpriced fixtures and left the odds and
+  // referee paths unprobed — the opposite of the point.
+  const score = (e: Record<string, unknown>, odds: number) =>
+    (odds > 0 ? 4 : 0) + (e.weather != null ? 2 : 0) + (Number(e.referee_id) > 0 ? 1 : 0);
+  let target: Record<string, unknown> = firstEvent;
+  let best = -1;
+  for (const c of coverage) {
+    const e = byLeague.get(c.league_id);
+    if (!e) continue;
+    const s = score(e, c.odds);
+    if (s > best) {
+      best = s;
+      target = e;
+    }
   }
   const id = Number(target.id);
   const home = String(target.home_team ?? '');
