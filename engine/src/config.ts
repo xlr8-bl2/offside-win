@@ -37,9 +37,14 @@ export const config = {
   },
 
   /**
-   * Leagues to track. Empty means "discover at runtime and keep the ones whose
-   * competition tier looks top-flight", which is what a fresh install does.
-   * Set LEAGUES=39,140,135 to pin explicit BSD league ids.
+   * Leagues to track. Empty means **every league the provider covers** — 88 at
+   * last count, cups, second tiers, women's and youth competitions included.
+   * There is no top-flight filter; `discoverLeagues` applies this list or takes
+   * everything. An earlier comment here promised tier filtering that was never
+   * implemented, and the gap is expensive: a blank list backfilled against three
+   * seasons exhausted D1's free-tier daily row-write quota in 27 minutes.
+   * Set LEAGUES=1,6,12 to pin explicit BSD league ids, which is what any install
+   * on the free tier wants.
    */
   leagues: (process.env.LEAGUES ?? '')
     .split(',')

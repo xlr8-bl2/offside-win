@@ -83,6 +83,17 @@ export async function probe(): Promise<void> {
   console.log('\nLeagues:');
   const leagues = await bsdList<Record<string, unknown>>('/api/v2/leagues/', {}, { limit: 100, max: 100 });
   writeFileSync(`${OUT}/leagues.raw.json`, JSON.stringify(leagues, null, 2));
+  // Identity only — no payload values — so this rides along in the public
+  // artifact. Choosing what LEAGUES should hold needs the id list in a form you
+  // can read, and a 40-line console preview of 88 leagues is not it.
+  writeFileSync(
+    `${OUT}/_leagues.json`,
+    JSON.stringify(
+      leagues.map((l) => ({ id: Number(l.id), name: String(l.name ?? ''), country: String(l.country ?? '') })),
+      null,
+      2,
+    ),
+  );
   console.log(`  ${leagues.length} leagues`);
   for (const l of leagues.slice(0, 40)) {
     console.log(`    ${String(l.id).padStart(6)}  ${String(l.name ?? '')}  ${String(l.country ?? '')}`);
