@@ -36,11 +36,18 @@ jobs:
           BSD_API_KEY: ${{ secrets.BSD_API_KEY }}
         run: npm run probe
 
+      # The probe runs as `npm -w engine run probe`, so npm sets the working
+      # directory to the workspace root — engine/ — and `probe-output/` is
+      # written there, not at the repo root. Reading it from the repo root finds
+      # nothing and, because the loop skips silently and upload-artifact only
+      # warns, the job still goes green while reporting absolutely nothing.
       - name: Print inferred shapes
         run: |
           echo "Field names and types only — no payload values."
-          for f in probe-output/*.sketch.json; do
-            [ -e "$f" ] || continue
+          shopt -s nullglob
+          found=0
+          for f in engine/probe-output/*.sketch.json; do
+            found=1
             echo ""
             echo "=============================================================="
             echo "=== $(basename "$f" .sketch.json)"
@@ -48,15 +55,25 @@ jobs:
             head -c 6000 "$f"
             echo ""
           done
+          if [ "$found" -eq 0 ]; then
+            echo "No sketches were written. The probe step did not produce output."
+            ls -la engine/probe-output/ 2>&1 || true
+            exit 1
+          fi
 
       - name: Endpoint availability
         run: |
           echo "Which endpoints this tier actually serves:"
-          cat probe-output/_summary.json 2>/dev/null | head -c 4000 || echo "(no summary written)"
+          cat engine/probe-output/_summary.json | head -c 4000
 
+      # Sketches and the summary only. The raw payloads stay on the runner:
+      # this repo is public, so artifacts are world-readable, and the whole
+      # point of sketching is to publish field shapes without payload values.
       - uses: actions/upload-artifact@v4
         with:
           name: probe-output
-          path: probe-output/
+          path: |
+            engine/probe-output/*.sketch.json
+            engine/probe-output/_summary.json
           retention-days: 3
           if-no-files-found: warn
