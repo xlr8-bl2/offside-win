@@ -1,0 +1,370 @@
+import { bsdOrNull, num } from './bsd.ts';
+import { isQuarterLine } from './price.ts';
+import { exec, insertMany, kvSetJSON, select } from './store.ts';
+import { MARKET_FAMILY } from './types.ts';
+import type { MarketCode, MarketFamily, Outcome } from './types.ts';
+
+/**
+ * Grading published picks, and feeding the result back into how much the model
+ * is trusted next time.
+ *
+ * This is what separates a tipping service from an analyzer. Without it there is
+ * no evidence the picks are any good, and no mechanism for the model to become
+ * more careful about the markets it has been wrong on. §13's "never ignores the
+ * market" cuts both ways: if our corner calls have been losing, the corner
+ * shrinkage should rise on its own rather than waiting for someone to notice.
+ */
+
+export type Result = 'WON' | 'LOST' | 'PUSH' | 'HALF_WON' | 'HALF_LOST' | 'VOID';
+
+interface FinalScore {
+  homeGoals: number;
+  awayGoals: number;
+  homeCorners: number | null;
+  awayCorners: number | null;
+  reds: number | null;
+}
+
+/**
+ * Settle one selection. Returns the result and the profit on a one-unit stake.
+ *
+ * Asian handicaps are the fiddly part and the reason this is not a one-liner:
+ * a whole line refunds on the exact margin, a quarter line splits the stake, and
+ * getting either wrong silently corrupts every performance number downstream.
+ */
+export function settleSelection(
+  market: MarketCode,
+  outcome: Outcome,
+  line: number | null,
+  odds: number,
+  s: FinalScore,
+): { result: Result; pnl: number } | null {
+  const total = s.homeGoals + s.awayGoals;
+  const win = (): { result: Result; pnl: number } => ({ result: 'WON', pnl: odds - 1 });
+  const lose = (): { result: Result; pnl: number } => ({ result: 'LOST', pnl: -1 });
+  const push = (): { result: Result; pnl: number } => ({ result: 'PUSH', pnl: 0 });
+  const won = (b: boolean) => (b ? win() : lose());
+
+  switch (market) {
+    case '1x2':
+      return won(
+        (outcome === 'HOME' && s.homeGoals > s.awayGoals) ||
+          (outcome === 'DRAW' && s.homeGoals === s.awayGoals) ||
+          (outcome === 'AWAY' && s.homeGoals < s.awayGoals),
+      );
+
+    case 'double_chance':
+      return won(
+        (outcome === '1X' && s.homeGoals >= s.awayGoals) ||
+          (outcome === '12' && s.homeGoals !== s.awayGoals) ||
+          (outcome === 'X2' && s.homeGoals <= s.awayGoals),
+      );
+
+    case 'draw_no_bet':
+      if (s.homeGoals === s.awayGoals) return push();
+      return won(
+        (outcome === 'HOME' && s.homeGoals > s.awayGoals) ||
+          (outcome === 'AWAY' && s.homeGoals < s.awayGoals),
+      );
+
+    case 'btts':
+      return won((outcome === 'yes') === (s.homeGoals >= 1 && s.awayGoals >= 1));
+
+    case 'over_under_05':
+    case 'over_under_15':
+    case 'over_under_25':
+    case 'over_under_35': {
+      const l = line ?? Number(market.slice(-2)) / 10;
+      return won((outcome === 'over') === (total > l));
+    }
+
+    case 'european_handicap': {
+      if (line === null) return null;
+      const adj = s.homeGoals + line;
+      return won(
+        (outcome === 'HOME' && adj > s.awayGoals) ||
+          (outcome === 'DRAW' && adj === s.awayGoals) ||
+          (outcome === 'AWAY' && adj < s.awayGoals),
+      );
+    }
+
+    case 'asian_handicap': {
+      if (line === null) return null;
+      const legs = isQuarterLine(line) ? [line - 0.25, line + 0.25] : [line];
+      let pnl = 0;
+      let wins = 0;
+      let losses = 0;
+      let pushes = 0;
+      for (const leg of legs) {
+        const share = 1 / legs.length;
+        const margin = outcome === 'HOME' ? s.homeGoals + leg - s.awayGoals : s.awayGoals - leg - s.homeGoals;
+        if (margin > 0) {
+          pnl += share * (odds - 1);
+          wins++;
+        } else if (margin < 0) {
+          pnl -= share;
+          losses++;
+        } else {
+          pushes++;
+        }
+      }
+      const result: Result =
+        wins === legs.length ? 'WON'
+        : losses === legs.length ? 'LOST'
+        : pushes === legs.length ? 'PUSH'
+        : wins > 0 && pushes > 0 ? 'HALF_WON'
+        : losses > 0 && pushes > 0 ? 'HALF_LOST'
+        : 'PUSH';
+      return { result, pnl };
+    }
+
+    case 'total_corners': {
+      if (line === null || s.homeCorners === null || s.awayCorners === null) return null;
+      const c = s.homeCorners + s.awayCorners;
+      if (Number.isInteger(line) && c === line) return push();
+      return won((outcome === 'over') === (c > line));
+    }
+
+    case 'corners_1x2': {
+      if (s.homeCorners === null || s.awayCorners === null) return null;
+      return won(
+        (outcome === 'HOME' && s.homeCorners > s.awayCorners) ||
+          (outcome === 'DRAW' && s.homeCorners === s.awayCorners) ||
+          (outcome === 'AWAY' && s.homeCorners < s.awayCorners),
+      );
+    }
+
+    case 'total_red_cards': {
+      if (line === null || s.reds === null) return null;
+      if (Number.isInteger(line) && s.reds === line) return push();
+      return won((outcome === 'over') === (s.reds > line));
+    }
+
+    case 'red_card': {
+      if (s.reds === null) return null;
+      return won((outcome === 'yes') === (s.reds > 0));
+    }
+
+    default:
+      return null;
+  }
+}
+
+export interface SettleReport {
+  considered: number;
+  settled: number;
+  unresolved: number;
+  pnl: number;
+}
+
+export async function runSettle(): Promise<SettleReport> {
+  const now = Math.floor(Date.now() / 1000);
+  // Give a match time to finish and the provider time to publish final stats.
+  const cutoff = now - 3 * 3600;
+
+  const pending = await select<{
+    id: number;
+    fixture_id: number;
+    market: MarketCode;
+    outcome: Outcome;
+    line: number | null;
+    odds: number;
+  }>(
+    `SELECT id, fixture_id, market, outcome, line, odds
+     FROM pick WHERE settled_at IS NULL AND kickoff < ? ORDER BY kickoff ASC LIMIT 500`,
+    [cutoff],
+  );
+
+  const report: SettleReport = { considered: pending.length, settled: 0, unresolved: 0, pnl: 0 };
+  if (pending.length === 0) {
+    console.log('Nothing to settle.');
+    return report;
+  }
+
+  // One lookup per fixture, not per pick.
+  const fixtureIds = [...new Set(pending.map((p) => p.fixture_id))];
+  const scores = new Map<number, FinalScore>();
+
+  for (const id of fixtureIds) {
+    const local = await select<{
+      home_goals: number | null;
+      away_goals: number | null;
+      home_corners: number | null;
+      away_corners: number | null;
+      home_reds: number | null;
+      away_reds: number | null;
+    }>(
+      `SELECT home_goals, away_goals, home_corners, away_corners, home_reds, away_reds
+       FROM match WHERE id = ?`,
+      [id],
+    );
+
+    let row = local[0];
+    // Not in our history yet — the backfill runs nightly and settlement hourly,
+    // so ask the provider directly rather than waiting a day to grade a pick.
+    if (!row || row.home_goals === null) {
+      const ev = await bsdOrNull<Record<string, unknown>>(`/api/v2/events/${id}/`);
+      const hg = num(ev?.['home_score']);
+      const ag = num(ev?.['away_score']);
+      const status = String(ev?.['status'] ?? '').toLowerCase();
+      if (hg === undefined || ag === undefined || !/finish|ft|ended|after/.test(status)) {
+        report.unresolved++;
+        continue;
+      }
+      row = {
+        home_goals: hg,
+        away_goals: ag,
+        home_corners: null,
+        away_corners: null,
+        home_reds: null,
+        away_reds: null,
+      };
+    }
+
+    scores.set(id, {
+      homeGoals: row.home_goals!,
+      awayGoals: row.away_goals!,
+      homeCorners: row.home_corners,
+      awayCorners: row.away_corners,
+      reds:
+        row.home_reds === null && row.away_reds === null
+          ? null
+          : (row.home_reds ?? 0) + (row.away_reds ?? 0),
+    });
+  }
+
+  const updates: Array<{ id: number; result: Result; pnl: number }> = [];
+  for (const p of pending) {
+    const s = scores.get(p.fixture_id);
+    if (!s) {
+      report.unresolved++;
+      continue;
+    }
+    const graded = settleSelection(p.market, p.outcome, p.line, p.odds, s);
+    if (!graded) {
+      // The match finished but the data needed to grade this market never
+      // arrived. Void it rather than guess — a wrong grade corrupts calibration
+      // permanently, and calibration is what the model steers by.
+      updates.push({ id: p.id, result: 'VOID', pnl: 0 });
+      continue;
+    }
+    updates.push({ id: p.id, result: graded.result, pnl: graded.pnl });
+    report.pnl += graded.pnl;
+    report.settled++;
+  }
+
+  for (const u of updates) {
+    await exec('UPDATE pick SET settled_at = ?, result = ?, pnl = ? WHERE id = ?', [
+      now,
+      u.result,
+      u.pnl,
+      u.id,
+    ]);
+  }
+
+  await refreshCalibration();
+  await kvSetJSON('settle:last_run', { at: now, ...report });
+
+  console.log(
+    `Settled ${report.settled} picks (${report.pnl >= 0 ? '+' : ''}${report.pnl.toFixed(2)} units), ` +
+      `${report.unresolved} still unresolved.`,
+  );
+  return report;
+}
+
+/**
+ * Recompute per-family calibration from settled history.
+ *
+ * `shrink` is the multiplier selection applies to a raw edge. A family whose
+ * predictions have been well calibrated keeps most of its edge; one that has
+ * been overconfident has it cut. This is the loop that makes the model more
+ * careful where it has actually been wrong, rather than where someone guessed
+ * it might be.
+ */
+export async function refreshCalibration(): Promise<void> {
+  const rows = await select<{
+    market: MarketCode;
+    model_prob: number;
+    result: string;
+    pnl: number;
+    odds: number;
+  }>(
+    `SELECT market, model_prob, result, pnl, odds FROM pick
+     WHERE settled_at IS NOT NULL AND result IS NOT NULL AND result != 'VOID'`,
+  );
+
+  const byFamily = new Map<MarketFamily, typeof rows>();
+  for (const r of rows) {
+    const fam = MARKET_FAMILY[r.market];
+    if (!fam) continue;
+    byFamily.set(fam, [...(byFamily.get(fam) ?? []), r]);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const out: Array<Record<string, unknown>> = [];
+
+  for (const [family, list] of byFamily) {
+    const n = list.length;
+    let brier = 0;
+    let logLoss = 0;
+    let meanP = 0;
+    let meanActual = 0;
+    let pnl = 0;
+
+    for (const r of list) {
+      // Half-wins and half-losses are partial outcomes; score them as such
+      // rather than rounding to a win or a loss.
+      const actual =
+        r.result === 'WON' ? 1 : r.result === 'HALF_WON' ? 0.75 : r.result === 'HALF_LOST' ? 0.25 : 0;
+      const p = Math.min(1 - 1e-9, Math.max(1e-9, r.model_prob));
+      brier += (p - actual) ** 2;
+      logLoss += -(actual * Math.log(p) + (1 - actual) * Math.log(1 - p));
+      meanP += p;
+      meanActual += actual;
+      pnl += r.pnl ?? 0;
+    }
+
+    brier /= n;
+    logLoss /= n;
+    meanP /= n;
+    meanActual /= n;
+
+    // Overconfidence is the gap between what we said and what happened. Cut the
+    // edge in proportion to it, floored so a bad run never silences a family
+    // entirely and capped so a good one never earns more than its raw edge.
+    const overconfidence = Math.max(0, meanP - meanActual);
+    const shrink = Math.max(0.2, Math.min(1, 1 - overconfidence * 3));
+
+    out.push({
+      market_family: family,
+      n,
+      brier,
+      log_loss: logLoss,
+      mean_model_p: meanP,
+      mean_actual: meanActual,
+      roi: pnl / n,
+      clv_mean: null,
+      shrink,
+      updated_at: now,
+    });
+  }
+
+  if (out.length > 0) {
+    await insertMany(
+      'calibration',
+      [
+        'market_family', 'n', 'brier', 'log_loss', 'mean_model_p',
+        'mean_actual', 'roi', 'clv_mean', 'shrink', 'updated_at',
+      ],
+      out,
+      { conflictTarget: 'market_family' },
+    );
+    for (const r of out) {
+      console.log(
+        `  ${String(r.market_family).padEnd(9)} n=${String(r.n).padStart(4)} ` +
+          `said ${(Number(r.mean_model_p) * 100).toFixed(1)}% got ${(Number(r.mean_actual) * 100).toFixed(1)}% ` +
+          `roi ${(Number(r.roi) * 100).toFixed(1)}% shrink ${Number(r.shrink).toFixed(2)}`,
+      );
+    }
+  }
+}

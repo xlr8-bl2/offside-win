@@ -1,0 +1,256 @@
+import { config } from '../config.ts';
+import { marketLabel } from '../select.ts';
+import type { Candidate, Claim, Factor } from '../types.ts';
+import { CONNECTIVES, FRAMES, choose, type Rng } from './grammar.ts';
+
+/**
+ * Composing a pick's explanation.
+ *
+ * The job is to turn computed claims into a short paragraph that a reader can
+ * check against the evidence, and to do it without every pick sounding like the
+ * last one. Three mechanisms:
+ *
+ * 1. **Seeded but varied.** The generator is seeded from the fixture and market,
+ *    so the same pick always reads the same way — regenerating a slate does not
+ *    silently rewrite yesterday's reasoning — while different picks diverge.
+ * 2. **An anti-repetition ledger.** Frames used recently are excluded, and the
+ *    ledger spans the whole slate, so two fixtures on the same day cannot open
+ *    with the same construction.
+ * 3. **Connectives that match the logic.** A claim that reinforces the previous
+ *    one joins differently from one that cuts against it. That is not decoration:
+ *    it is how the reader learns the model saw the tension rather than ignoring
+ *    it.
+ */
+
+/** xmur3 + mulberry32: a small, well-distributed seeded PRNG. */
+export function seededRng(seed: string): Rng {
+  let h = 1779033703 ^ seed.length;
+  for (let i = 0; i < seed.length; i++) {
+    h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  let a = (h ^= h >>> 16) >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Remembers which frames have been used lately so the next pick can avoid them.
+ * Bounded, because unbounded avoidance eventually leaves nothing to choose from.
+ */
+export class RepetitionLedger {
+  private used: string[] = [];
+  private readonly limit: number;
+
+  constructor(limit = config.narrate.ledgerSize, seed: string[] = []) {
+    this.limit = limit;
+    this.used = seed.slice(-limit);
+  }
+
+  /** Frame indices to steer away from for this predicate. */
+  avoidFor(predicate: string, frameCount: number): Set<number> {
+    const recent = new Set<number>();
+    // Only the most recent few matter; avoiding everything ever used would
+    // exhaust the grammar and force repetition anyway.
+    const window = Math.max(1, Math.min(frameCount - 1, Math.ceil(frameCount / 2)));
+    let seen = 0;
+    for (let i = this.used.length - 1; i >= 0 && seen < window; i--) {
+      const entry = this.used[i]!;
+      const [p, idx] = entry.split(':');
+      if (p === predicate) {
+        recent.add(Number(idx));
+        seen++;
+      }
+    }
+    return recent;
+  }
+
+  record(predicate: string, index: number): void {
+    this.used.push(`${predicate}:${index}`);
+    if (this.used.length > this.limit) this.used.splice(0, this.used.length - this.limit);
+  }
+
+  snapshot(): string[] {
+    return this.used.slice();
+  }
+}
+
+/**
+ * Rank claims by how much they should influence what the reader is told.
+ *
+ * §12's hierarchy decides first — availability before stakes before regime — and
+ * magnitude breaks ties within a tier. A tier-1 absence outranks a tier-7 line
+ * move even when the line move is larger, because that is the order in which the
+ * doctrine says these things matter.
+ */
+export function rankClaims(claims: Claim[]): Claim[] {
+  return [...claims].sort((a, b) => a.tier - b.tier || b.magnitude - a.magnitude);
+}
+
+/**
+ * Pick the claims to use, preferring variety of subject matter. Three sentences
+ * about three absences is a worse paragraph than one about an absence, one about
+ * the schedule and one about the price.
+ */
+export function selectClaims(claims: Claim[], max: number): Claim[] {
+  const ranked = rankClaims(claims);
+  const chosen: Claim[] = [];
+  const usedPredicates = new Set<string>();
+
+  for (const c of ranked) {
+    if (chosen.length >= max) break;
+    if (usedPredicates.has(c.predicate)) continue;
+    chosen.push(c);
+    usedPredicates.add(c.predicate);
+  }
+  // Backfill if the variety rule left us short.
+  for (const c of ranked) {
+    if (chosen.length >= max) break;
+    if (!chosen.includes(c)) chosen.push(c);
+  }
+  return chosen;
+}
+
+/**
+ * Lowercase a sentence's first word so it can follow a connective — unless that
+ * word is a name. Joining with "Alongside it, brighton play their fourth match"
+ * reads as a typo and undoes the credibility the specificity was there to buy.
+ *
+ * The proper nouns are collected from the claims themselves rather than guessed
+ * at, so this works for any team, player or manager the data contains without a
+ * hardcoded list.
+ */
+export function properNouns(claims: Claim[], ...extra: string[]): Set<string> {
+  const out = new Set<string>();
+  const add = (v: unknown) => {
+    if (typeof v !== 'string' || v.length === 0) return;
+    // Index the first word too, since that is what gets decapitalised.
+    out.add(v);
+    const first = v.split(/\s+/)[0];
+    if (first) out.add(first);
+  };
+  for (const c of claims) {
+    add(c.subject);
+    for (const key of ['team', 'opponent', 'manager', 'home', 'away']) add(c.evidence[key]);
+  }
+  for (const e of extra) add(e);
+  return out;
+}
+
+function joinAfterConnective(sentence: string, nouns: Set<string>): string {
+  const firstWord = sentence.split(/[\s,.;:—]/)[0] ?? '';
+  if (nouns.has(firstWord)) return sentence;
+  // Also leave acronyms and initialisms alone.
+  if (/^[A-Z]{2,}$/.test(firstWord)) return sentence;
+  return sentence.charAt(0).toLowerCase() + sentence.slice(1);
+}
+
+function connectiveFor(prev: Claim, next: Claim, rng: Rng): string {
+  if (prev.polarity === 0 || next.polarity === 0) return choose(CONNECTIVES.neutral as unknown as string[], rng).item;
+  return prev.polarity === next.polarity
+    ? choose(CONNECTIVES.reinforcing as unknown as string[], rng).item
+    : choose(CONNECTIVES.opposing as unknown as string[], rng).item;
+}
+
+export interface NarrateInput {
+  candidate: Candidate;
+  drivers: Factor[];
+  homeTeam: string;
+  awayTeam: string;
+  fixtureId: number;
+  ledger: RepetitionLedger;
+}
+
+/**
+ * Build the sentence that states the bet itself, with our number against the
+ * market's. This always appears, because a reader should never have to infer
+ * what was actually being recommended.
+ */
+function verdictSentence(c: Candidate, rng: Rng, ledger: RepetitionLedger): string {
+  const claim: Claim = {
+    subject: 'the model',
+    predicate: 'rating_gap',
+    polarity: 1,
+    magnitude: Math.min(1, Math.abs(c.edge) / 0.12),
+    evidence: {
+      model_pct: c.model_prob * 100,
+      book_pct: c.book_prob * 100,
+      edge_points: c.edge * 100,
+    },
+    section: '§7.3',
+    tier: 7,
+  };
+  const frames = FRAMES.rating_gap;
+  const { item, index } = choose(frames, rng, ledger.avoidFor('rating_gap', frames.length));
+  ledger.record('rating_gap', index);
+  return item(claim, rng);
+}
+
+export function narrate(input: NarrateInput): string {
+  const { candidate, drivers, ledger } = input;
+  const rng = seededRng(
+    `${input.fixtureId}:${candidate.market}:${candidate.outcome}:${candidate.line ?? 'x'}`,
+  );
+
+  const claims = selectClaims(
+    drivers.flatMap((d) => d.claims),
+    config.narrate.maxClaims,
+  );
+
+  const nouns = properNouns(claims, input.homeTeam, input.awayTeam);
+  const sentences: string[] = [];
+  let previous: Claim | null = null;
+
+  for (const claim of claims) {
+    const frames = FRAMES[claim.predicate];
+    if (!frames || frames.length === 0) continue;
+    const avoid = ledger.avoidFor(claim.predicate, frames.length);
+    const { item, index } = choose(frames, rng, avoid);
+    ledger.record(claim.predicate, index);
+
+    let sentence = item(claim, rng);
+    if (previous) {
+      sentence = connectiveFor(previous, claim, rng) + joinAfterConnective(sentence, nouns);
+    }
+    sentences.push(sentence);
+    previous = claim;
+  }
+
+  // No claims cleared: say what the bet is and be honest that the case rests on
+  // the numbers rather than on a story.
+  if (sentences.length === 0) {
+    return (
+      `${capitalise(marketLabel(candidate))} at ${candidate.odds.toFixed(2)}. ` +
+      `${verdictSentence(candidate, rng, ledger)} ` +
+      `No single contextual factor drives this — it is a pricing disagreement rather than a narrative one.`
+    );
+  }
+
+  const lead = `${capitalise(marketLabel(candidate))} at ${candidate.odds.toFixed(2)}.`;
+  return [lead, ...sentences, verdictSentence(candidate, rng, ledger)].join(' ');
+}
+
+/**
+ * The explanation for a pass. §13 treats a pass as the analysis working, so it
+ * gets a real sentence rather than an empty state.
+ */
+export function narratePass(reason: string, homeTeam: string, awayTeam: string, fixtureId: number): string {
+  const rng = seededRng(`pass:${fixtureId}`);
+  const openers = [
+    `No call on ${homeTeam} against ${awayTeam}.`,
+    `Passing on ${homeTeam} v ${awayTeam}.`,
+    `${homeTeam} v ${awayTeam} is one to leave alone.`,
+    `Nothing to take on ${homeTeam} against ${awayTeam}.`,
+  ];
+  return `${choose(openers, rng).item} ${reason}`;
+}
+
+function capitalise(s: string): string {
+  return s.length ? s[0]!.toUpperCase() + s.slice(1) : s;
+}
+
+export const _internals = { connectiveFor, capitalise, joinAfterConnective };
