@@ -13,6 +13,11 @@ name: probe
 # readable by anyone. The job prints *shape sketches* — field names and types —
 # rather than payload values, for that reason. Your API key is never printed and
 # GitHub masks it regardless.
+#
+# REGISTRATION: this repo was created with GitHub's importer, which copies workflow
+# files into git without registering them with Actions. A workflow stays invisible to
+# the API — not listable, not dispatchable, 404 on dispatch — until a push modifies
+# its file on the default branch. That is what this block is doing here. See HANDOFF.md.
 on:
   workflow_dispatch:
 

@@ -53,10 +53,20 @@ bootstrap  30-90 min full history, ratings, first board
 backtest   manual    the only evidence the model works — run it
 ```
 
-## Two things worth not re-deriving
+## Three things worth not re-deriving
 
 **Actions is blocked on the original account** (`xlr8-bl`). Runs there end in seconds with no
 runner, no logs and no steps. That is why the project moved accounts. It is not a code problem.
+
+**Workflows must be touched before they exist.** `xlr8-bl2/offside-win` was created with GitHub's
+importer, which copies workflow files into git without registering them with Actions. An
+unregistered workflow is invisible to the API: it is not listed by `list_workflows`, and
+dispatching it returns a bare `404` whether you aim at the default branch or any other. It becomes
+real only once a push has **modified that file** on the default branch — merging commits that
+leave the file untouched is not enough, which is why the first sync registered only the workflows
+it happened to change. All eight have since been touched, so this should not recur. If a new
+workflow ever 404s on dispatch, this is the reason, and the fix is a one-line edit to it on the
+default branch — not permissions and not secrets.
 
 **The backtest is the claim.** The model must beat both a naive Poisson and the league base rate on
 log loss. Until it has run, the model page says outright there is no evidence any of this works —
