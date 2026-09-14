@@ -125,6 +125,50 @@ After that the workflows run themselves:
 
 ---
 
+## Running the engine from a different GitHub account
+
+Nothing here is tied to an account. The engine is Node 22 and `fetch` with five environment
+variables, so moving it is a push and four secrets.
+
+```bash
+git remote add runner https://github.com/OTHER-ACCOUNT/offside-win.git
+git push runner HEAD:main
+```
+
+Then on that repo: add `BSD_API_KEY`, `CF_ACCOUNT_ID`, `CF_D1_DATABASE_ID` and `CF_API_TOKEN`, and
+run the **probe** workflow.
+
+Both accounts can point at the same Cloudflare D1 database — the engine writes over the REST API
+with an account ID and token, so where it runs is irrelevant to where the data lands.
+
+### Make that repo public too
+
+This is the part worth getting right. On a **private** repo Actions minutes are metered, and this
+schedule does not fit in the free allowance:
+
+| Workflow | Frequency | Runs/month | Rough minutes/month |
+|---|---|---|---|
+| `slate` | every 30 min | ~1,440 | 2,900+ |
+| `settle` | hourly | ~720 | 1,400+ |
+| `ratings` | daily | 30 | 900–1,800 |
+
+A personal account gets 2,000 free minutes a month, so a private repo would blow through that in
+under a week and then bill. **Public repos get unlimited free standard runners**, which is what this
+schedule assumes.
+
+If the repo has to be private, drop `slate` to hourly and `settle` to every three hours, and expect
+to pay for the `ratings` backfill regardless.
+
+### If Actions is blocked on an account
+
+The symptom is unmistakable: runs complete in one to five seconds with **no runner assigned, no
+logs, and no steps executed**. That is GitHub declining to schedule the job, not a failure in the
+code — a genuine code failure produces logs. The Actions tab shows the reason as a banner; it is
+usually a failed payment, which blocks Actions account-wide regardless of whether the repository
+is public.
+
+---
+
 ## What it actually does
 
 ### Ratings
