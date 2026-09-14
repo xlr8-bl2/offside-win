@@ -83,9 +83,9 @@ export async function selectOne<T = Record<string, unknown>>(
 /**
  * Chunked multi-row upsert.
  *
- * SQLite caps bound parameters per statement, so chunk on total parameters
- * rather than row count — a 20-column table and a 4-column table need very
- * different row limits to stay under the same ceiling.
+ * D1 caps bound parameters per statement — at 100, far below SQLite's own
+ * limit — so chunk on total parameters rather than row count: a 20-column table
+ * and a 4-column table need very different row limits to stay under one ceiling.
  */
 export async function insertMany(
   table: string,
@@ -95,7 +95,7 @@ export async function insertMany(
 ): Promise<number> {
   if (rows.length === 0) return 0;
 
-  const MAX_PARAMS = 480;
+  const MAX_PARAMS = config.d1.maxParams;
   const perRow = columns.length;
   const chunkRows = Math.max(1, Math.floor(MAX_PARAMS / perRow));
 
