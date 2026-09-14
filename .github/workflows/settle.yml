@@ -2,6 +2,11 @@ name: settle
 
 # Grades published picks against results and refreshes per-market calibration,
 # which feeds straight back into how far selection trusts each market.
+#
+# REGISTRATION: this repo was created with GitHub's importer, which copies workflow
+# files into git without registering them with Actions. A workflow stays invisible to
+# the API — not listable, not dispatchable, 404 on dispatch — until a push modifies
+# its file on the default branch. That is what this block is doing here. See HANDOFF.md.
 on:
   schedule:
     - cron: '25 * * * *'

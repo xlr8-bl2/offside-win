@@ -2,6 +2,11 @@ name: backtest
 
 # Walk-forward evaluation. Manual, because it is the job that decides whether
 # the model ships, not a thing to run on a timer.
+#
+# REGISTRATION: this repo was created with GitHub's importer, which copies workflow
+# files into git without registering them with Actions. A workflow stays invisible to
+# the API — not listable, not dispatchable, 404 on dispatch — until a push modifies
+# its file on the default branch. That is what this block is doing here. See HANDOFF.md.
 on:
   workflow_dispatch:
     inputs:

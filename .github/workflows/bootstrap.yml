@@ -12,6 +12,11 @@ name: bootstrap
 # dressed up as an opinion of our own.
 #
 # After this, the scheduled workflows keep themselves going.
+#
+# REGISTRATION: this repo was created with GitHub's importer, which copies workflow
+# files into git without registering them with Actions. A workflow stays invisible to
+# the API — not listable, not dispatchable, 404 on dispatch — until a push modifies
+# its file on the default branch. That is what this block is doing here. See HANDOFF.md.
 on:
   workflow_dispatch:
     inputs:
