@@ -74,6 +74,6 @@ jobs:
           name: probe-output
           path: |
             engine/probe-output/*.sketch.json
-            engine/probe-output/_summary.json
+            engine/probe-output/_*.json
           retention-days: 3
           if-no-files-found: warn
