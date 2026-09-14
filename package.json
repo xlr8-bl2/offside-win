@@ -11,6 +11,7 @@
     "slate": "npm -w engine run slate",
     "settle": "npm -w engine run settle",
     "backtest": "npm -w engine run backtest",
+    "migrate": "npm -w engine run migrate",
     "test": "npm -w engine test",
     "typecheck": "npm -w engine run typecheck && npm -w worker run typecheck",
     "dev": "npm -w worker run dev",

@@ -111,8 +111,12 @@ export async function probe(): Promise<void> {
   // property of the league and our tier, not of whichever fixture happened to
   // sort first. Sample one fixture per league so the answer is about coverage.
   const leagueName = new Map(leagues.map((l) => [Number(l.id), String(l.name ?? '')]));
+  // Sample each league's *soonest* fixture, not whichever sorted first: books
+  // price closer to kickoff, so a fixture days out can be unpriced for reasons
+  // that say nothing about entitlement.
+  const kickoff = (e: Record<string, unknown>) => Date.parse(String(e.event_date ?? '')) || Infinity;
   const byLeague = new Map<number, Record<string, unknown>>();
-  for (const e of events) {
+  for (const e of [...events].sort((a, b) => kickoff(a) - kickoff(b))) {
     const lid = Number(e.league_id);
     if (Number.isFinite(lid) && !byLeague.has(lid)) byLeague.set(lid, e);
   }
@@ -132,7 +136,15 @@ export async function probe(): Promise<void> {
   // pitch_condition is recorded but uninterpretable until its scale is known.
   // A range is an aggregate rather than a payload value, so it is safe to print
   // from a public job — and it is what PITCH_SCALE_MAX needs.
-  const pitch = events.map((e) => Number(e.pitch_condition)).filter((n) => Number.isFinite(n));
+  // Filter before coercing: Number(null) is 0 and Number.isFinite(0) is true, so
+  // coercing first counts every fixture that reports nothing as one reporting a
+  // zero — turning "the provider never populates this" into a plausible-looking
+  // scale that starts at 0.
+  const pitch = events
+    .map((e) => e.pitch_condition)
+    .filter((v) => v !== null && v !== undefined && v !== '')
+    .map(Number)
+    .filter((n) => Number.isFinite(n));
   if (pitch.length) {
     const distinct = [...new Set(pitch)].sort((a, b) => a - b);
     console.log(
