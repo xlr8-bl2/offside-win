@@ -23,7 +23,11 @@ import type { MatchRow } from './types.ts';
 // down by its schema, and a field that moves should degrade to "unknown", not
 // take the parser down with it.
 const ALIASES = {
-  xg: ['xg.value', 'xg.total', 'xg', 'expected_goals', 'expectedGoals', 'xg.xg'],
+  // xg.actual and expected_goals are both confirmed live: a finished match ships
+  // `xg: { actual: number, estimated: boolean }` alongside a flat
+  // `expected_goals`. Note that xg.estimated is a *flag*, not a value — it
+  // belongs to xgEstimated below and must never be read as a quantity.
+  xg: ['xg.actual', 'xg.value', 'xg.total', 'xg', 'expected_goals', 'expectedGoals', 'xg.xg'],
   xgEstimated: ['xg.estimated', 'xg_estimated', 'estimated'],
   corners: ['corners', 'corner_kicks', 'cornerKicks', 'corners.total', 'corners_total'],
   yellows: ['yellow_cards', 'yellowCards', 'yellows', 'cards.yellow', 'yellow'],
