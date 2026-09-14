@@ -1,0 +1,57 @@
+name: probe
+
+# Walks a real fixture end to end and reports what the provider actually
+# returns. This exists because the provider's OpenAPI types several of the
+# fields the model leans on hardest — weather, head_to_head,
+# unavailable_players, appointment_effect, prediction markets — as `any`.
+# Everything parses defensively against alias lists, but this is what replaces
+# the guesses with facts.
+#
+# Needs only BSD_API_KEY, so it can be run before any Cloudflare setup exists.
+#
+# NOTE ON VISIBILITY: this repo is public, so these logs and artifacts are
+# readable by anyone. The job prints *shape sketches* — field names and types —
+# rather than payload values, for that reason. Your API key is never printed and
+# GitHub masks it regardless.
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+
+      - name: Probe the provider
+        env:
+          BSD_API_KEY: ${{ secrets.BSD_API_KEY }}
+        run: npm run probe
+
+      - name: Print inferred shapes
+        run: |
+          echo "Field names and types only — no payload values."
+          for f in probe-output/*.sketch.json; do
+            [ -e "$f" ] || continue
+            echo ""
+            echo "=============================================================="
+            echo "=== $(basename "$f" .sketch.json)"
+            echo "=============================================================="
+            head -c 6000 "$f"
+            echo ""
+          done
+
+      - name: Endpoint availability
+        run: |
+          echo "Which endpoints this tier actually serves:"
+          cat probe-output/_summary.json 2>/dev/null | head -c 4000 || echo "(no summary written)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-output
+          path: probe-output/
+          retention-days: 3
+          if-no-files-found: warn

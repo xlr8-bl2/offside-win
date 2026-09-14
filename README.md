@@ -64,9 +64,8 @@ That is the entire configuration.
 
 ### 3. Probe the provider before anything else
 
-```bash
-BSD_API_KEY=... npm run probe
-```
+Run the **probe** workflow from the Actions tab (or locally with `BSD_API_KEY=... npm run probe`).
+It needs only `BSD_API_KEY`, so it works before any Cloudflare setup exists.
 
 This is not optional ceremony. The provider's OpenAPI types several of the fields this model leans
 on hardest — `weather`, `head_to_head`, `unavailable_players`, `appointment_effect`, prediction
@@ -88,24 +87,28 @@ Read `probe-output/event.sketch.json` and set `PITCH_SCALE_MAX` once you can see
 scale — until then §6.3 correctly reports itself as thin rather than guessing which end of an
 undocumented integer means "heavy".
 
-### 4. First run, in this order
+### 4. First run
 
-```bash
-npm run migrate    # apply schema.sql
-npm run history    # backfill finished matches and their stats — the slow one
-npm run ratings    # fit Dixon-Coles, corner and card models per league
-npm run slate      # price the next 72 hours and publish the board
+Run the **bootstrap** workflow from the Actions tab. It does the whole first run in order:
+
+```
+migrate  → create the tables
+history  → backfill finished matches and their stats   (the slow step)
+ratings  → fit Dixon-Coles and the corner/card models
+slate    → price the next 72 hours and publish the board
 ```
 
-**The order matters.** A league with no fitted ratings is skipped by `slate`, deliberately: without
-our own numbers there is no opinion to publish, and falling back to the bookmaker's price dressed up
-as analysis would be worse than showing nothing.
+**The order is load-bearing.** A league with no fitted ratings is skipped by `slate`, deliberately:
+without our own numbers there is no opinion to publish, and falling back to the bookmaker's price
+dressed up as analysis would be worse than showing nothing.
 
-Then deploy:
+Locally the same sequence is `npm run migrate && npm run history && npm run ratings && npm run slate`.
 
-```bash
-git push        # the deploy workflow applies the schema and ships the Worker
-```
+Then deploy: pushing to `main` runs the deploy workflow, which applies the schema and ships the
+Worker.
+
+> **Workflows must exist on the default branch.** GitHub only offers `workflow_dispatch` for files
+> present on `main`, so nothing appears in the Actions tab until this branch is merged.
 
 After that the workflows run themselves:
 
