@@ -107,8 +107,8 @@ Locally the same sequence is `npm run migrate && npm run history && npm run rati
 Then deploy: pushing to `main` runs the deploy workflow, which applies the schema and ships the
 Worker.
 
-> **Workflows must exist on the default branch.** GitHub only offers `workflow_dispatch` for files
-> present on `main`, so nothing appears in the Actions tab until this branch is merged.
+> The repo was empty on first push, so GitHub made that branch the default. The workflows are
+> already dispatchable from the Actions tab — nothing needs merging first.
 
 After that the workflows run themselves:
 

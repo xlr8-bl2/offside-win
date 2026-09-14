@@ -1,8 +1,11 @@
 name: deploy
 
+# The repo was empty when this branch was first pushed, so GitHub promoted that
+# branch to default rather than creating `main`. Both are listed so deploy fires
+# on whichever is current, and renaming the default later needs no edit here.
 on:
   push:
-    branches: [main]
+    branches: [main, 'claude/**']
     paths: ['worker/**', 'public/**', 'schema.sql', '.github/workflows/deploy.yml']
   workflow_dispatch:
 
