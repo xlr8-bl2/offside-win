@@ -24,6 +24,7 @@
     "supabase:check": "npm -w engine run supabase:check",
     "board:stats": "npm -w engine run board:stats",
     "eval:provider": "npm -w engine run eval:provider",
-    "h2h": "npm -w engine run h2h"
+    "h2h": "npm -w engine run h2h",
+    "market": "npm -w engine run market"
   }
 }
