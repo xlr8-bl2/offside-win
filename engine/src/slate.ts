@@ -3,6 +3,7 @@ import { config } from './config.ts';
 import { analyseFixture } from './context/index.ts';
 import { checkComparisonEntitlement, gatherFixture } from './context/gather.ts';
 import { RepetitionLedger, narrate, narrateConfident, narratePass } from './narrate/compose.ts';
+import { chooseHero, type HeroCandidate } from './feature.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
 import { buildCandidates, driversFor, select, selectConfident, setAsideFor, type CalibrationMap } from './select.ts';
 import { dbStats, insertMany, kvGetJSON, kvSetJSON, pickConflictTarget, select as dbSelect } from './store.ts';
@@ -70,6 +71,11 @@ export interface SlateReport {
   d1Queries: number;
 }
 
+/** Lower is more prominent. Unlisted leagues sort behind every ranked one. */
+export function leagueRank(leagueId: number): number {
+  return config.leagueRank[leagueId] ?? config.unrankedLeague;
+}
+
 export async function runSlate(): Promise<SlateReport> {
   const now = Math.floor(Date.now() / 1000);
   const from = new Date((now - config.slate.lookbackHours * 3600) * 1000).toISOString();
@@ -125,6 +131,7 @@ export async function runSlate(): Promise<SlateReport> {
 
   const fixtureRows: Array<Record<string, unknown>> = [];
   const pickRows: Array<Record<string, unknown>> = [];
+  const heroCandidates: HeroCandidate[] = [];
 
   for (const event of candidates) {
     try {
@@ -215,6 +222,9 @@ export async function runSlate(): Promise<SlateReport> {
         // That is the matchday imagery the site is built on, so the id travels
         // with the fixture rather than the page reaching for stock.
         venue_id: num(event['venue_id']) ?? null,
+        // How prominent this competition is, so the board can lead with the
+        // games people came for rather than with whatever kicks off first.
+        rank: leagueRank(analysis.league_id),
         status: analysis.status,
         provisional: analysis.provisional,
         lineup_status: analysis.lineup_status,
@@ -268,6 +278,19 @@ export async function runSlate(): Promise<SlateReport> {
         lambda_away: analysis.lambda_away,
         corner_rate: Number(analysis.corner_rate.toFixed(2)),
         card_rate: Number(analysis.card_rate.toFixed(3)),
+        // The team sheet, which was computed for the factors and then thrown
+        // away. It is the panel the analysis keeps referring to — "without two
+        // players, none of whom register in the scoring records" means more
+        // next to the eleven that is actually playing.
+        lineups: ctx.lineups
+          ? {
+              status: ctx.lineups.status,
+              confidence: ctx.lineups.confidence,
+              home: ctx.lineups.home,
+              away: ctx.lineups.away,
+              unavailable: ctx.lineups.unavailable,
+            }
+          : null,
         ledger: factors.map(forStorage),
         markets: analysis.model.map((m) => ({
           market: m.market,
@@ -341,6 +364,31 @@ export async function runSlate(): Promise<SlateReport> {
         });
       }
 
+      // Collected for the masthead. The best-rated starter per side is the face
+      // the composite uses, which is why the lineup is read here rather than
+      // guessed at from the squad.
+      const bestStarter = (which: 'home' | 'away'): number | null => {
+        const players = ctx.lineups?.[which]?.players ?? [];
+        const starters = players.filter((pl) => pl.starting && pl.ai_score !== null);
+        if (!starters.length) return null;
+        return starters.reduce((a, b) => ((b.ai_score ?? 0) > (a.ai_score ?? 0) ? b : a)).id;
+      };
+      heroCandidates.push({
+        id: analysis.fixture_id,
+        league_id: analysis.league_id,
+        league: ctx.league_name ?? '',
+        kickoff: analysis.kickoff,
+        home: analysis.home_team,
+        away: analysis.away_team,
+        home_id: analysis.home_team_id,
+        away_id: analysis.away_team_id,
+        venue_id: num(event['venue_id']) ?? null,
+        confidence,
+        derby: factors.some((f) => f.id === 'fixture.derby' && f.strength > 0.3),
+        star_home: bestStarter('home'),
+        star_away: bestStarter('away'),
+      });
+
       report.analysed++;
       if (allVerdicts.length > 0) report.picks += allVerdicts.length;
       report.confident += confidentVerdicts.length;
@@ -389,6 +437,14 @@ export async function runSlate(): Promise<SlateReport> {
           'WHERE pick.settled_at IS NULL',
       },
     );
+  }
+
+  // What the site leads with today. Written whether or not anything special is
+  // on — a quiet Tuesday still needs a masthead, it just gets a quieter one.
+  const hero = chooseHero(heroCandidates);
+  if (hero) {
+    await kvSetJSON('hero:today', hero);
+    console.log(`  hero: ${hero.kicker} — ${hero.headline} (${hero.reason})`);
   }
 
   await kvSetJSON('narrate:ledger', ledger.snapshot());

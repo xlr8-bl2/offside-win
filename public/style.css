@@ -467,3 +467,149 @@ h3.display { font-size: clamp(1.2rem, 2.1vw, 1.7rem); }
 .foot-note a { color: var(--ink-2); text-decoration: underline; }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ======================================================= product chrome */
+
+/* Occasion kicker above the hero headline. */
+.kicker {
+  display: inline-block; margin: 0 0 18px;
+  padding: 7px 16px; border-radius: 999px;
+  background: rgba(226,185,121,0.12);
+  border: 1px solid rgba(226,185,121,0.3);
+  color: var(--gold);
+  font-size: 0.68rem; font-weight: 800;
+  letter-spacing: 0.2em; text-transform: uppercase;
+}
+
+/* The fixture as the headline: two names and a hairline "vs" between them. */
+.hero-fx { display: flex; flex-direction: column; gap: 2px; max-width: 16ch; }
+.hero-fx em {
+  font-style: normal; color: var(--gold);
+  font-size: 0.32em; letter-spacing: 0.24em; font-weight: 700;
+  padding: 6px 0;
+}
+
+.hero-badges {
+  position: absolute; right: var(--gutter); top: 50%;
+  transform: translateY(-50%);
+  display: flex; align-items: center; gap: 18px;
+}
+.hero-badges .crest { width: 118px; height: 118px; font-size: 2rem; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+.hero-vs { font-family: var(--display); font-weight: 800; font-size: 1.4rem; color: var(--ink-3); }
+@media (max-width: 1100px) { .hero-badges { display: none; } }
+
+/* Trust strip. Four things that are true, under the masthead. */
+.trust { background: var(--bg-2); border-bottom: 1px solid var(--line-soft); }
+.trust-inner {
+  max-width: var(--maxw); margin: 0 auto; padding: 22px var(--gutter);
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;
+}
+.trust-item { display: flex; flex-direction: column; gap: 2px; padding-left: 14px; border-left: 2px solid var(--gold); }
+.trust-item b { font-size: 0.9rem; font-weight: 700; }
+.trust-item span { font-size: 0.76rem; color: var(--ink-3); }
+@media (max-width: 860px) {
+  .trust-inner { grid-template-columns: repeat(2, 1fr); gap: 16px; }
+}
+
+/* Confidence, as a bar rather than as a number in a sentence. */
+.conf { display: flex; align-items: center; gap: 9px; margin-top: 2px; }
+.conf-track { flex: 1 1 auto; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.07); overflow: hidden; }
+.conf-track i { display: block; height: 100%; background: linear-gradient(90deg, var(--gold-2), var(--gold)); }
+.conf-pct { font-size: 0.68rem; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Stats band. */
+.statband { background: var(--bg-2); border-block: 1px solid var(--line-soft); padding-block: clamp(30px, 4vw, 52px); }
+.statgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+.statcell { text-align: center; }
+.statcell b { display: block; font-family: var(--display); font-weight: 800; font-size: clamp(1.8rem, 4vw, 3rem); color: var(--gold); }
+.statcell span { font-size: 0.68rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; }
+@media (max-width: 700px) { .statgrid { grid-template-columns: repeat(2, 1fr); gap: 26px; } }
+
+/* Leagues explorer. */
+.lgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+.lcard {
+  display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center;
+  background: var(--surface); border: 1px solid var(--line-soft);
+  border-radius: var(--r-lg); padding: 22px 16px;
+  transition: border-color 0.14s ease, transform 0.14s ease;
+}
+.lcard:hover { border-color: rgba(226,185,121,0.35); transform: translateY(-2px); }
+.lcard b { font-size: 0.86rem; font-weight: 600; line-height: 1.3; }
+.lcard span { font-size: 0.72rem; color: var(--ink-3); }
+
+/* Closing band. */
+.closing { border-top: 1px solid var(--line-soft); background: var(--bg-2); }
+.closing-in {
+  padding-block: clamp(40px, 6vw, 76px);
+  display: flex; align-items: center; justify-content: space-between; gap: 26px; flex-wrap: wrap;
+}
+
+/* ============================================================ team sheet */
+
+.pitch {
+  display: grid; grid-template-columns: 1fr 2px 1fr; gap: 0;
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0 40px, transparent 40px 80px),
+    linear-gradient(160deg, #10241a, #0a1712);
+  border: 1px solid var(--line); border-radius: var(--r);
+  padding: 18px 12px; overflow-x: auto;
+}
+.pitch-mid { background: rgba(255,255,255,0.08); }
+.pitch-half { display: grid; gap: 14px; align-content: start; min-width: 240px; }
+.pitch-half.flip { direction: rtl; }
+.pitch-half.flip > * { direction: ltr; }
+.pitch-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 0.82rem; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.formation { margin-left: auto; font-size: 0.72rem; color: var(--gold); font-weight: 700; font-variant-numeric: tabular-nums; }
+.pitch-row { display: flex; justify-content: space-evenly; gap: 6px; }
+.pp { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 62px; }
+.pp .crest { width: 38px; height: 38px; background: rgba(0,0,0,0.35); }
+.pp-name {
+  font-size: 0.66rem; color: var(--ink-2); text-align: center;
+  max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.outlist { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin-top: 16px; }
+.outlist b { font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); margin-right: 4px; }
+
+/* ================================================================ footer */
+
+.foot-cols {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 26px;
+  padding-bottom: 28px; border-bottom: 1px solid var(--line-soft);
+}
+.foot-col h4 { margin: 0 0 12px; font-size: 0.66rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; }
+.foot-col a { display: block; padding: 5px 0; font-size: 0.85rem; color: var(--ink-2); }
+.foot-col a:hover { color: var(--ink); }
+.socials { display: flex; gap: 10px; margin-top: 6px; }
+.socials a {
+  width: 34px; height: 34px; display: grid; place-items: center;
+  border: 1px solid var(--line); border-radius: 50%; color: var(--ink-2);
+}
+.socials a:hover { color: var(--ink); border-color: var(--ink-3); }
+.socials svg { width: 15px; height: 15px; }
+@media (max-width: 760px) { .foot-cols { grid-template-columns: repeat(2, 1fr); } }
+
+/* ========================================================= cookie notice */
+
+.cookie {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 90; width: min(640px, calc(100vw - 32px));
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: 18px 20px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+}
+.cookie p { margin: 0; font-size: 0.83rem; color: var(--ink-2); flex: 1 1 260px; line-height: 1.55; }
+.cookie a { color: var(--ink); text-decoration: underline; }
+.cookie .btn { padding: 10px 18px; font-size: 0.82rem; }
+
+/* ============================================================ legal page */
+
+.prose { max-width: 72ch; }
+.prose h2 { font-size: 1.15rem; margin: 30px 0 10px; font-weight: 700; }
+.prose p, .prose li { color: var(--ink-2); font-size: 0.93rem; line-height: 1.75; }
+.prose ul { padding-left: 20px; }
+.prose a { color: var(--ink); text-decoration: underline; }
