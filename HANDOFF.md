@@ -99,6 +99,19 @@ on total parameters — the right shape — but with a ceiling of 480, so the fi
 backfill went out at 480 parameters and came back `7500: too many SQL variables`. Every bulk write
 in the engine would have hit it. The cap now comes from `config.d1.maxParams`.
 
+**The UI has now been rendered, and it works.** All four views were driven in Chromium at 390px and
+360px against live data: board, picks, model and a fixture detail, with **no JavaScript errors** on
+any of them. The page never scrolls sideways at either width — the wide stats tables live in
+`.scroll` containers (`overflow-x: auto`, `table { min-width: 560px }`), so they scroll inside
+themselves, which looks like a clipped column in a screenshot and is the intended behaviour rather
+than a layout bug. The model page carries the real backtest verdict and still refuses to print an
+ROI; the picks page still says 0 settled picks is too few to judge.
+
+To render it yourself in a sandbox: the egress proxy re-terminates TLS and Chromium's own root store
+does not pick up its CA, so the browser cannot reach the Worker directly. Serve `public/` from
+127.0.0.1 and proxy `/api/*` through Node, which does trust the CA. Never disable certificate
+verification to get around it.
+
 **Tracking is what everything reads, and it is one fetch away from empty.** `ratings`, `slate` and
 `backtest` all work from `league.tracked = 1`. A scheduled `history` run with no `LEAGUES` set,
 firing while the provider quota was exhausted, discovered zero leagues and untracked all fifteen —
