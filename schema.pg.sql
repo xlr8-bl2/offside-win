@@ -252,6 +252,22 @@ CREATE OR REPLACE VIEW pick_summary AS
   FROM pick
   WHERE settled_at IS NOT NULL AND result IS DISTINCT FROM 'VOID';
 
+-- The same aggregate, split by what kind of call it was. Mixing them produces a
+-- number that describes nothing: a value bet is taken at 2.50 expecting to lose
+-- most of the time, a confidence call is taken at 1.16 expecting to win nearly
+-- always, and their combined strike rate and ROI belong to neither. The split
+-- is what lets the page show each product against its own bar.
+CREATE OR REPLACE VIEW pick_summary_by_kind AS
+  SELECT kind,
+         count(*)                                                   AS n,
+         count(*) FILTER (WHERE result IN ('WON', 'HALF_WON'))      AS wins,
+         sum(pnl)                                                   AS pnl,
+         avg(odds)                                                  AS avg_odds,
+         avg(clv) FILTER (WHERE clv IS NOT NULL)                    AS clv_mean
+  FROM pick
+  WHERE settled_at IS NOT NULL AND result IS DISTINCT FROM 'VOID'
+  GROUP BY kind;
+
 CREATE OR REPLACE FUNCTION get_board(p_from bigint, p_to bigint, p_league bigint DEFAULT NULL)
 RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
   SELECT json_build_object(
@@ -281,6 +297,9 @@ CREATE OR REPLACE FUNCTION get_picks(p_limit integer DEFAULT 60, p_settled text 
 RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
   SELECT json_build_object(
            'summary', (SELECT to_json(s) FROM pick_summary s),
+           'summary_by_kind', coalesce((
+             SELECT json_object_agg(k.kind, to_json(k)) FROM pick_summary_by_kind k
+           ), '{}'::json),
            'picks', coalesce((
              SELECT json_agg(row_to_json(p) ORDER BY p.kickoff DESC)
              FROM (
@@ -414,6 +433,7 @@ CREATE POLICY kv_read ON kv FOR SELECT TO anon USING (true);
 GRANT SELECT ON kv TO anon;
 
 GRANT SELECT ON pick_summary TO anon;
+GRANT SELECT ON pick_summary_by_kind TO anon;
 
 -- The serving functions are the Worker's whole read path. EXECUTE only: they
 -- are SECURITY INVOKER, so each one still reads under the anon SELECT policies

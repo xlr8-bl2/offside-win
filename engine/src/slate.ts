@@ -2,8 +2,9 @@ import { bsdList, num, stats as bsdStats, toEpoch } from './bsd.ts';
 import { config } from './config.ts';
 import { analyseFixture } from './context/index.ts';
 import { checkComparisonEntitlement, gatherFixture } from './context/gather.ts';
-import { RepetitionLedger, narrate, narratePass } from './narrate/compose.ts';
-import { buildCandidates, driversFor, select, setAsideFor, type CalibrationMap } from './select.ts';
+import { RepetitionLedger, narrate, narrateConfident, narratePass } from './narrate/compose.ts';
+import { parsePrediction, providerMarkets } from './provider-model.ts';
+import { buildCandidates, driversFor, select, selectConfident, setAsideFor, type CalibrationMap } from './select.ts';
 import { dbStats, insertMany, kvGetJSON, kvSetJSON, pickConflictTarget, select as dbSelect } from './store.ts';
 import type { CalibrationRow } from './select.ts';
 import type { Candidate, Factor, MarketFamily } from './types.ts';
@@ -61,6 +62,8 @@ export interface SlateReport {
   fixtures: number;
   analysed: number;
   picks: number;
+  /** Of those picks, how many are high-confidence calls rather than value bets. */
+  confident: number;
   passes: number;
   skipped: number;
   requests: number;
@@ -94,7 +97,7 @@ export async function runSlate(): Promise<SlateReport> {
   );
 
   if (candidates.length === 0) {
-    return { fixtures: events.length, analysed: 0, picks: 0, passes: 0, skipped: events.length, requests: bsdStats.requests, d1Queries: dbStats.queries };
+    return { fixtures: events.length, analysed: 0, picks: 0, confident: 0, passes: 0, skipped: events.length, requests: bsdStats.requests, d1Queries: dbStats.queries };
   }
 
   // Probe the paid-tier entitlement once per run rather than per fixture.
@@ -113,6 +116,7 @@ export async function runSlate(): Promise<SlateReport> {
     fixtures: events.length,
     analysed: 0,
     picks: 0,
+    confident: 0,
     passes: 0,
     skipped: events.length - candidates.length,
     requests: 0,
@@ -153,6 +157,40 @@ export async function runSlate(): Promise<SlateReport> {
         };
       });
 
+      // High-confidence calls, from the provider's probabilities rather than our
+      // own. The prediction is already in the context — the gatherer fetches it
+      // for the market factors — so this costs no extra request.
+      //
+      // Deliberately independent of `select` above. That asks whether the price
+      // is wrong and passes when it is not; this asks what is likely and has no
+      // view on the price, so a fixture can produce a confident call, a value
+      // bet, both, or neither, and each is stored with its own kind.
+      const prediction = parsePrediction(ctx.prediction);
+      const confidentVerdicts = (() => {
+        if (!prediction) return [];
+        const theirCands = buildCandidates(providerMarkets(prediction), analysis.book, calibration);
+        return selectConfident(theirCands).map((candidate) => {
+          const drivers = driversFor(candidate, factors);
+          return {
+            kind: 'CONFIDENT' as const,
+            candidate,
+            narrative: narrateConfident({
+              candidate,
+              drivers,
+              homeTeam: analysis.home_team,
+              awayTeam: analysis.away_team,
+              fixtureId: analysis.fixture_id,
+              ledger,
+              expectedGoals: prediction.expected_goals,
+            }),
+            drivers,
+            set_aside: setAsideFor(candidate, factors, drivers),
+          };
+        });
+      })();
+
+      const allVerdicts = [...verdicts, ...confidentVerdicts];
+
       const passNarrative = selection.passReason
         ? narratePass(selection.passReason, analysis.home_team, analysis.away_team, analysis.fixture_id)
         : null;
@@ -173,17 +211,35 @@ export async function runSlate(): Promise<SlateReport> {
         odds_1x2: Object.fromEntries(
           (analysis.book.find((b) => b.market === '1x2')?.fair ?? new Map()).entries(),
         ),
-        top_pick: verdicts[0]
-          ? {
-              kind: verdicts[0].kind,
-              market: verdicts[0].candidate.market,
-              outcome: verdicts[0].candidate.outcome,
-              line: verdicts[0].candidate.line,
-              odds: verdicts[0].candidate.odds,
-              edge: Number(verdicts[0].candidate.edge.toFixed(4)),
-            }
-          : null,
+        // The board card's headline. A value bet leads when there is one —
+        // it is the rarer and more valuable thing — and a confident call leads
+        // when there is not, so a fixture with something to say never shows an
+        // empty card.
+        top_pick: ((v) =>
+          v
+            ? {
+                kind: v.kind,
+                market: v.candidate.market,
+                outcome: v.candidate.outcome,
+                line: v.candidate.line,
+                odds: v.candidate.odds,
+                edge: Number(v.candidate.edge.toFixed(4)),
+                prob: Number(v.candidate.model_prob.toFixed(3)),
+              }
+            : null)(allVerdicts[0]),
         pass: passNarrative,
+        // The confident calls, compact: the board loads every fixture at once,
+        // so the reasoning stays in the bundle and only the call travels here.
+        confident: confidentVerdicts.map((v) => ({
+          market: v.candidate.market,
+          outcome: v.candidate.outcome,
+          line: v.candidate.line,
+          prob: Number(v.candidate.model_prob.toFixed(3)),
+          odds: v.candidate.odds,
+          // Whether anything in our context argues against it. This is the
+          // differentiator, so it belongs where a reader sees it first.
+          caveat: v.drivers.some((d) => d.claims.some((c) => c.polarity < 0)),
+        })),
         // Signals worth an icon on the card without opening the fixture.
         flags: factors
           .filter((f) => f.state === 'COMPUTED' && f.strength >= 0.5)
@@ -222,7 +278,7 @@ export async function runSlate(): Promise<SlateReport> {
           .sort((a, b) => b.shrunk_edge - a.shrunk_edge)
           .slice(0, 25)
           .map(candidateForStorage),
-        verdicts: verdicts.map((v) => ({
+        verdicts: allVerdicts.map((v) => ({
           kind: v.kind,
           candidate: candidateForStorage(v.candidate),
           narrative: v.narrative,
@@ -247,7 +303,7 @@ export async function runSlate(): Promise<SlateReport> {
         computed_at: analysis.computed_at,
       });
 
-      for (const v of verdicts) {
+      for (const v of allVerdicts) {
         pickRows.push({
           fixture_id: analysis.fixture_id,
           kickoff: analysis.kickoff,
@@ -274,7 +330,8 @@ export async function runSlate(): Promise<SlateReport> {
       }
 
       report.analysed++;
-      if (verdicts.length > 0) report.picks += verdicts.length;
+      if (allVerdicts.length > 0) report.picks += allVerdicts.length;
+      report.confident += confidentVerdicts.length;
       if (selection.passReason) report.passes++;
     } catch (err) {
       console.error(`  fixture ${event['id']} failed: ${err instanceof Error ? err.message : String(err)}`);
