@@ -321,8 +321,13 @@ function asClause(sentence: string, properNouns: string[]): string {
   const first = body.split(/\s+/)[0] ?? '';
   const isName =
     properNouns.some((name) => name && body.startsWith(name)) ||
+    // A capital anywhere past the first letter marks an acronym or a
+    // compound name: AFC, FC, McTominay.
     /[A-Z]/.test(first.slice(1)) ||
-    !/^[A-Z][a-z]/.test(first);
+    !/^[A-Z][a-z]/.test(first) ||
+    // Two capitalised words in a row is a name almost every time, and the cost
+    // of being wrong is a missing lowercase rather than a mangled surname.
+    /^[A-Z][a-z'-]+ [A-Z]/.test(body);
   return isName ? body : body[0]!.toLowerCase() + body.slice(1);
 }
 
@@ -487,7 +492,12 @@ export function narrateConfident(input: ConfidentInput): string {
       magnitude: claim.magnitude,
       // The inner sentence is lowercased so it reads as a clause rather than as
       // a second sentence bolted on.
-      evidence: { detail: asClause(detail, [input.homeTeam, input.awayTeam]) },
+      // The claim's own subject matters as much as the team names: a
+      // counterweight usually opens on the player it is about, and the first
+      // pass of this produced "viktor Gyokeres is out".
+      evidence: {
+        detail: asClause(detail, [input.homeTeam, input.awayTeam, claim.subject, String(claim.evidence.team ?? '')]),
+      },
       section: claim.section,
       tier: claim.tier,
     });
