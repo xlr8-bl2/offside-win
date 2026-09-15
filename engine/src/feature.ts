@@ -33,11 +33,23 @@ export interface HeroPick {
   reason: string;
 }
 
-/** Competitions whose name alone is the occasion. */
-const MARQUEE: Record<number, string> = {
-  7: 'Champions League night',
-  8: 'Europa League night',
-  83: 'Conference League night',
+/**
+ * Competitions whose name alone is the occasion, and how much that is worth.
+ *
+ * The bonus has to be read against the rank gap, which is 100 a tier. A flat
+ * +220 for all three put a Europa League tie above a La Liga fixture kicking off
+ * in the same hour — Anderlecht v Lyon led the page over Barcelona, which is the
+ * exact complaint this feature exists to answer.
+ *
+ * So only the Champions League gets a bonus large enough to jump tiers. Europa
+ * and Conference nights are worth something and not worth more than a top-five
+ * league game: they lead when nothing bigger is on, which on a Thursday is
+ * usually the case, and step aside when there is.
+ */
+const MARQUEE: Record<number, { label: string; boost: number }> = {
+  7: { label: 'Champions League night', boost: 220 },
+  8: { label: 'Europa League night', boost: 60 },
+  83: { label: 'Conference League night', boost: 30 },
 };
 
 export interface HeroCandidate {
@@ -68,7 +80,7 @@ export function scoreCandidate(f: HeroCandidate, now: number): number {
   const rank = leagueRank(f.league_id);
   let score = (10 - rank) * 100;
 
-  if (MARQUEE[f.league_id]) score += 220;
+  score += MARQUEE[f.league_id]?.boost ?? 0;
   if (f.derby) score += 180;
 
   // Today beats later this week: a masthead is about tonight.
@@ -87,7 +99,7 @@ export function chooseHero(fixtures: HeroCandidate[], now = Math.floor(Date.now(
 
   const best = live.reduce((a, b) => (scoreCandidate(b, now) > scoreCandidate(a, now) ? b : a));
 
-  const marquee = MARQUEE[best.league_id];
+  const marquee = MARQUEE[best.league_id]?.label;
   const kicker = marquee ?? (best.derby ? 'Derby day' : best.league);
   const reason = marquee
     ? 'marquee competition'
