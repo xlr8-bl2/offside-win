@@ -25,9 +25,14 @@ on:
         type: string
         default: '3'
       leagues:
-        description: 'Comma-separated league IDs, or blank for every league the provider covers'
+        # Defaulted, not blank. Blank means every league the provider covers —
+        # 88 of them across three seasons — which exhausted D1's free-tier daily
+        # row-write quota 27 minutes into the first real run. Blank is still
+        # accepted and still means everything; it just is not the default you
+        # get by pressing the button.
+        description: 'Comma-separated league IDs. Blank means EVERY league the provider covers, which will exhaust D1 free-tier daily writes.'
         type: string
-        default: ''
+        default: '1,3,4,5,6,39,40,41,42,43,44,7,8,83,90'
       skip_history:
         description: 'Skip the backfill (use when re-fitting existing history)'
         type: boolean
