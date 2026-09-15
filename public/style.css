@@ -224,3 +224,33 @@ td.neg { color: var(--bad); }
   .factor { grid-template-columns: 1fr; gap: 5px; }
   .factor-state { width: 74px; }
 }
+
+/* High-confidence calls. Visually distinct from value bets on purpose: they are
+   a different claim, and a reader must never have to work out which one they
+   are looking at. */
+.verdict.confident { border-left: 3px solid var(--conf, #3b7ddd); }
+.tag.confident { background: var(--conf, #3b7ddd); color: #fff; }
+.disclosure {
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  opacity: 0.72;
+}
+.also { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.also-call {
+  font-size: 0.78rem;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.14);
+  white-space: nowrap;
+}
+.also-call b { font-weight: 600; }
+/* The caveat marker. Small, but it is the thing that makes our page worth
+   reading rather than the provider's. */
+.caveat {
+  display: inline-block;
+  margin-left: 4px;
+  font-style: normal;
+  font-weight: 700;
+  color: #d08214;
+}

@@ -118,11 +118,16 @@ function cardHTML(f) {
     </div>
     <div class="pick-line${pick ? '' : ' pass'}">
       ${pick
-        ? `<span class="tag ${pick.kind.toLowerCase()}">${pick.kind}</span>
+        ? `<span class="tag ${pick.kind.toLowerCase()}">${pick.kind === 'CONFIDENT' ? 'CALL' : pick.kind}</span>
            <span>${esc(marketLabel(pick.market, pick.outcome, pick.line))}</span>
-           <span class="odds">${dec(pick.odds)}</span>`
+           <span class="odds">${pick.kind === 'CONFIDENT' && pick.prob ? pct(pick.prob, 0) : dec(pick.odds)}</span>`
         : `<span>No call — see the reasoning</span>`}
     </div>
+    ${(f.confident ?? []).length > 1
+      ? `<div class="also">${(f.confident ?? []).slice(1).map((c) =>
+          `<span class="also-call">${esc(marketLabel(c.market, c.outcome, c.line))} <b>${pct(c.prob, 0)}</b>${
+            c.caveat ? '<i class="caveat" title="our context argues against this">!</i>' : ''}</span>`).join('')}</div>`
+      : ''}
     ${f.provisional
       ? `<div class="factor-meta" style="margin-top:8px"><span class="tag prov">provisional</span>
          <span>lineup ${esc(f.lineup_status)}</span></div>`
@@ -192,23 +197,41 @@ async function viewFixture(id) {
   app.querySelector('.back').onclick = () => { location.hash = '#/board'; };
 }
 
+const VERDICT_LABEL = {
+  VALUE: 'biggest mispricing',
+  LIKELY: 'most likely to land',
+  CONFIDENT: 'high-confidence call',
+};
+
 function verdictHTML(v) {
   const c = v.candidate;
+  const confident = v.kind === 'CONFIDENT';
   return `
   <div class="verdict ${v.kind.toLowerCase()}">
     <div class="verdict-head">
-      <span class="tag ${v.kind.toLowerCase()}">${v.kind === 'VALUE' ? 'biggest mispricing' : 'most likely to land'}</span>
+      <span class="tag ${v.kind.toLowerCase()}">${VERDICT_LABEL[v.kind] ?? esc(v.kind)}</span>
       <span class="sel">${esc(marketLabel(c.market, c.outcome, c.line))}</span>
       <span class="odds">${dec(c.odds)}</span>
       <span class="tag muted">${esc(c.bookmaker ?? '')}</span>
     </div>
     <p class="narrative">${esc(v.narrative)}</p>
-    <div class="numbers">
-      <span>we make it <b>${pct(c.model_prob)}</b></span>
-      <span>market <b>${pct(c.book_prob)}</b></span>
-      <span>edge <b>${(c.edge * 100).toFixed(1)} pts</b></span>
-      <span>stake <b>${pct(c.kelly, 2)}</b> of bank</span>
-    </div>
+    ${confident
+      // Edge and stake are meaningless on a call that agrees with the price —
+      // both are ~0 by construction — and printing them would imply a value the
+      // call does not claim. What a reader needs instead is what it returns.
+      ? `<div class="numbers">
+           <span>confidence <b>${pct(c.model_prob)}</b></span>
+           <span>price <b>${dec(c.odds)}</b></span>
+           <span>returns <b>${((c.odds - 1) * 100).toFixed(0)}p</b> in the pound</span>
+         </div>
+         <p class="disclosure">A confidence, not a tip. This agrees with the market price rather than
+         disputing it, so it is a read on the match — not a claim that betting it makes money.</p>`
+      : `<div class="numbers">
+           <span>we make it <b>${pct(c.model_prob)}</b></span>
+           <span>market <b>${pct(c.book_prob)}</b></span>
+           <span>edge <b>${(c.edge * 100).toFixed(1)} pts</b></span>
+           <span>stake <b>${pct(c.kelly, 2)}</b> of bank</span>
+         </div>`}
     ${v.set_aside && v.set_aside.length
       ? `<details class="evidence"><summary>Assessed and set aside (${v.set_aside.length})</summary>
          <pre>${esc(v.set_aside.map((s) => `${s.section} ${s.note}`).join('\n\n'))}</pre></details>`
