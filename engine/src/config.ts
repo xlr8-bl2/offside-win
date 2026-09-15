@@ -152,16 +152,31 @@ export const config = {
     maxCorners: num('PRICE_MAX_CORNERS', 26),
     maxCards: num('PRICE_MAX_CARDS', 12),
     /**
-     * Variance-to-mean ratio for a team's goals. FITTED.
+     * Variance-to-mean ratio for a team's goals. MEASURED, and left at Poisson.
      *
-     * 1.0 is Poisson, which assumes a team's goals are as variable as their
-     * mean. Real football is more variable than that — blowouts and goalless
-     * draws both happen more often than Poisson allows — and the cost is not
-     * spread evenly across markets. It lands on the outer goal lines, where
-     * pure Poisson made us claim 80%+ on "under 3.5" and land 71.7%. Above 1
-     * this switches the marginals to a negative binomial with the same mean
-     * and fatter tails; the low-score tau correction and every downstream
-     * market are unchanged, because they all read the same matrix.
+     * 1.0 is Poisson. Above 1 the marginals become negative binomial with the
+     * same mean and fatter tails. The hypothesis was that Poisson is too tight
+     * for real football and that this was why we claimed 80%+ on "under 3.5"
+     * and landed 71.7%. A hit-rate sweep appeared to confirm it — 80.3% to
+     * 82.6% at 1.30 — but that gain was 40% fewer calls, not better ones.
+     *
+     * The backtest settled it over 34,210 matches:
+     *
+     *            1.00 (Poisson)   1.25
+     *   overall        0.6200    0.6201
+     *   over 3.5       0.6030    0.6011   better
+     *   over 2.5       0.6842    0.6837   better
+     *   over 1.5       0.5544    0.5553   worse
+     *   btts           0.6957    0.6966   worse
+     *   1x2 home       0.6562    0.6568   worse
+     *
+     * So it is not a free win, it is a trade: fattening both marginals helps
+     * the high line and hurts the low ones and BTTS, because raising P(0) per
+     * team is the same move as fattening the top tail. Net zero. A per-line
+     * correction, or dispersion applied to the total rather than to each team,
+     * might pick up the over-3.5 gain without paying for it — but this knob as
+     * written does not, so it stays at Poisson. Do not re-derive this: the
+     * evidence is above and `npm run backtest` reproduces it in 73 seconds.
      */
     goalDispersion: num('PRICE_GOAL_DISPERSION', 1.0),
   },
