@@ -171,11 +171,26 @@ export function kvSetJSON(key: string, value: unknown, ttlSeconds?: number): Pro
   return kvSet(key, JSON.stringify(value), ttlSeconds);
 }
 
-/** Apply schema.sql. Idempotent — every statement is CREATE ... IF NOT EXISTS. */
-export async function migrate(schemaSql: string): Promise<void> {
-  const statements = schemaSql
+/**
+ * Apply the schema. Idempotent — every statement is CREATE ... IF NOT EXISTS.
+ *
+ * Comments are stripped *before* the split, not after. Splitting first means a
+ * comment containing a semicolon is torn in two, and the tail — no longer
+ * preceded by `--` — survives comment-stripping and is executed as SQL. The
+ * live schema has two such comments and gets away with it only because the
+ * semicolons happen to sit at end of line, where the leftover fragment starts
+ * with a newline and the continuation lines are still whole comments. Reflow
+ * one of those lines and the migration breaks. Stripping first removes the
+ * whole class rather than relying on where the punctuation lands.
+ */
+export function splitStatements(schemaSql: string): string[] {
+  return schemaSql
+    .replace(/^\s*--.*$/gm, '')
     .split(';')
-    .map((s) => s.replace(/^\s*--.*$/gm, '').trim())
+    .map((s) => s.trim())
     .filter((s) => s.length > 0);
-  for (const stmt of statements) await exec(stmt);
+}
+
+export async function migrate(schemaSql: string): Promise<void> {
+  for (const stmt of splitStatements(schemaSql)) await exec(stmt);
 }
