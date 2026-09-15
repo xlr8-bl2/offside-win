@@ -274,6 +274,16 @@ export interface BackfillOptions {
 
 export async function backfillHistory(opts: BackfillOptions = {}): Promise<BackfillReport> {
   const leagues = await discoverLeagues();
+  // The provider always covers *some* leagues, so an empty list means the fetch
+  // failed — a quota ceiling, an expired key, an outage — and every step after
+  // this would be a well-behaved no-op reporting success. Say so instead.
+  if (leagues.length === 0) {
+    throw new Error(
+      'League discovery returned nothing. The provider lists leagues unconditionally, so this ' +
+        'is a failed fetch (quota, key or outage) rather than an empty catalogue — refusing to ' +
+        'treat it as an empty scope.',
+    );
+  }
   const now = Math.floor(Date.now() / 1000);
   const report: BackfillReport = {
     leagues: leagues.length,
@@ -302,14 +312,22 @@ export async function backfillHistory(opts: BackfillOptions = {}): Promise<Backf
 
   // Anything tracked by an earlier, wider run must stop being tracked, or
   // ratings and slate keep grinding over leagues this run no longer maintains —
-  // on partial history, which is worse than none. markUntracked existed for
-  // exactly this and was never called. With a blank LEAGUES the discovered set
-  // is everything, so this correctly untracks nothing.
-  const inScope = new Set(leagues.map((l) => l.id));
-  const stale = (await trackedLeagues()).map((l) => l.id).filter((id) => !inScope.has(id));
-  if (stale.length) {
-    await markUntracked(stale);
-    console.log(`Untracked ${stale.length} leagues no longer in scope`);
+  // on partial history, which is worse than none.
+  //
+  // Only ever narrow against an *explicit* pin. Two ways this went wrong once:
+  // a blank LEAGUES means "everything the provider covers", which is not a
+  // statement that anything is out of scope; and discovery returning nothing is
+  // a failed fetch, not an instruction to switch the system off. The second one
+  // actually happened — the provider quota ran out mid-run, /leagues/ answered
+  // with nothing, and every tracked league was untracked on the strength of it,
+  // which stopped ratings, slate and the backtest dead.
+  if (config.leagues.length > 0 && leagues.length > 0) {
+    const inScope = new Set(leagues.map((l) => l.id));
+    const stale = (await trackedLeagues()).map((l) => l.id).filter((id) => !inScope.has(id));
+    if (stale.length) {
+      await markUntracked(stale);
+      console.log(`Untracked ${stale.length} leagues no longer in scope`);
+    }
   }
 
   for (const league of leagues) {

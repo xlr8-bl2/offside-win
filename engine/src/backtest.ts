@@ -220,11 +220,25 @@ export async function runBacktest(opts: BacktestOptions = {}): Promise<BacktestR
   // Lower log loss is better, so a positive improvement means the model wins.
   const beatsNaive = improvement.vs_naive_poisson > 0;
   const beatsBase = improvement.vs_base_rate > 0;
-  const verdict = beatsNaive && beatsBase
-    ? `Model beats both baselines on log loss (${fullLL.toFixed(4)} vs naive ${naiveLL.toFixed(4)}, base rate ${baseLL.toFixed(4)}).`
-    : `Model does NOT beat ${!beatsNaive ? 'the naive Poisson' : 'the league base rate'} ` +
-      `(${fullLL.toFixed(4)} vs naive ${naiveLL.toFixed(4)}, base rate ${baseLL.toFixed(4)}). ` +
-      `On this evidence the extra machinery is not earning its place and should not be trusted.`;
+
+  // A run that scored nothing has no opinion. Every comparison above is NaN,
+  // and `NaN > 0` is false, so without this the empty case falls straight into
+  // the failure branch and publishes "the model does NOT beat the naive
+  // Poisson" on the strength of zero matches. That is not the honest reading of
+  // no data, it is a different claim entirely — and it is the one the model
+  // page would have shown.
+  const evaluated =
+    totalMatches > 0 && Number.isFinite(fullLL) && Number.isFinite(naiveLL) && Number.isFinite(baseLL);
+
+  const verdict = !evaluated
+    ? `No verdict: the backtest scored ${totalMatches} matches across ${leaguesUsed} leagues, ` +
+      `so there is no evidence either way. This is a broken run rather than a result — it does ` +
+      `not mean the model failed, and must not be read as though it did.`
+    : beatsNaive && beatsBase
+      ? `Model beats both baselines on log loss (${fullLL.toFixed(4)} vs naive ${naiveLL.toFixed(4)}, base rate ${baseLL.toFixed(4)}).`
+      : `Model does NOT beat ${!beatsNaive ? 'the naive Poisson' : 'the league base rate'} ` +
+        `(${fullLL.toFixed(4)} vs naive ${naiveLL.toFixed(4)}, base rate ${baseLL.toFixed(4)}). ` +
+        `On this evidence the extra machinery is not earning its place and should not be trusted.`;
 
   const report: BacktestReport = {
     label: opts.label ?? process.env.BACKTEST_LABEL ?? 'manual',
@@ -244,10 +258,14 @@ export async function runBacktest(opts: BacktestOptions = {}): Promise<BacktestR
     console.log(`  ${market.padEnd(12)} n=${String(s.n).padStart(6)} logloss=${s.logLoss.toFixed(4)} brier=${s.brier.toFixed(4)}`);
   }
 
+  // Written relative to the engine workspace, because `npm -w engine run
+  // backtest` sets the working directory there — the old 'engine/…' path
+  // resolved to engine/engine/… , threw, and was swallowed by this catch, so
+  // the workflow's upload step never found a report and only warned.
   try {
-    writeFileSync('engine/backtest-report.json', JSON.stringify(report, null, 2));
-  } catch {
-    // Running outside the repo root; the D1 copy below is the durable one.
+    writeFileSync('backtest-report.json', JSON.stringify(report, null, 2));
+  } catch (err) {
+    console.log(`  could not write backtest-report.json (${err instanceof Error ? err.message : err}) — the D1 copy is the durable one`);
   }
 
   await insertMany(
@@ -255,6 +273,17 @@ export async function runBacktest(opts: BacktestOptions = {}): Promise<BacktestR
     ['label', 'report_json', 'created_at'],
     [{ label: report.label, report_json: JSON.stringify(report), created_at: report.generated_at }],
   );
+
+  // Record the run, then fail: a backtest that scored nothing has not done its
+  // job, and going green would leave "no verdict" sitting on the model page
+  // with nothing drawing attention to it.
+  if (!evaluated) {
+    throw new Error(
+      `Backtest scored no matches (${leaguesUsed} leagues, ${refits} refits). ` +
+        `Usually this means no league is marked tracked, or none has enough finished matches ` +
+        `for a walk-forward. The report is stored with an explicit "no verdict".`,
+    );
+  }
 
   return report;
 }
