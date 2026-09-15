@@ -5,18 +5,28 @@ Read this if you are picking the project up in a session scoped to
 
 ## Where things stand
 
-The code is complete: 50 tests pass, both projects typecheck, and it is deployed nowhere yet.
-`README.md` explains the architecture and `SETUP.md` the setup.
+Live and running. The site is at <https://offside-win.ashleymbaht.workers.dev>, all eight
+workflows are registered and green on schedule, and 100 tests pass.
 
-`xlr8-bl2/offside-win` was created with GitHub's importer from `xlr8-bl/offside-win`. An import is
-a one-time copy, not a live link, so **this repo may be behind**. The upstream is public, so
-syncing needs no credentials:
+**The data lives in Supabase, not D1.** The engine writes to Postgres over the session pooler;
+the Worker reads through PostgREST with the anon key, confined to reading by row-level security
+and SELECT-only grants declared in `schema.pg.sql`. D1 is still reachable with `DB_BACKEND=d1`
+for comparison, but nothing is scheduled against it and the site no longer reads it.
 
-```bash
-git fetch https://github.com/xlr8-bl/offside-win claude/offside-win-context-model-ehx2ik
-git merge FETCH_HEAD          # fast-forward; the histories are shared
-git push
-```
+Why the move: D1's free tier caps daily row writes, and an 88-league backfill exhausted it in 27
+minutes. The same work on Postgres wrote 66,782 rows in 402 queries. The tracked set is now every
+league the provider covers.
+
+**The Worker parses nothing.** Each endpoint calls one STABLE function in `schema.pg.sql`
+(`get_board`, `get_fixture`, `get_picks`, `get_model`, `get_health`) that returns the finished
+response body as a single json value, and the Worker streams those bytes straight through.
+Reassembling a 300-fixture board in the Worker would blow Cloudflare's free-tier budget of 10 ms
+of CPU per request. If you add an endpoint, add a function — do not add a JSON.parse.
+
+**The backtest passes.** 0.6200 log loss over 34,210 matches across 64 leagues and 1,554 refits,
+against a naive Poisson baseline it beats decisively and a base rate of 0.6277 it beats by
+~0.008. That last figure is the honest one: the model is better than guessing the base rate, and
+not by much yet. Run `backtest` after any change to pricing or context.
 
 ## What has never been verified
 
@@ -138,3 +148,27 @@ working directory to the workspace, so the old `engine/backtest-report.json` pat
 `engine/engine/…`, threw, and was swallowed by a bare `catch` — the upload step then only warned.
 Same shape as the probe output-path bug; worth suspecting first whenever an artifact step warns that
 it found no files.
+
+**The provider's own predictions are worse than ours, and worse than the market.** The provider
+ships a `/prediction/` endpoint and advertises "over 87% accuracy". Scored against 373 finished
+matches out of our own history (`npm run eval:provider`, or the `pg` workflow with
+`command: eval:provider`):
+
+| | provider | ours | base rate |
+|---|---|---|---|
+| 1x2 log loss | 1.0102 | 0.6200 | 0.6277 |
+| favourite actually wins | 45.8% | — | — |
+| over 2.5 accuracy | 53.6% | — | 55.2% always-yes |
+| btts accuracy | 51.7% | — | 58.4% always-yes |
+
+A uniform guess on 1x2 scores 1.0986, so their probabilities carry almost no information, and
+their over/BTTS calls are less accurate than saying "yes" every time. Their payload reports
+`model.version: "dc-blend-v1"` — the same Dixon-Coles family as ours, as a black box that cannot
+be fitted, audited or corrected. **Do not republish the 87% figure.** It is not supported by
+their own endpoint's output, and it would be an advertising claim made to paying customers.
+
+**Six context factors are still dark**, losing 19 of the weight: `stakes.table` (6),
+`manager.home` (5), `style.press_matchup` (3), `environment.pitch` (2), `environment.venue` (2),
+`market.prediction_market` (1). `npm run board:stats` prints the current tally per factor.
+`stakes.table` and `manager.home` had their parsers fixed and are still UNAVAILABLE, so the gap
+is upstream of the parser — diagnose before writing more parsing code.

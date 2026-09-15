@@ -91,17 +91,25 @@ jobs:
             echo "attempt $i failed, retrying"
           done
           echo "health: $body"
-          case "$body" in
+          # Postgres' json_build_object writes `"ok" : true`, with spaces around
+          # the colon, so matching the compact spelling failed a check on a
+          # response that was perfectly healthy. Compare with the whitespace
+          # squeezed out rather than assuming either spelling.
+          flat=$(printf '%s' "$body" | tr -d ' \n')
+          case "$flat" in
             *'"ok":true'*) ;;
             *) echo "health check did not report ok"; exit 1 ;;
           esac
-          case "$body" in
+          case "$flat" in
             *'"stale":false'*) ;;
             *) echo "WARNING: the board is stale - check that the slate workflow is running" ;;
           esac
-          count=$(curl -fsS "$SITE/api/board?hours=72" | head -c 200)
-          echo "board: $count"
-          case "$count" in
-            *'"fixtures"'*) ;;
+          board=$(curl -fsS "$SITE/api/board?hours=72" | head -c 200 | tr -d ' \n')
+          echo "board: $board"
+          case "$board" in
+            *'"fixtures":['*) ;;
             *) echo "the board did not come back in the expected shape"; exit 1 ;;
+          esac
+          case "$board" in
+            *'"count":0,'*) echo "the board is EMPTY - the slate has published nothing"; exit 1 ;;
           esac
