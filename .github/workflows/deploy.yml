@@ -104,7 +104,11 @@ jobs:
             *'"stale":false'*) ;;
             *) echo "WARNING: the board is stale - check that the slate workflow is running" ;;
           esac
-          board=$(curl -fsS "$SITE/api/board?hours=72" | head -c 200 | tr -d ' \n')
+          # Not piped into head: head closes the pipe at 200 bytes, curl -f dies
+          # writing to it, and the step fails with exit 23 on a board that came
+          # back perfectly. Fetch it whole — it is 64KB — then trim.
+          curl -fsS "$SITE/api/board?hours=72" -o /tmp/board.json
+          board=$(tr -d ' \n' < /tmp/board.json | cut -c1-200)
           echo "board: $board"
           case "$board" in
             *'"fixtures":['*) ;;
