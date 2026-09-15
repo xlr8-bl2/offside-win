@@ -203,6 +203,13 @@ export async function runSlate(): Promise<SlateReport> {
         kickoff: analysis.kickoff,
         home: analysis.home_team,
         away: analysis.away_team,
+        // The provider runs an image service keyed by these same ids —
+        // /img/team/{id}/ and /img/league/{id}/, no auth — so carrying them on
+        // the card is what lets the front end show real crests instead of a
+        // generated monogram. They were already on the analysis and simply
+        // never travelled.
+        home_id: analysis.home_team_id,
+        away_id: analysis.away_team_id,
         status: analysis.status,
         provisional: analysis.provisional,
         lineup_status: analysis.lineup_status,

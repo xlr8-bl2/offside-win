@@ -80,12 +80,33 @@ function initials(name) {
   return use.map((w) => w[0].toUpperCase()).join('') || '?';
 }
 
-function crest(name, size = 'md') {
+/**
+ * A club or league mark.
+ *
+ * The provider runs an unauthenticated image service keyed by the same numeric
+ * ids the REST API returns — /img/team/{id}/, /img/league/{id}/ — so the real
+ * crest is used wherever an id is available. The generated monogram stays as
+ * the fallback rather than being discarded: ids are missing on older stored
+ * boards, and not every entity in the set has artwork. A crest that 404s falls
+ * back to something designed rather than to a broken-image glyph.
+ */
+const IMG_BASE = 'https://sports.bzzoiro.com/img';
+
+function crest(name, size = 'md', id = null, type = 'team') {
   const [dark, light] = PALETTE[hash(String(name || '')) % PALETTE.length];
   const text = initials(name);
   const fit = text.length >= 3 ? 'font-size:0.72em' : '';
-  return `<span class="crest crest-${size}" style="background:linear-gradient(145deg,${light},${dark});${fit}"
-    aria-hidden="true">${esc(text)}</span>`;
+  const vars = `--c1:${dark};--c2:${light};${fit}`;
+
+  if (id === null || id === undefined || !Number.isFinite(Number(id))) {
+    return `<span class="crest crest-${size} noimg" style="${vars}" aria-hidden="true"><i>${esc(text)}</i></span>`;
+  }
+  // onerror both drops the broken image and flips the monogram on, so the
+  // fallback is a single state change rather than two.
+  return `<span class="crest crest-${size}" style="${vars}" aria-hidden="true"
+    ><img src="${IMG_BASE}/${esc(type)}/${encodeURIComponent(id)}/" alt="" loading="lazy" decoding="async"
+      onerror="this.closest('.crest').classList.add('noimg');this.remove()"
+    ><i>${esc(text)}</i></span>`;
 }
 
 // ---------------------------------------------------------------- markets
@@ -159,16 +180,18 @@ function heroHTML() {
 function railHTML(fixtures) {
   const byLeague = new Map();
   for (const f of fixtures) {
-    const k = f.league ?? `League ${f.league_id}`;
-    byLeague.set(k, (byLeague.get(k) ?? 0) + 1);
+    const k = f.league_id ?? f.league;
+    const e = byLeague.get(k) ?? { name: f.league ?? `League ${f.league_id}`, id: f.league_id, n: 0 };
+    e.n++;
+    byLeague.set(k, e);
   }
-  const top = [...byLeague].sort((a, b) => b[1] - a[1]).slice(0, 14);
+  const top = [...byLeague.values()].sort((a, b) => b.n - a.n).slice(0, 14);
   if (!top.length) return '';
   return `
   <div class="rail"><div class="rail-inner">
     <span class="rail-label">On the board</span>
-    ${top.map(([name, n]) => `
-      <a class="rail-item" href="#/board">${crest(name, 'sm')}<b>${esc(name)}</b><span class="count">${n}</span></a>`).join('')}
+    ${top.map((l) => `
+      <a class="rail-item" href="#/board">${crest(l.name, 'sm', l.id, 'league')}<b>${esc(l.name)}</b><span class="count">${l.n}</span></a>`).join('')}
   </div></div>`;
 }
 
@@ -179,12 +202,12 @@ function cardHTML(f) {
   return `
   <article class="card" data-id="${f.id}" tabindex="0" role="link" aria-label="${esc(f.home)} versus ${esc(f.away)}">
     <div class="card-top">
-      <span class="card-league">${crest(f.league ?? '', 'sm')}<span>${esc(f.league ?? '')}</span></span>
+      <span class="card-league">${crest(f.league ?? '', 'sm', f.league_id, 'league')}<span>${esc(f.league ?? '')}</span></span>
       <span class="card-kick">${esc(kickoffLabel(f.kickoff))}</span>
     </div>
     <div class="card-teams">
-      <div class="team-row">${crest(f.home, 'md')}<span class="name">${esc(f.home)}</span><span class="pc">${pct(p.HOME)}</span></div>
-      <div class="team-row">${crest(f.away, 'md')}<span class="name">${esc(f.away)}</span><span class="pc">${pct(p.AWAY)}</span></div>
+      <div class="team-row">${crest(f.home, 'md', f.home_id)}<span class="name">${esc(f.home)}</span><span class="pc">${pct(p.HOME)}</span></div>
+      <div class="team-row">${crest(f.away, 'md', f.away_id)}<span class="name">${esc(f.away)}</span><span class="pc">${pct(p.AWAY)}</span></div>
     </div>
     ${pick
       ? `<div class="card-pick">
@@ -224,7 +247,7 @@ function explainHTML(sample) {
         </div>
         <div class="quote">
           <div class="qmeta">
-            ${crest(fixture.home, 'sm')}<b style="color:var(--ink);font-weight:600">${esc(fixture.home)} v ${esc(fixture.away)}</b>
+            ${crest(fixture.home, 'sm', fixture.home_id)}<b style="color:var(--ink);font-weight:600">${esc(fixture.home)} v ${esc(fixture.away)}</b>
             <span class="tag ${esc(verdict.kind.toLowerCase())}">${esc(VERDICT_LABEL[verdict.kind] ?? verdict.kind)}</span>
           </div>
           ${esc(verdict.narrative)}
@@ -407,12 +430,12 @@ async function viewFixture(id) {
 
     <div class="fx-hero">
       <div class="fx-teams">
-        <div class="fx-side">${crest(f.home, 'lg')}<span class="name">${esc(f.home)}</span></div>
+        <div class="fx-side">${crest(f.home, 'lg', f.home_id)}<span class="name">${esc(f.home)}</span></div>
         <div class="fx-mid">
           <div class="fx-score">${pct(p.HOME)} <span style="color:var(--ink-3);font-size:0.5em">/</span> ${pct(p.DRAW)} <span style="color:var(--ink-3);font-size:0.5em">/</span> ${pct(p.AWAY)}</div>
           <div class="fx-when">${esc(kickoffLabel(f.kickoff))}</div>
         </div>
-        <div class="fx-side">${crest(f.away, 'lg')}<span class="name">${esc(f.away)}</span></div>
+        <div class="fx-side">${crest(f.away, 'lg', f.away_id)}<span class="name">${esc(f.away)}</span></div>
       </div>
       <div class="fx-meta">
         <span>${esc(f.league ?? '')}</span>
@@ -544,7 +567,7 @@ async function viewModel() {
         <thead><tr><th>League</th><th class="num">Matches</th><th class="num">Home edge</th><th class="num">Mean goals</th><th class="num">Fitted</th></tr></thead>
         <tbody>${leagues.slice(0, 40).map((l) => `
           <tr>
-            <td>${crest(l.name ?? '', 'sm')} ${esc(l.name ?? `League ${l.league_id}`)}</td>
+            <td>${crest(l.name ?? '', 'sm', l.league_id, 'league')} ${esc(l.name ?? `League ${l.league_id}`)}</td>
             <td class="num">${(l.n_matches ?? 0).toLocaleString()}</td>
             <td class="num">${dec(l.home_adv)}</td>
             <td class="num">${dec(l.mean_goals)}</td>
@@ -566,13 +589,13 @@ async function viewLeagues() {
   const fixtures = board.fixtures ?? [];
   const byLeague = new Map();
   for (const f of fixtures) {
-    const k = f.league ?? `League ${f.league_id}`;
-    const e = byLeague.get(k) ?? { n: 0, picks: 0 };
+    const k = f.league_id ?? f.league;
+    const e = byLeague.get(k) ?? { name: f.league ?? `League ${f.league_id}`, id: f.league_id, n: 0, picks: 0 };
     e.n++;
     if (f.top_pick) e.picks++;
     byLeague.set(k, e);
   }
-  const rows = [...byLeague].sort((a, b) => b[1].n - a[1].n);
+  const rows = [...byLeague.values()].sort((a, b) => b.n - a.n);
 
   app.innerHTML = `
   <div class="wrap section">
@@ -581,9 +604,9 @@ async function viewLeagues() {
       <p>${rows.length} leagues have fixtures in the current window, out of 88 tracked.</p>
     </div></div>
     <div class="cards">
-      ${rows.map(([name, e]) => `
-        <article class="card" data-league="${esc(name)}">
-          <div class="card-top"><span class="card-league">${crest(name, 'md')}<span>${esc(name)}</span></span></div>
+      ${rows.map((e) => `
+        <article class="card" data-league="${esc(e.name)}">
+          <div class="card-top"><span class="card-league">${crest(e.name, 'md', e.id, 'league')}<span>${esc(e.name)}</span></span></div>
           <div class="numbers" style="margin:0">
             <span>fixtures <b>${e.n}</b></span>
             <span>calls <b>${e.picks}</b></span>
