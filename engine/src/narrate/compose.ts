@@ -308,6 +308,25 @@ export interface ConfidentInput {
 }
 
 /**
+ * Turn a sentence into a clause that can follow "It is not a clean case: ".
+ *
+ * Lowercasing the first character blindly mangles a name — the live board
+ * produced "deportivo Alavés have had only 3.3 days" and "aFC Ajax have had
+ * only 3.0 days". A first word is only safe to lowercase when it is ordinary
+ * prose: not a team name, and not an acronym or mixed-case token like AFC or
+ * FC that carries capitals past the first letter.
+ */
+function asClause(sentence: string, properNouns: string[]): string {
+  const body = sentence.replace(/\.$/, '');
+  const first = body.split(/\s+/)[0] ?? '';
+  const isName =
+    properNouns.some((name) => name && body.startsWith(name)) ||
+    /[A-Z]/.test(first.slice(1)) ||
+    !/^[A-Z][a-z]/.test(first);
+  return isName ? body : body[0]!.toLowerCase() + body.slice(1);
+}
+
+/**
  * Outcomes whose bet wins when the thing in question happens *less*.
  *
  * A factor that suppresses goals argues against "over 2.5" and for "under 2.5",
@@ -468,7 +487,7 @@ export function narrateConfident(input: ConfidentInput): string {
       magnitude: claim.magnitude,
       // The inner sentence is lowercased so it reads as a clause rather than as
       // a second sentence bolted on.
-      evidence: { detail: detail.replace(/\.$/, '').replace(/^(.)/, (m) => m.toLowerCase()) },
+      evidence: { detail: asClause(detail, [input.homeTeam, input.awayTeam]) },
       section: claim.section,
       tier: claim.tier,
     });

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { RepetitionLedger, narrateConfident } from '../src/narrate/compose.ts';
 import { providerMarkets, parsePrediction } from '../src/provider-model.ts';
+import { selectConfident } from '../src/select.ts';
 import type { Candidate, Claim, Factor } from '../src/types.ts';
 
 const ledger = () => new RepetitionLedger(40, []);
@@ -171,4 +172,34 @@ test('over and under are complements', () => {
 test('a payload with no markets is refused rather than half-read', () => {
   assert.equal(parsePrediction({ model: { confidence: 1 } }), null);
   assert.equal(parsePrediction(null), null);
+});
+
+test('a counterweight clause never lowercases a team name', () => {
+  // The live board produced "deportivo Alavés have had only 3.3 days" and
+  // "aFC Ajax have had only 3.0 days" — a blind toLowerCase on the first
+  // character of the clause.
+  for (const [home, away] of [
+    ['Deportivo Alavés', 'Valencia'],
+    ['AFC Ajax', 'Willem II Tilburg'],
+  ] as const) {
+    const out = narrateConfident({
+      candidate: cand('double_chance', '1X', null, 0.86, 1.16),
+      drivers: [factor([
+        claim('fatigue', home, -1, { team: home, rest_days: 3, opponent_rest_days: 7, matches_in_7: 2 }),
+      ])],
+      homeTeam: home, awayTeam: away, fixtureId: 9,
+      expectedGoals: { home: 2.0, away: 0.9 },
+      ledger: ledger(),
+    });
+    assert.doesNotMatch(out, /deportivo|aFC|willem/, `mangled a proper noun: ${out}`);
+  }
+});
+
+test('a 94% call at 1.04 is not published', () => {
+  // Correct, unusable, and it makes every other call on the page look like
+  // padding. The live board offered exactly this.
+  const short = cand('double_chance', '1X', null, 0.94, 1.04);
+  const usable = cand('over_under_15', 'over', 1.5, 0.83, 1.18);
+  const out = selectConfident([short, usable]);
+  assert.deepEqual(out.map((c) => c.odds), [1.18], 'published a call at 1.04');
 });

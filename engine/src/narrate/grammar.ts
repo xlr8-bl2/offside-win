@@ -212,7 +212,7 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     (c) => {
       const in7 = n(c.evidence.matches_in_7_days);
       const rest = n(c.evidence.days_rest);
-      return `Congestion bites here: ${in7} matches already inside a week for ${c.subject}, and ${rest.toFixed(1)} days before this one.`;
+      return `Congestion bites here: ${in7} ${plural(in7, 'match', 'matches')} already inside a week for ${c.subject}, and ${rest.toFixed(1)} days before this one.`;
     },
   ],
 
@@ -294,8 +294,18 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
   ],
 
   style_clash: [
-    (c) => `${c.subject} average ${n(c.evidence.possession_gap)} points more possession than ${s(c.evidence.opponent)}, so expect one side with the ball and one chasing it.`,
-    (c) => `The shape of this is lopsided: ${n(c.evidence.possession)}% possession for ${c.subject} against a side that does not want it.`,
+    (c) => {
+      const gap = n(c.evidence.possession_gap);
+      only(gap >= 6);
+      return `${c.subject} average ${gap} points more possession than ${s(c.evidence.opponent)}, so expect one side with the ball and one chasing it.`;
+    },
+    (c) => {
+      const pos = n(c.evidence.possession);
+      // 48% is not lopsided. The frame reads as a claim about dominance, so it
+      // may only be used when the number supports one.
+      only(pos >= 57);
+      return `The shape of this is lopsided: ${pos}% possession for ${c.subject} against a side that does not want it.`;
+    },
     (c) => `${s(c.evidence.opponent)} will spend this match without the ball — ${c.subject} hold ${n(c.evidence.possession_gap)} points more of it than they do.`,
   ],
 

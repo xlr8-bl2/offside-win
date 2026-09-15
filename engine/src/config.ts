@@ -198,6 +198,13 @@ export const config = {
      * to look like every other tips site.
      */
     ceiling: num('CONF_CEILING', 0.95),
+    /**
+     * And never publish one at a price this short whatever its probability. The
+     * live board offered Ajax 1X at 1.04 — a 94% call returning fourpence in
+     * the pound. Correct, unusable, and it makes every other call on the page
+     * look like padding.
+     */
+    minOdds: num('CONF_MIN_ODDS', 1.1),
   },
 
   selection: {
