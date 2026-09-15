@@ -424,7 +424,7 @@ export async function backfillHistory(opts: BackfillOptions = {}): Promise<Backf
  * nothing a decayed fit will notice.
  */
 export async function fetchMissingStats(
-  limit = 4000,
+  limit = config.history.statsLimit,
   windowDays?: number,
 ): Promise<{ fetched: number; failed: number }> {
   const cutoff =

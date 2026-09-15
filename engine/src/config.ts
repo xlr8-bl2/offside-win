@@ -81,6 +81,14 @@ export const config = {
     seasons: num('HISTORY_SEASONS', 3),
     /** Don't pull per-match stats for matches older than this; goals suffice. */
     statsWindowDays: num('STATS_WINDOW_DAYS', 540),
+    /**
+     * Matches to pull stats for in one run. This is a cap on work per job, not
+     * a total: whatever is left is picked up next run, since every fetched match
+     * is marked and never re-fetched. Raise it for a wide first backfill — at
+     * 88 leagues the default leaves most of the set unfetched and the shortfall
+     * is invisible unless you count rows.
+     */
+    statsLimit: num('STATS_LIMIT', 4000),
   },
 
   ratings: {
