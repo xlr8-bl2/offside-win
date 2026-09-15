@@ -117,11 +117,15 @@ const RESULT_LABEL: Record<string, string> = {
 };
 
 interface Theirs {
-  label: string;
+  /** Their 1x2 call: always present, this is their `predicted` label. */
+  call: string | null;
+  /** The bets their own recommendations block flags as worth placing. */
+  recommended: string[];
   conf: number | null;
 }
 const theirs = new Map<number, Theirs>();
 let shapeShown = false;
+let recBlocks = 0;
 
 const queue = [...sample];
 await Promise.all(
@@ -132,13 +136,9 @@ await Promise.all(
       const p = (await bsdOrNull(`/api/v2/events/${row.id}/prediction/`)) as Record<string, any> | null;
       if (!p) continue;
 
-      // The recommendations block was read through a guessed shape and matched
-      // nothing — n=0 on every recommended-bet line. Print the payload once so
-      // the shape is read rather than guessed again.
       if (!shapeShown) {
         shapeShown = true;
         console.log('\n--- one prediction payload, as it actually arrives ---');
-        console.log('top level:', Object.keys(p).join(', '));
         for (const [k, v] of Object.entries(p)) {
           if (k === 'markets') continue;
           console.log(`  ${k}: ${JSON.stringify(v).slice(0, 300)}`);
@@ -150,26 +150,28 @@ await Promise.all(
       }
 
       const mr = p.markets?.match_result;
-      const rec = p.recommendations ?? p.recommendation ?? p.tips ?? p.best_bet ?? null;
-      let label: string | null = null;
+      const rec = p.recommendations ?? null;
+      if (rec && typeof rec === 'object') recBlocks++;
 
-      if (rec && typeof rec === 'object' && !Array.isArray(rec)) {
-        if (rec.winner === true && mr?.predicted) label = RESULT_LABEL[String(mr.predicted)] ?? null;
-        else if (rec.over_25 === true) label = 'over 2.5';
-        else if (rec.btts === true) label = 'btts yes';
-        else if (typeof rec.selection === 'string') label = rec.selection.toLowerCase();
-      } else if (Array.isArray(rec) && rec.length) {
-        const first = rec[0];
-        const s = typeof first === 'string' ? first : first?.selection ?? first?.pick ?? first?.bet;
-        if (typeof s === 'string') label = RESULT_LABEL[s] ?? s.toLowerCase();
+      // Their published bets, exactly as their own flags declare them. These
+      // are the picks an "X% accuracy" claim is a ratio over.
+      const recommended: string[] = [];
+      const call = mr?.predicted ? RESULT_LABEL[String(mr.predicted)] ?? null : null;
+      if (rec) {
+        if (rec.winner === true && call) recommended.push(call);
+        if (rec.bet_favorite === true && rec.favorite) {
+          const fav = RESULT_LABEL[String(rec.favorite)];
+          if (fav) recommended.push(fav);
+        }
+        if (rec.over_15 === true) recommended.push('over 1.5');
+        if (rec.over_25 === true) recommended.push('over 2.5');
+        if (rec.btts === true) recommended.push('btts yes');
       }
-      // No recommendations block: their published call is the outcome they name.
-      if (!label && mr?.predicted) label = RESULT_LABEL[String(mr.predicted)] ?? null;
-      if (!label) continue;
 
       theirs.set(row.id, {
-        label,
-        conf: asProb(p.confidence ?? mr?.confidence ?? mr?.prob_home) ?? null,
+        call,
+        recommended: [...new Set(recommended)],
+        conf: asProb(p.model?.confidence ?? p.confidence ?? null),
       });
     }
   }),
@@ -179,91 +181,104 @@ await Promise.all(
 
 const pct = (h: number, n: number) => (n ? `${((100 * h) / n).toFixed(1)}%` : '—');
 const rate = (sels: Sel[]) => ({ n: sels.length, hit: sels.filter((s) => s.won).length });
+const line = (name: string, r: { n: number; hit: number }, extra = '') =>
+  console.log(`  ${name.padEnd(26)} ${pct(r.hit, r.n).padStart(6)}  (${r.hit}/${r.n})${extra}`);
 
 const graded = sample.filter((r) => theirs.has(r.id));
-const theirSels: Sel[] = [];
-const unmatched = new Map<string, number>();
+console.log(`\nprovider answered for ${graded.length}/${sample.length} matches` +
+  `, ${recBlocks} carried a recommendations block`);
+
+// 1. Their own recommended bets. This is the denominator an accuracy claim is
+//    a ratio over, and the flags are theirs, not our reading of their numbers.
+const theirRecs: Sel[] = [];
+const recLabels = new Map<string, { n: number; hit: number }>();
 for (const r of graded) {
-  const t = theirs.get(r.id)!;
-  const s = r.graded.get(t.label);
-  if (!s) {
-    unmatched.set(t.label, (unmatched.get(t.label) ?? 0) + 1);
-    continue;
-  }
-  theirSels.push(s);
-}
-
-console.log(`\nprovider answered for ${graded.length}/${sample.length} matches`);
-if (unmatched.size) {
-  console.log('labels we could not grade (so not counted):');
-  for (const [k, v] of [...unmatched].sort((a, b) => b[1] - a[1])) console.log(`  ${k} x${v}`);
-}
-
-const them = rate(theirSels);
-console.log(`\n=== the provider, on every match it answered ===`);
-console.log(`  hit rate: ${pct(them.hit, them.n)}  (${them.hit}/${them.n})`);
-{
-  const byMarket = new Map<string, Sel[]>();
-  for (const s of theirSels) byMarket.set(s.market, [...(byMarket.get(s.market) ?? []), s]);
-  for (const [m, list] of byMarket) {
-    const r = rate(list);
-    console.log(`    ${m.padEnd(6)} ${pct(r.hit, r.n)}  (${r.hit}/${r.n})`);
+  for (const label of theirs.get(r.id)!.recommended) {
+    const s = r.graded.get(label);
+    if (!s) continue;
+    theirRecs.push(s);
+    const c = recLabels.get(label) ?? { n: 0, hit: 0 };
+    c.n++;
+    if (s.won) c.hit++;
+    recLabels.set(label, c);
   }
 }
-
-// Ours at the same volume: our most confident N picks, where N is how many they
-// published. Publishing less is how a hit rate is inflated, so the comparison
-// only means something if both sides publish the same number.
-const oursAll = sample.map((r) => r.ours);
-const oursRanked = [...oursAll].sort((a, b) => b.prob - a.prob);
-const oursMatched = oursRanked.slice(0, them.n);
-const om = rate(oursMatched);
-
-console.log(`\n=== us, same matches, same number of picks (${them.n}) ===`);
-console.log(`  hit rate: ${pct(om.hit, om.n)}  (${om.hit}/${om.n})`);
-{
-  const byMarket = new Map<string, Sel[]>();
-  for (const s of oursMatched) byMarket.set(s.market, [...(byMarket.get(s.market) ?? []), s]);
-  for (const [m, list] of byMarket) {
-    const r = rate(list);
-    console.log(`    ${m.padEnd(6)} ${pct(r.hit, r.n)}  (${r.hit}/${r.n})`);
-  }
+console.log(`\n=== the provider's OWN recommended bets ===`);
+if (!theirRecs.length) {
+  console.log(`  none. Across ${graded.length} matches their recommendations block flagged`);
+  console.log(`  no bet at all — every winner/bet_favorite/over/btts flag came back false.`);
+  console.log(`  So an accuracy figure over "matches they predicted" cannot be reproduced`);
+  console.log(`  from this sample: the set it is a ratio over is empty here.`);
+} else {
+  line('all recommended bets', rate(theirRecs));
+  for (const [label, c] of [...recLabels].sort((a, b) => b[1].n - a[1].n)) line(`  ${label}`, c);
 }
 
-console.log(`\n=== us, by how selective we are ===`);
+// 2. Same market, same matches: their 1x2 call against ours. The only fully
+//    like-for-like comparison, because both sides name exactly one of three.
+const h2h = graded.filter((r) => theirs.get(r.id)!.call);
+const theirCall: Sel[] = [];
+const ourCall: Sel[] = [];
+for (const r of h2h) {
+  const t = r.graded.get(theirs.get(r.id)!.call!);
+  const best1x2 = [...r.graded.values()]
+    .filter((s) => s.market === '1x2')
+    .reduce((a, b) => (b.prob > a.prob ? b : a));
+  if (t) theirCall.push(t);
+  ourCall.push(best1x2);
+}
+console.log(`\n=== 1x2, head to head on the same ${h2h.length} matches ===`);
+line('them (their `predicted`)', rate(theirCall));
+line('us  (our most likely)', rate(ourCall));
+line('always pick home', {
+  n: h2h.length,
+  hit: h2h.filter((r) => r.graded.get('home')!.won).length,
+});
+
+// 3. Over 2.5 and BTTS, where both sides publish a probability.
+console.log(`\n=== over 2.5 and btts, same matches ===`);
+for (const [market, ours, theirsKey] of [
+  ['over 2.5', 'over 2.5', 'prob_over_25'],
+  ['btts', 'btts yes', 'prob_yes'],
+] as const) {
+  const our = graded.map((r) => {
+    const yes = r.graded.get(ours)!;
+    const no = r.graded.get(ours === 'over 2.5' ? 'under 2.5' : 'btts no')!;
+    return yes.prob >= 0.5 ? yes : no;
+  });
+  void theirsKey;
+  line(`us: ${market}`, rate(our));
+  line(`  always say yes`, { n: graded.length, hit: graded.filter((r) => r.graded.get(ours)!.won).length });
+}
+
+// 4. Ours by selectivity, on markets that are not nearly free. "Over 1.5" lands
+//    ~78% unaided and is priced near 1.20, so a tipster who only names it posts
+//    a high number and loses money — it is excluded from what we would publish.
+const REAL = new Set(['1x2', 'ou25', 'btts']);
+const oursReal = sample.map((r) =>
+  [...r.graded.values()].filter((s) => REAL.has(s.market)).reduce((a, b) => (b.prob > a.prob ? b : a)),
+);
+const ranked = [...oursReal].sort((a, b) => b.prob - a.prob);
+console.log(`\n=== us, excluding near-free markets, by how selective we are ===`);
 console.log(`  a hit rate is a choice of volume, not a property of a model.`);
-for (const frac of [1, 0.6, 0.4, 0.25, 0.1]) {
-  const cut = oursRanked.slice(0, Math.max(1, Math.round(oursRanked.length * frac)));
+for (const frac of [1, 0.5, 0.25, 0.1]) {
+  const cut = ranked.slice(0, Math.max(1, Math.round(ranked.length * frac)));
   const r = rate(cut);
-  const minP = Math.min(...cut.map((s) => s.prob));
   console.log(
-    `  top ${String(Math.round(frac * 100)).padStart(3)}%  ${pct(r.hit, r.n)}  (${r.hit}/${r.n})` +
-      `  model prob >= ${minP.toFixed(2)}  break-even odds ${(r.n / Math.max(1, r.hit)).toFixed(2)}`,
+    `  top ${String(Math.round(frac * 100)).padStart(3)}%  ${pct(r.hit, r.n).padStart(6)}  (${r.hit}/${r.n})` +
+      `  model prob >= ${Math.min(...cut.map((s) => s.prob)).toFixed(2)}` +
+      `  break-even odds ${(r.n / Math.max(1, r.hit)).toFixed(2)}`,
   );
 }
-
-console.log(`\n=== what these picks actually are ===`);
-console.log(`  a hit rate without its base rate says nothing. "Over 1.5" lands ~78% unaided.`);
-const counts = new Map<string, { n: number; hit: number }>();
-for (const s of oursMatched) {
-  const c = counts.get(s.label) ?? { n: 0, hit: 0 };
+const mix = new Map<string, { n: number; hit: number }>();
+for (const s of oursReal) {
+  const c = mix.get(s.label) ?? { n: 0, hit: 0 };
   c.n++;
   if (s.won) c.hit++;
-  counts.set(s.label, c);
+  mix.set(s.label, c);
 }
-for (const [label, c] of [...counts].sort((a, b) => b[1].n - a[1].n)) {
-  console.log(`  ours: ${label.padEnd(10)} ${String(c.n).padStart(4)} picks  ${pct(c.hit, c.n)}`);
-}
-const tCounts = new Map<string, { n: number; hit: number }>();
-for (const s of theirSels) {
-  const c = tCounts.get(s.label) ?? { n: 0, hit: 0 };
-  c.n++;
-  if (s.won) c.hit++;
-  tCounts.set(s.label, c);
-}
-for (const [label, c] of [...tCounts].sort((a, b) => b[1].n - a[1].n)) {
-  console.log(`  them: ${label.padEnd(10)} ${String(c.n).padStart(4)} picks  ${pct(c.hit, c.n)}`);
-}
+console.log(`  what those picks are:`);
+for (const [label, c] of [...mix].sort((a, b) => b[1].n - a[1].n)) line(`    ${label}`, c);
 
 console.log(`\nprovider requests: ${stats.requests} (${stats.errors} errors)`);
 await closeDb();
