@@ -181,6 +181,25 @@ export const config = {
     goalDispersion: num('PRICE_GOAL_DISPERSION', 1.0),
   },
 
+  /**
+   * High-confidence calls, sourced from the provider's probabilities rather
+   * than our own. A separate gate from `selection` on purpose: that one asks
+   * "is the price wrong", this one asks "what is likely", and mixing the two
+   * thresholds would mean a change to one silently moved the other.
+   */
+  confident: {
+    /** Publish a call at or above this probability. */
+    floor: num('CONF_FLOOR', 0.8),
+    /** Cap per fixture. Their page shows 2-4; more than this reads as spam. */
+    perFixture: num('CONF_PER_FIXTURE', 2),
+    /**
+     * Never publish a call this likely without saying what it pays. Over 0.5
+     * goals is ~97% and prices near 1.02: true, worthless, and the fastest way
+     * to look like every other tips site.
+     */
+    ceiling: num('CONF_CEILING', 0.95),
+  },
+
   selection: {
     /**
      * Base edge required before a price counts as wrong. The real bar is

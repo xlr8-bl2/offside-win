@@ -114,7 +114,15 @@ export type ClaimPredicate =
   | 'market_move'      // §7.1
   | 'market_sharp'     // Pinnacle divergence
   | 'market_crowd'     // Polymarket divergence
-  | 'rating_gap';      // our own numbers disagree with the price
+  | 'rating_gap'       // our own numbers disagree with the price
+  // Confidence calls. These answer "what is likely", not "what is mispriced",
+  // and are kept as separate predicates so a frame written for one can never be
+  // selected for the other — a value bet and a likely outcome make opposite
+  // arguments and a sentence that blurs them misleads the reader.
+  | 'strength_gap'     // the expected-goals mismatch that drives a confident call
+  | 'match_shape'      // the same evidence read as a total, for a goals bet with no side
+  | 'confidence_case'  // the verdict for a confidence call, including what it pays
+  | 'counterweight';   // context pulling against the call, said out loud
 
 // ---------------------------------------------------------------- history
 

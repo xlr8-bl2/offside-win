@@ -292,3 +292,39 @@ export function setAsideFor(candidate: Candidate, factors: Factor[], drivers: Fa
     .sort((a, b) => a.tier - b.tier || b.strength - a.strength)
     .slice(0, 4);
 }
+
+// --------------------------------------------------------- confidence calls
+
+/**
+ * High-confidence calls, which are a different product from value bets.
+ *
+ * `select` above asks whether the market is wrong. This asks what is likely,
+ * and takes no view on the price — because the probabilities it runs on are the
+ * provider's, which measure 0.93 points from the de-vigged market, so by
+ * construction there is no disagreement to find. A call here is "this is very
+ * probably going to happen, and here is why", and the board labels it as such.
+ *
+ * Three rules keep it from degenerating into the thing every tips site does:
+ *
+ *  - A ceiling as well as a floor. "Over 0.5 goals" is 97% and pays 1.02.
+ *    Publishing it is true, worthless, and indistinguishable from filler.
+ *  - One call per market family. 1X and 12 are nearly the same bet on the same
+ *    side; showing both is padding the count, not adding an opinion.
+ *  - A hard cap per fixture, so a lopsided game cannot fill the board alone.
+ */
+export function selectConfident(candidates: Candidate[], floor = config.confident.floor): Candidate[] {
+  const eligible = candidates
+    .filter((c) => c.model_prob >= floor && c.model_prob <= config.confident.ceiling)
+    .sort((a, b) => b.model_prob - a.model_prob);
+
+  const seen = new Set<MarketFamily>();
+  const out: Candidate[] = [];
+  for (const c of eligible) {
+    const family = MARKET_FAMILY[c.market];
+    if (seen.has(family)) continue;
+    seen.add(family);
+    out.push(c);
+    if (out.length >= config.confident.perFixture) break;
+  }
+  return out;
+}

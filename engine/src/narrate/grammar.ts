@@ -36,8 +36,63 @@ export function choose<T>(items: T[], rng: Rng, avoid: Set<number> = new Set()):
 }
 
 const cap = (s: string): string => (s.length ? s[0]!.toUpperCase() + s.slice(1) : s);
-const n = (v: unknown, fallback = 0): number => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
-const s = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback);
+
+/**
+ * Thrown when a frame asks for evidence the claim does not carry.
+ *
+ * This is the guardrail that stops generated prose from degrading into filler.
+ * The readers `n` and `s` used to fall back to 0 and "" silently, which meant a
+ * claim missing a key produced sentences like "both sides average 0 points more
+ * possession than , so expect one side with the ball" — confident, specific,
+ * and meaningless. A frame that cannot be written truthfully must not be
+ * written at all, so the reader throws and the composer picks a different frame,
+ * or drops the claim if none of them can be satisfied.
+ *
+ * An explicit fallback still means what it says: `s(c.evidence.role, 'UNKNOWN')`
+ * is a frame declaring that key optional.
+ */
+export class MissingEvidence extends Error {
+  constructor(readonly key: string) {
+    super(`frame needs evidence "${key}", which this claim does not carry`);
+    this.name = 'MissingEvidence';
+  }
+}
+
+/**
+ * Frame guard: refuse this frame unless the claim's numbers actually suit it.
+ *
+ * Presence is not the only way a frame can be untrue. "Neither attack is
+ * modelled to do much damage" is a fine sentence about a 1.3-goal match and a
+ * false one about a 3.25-goal match, and both carry the same evidence keys. So
+ * a frame may state the range it is valid over, and falls out of the pool the
+ * same way a frame with missing evidence does.
+ */
+function only(condition: boolean): void {
+  if (!condition) throw new MissingEvidence('frame precondition');
+}
+
+/** Render a frame, or return null if its evidence is not all present. */
+export function tryFrame(frame: Frame, claim: Claim, rng: Rng): string | null {
+  try {
+    const out = frame(claim, rng);
+    return out.trim().length > 0 ? out : null;
+  } catch (err) {
+    if (err instanceof MissingEvidence) return null;
+    throw err;
+  }
+}
+
+function n(v: unknown, fallback?: number): number {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (fallback !== undefined) return fallback;
+  throw new MissingEvidence('number');
+}
+
+function s(v: unknown, fallback?: string): string {
+  if (typeof v === 'string' && v.trim().length > 0) return v;
+  if (fallback !== undefined) return fallback;
+  throw new MissingEvidence('string');
+}
 const plural = (count: number, one: string, many = `${one}s`): string => (count === 1 ? one : many);
 
 /** Intensity words, graded by magnitude so a small effect never reads as a big one. */
@@ -304,6 +359,134 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     (c) => `Our own numbers make this ${n(c.evidence.model_pct).toFixed(1)}% against the ${n(c.evidence.book_pct).toFixed(1)}% the price implies.`,
     (c) => `We rate it ${n(c.evidence.model_pct).toFixed(1)}%; the market is at ${n(c.evidence.book_pct).toFixed(1)}%. That gap is the bet.`,
     (c) => `The ${n(c.evidence.edge_points).toFixed(1)}-point difference between our ${n(c.evidence.model_pct).toFixed(1)}% and the book's ${n(c.evidence.book_pct).toFixed(1)}% is what makes this worth taking.`,
+  ],
+
+  // ------------------------------------------------- confidence calls
+  //
+  // A different argument from everything above. A value bet says the price is
+  // wrong; a confidence call says the match is lopsided and explains how. The
+  // frames stay concrete — the mismatch in expected goals is the case, and a
+  // sentence that gestures at "quality" without a number is the exact filler
+  // this product exists to avoid.
+
+  strength_gap: [
+    (c) => {
+      const f = n(c.evidence.xg_for);
+      const a = n(c.evidence.xg_against);
+      return `The model has ${s(c.evidence.team)} at ${f.toFixed(2)} goals here against ${s(c.evidence.opponent)}'s ${a.toFixed(2)} — that gap is the whole case.`;
+    },
+    (c) => {
+      const r = n(c.evidence.ratio);
+      only(r >= 1.8);
+      return `${s(c.evidence.team)} project to score ${r.toFixed(1)} times what ${s(c.evidence.opponent)} manage. Games that one-sided on paper usually are.`;
+    },
+    (c) => {
+      const f = n(c.evidence.xg_for);
+      const a = n(c.evidence.xg_against);
+      only(f - a < 0.7);
+      return `${cap(s(c.evidence.team))} are the better side at ${f.toFixed(2)} to ${a.toFixed(2)}, though not by the margin the confidence number might suggest — the cushion here is the draw, not the win.`;
+    },
+    (c) => {
+      const f = n(c.evidence.xg_for);
+      const a = n(c.evidence.xg_against);
+      return `${f.toFixed(2)} against ${a.toFixed(2)}. ${cap(s(c.evidence.opponent))}'s route to a result runs through a clean sheet the numbers do not expect them to keep.`;
+    },
+    (c, rng) => {
+      const f = n(c.evidence.xg_for);
+      const a = n(c.evidence.xg_against);
+      return `${cap(s(c.evidence.team))} are ${intensity(c.magnitude, rng)} the stronger side on expected goals, ${f.toFixed(2)} to ${a.toFixed(2)}, and the market has not argued with it.`;
+    },
+    (c) => {
+      const a = n(c.evidence.xg_against);
+      return `For this to go wrong, ${s(c.evidence.opponent)} have to beat an expected ${a.toFixed(2)} goals by some distance — which is the risk, stated plainly.`;
+    },
+    (c) => {
+      const f = n(c.evidence.xg_for);
+      const a = n(c.evidence.xg_against);
+      const total = f + a;
+      return `Expected goals split ${f.toFixed(2)} to ${a.toFixed(2)}, ${total.toFixed(2)} in the match. The shape of that total is what this call reads.`;
+    },
+  ],
+
+  // A totals bet has no side, so the mismatch sentence must be about the shape
+  // of the match rather than about who is better. Reusing strength_gap here
+  // produced "Huracan project to score 1.1 times what Racing Club manage" under
+  // an *under 3.5* call — a sentence arguing the opposite of the bet.
+  match_shape: [
+    (c) => {
+      const t = n(c.evidence.total);
+      return `The model reads this as a ${t.toFixed(2)}-goal match, and the call follows from that number rather than from either side.`;
+    },
+    (c) => {
+      const f = n(c.evidence.xg_home);
+      const a = n(c.evidence.xg_away);
+      return `${f.toFixed(2)} expected for ${s(c.evidence.home)}, ${a.toFixed(2)} for ${s(c.evidence.away)} — neither side projects to run away with it, and the total is what matters here.`;
+    },
+    (c) => {
+      const t = n(c.evidence.total);
+      const line = n(c.evidence.line);
+      const side = t > line ? 'above' : 'below';
+      return `Expected goals total ${t.toFixed(2)} against a line of ${line.toFixed(1)}: ${side} it, which is the call.`;
+    },
+    (c, rng) => {
+      const t = n(c.evidence.total);
+      only(t < 2.4);
+      return `A ${intensity(c.magnitude, rng)} one-sided game on the numbers still only projects ${t.toFixed(2)} goals in total, and the total is the bet.`;
+    },
+    (c) => {
+      const f = n(c.evidence.xg_home);
+      const a = n(c.evidence.xg_away);
+      only(f + a < 2.4);
+      return `Neither attack is modelled to do much damage — ${f.toFixed(2)} and ${a.toFixed(2)} — so the goals market is where the confidence sits.`;
+    },
+    (c) => {
+      const f = n(c.evidence.xg_home);
+      const a = n(c.evidence.xg_away);
+      only(f + a >= 2.8);
+      return `${f.toFixed(2)} and ${a.toFixed(2)} makes ${(f + a).toFixed(2)} between them — enough traffic that the goals market is the clearer read here.`;
+    },
+    (c) => {
+      const f = n(c.evidence.xg_home);
+      const a = n(c.evidence.xg_away);
+      only(f + a >= 2.8);
+      return `Both sides are modelled to score: ${f.toFixed(2)} against ${a.toFixed(2)}, and a match with that much in it rarely stays quiet.`;
+    },
+  ],
+
+  confidence_case: [
+    (c) => {
+      const p = n(c.evidence.prob_pct);
+      const odds = n(c.evidence.odds);
+      return `That puts it at ${p.toFixed(0)}%, priced ${odds.toFixed(2)} — a high-probability call rather than a claim the market is wrong.`;
+    },
+    (c) => {
+      const p = n(c.evidence.prob_pct);
+      const ret = n(c.evidence.return_pct);
+      return `${p.toFixed(0)}% likely, returning ${ret.toFixed(0)}p in the pound. The confidence is the point here, not the payout.`;
+    },
+    (c) => {
+      const p = n(c.evidence.prob_pct);
+      const odds = n(c.evidence.odds);
+      return `We make it ${p.toFixed(0)}% at ${odds.toFixed(2)}. Short, and short for a reason — the market has this one read the same way we do.`;
+    },
+    (c) => {
+      const p = n(c.evidence.prob_pct);
+      return `Call it ${p.toFixed(0)}%. Nothing in the pricing disagrees, so take this as a read on the match rather than on the odds.`;
+    },
+    (c) => {
+      const p = n(c.evidence.prob_pct);
+      const odds = n(c.evidence.odds);
+      return `${p.toFixed(0)}% on our numbers, ${odds.toFixed(2)} on the board. Both are saying the same thing, which is worth knowing and is not an edge.`;
+    },
+  ],
+
+  counterweight: [
+    (c) => `It is not a clean case: ${s(c.evidence.detail)}.`,
+    (c) => `Worth holding against it — ${s(c.evidence.detail)}.`,
+    (c) => `One thing spoils the picture: ${s(c.evidence.detail)}.`,
+    (c) => `The reservation, and it is a real one: ${s(c.evidence.detail)}.`,
+    (c) => `Before anyone treats this as settled, ${s(c.evidence.detail)}.`,
+    (c) => `What the confidence number does not see: ${s(c.evidence.detail)}.`,
   ],
 };
 
