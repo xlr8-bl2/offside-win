@@ -244,7 +244,13 @@ export const config = {
     ledgerSize: num('NARRATE_LEDGER', 400),
     /** Claims composed into one narrative. */
     minClaims: num('NARRATE_MIN_CLAIMS', 2),
-    maxClaims: num('NARRATE_MAX_CLAIMS', 4),
+    /**
+     * Supporting claims per explanation, on top of the fixed beats — the form
+     * opener, the mismatch, the reservation and the conclusion. Four was a
+     * budget for a list of observations; an argument needs room for the step
+     * that connects them.
+     */
+    maxClaims: num('NARRATE_MAX_CLAIMS', 5),
   },
 
   slate: {
