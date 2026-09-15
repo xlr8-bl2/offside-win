@@ -314,7 +314,12 @@ export function setAsideFor(candidate: Candidate, factors: Factor[], drivers: Fa
  */
 export function selectConfident(candidates: Candidate[], floor = config.confident.floor): Candidate[] {
   const eligible = candidates
-    .filter((c) => c.model_prob >= floor && c.model_prob <= config.confident.ceiling)
+    .filter(
+      (c) =>
+        c.model_prob >= floor &&
+        c.model_prob <= config.confident.ceiling &&
+        c.odds >= config.confident.minOdds,
+    )
     .sort((a, b) => b.model_prob - a.model_prob);
 
   const seen = new Set<MarketFamily>();
