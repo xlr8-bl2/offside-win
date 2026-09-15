@@ -99,6 +99,29 @@ on total parameters — the right shape — but with a ceiling of 480, so the fi
 backfill went out at 480 parameters and came back `7500: too many SQL variables`. Every bulk write
 in the engine would have hit it. The cap now comes from `config.d1.maxParams`.
 
+**Tracking is what everything reads, and it is one fetch away from empty.** `ratings`, `slate` and
+`backtest` all work from `league.tracked = 1`. A scheduled `history` run with no `LEAGUES` set,
+firing while the provider quota was exhausted, discovered zero leagues and untracked all fifteen —
+silently, in two log lines, taking ratings and the backtest down while the board carried on serving
+its last good result. Narrowing now requires an explicit pin and a non-empty discovery, discovery
+returning nothing is a hard error, and `ratings.yml` and `slate.yml` pin `LEAGUES` (override with a
+repository variable of that name). If something that worked yesterday reports nothing today, check
+`tracked` first.
+
 **The backtest is the claim.** The model must beat both a naive Poisson and the league base rate on
 log loss. Until it has run, the model page says outright there is no evidence any of this works —
 keep it that way rather than softening it.
+
+A backtest that scores **nothing** now says "No verdict" and exits non-zero, rather than announcing
+that the model fails. Every comparison is `NaN` in that case and `NaN > 0` is false, so the empty
+run used to fall straight into the failure branch and publish "Model does NOT beat the naive
+Poisson" off zero matches — a far stronger claim than the data supports, and the opposite of the
+honesty the rest of this document insists on. Distinguishing "no evidence" from "it failed" is not
+softening the verdict; printing a verdict nobody measured is what would be. (That change, and the
+report-path fix below, were committed under 9e7b0a8, whose message covers only the tracking bug.)
+
+**`backtest-report.json` is written relative to `engine/`.** `npm -w engine run backtest` sets the
+working directory to the workspace, so the old `engine/backtest-report.json` path resolved to
+`engine/engine/…`, threw, and was swallowed by a bare `catch` — the upload step then only warned.
+Same shape as the probe output-path bug; worth suspecting first whenever an artifact step warns that
+it found no files.
