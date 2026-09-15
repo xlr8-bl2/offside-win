@@ -59,6 +59,11 @@ function sideManagerFactor(side: SideContext, which: 'home' | 'away'): Factor {
   const days = mgr.tenureDays ?? 0;
   const ae = mgr.current.appointment_effect;
   const name = mgr.name ?? 'the manager';
+  // Every note below opens on the manager, and the fallback is lowercase
+  // because it also travels into claim evidence where frames use it
+  // mid-sentence. The live board showed the consequence: "the manager is 1 game
+  // into the job at Raków Częstochowa."
+  const Name = name[0]!.toUpperCase() + name.slice(1);
 
   const evidence: Record<string, unknown> = {
     manager: name,
@@ -94,7 +99,7 @@ function sideManagerFactor(side: SideContext, which: 'home' | 'away'): Factor {
       section: '§1.1',
       tier: 3,
       note:
-        `${name} is ${games} game${games === 1 ? '' : 's'} into the job at ${side.team_name}` +
+        `${Name} is ${games} game${games === 1 ? '' : 's'} into the job at ${side.team_name}` +
         (ae && ae.delta !== null
           ? `, with the club running ${ae.delta >= 0 ? '+' : ''}${ae.delta.toFixed(2)} points per match against its form immediately before the appointment.`
           : '. The new-manager bounce window is live but reverts by around game six.'),
@@ -134,7 +139,7 @@ function sideManagerFactor(side: SideContext, which: 'home' | 'away'): Factor {
       section: '§1.1',
       tier: 3,
       note:
-        `${name} is ${games} games into the job at ${side.team_name} — past the bounce window, ` +
+        `${Name} is ${games} games into the job at ${side.team_name} — past the bounce window, ` +
         `where the doctrine expects regression toward the underlying level` +
         (appointmentDelta !== null
           ? `. The appointment has moved the club ${appointmentDelta >= 0 ? '+' : ''}${appointmentDelta.toFixed(2)} points per match.`
@@ -154,7 +159,7 @@ function sideManagerFactor(side: SideContext, which: 'home' | 'away'): Factor {
       section: '§1.3',
       tier: 3,
       note:
-        `${name} has been at ${side.team_name} for ${Math.round(days / 365)} years and ${games} matches — ` +
+        `${Name} has been at ${side.team_name} for ${Math.round(days / 365)} years and ${games} matches — ` +
         `a settled regime with a large, stable sample behind it.`,
       evidence,
       claims: [
@@ -176,7 +181,7 @@ function sideManagerFactor(side: SideContext, which: 'home' | 'away'): Factor {
     id: `manager.${which}.established`,
     section: '§1.1',
     tier: 3,
-    note: `${name} is established at ${side.team_name} (${games} matches), with no regime discontinuity to read.`,
+    note: `${Name} is established at ${side.team_name} (${games} matches), with no regime discontinuity to read.`,
     evidence,
     strength: 0.1,
   });
