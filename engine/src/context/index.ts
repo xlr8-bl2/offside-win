@@ -8,6 +8,7 @@ import type { Factor, FixtureAnalysis, ModelMarket } from '../types.ts';
 import { availabilityFactors } from './availability.ts';
 import { environmentFactors } from './environment.ts';
 import { fatigueFactors } from './fatigue.ts';
+import { formFactors } from './form.ts';
 import { managerFactors } from './manager.ts';
 import { marketFactors } from './market.ts';
 import { refereeFactors } from './referee.ts';
@@ -24,6 +25,7 @@ import type { FixtureContext } from './types.ts';
  */
 const MODULES = [
   availabilityFactors, // tier 1 — §2.4, §3.1, §3.2
+  formFactors,         // tier 2 — §2.1, how they have been playing
   stakesFactors,       // tier 2 — §5.1, §5.2, §5.3
   managerFactors,      // tier 3 — §1
   fatigueFactors,      // tier 4 — §2.8, §5.5, §6.4

@@ -238,26 +238,55 @@ export function narrate(input: NarrateInput): string {
     `${input.fixtureId}:${candidate.market}:${candidate.outcome}:${candidate.line ?? 'x'}`,
   );
 
+  // Same four beats as a confidence call: who these teams are, why this call,
+  // what cuts against it, what we expect. A value bet adds its own fifth — the
+  // disagreement with the price — which verdictSentence supplies at the end.
+  const all = drivers.flatMap((d) => d.claims);
+  const backed = backedTeam(candidate, input.homeTeam, input.awayTeam);
+  const formClaims = all.filter((c) => c.predicate === 'form_run');
+  const opener =
+    formClaims.find((c) => backed && String(c.evidence.team ?? '') === backed) ??
+    formClaims.sort((a, b) => b.magnitude - a.magnitude)[0] ??
+    null;
+
   const claims = selectClaims(
-    drivers.flatMap((d) => d.claims),
+    all.filter((c) => c !== opener && c.predicate !== 'form_run'),
     config.narrate.maxClaims,
   );
 
-  const nouns = properNouns(claims, input.homeTeam, input.awayTeam);
+  const nouns = properNouns([...(opener ? [opener] : []), ...claims], input.homeTeam, input.awayTeam);
   const sentences: string[] = [];
   let previous: Claim | null = null;
 
-  for (const claim of claims) {
+  if (opener) {
+    const s = renderClaim(opener, rng, ledger);
+    if (s) {
+      sentences.push(s);
+      previous = opener;
+    }
+  }
+
+  for (const [i, claim] of claims.entries()) {
     const rendered = renderClaim(claim, rng, ledger);
     if (rendered === null) continue;
 
     let sentence = rendered;
     if (previous) {
-      sentence = connectiveFor(previous, claim, rng) + joinAfterConnective(sentence, nouns);
+      // The first claim after the form opener follows *from* it; the rest are
+      // peers of each other.
+      sentence =
+        i === 0 && previous === opener && canFollowConnective(rendered)
+          ? causalJoin(rendered, nouns, rng)
+          : connectiveFor(previous, claim, rng) + joinAfterConnective(sentence, nouns);
     }
     sentences.push(sentence);
     previous = claim;
   }
+
+  const conclusion = sentences.length
+    ? renderClaim(conclusionClaim(candidate, input.homeTeam, input.awayTeam), rng, ledger)
+    : null;
+  if (conclusion) sentences.push(conclusion);
 
   // No claims cleared: say what the bet is and be honest that the case rests on
   // the numbers rather than on a story.
@@ -439,6 +468,78 @@ function confidenceVerdict(c: Candidate): Claim {
  * at 86%; saying out loud what the 86% has not accounted for is the only reason
  * to read ours instead of theirs.
  */
+/**
+ * What we expect to happen, in words rather than as a market code.
+ *
+ * The conclusion beat needs to name an outcome a reader can picture. "Double
+ * chance 1X" is a bet; "Arsenal not losing this" is an expectation, and it is
+ * the sentence the argument has been building toward.
+ */
+/**
+ * Whether a sentence can be demoted to a clause after a connective.
+ *
+ * Some frames open on a figure — "2.10 against 0.78. Everton's route to a result
+ * runs through a clean sheet" — and a connective in front of one produces "And
+ * that is what makes 2.10 against 0.78", which is not a sentence. A clause has to
+ * start with a word.
+ */
+function canFollowConnective(sentence: string): boolean {
+  return /^[A-Za-z]/.test(sentence.trim());
+}
+
+function causalJoin(sentence: string, nouns: Set<string>, rng: Rng): string {
+  return choose(CONNECTIVES.causal as unknown as string[], rng).item + joinAfterConnective(sentence, nouns);
+}
+
+/** The side a selection backs, or null for a bet with no side. */
+function backedTeam(c: Candidate, home: string, away: string): string | null {
+  if (c.outcome === 'HOME' || c.outcome === '1X') return home;
+  if (c.outcome === 'AWAY' || c.outcome === 'X2') return away;
+  return null;
+}
+
+function expectationFor(c: Candidate, home: string, away: string): string {
+  const side = (o: string) => (o === 'HOME' || o === '1X' ? home : away);
+  switch (c.market) {
+    case '1x2':
+      if (c.outcome === 'DRAW') return 'a match that stays level';
+      return `${side(c.outcome)} winning it`;
+    case 'double_chance':
+      if (c.outcome === '12') return 'a winner rather than a draw';
+      return `${side(c.outcome)} avoiding defeat`;
+    case 'draw_no_bet':
+      return `${side(c.outcome)} coming out on top if there is a winner`;
+    case 'btts':
+      return c.outcome === 'yes' ? 'both teams finding the net' : 'at least one side kept out';
+    case 'over_under_05':
+    case 'over_under_15':
+    case 'over_under_25':
+    case 'over_under_35':
+      return c.outcome === 'over'
+        ? `more than ${c.line} goals in it`
+        : `fewer than ${c.line} goals in it`;
+    case 'total_corners':
+      return c.outcome === 'over' ? 'a busy game for corners' : 'a quiet one for corners';
+    case 'asian_handicap':
+    case 'european_handicap':
+      return `${side(c.outcome)} covering the line`;
+    default:
+      return marketLabel(c).toLowerCase();
+  }
+}
+
+function conclusionClaim(c: Candidate, home: string, away: string): Claim {
+  return {
+    subject: 'the read',
+    predicate: 'conclusion',
+    polarity: 1,
+    magnitude: c.model_prob,
+    evidence: { expectation: expectationFor(c, home, away) },
+    section: '§12',
+    tier: 7,
+  };
+}
+
 export function narrateConfident(input: ConfidentInput): string {
   const { candidate, drivers, ledger } = input;
   const rng = seededRng(
@@ -454,24 +555,50 @@ export function narrateConfident(input: ConfidentInput): string {
     flip === 1 ? c : { ...c, polarity: (c.polarity * -1) as Claim['polarity'] };
 
   const all = drivers.flatMap((d) => d.claims).map(orient);
+
+  // Beat one is the form of the side being backed, which is a different pool
+  // from the rest: it opens the argument rather than supporting it, so it is
+  // pulled out before the supporting claims are selected.
+  const backed = backedTeam(candidate, input.homeTeam, input.awayTeam);
+  const formClaims = all.filter((c) => c.predicate === 'form_run');
+  const opener =
+    formClaims.find((c) => backed && String(c.evidence.team ?? '') === backed) ??
+    formClaims.sort((a, b) => b.magnitude - a.magnitude)[0] ??
+    null;
+
   const supporting = selectClaims(
-    all.filter((c) => c.polarity > 0),
+    all.filter((c) => c.polarity > 0 && c !== opener && c.predicate !== 'form_run'),
     Math.max(1, config.narrate.maxClaims - 1),
   );
-  const against = selectClaims(all.filter((c) => c.polarity < 0), 1);
+  const against = selectClaims(all.filter((c) => c.polarity < 0 && c.predicate !== 'form_run'), 1);
 
   const render = (claim: Claim): string | null => renderClaim(claim, rng, ledger);
 
   const sentences: string[] = [];
+  const nouns = properNouns([...(opener ? [opener] : []), ...supporting, ...against], input.homeTeam, input.awayTeam);
 
+  // 1. Who these teams are right now.
+  let previous: Claim | null = null;
+  if (opener) {
+    const s = render(opener);
+    if (s) {
+      sentences.push(s);
+      previous = opener;
+    }
+  }
+
+  // 2. Why this call — joined causally to the form when there is form to join to,
+  //    because the mismatch is a consequence of how they have been playing.
   const gap = strengthGapClaim(input);
   if (gap) {
     const s = render(gap);
-    if (s) sentences.push(s);
+    if (s) {
+      sentences.push(previous && canFollowConnective(s) ? causalJoin(s, nouns, rng) : s);
+      previous = gap;
+    }
   }
 
-  const nouns = properNouns([...supporting, ...against], input.homeTeam, input.awayTeam);
-  let previous: Claim | null = gap;
+  // 3. What else points the same way.
   for (const claim of supporting) {
     const s = render(claim);
     if (!s) continue;
@@ -503,6 +630,12 @@ export function narrateConfident(input: ConfidentInput): string {
     });
     if (framed) sentences.push(framed);
   }
+
+  // 5. What we expect to happen, named before the price is.
+  const conclusion = sentences.length
+    ? render(conclusionClaim(candidate, input.homeTeam, input.awayTeam))
+    : null;
+  if (conclusion) sentences.push(conclusion);
 
   const lead = `${capitalise(marketLabel(candidate))} at ${candidate.odds.toFixed(2)}.`;
   const verdict = render(confidenceVerdict(candidate));

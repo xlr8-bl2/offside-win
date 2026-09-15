@@ -720,6 +720,104 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     },
   ],
 
+  // --------------------------------------------------------- form
+  //
+  // The opener. Every explanation used to start on a number — "meaningfully the
+  // stronger side on expected goals, 1.60 to 0.89" — which is true and is not how
+  // anybody talks about a football match. An argument starts with who these teams
+  // are right now, so these frames come first and everything else follows from
+  // them.
+
+  form_run: [
+    (c) => {
+      const w = n(c.evidence.wins);
+      const m = n(c.evidence.matches);
+      only(w >= 3);
+      return `${cap(s(c.evidence.team))} have won ${w} of their last ${m}, scoring ${n(c.evidence.goals_for).toFixed(1)} a game while they have been at it.`;
+    },
+    (c) => {
+      const kind = s(c.evidence.streak_kind, 'none');
+      const len = n(c.evidence.streak_length);
+      only(kind === 'won' && len >= 3);
+      return `${len} straight wins for ${s(c.evidence.team)}, and this is the run they arrive on.`;
+    },
+    (c) => {
+      const kind = s(c.evidence.streak_kind, 'none');
+      const len = n(c.evidence.streak_length);
+      only(kind === 'unbeaten' && len >= 4);
+      return `${cap(s(c.evidence.team))} are unbeaten in ${len}, conceding ${n(c.evidence.goals_against).toFixed(1)} a game across the run.`;
+    },
+    (c) => {
+      const kind = s(c.evidence.streak_kind, 'none');
+      const len = n(c.evidence.streak_length);
+      only(kind === 'lost' && len >= 3);
+      return `${cap(s(c.evidence.team))} have lost ${len} in a row and are shipping ${n(c.evidence.goals_against).toFixed(1)} goals a game doing it.`;
+    },
+    (c) => {
+      const kind = s(c.evidence.streak_kind, 'none');
+      const len = n(c.evidence.streak_length);
+      only(kind === 'winless' && len >= 4);
+      return `${cap(s(c.evidence.team))} have not won in ${len}, which is long enough to be the story of their season rather than a bad week.`;
+    },
+    (c) => {
+      const ppg = n(c.evidence.ppg);
+      only(ppg >= 2);
+      return `${n(c.evidence.ppg).toFixed(2)} points a game across their last ${n(c.evidence.matches)} is title form, and it is the form ${s(c.evidence.team)} are in.`;
+    },
+    (c) => {
+      const ppg = n(c.evidence.ppg);
+      only(ppg <= 0.8);
+      return `${cap(s(c.evidence.team))} have managed ${ppg.toFixed(2)} points a game from their last ${n(c.evidence.matches)}, which is relegation form whatever the table currently says.`;
+    },
+    (c) => {
+      // The sentence that makes "they travel badly" sayable. Only when the venue
+      // split is genuinely different from the overall record.
+      const vp = c.evidence.venue_ppg;
+      const ppg = n(c.evidence.ppg);
+      only(typeof vp === 'number' && Math.abs((vp as number) - ppg) >= 0.6);
+      const better = (vp as number) > ppg;
+      return `${cap(s(c.evidence.team))} are a different side ${s(c.evidence.where)}: ${(vp as number).toFixed(2)} points a game there against ${ppg.toFixed(2)} overall, and this one is ${better ? 'in the half of the split that suits them' : 'in the half that does not'}.`;
+    },
+    (c) => {
+      const cs = n(c.evidence.clean_sheets);
+      only(cs >= 3);
+      return `${cs} clean sheets in ${n(c.evidence.matches)} says what ${s(c.evidence.team)} have been built on lately.`;
+    },
+    (c) => {
+      const gf = n(c.evidence.goals_for);
+      only(gf >= 2.2);
+      return `${cap(s(c.evidence.team))} are scoring ${gf.toFixed(1)} a game and have not looked like stopping.`;
+    },
+    (c) => {
+      const ga = n(c.evidence.goals_against);
+      only(ga >= 2);
+      return `${cap(s(c.evidence.team))} are conceding ${ga.toFixed(1)} a game, and a defence leaking at that rate decides matches on its own.`;
+    },
+    (c) => {
+      const w = n(c.evidence.wins);
+      const d = n(c.evidence.draws);
+      const l = n(c.evidence.losses);
+      only(d >= 3);
+      return `${w}-${d}-${l} over six tells its own story for ${s(c.evidence.team)} — they are hard to beat and harder to back.`;
+    },
+  ],
+
+  // -------------------------------------------------------- conclusion
+  //
+  // What we actually expect to happen, said before the price. This is the beat
+  // the old structure had no room for: it went from evidence straight to a
+  // percentage, so it read as a calculation rather than as a read on a match.
+
+  conclusion: [
+    (c) => `Put together, the expectation is ${s(c.evidence.expectation)}.`,
+    (c) => `Add it up and ${s(c.evidence.expectation)} is what this points to.`,
+    (c) => `On that evidence, ${s(c.evidence.expectation)}.`,
+    (c) => `Which is why we land on ${s(c.evidence.expectation)}.`,
+    (c) => `Take the lot together and ${s(c.evidence.expectation)} is the read.`,
+    (c) => `That is the case, and it ends at ${s(c.evidence.expectation)}.`,
+    (c) => `Everything above points the same way: ${s(c.evidence.expectation)}.`,
+  ],
+
   // ------------------------------------------------- confidence calls
   //
   // A different argument from everything above. A value bet says the price is
@@ -834,7 +932,14 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     (c) => {
       const p = n(c.evidence.prob_pct);
       const odds = n(c.evidence.odds);
+      only(p >= 75);
       return `That puts it at ${p.toFixed(0)}%, priced ${odds.toFixed(2)} — a high-probability call rather than a claim the market is wrong.`;
+    },
+    (c) => {
+      const p = n(c.evidence.prob_pct);
+      const odds = n(c.evidence.odds);
+      only(p < 75);
+      return `We make it ${p.toFixed(0)}% at ${odds.toFixed(2)} — likely rather than safe, and priced about where it should be.`;
     },
     (c) => {
       const p = n(c.evidence.prob_pct);
@@ -880,6 +985,21 @@ export const CONNECTIVES = {
     'Compounding it, ',
     'Pulling the same way, ',
     'And ',
+  ],
+  /**
+   * Causal joins, for moving between beats of an argument rather than between
+   * peers within one. The old composer only had additive and opposing
+   * connectives, so every claim arrived as another item on a list — "On top of
+   * that", "Alongside it", "Separately". An argument needs to be able to say
+   * that one thing follows from another.
+   */
+  causal: [
+    'Which is why ',
+    'So ',
+    'And that is what makes ',
+    'On that evidence, ',
+    'That matters here because ',
+    'It follows that ',
   ],
   opposing: [
     'Against that, ',

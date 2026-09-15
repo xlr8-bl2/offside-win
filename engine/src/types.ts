@@ -105,6 +105,8 @@ export type ClaimPredicate =
   | 'derby'
   | 'revenge'
   | 'form'             // recent output
+  | 'form_run'         // §2.1 — the run of results a supporter would open with
+  | 'conclusion'       // what we expect to happen, before the price is named
   | 'style_clash'      // §4.2 matchup read
   | 'set_piece'
   | 'weather'
