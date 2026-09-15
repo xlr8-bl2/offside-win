@@ -68,6 +68,42 @@ export function toPgPlaceholders(sql: string): string {
   return out;
 }
 
+/**
+ * The plain column names a conflict target names, or null if it is anything
+ * more clever. Used only to collapse duplicates before sending, so failing to
+ * parse is safe — it just means no collapsing.
+ */
+export function conflictColumns(opts: { onConflict?: string; conflictTarget?: string }): string[] | null {
+  const raw =
+    opts.conflictTarget ??
+    opts.onConflict?.match(/ON\s+CONFLICT\s*\(([^)]*)\)/i)?.[1] ??
+    null;
+  if (!raw) return null;
+  const cols = raw.split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
+  return cols.every((c) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(c)) ? cols : null;
+}
+
+/**
+ * Collapse rows that share a conflict key, keeping the last.
+ *
+ * Postgres refuses an INSERT whose own VALUES list hits the same conflict key
+ * twice — "ON CONFLICT DO UPDATE command cannot affect row a second time" —
+ * where SQLite quietly lets the later row win. That difference stays hidden
+ * until a batch happens to contain a repeat: fifteen leagues never did, and
+ * eighty-eight did within a minute, because a match can be carried by more than
+ * one competition. Keeping the last occurrence is what the D1 backend did, so
+ * both backends now agree rather than one of them erroring at scale.
+ */
+export function dedupeByConflictKey(
+  rows: Array<Record<string, unknown>>,
+  cols: string[] | null,
+): Array<Record<string, unknown>> {
+  if (!cols || rows.length < 2) return rows;
+  const seen = new Map<string, Record<string, unknown>>();
+  for (const row of rows) seen.set(cols.map((c) => String(row[c] ?? '\u0000')).join('\u0001'), row);
+  return seen.size === rows.length ? rows : [...seen.values()];
+}
+
 let client: postgres.Sql | null = null;
 
 function db(): postgres.Sql {
@@ -155,6 +191,8 @@ export async function insertMany(
 ): Promise<number> {
   if (rows.length === 0) return 0;
 
+  const toWrite = dedupeByConflictKey(rows, conflictColumns(opts));
+
   const perRow = columns.length;
   const chunkRows = Math.max(1, Math.min(1000, Math.floor(config.pg.maxParams / perRow)));
   const colList = columns.map((c) => `"${c}"`).join(', ');
@@ -169,8 +207,8 @@ export async function insertMany(
       : '');
 
   let written = 0;
-  for (let i = 0; i < rows.length; i += chunkRows) {
-    const chunk = rows.slice(i, i + chunkRows);
+  for (let i = 0; i < toWrite.length; i += chunkRows) {
+    const chunk = toWrite.slice(i, i + chunkRows);
     let p = 0;
     const values = chunk
       .map(() => `(${columns.map(() => `$${++p}`).join(', ')})`)
