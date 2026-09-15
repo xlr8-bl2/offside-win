@@ -27,7 +27,20 @@ console.log('\n--- connection string shape ---');
 try {
   const u = new URL(dbUrl);
   console.log(`  host      ${u.hostname}`);
-  console.log(`  port      ${u.port}  ${u.port === '6543' ? '(transaction pooler)' : u.port === '5432' ? '(session/direct)' : '(unexpected)'}`);
+  console.log(`  port      ${u.port}  ${u.port === '6543' ? '(transaction pooler)' : u.port === '5432' ? '(session pooler, or direct)' : '(unexpected)'}`);
+  // The single most likely setup mistake, and it fails as an opaque network
+  // error: Supabase serves *direct* connections (db.<ref>.supabase.co) over
+  // IPv6 only unless you buy the IPv4 add-on, and GitHub's runners are
+  // IPv4-only, so the engine can never reach it. The pooler hosts are IPv4.
+  if (/^db\..*\.supabase\.co$/.test(u.hostname)) {
+    console.error(
+      '\n  This is the DIRECT connection string. It resolves to IPv6 only, and GitHub Actions\n' +
+        '  runners have no IPv6 route, so this will always fail with ENETUNREACH.\n' +
+        '  Use the pooler instead: Supabase > Connect > Transaction pooler, which looks like\n' +
+        '    postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres',
+    );
+    process.exit(1);
+  }
   console.log(`  user      ${u.username.split('.')[0]}...`);
   console.log(`  password  ${u.password ? `set (${u.password.length} chars)` : 'MISSING'}`);
   if (/\[|\]|YOUR-PASSWORD|PASSWORD/i.test(decodeURIComponent(u.password || ''))) {
