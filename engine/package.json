@@ -15,7 +15,8 @@
     "supabase:check": "node scripts/supabase-check.mjs",
     "board:stats": "node scripts/board-stats.mjs",
     "eval:provider": "tsx scripts/eval-provider.mjs",
-    "h2h": "tsx scripts/head-to-head.mts"
+    "h2h": "tsx scripts/head-to-head.mts",
+    "market": "tsx scripts/is-it-the-market.mts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
