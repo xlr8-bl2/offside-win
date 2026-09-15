@@ -176,6 +176,37 @@ a strong home side prices 1.15-1.25. Their own page says so in the footer: "A co
 tip. We do not claim these beat the bookmakers'." Do not republish 86.7% without that caveat —
 they are careful about it, and they are the ones with the better number.
 
+**The provider's model is the bookmakers' price.** `npm run market` de-vigs live 1x2 quotes and
+measures how far each model sits from the fair price, per outcome, over 87 upcoming fixtures:
+
+| | distance from the de-vigged market |
+|---|---|
+| provider | **0.93 pts** |
+| us | **8.52 pts** |
+
+0.93 points is inside the noise of de-vig method choice. Their `dc-blend-v1` is the market with a
+hat on, which explains all of it at once: an 86.7% hit rate (the market is well calibrated), every
+`recommendations` flag false (nothing to recommend when you agree with the price), and their own
+footer refusing to claim an edge. Their number is unbeatable on that scoreboard and worthless as
+one, because a price cannot be bet into itself.
+
+**Ours is genuinely independent, and that is not yet good news.** 8.52 points from the market is a
+long way. Combined with a backtest that beats the league base rate by only 0.008 log loss, the
+likeliest reading is that we are noisy rather than contrarian — a model with real information
+would sit closer to the price and diverge *selectively*. Nothing here has established an edge, and
+the distance alone is not evidence of one.
+
+**Do not compare our 0.6200 to their 1.0102.** Repeated several times in this project and wrong
+every time. 0.6200 is the mean of seven *binary* log losses (1x2 outcomes, BTTS, three goal
+lines); 1.0102 is a *three-way categorical* log loss on 1x2 alone. A uniform guess scores 0.693 on
+the first scale and 1.0986 on the second. They are not the same quantity and the comparison
+flattered us every time.
+
+**The test that decides whether there is a business** is our model against the de-vigged closing
+price on finished matches — not against a base rate, and not on hit rate. It needs historical
+odds, which are not stored. The `pick` table already carries `closing_odds` and `clv`, so settling
+real picks accumulates it; that is the number to wait for before any claim is published.
+
 **Six context factors are still dark**, losing 19 of the weight: `stakes.table` (6),
 `manager.home` (5), `style.press_matchup` (3), `environment.pitch` (2), `environment.venue` (2),
 `market.prediction_market` (1). `npm run board:stats` prints the current tally per factor.
