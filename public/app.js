@@ -210,10 +210,14 @@ function cardHTML(f) {
       <div class="team-row">${crest(f.away, 'md', f.away_id)}<span class="name">${esc(f.away)}</span><span class="pc">${pct(p.AWAY)}</span></div>
     </div>
     ${pick
+      // Two rows rather than one: a long selection used to push the tag onto a
+      // line of its own, so cards in the same grid did not line up.
       ? `<div class="card-pick">
-           <span class="tag ${esc(pick.kind.toLowerCase())}">${pick.kind === 'CONFIDENT' ? 'Call' : esc(pick.kind)}</span>
+           <div class="pick-meta">
+             <span class="tag ${esc(pick.kind.toLowerCase())}">${pick.kind === 'CONFIDENT' ? 'Call' : esc(pick.kind)}</span>
+             <span class="num">${pick.kind === 'CONFIDENT' && pick.prob ? pct(pick.prob) : dec(pick.odds)}</span>
+           </div>
            <span class="sel">${esc(marketLabel(pick.market, pick.outcome, pick.line, f.home, f.away))}</span>
-           <span class="num">${pick.kind === 'CONFIDENT' && pick.prob ? pct(pick.prob) : dec(pick.odds)}</span>
          </div>`
       : `<div class="card-pick none">No call here — the price looks right</div>`}
     ${extra.length
@@ -268,9 +272,7 @@ async function viewHome() {
   }
   const fixtures = board.fixtures ?? [];
   const withPicks = fixtures.filter((f) => f.top_pick);
-  const top = [...withPicks]
-    .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
-    .slice(0, 8);
+  const top = spread(withPicks, 8);
 
   app.innerHTML =
     heroHTML() +
@@ -289,6 +291,41 @@ async function viewHome() {
     explainHTML(await sampleNarrative(top));
 
   wireCards();
+}
+
+/**
+ * The eight cards for the front page, chosen for variety as well as confidence.
+ *
+ * Ranking by confidence alone produces a monoculture: over 1.5 goals and home-
+ * or-draw are the two markets that most often clear the bar, and on a typical
+ * board they are two thirds of every call. Eight cards all saying "Over 1.5
+ * goals, 83%" is an accurate summary of the model and a terrible shop window —
+ * it reads as one idea repeated rather than as coverage.
+ *
+ * So this walks the confidence order in passes, taking at most one fixture per
+ * market on each pass. Nothing is hidden and nothing is reordered on the board
+ * itself; this is the front page choosing what to lead with.
+ */
+function spread(fixtures, limit) {
+  const ranked = [...fixtures].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+  const out = [];
+  const used = new Set();
+  while (out.length < limit) {
+    const seenThisPass = new Set();
+    let added = 0;
+    for (const f of ranked) {
+      if (out.length >= limit) break;
+      if (used.has(f.id)) continue;
+      const key = `${f.top_pick?.market}:${f.top_pick?.outcome}`;
+      if (seenThisPass.has(key)) continue;
+      seenThisPass.add(key);
+      used.add(f.id);
+      out.push(f);
+      added++;
+    }
+    if (added === 0) break;
+  }
+  return out;
 }
 
 /** Pull one real narrative for the explainer band rather than inventing one. */
