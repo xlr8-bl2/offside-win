@@ -295,7 +295,6 @@ function railHTML(fixtures) {
 }
 
 function cardHTML(f) {
-  const p = f.odds_1x2 ?? {};
   const pick = f.top_pick;
   const extra = (f.confident ?? []).slice(pick && pick.kind === 'CONFIDENT' ? 1 : 0).slice(0, 2);
   return `
@@ -304,25 +303,29 @@ function cardHTML(f) {
       <span class="card-league">${crest(f.league ?? '', 'sm', f.league_id, 'league')}<span>${esc(f.league ?? '')}</span></span>
       <span class="card-kick${isSoon(f.kickoff) ? ' soon' : ''}">${esc(kickoffLabel(f.kickoff))}</span>
     </div>
-    <div class="card-teams">
-      <div class="team-row">${crest(f.home, 'md', f.home_id)}<span class="name">${esc(f.home)}</span><span class="pc">${pct(p.HOME)}</span></div>
-      <div class="team-row">${crest(f.away, 'md', f.away_id)}<span class="name">${esc(f.away)}</span><span class="pc">${pct(p.AWAY)}</span></div>
+
+    <div class="vs">
+      <div class="vs-side">${crest(f.home, 'lg', f.home_id)}<span>${esc(f.home)}</span></div>
+      <span class="vs-mark">vs</span>
+      <div class="vs-side">${crest(f.away, 'lg', f.away_id)}<span>${esc(f.away)}</span></div>
     </div>
+
     ${pick
       ? `<div class="card-pick">
+           <span class="sel">${esc(marketLabel(pick.market, pick.outcome, pick.line, f.home, f.away))}</span>
            <div class="pick-meta">
              <span class="tag ${esc(pick.kind.toLowerCase())}">${esc(KIND_TAG[pick.kind] ?? pick.kind)}</span>
              <span class="num">${dec(pick.odds)}</span>
            </div>
-           <span class="sel">${esc(marketLabel(pick.market, pick.outcome, pick.line, f.home, f.away))}</span>
            ${typeof f.confidence === 'number'
-             ? `<div class="conf"><span class="conf-track"><i style="width:${Math.round(f.confidence * 100)}%"></i></span><span class="conf-pct">${pct(f.confidence)} confidence</span></div>`
+             ? `<div class="conf"><span class="conf-track"><i style="width:${Math.round(f.confidence * 100)}%"></i></span><span class="conf-pct">${pct(f.confidence)}</span></div>`
              : ''}
          </div>`
       : `<div class="card-pick none">No call on this one</div>`}
     ${extra.length
       ? `<div class="also">${extra.map((c) => `<span class="also-call">${esc(marketLabel(c.market, c.outcome, c.line, f.home, f.away))} <b>${pct(c.prob)}</b>${c.caveat ? '<i class="caveat" title="worth reading the caveat">!</i>' : ''}</span>`).join('')}</div>`
       : ''}
+    <span class="card-go">Read the analysis →</span>
   </article>`;
 }
 
@@ -667,6 +670,67 @@ function pitchHTML(lineups, home, away, homeId, awayId) {
   </div>`;
 }
 
+/** W/D/L chips, oldest to newest, the way every football site draws form. */
+function formChips(ev) {
+  const seq = String(ev?.sequence ?? '');
+  if (!seq) return '';
+  return `<span class="chips">${[...seq].map((r) => `<i class="chip ${r.toLowerCase()}">${r}</i>`).join('')}</span>`;
+}
+
+function statBar(label, home, away, fmt = (v) => String(Math.round(v))) {
+  const h = Number(home) || 0;
+  const a = Number(away) || 0;
+  const total = h + a;
+  const hp = total > 0 ? (h / total) * 100 : 50;
+  return `
+  <div class="sbar">
+    <div class="sbar-top"><b>${fmt(h)}</b><span>${esc(label)}</span><b>${fmt(a)}</b></div>
+    <div class="sbar-track"><i class="h" style="width:${hp}%"></i><i class="a" style="width:${100 - hp}%"></i></div>
+  </div>`;
+}
+
+function h2hHTML(h2h, home, away) {
+  if (!h2h || !h2h.total_matches) return '<div class="empty">No previous meetings on record.</div>';
+  const recent = (h2h.recent_matches ?? []).slice(0, 6);
+  return `
+  <div class="panel">
+    <p class="panel-head">Head to head · ${h2h.total_matches} meetings</p>
+    ${statBar(`${home} wins · draws · ${away} wins`, h2h.home_wins ?? 0, h2h.away_wins ?? 0)}
+    <div class="numbers" style="margin-top:14px">
+      <span>${esc(home)} <b>${h2h.home_wins ?? 0}</b></span>
+      <span>drawn <b>${h2h.draws ?? 0}</b></span>
+      <span>${esc(away)} <b>${h2h.away_wins ?? 0}</b></span>
+      ${typeof h2h.avg_total_goals === 'number' ? `<span>goals a game <b>${h2h.avg_total_goals.toFixed(2)}</b></span>` : ''}
+    </div>
+    ${recent.length ? `<div class="h2h-list">${recent.map((m) => `
+      <div class="h2h-row">
+        <span class="h2h-date">${m.date ? new Date(m.date).toLocaleDateString([], { month: 'short', year: '2-digit' }) : ''}</span>
+        <span class="h2h-teams">${esc(m.home ?? '')} <b>${esc(m.score ?? '')}</b> ${esc(m.away ?? '')}</span>
+      </div>`).join('')}</div>` : ''}
+  </div>`;
+}
+
+function standingsHTML(st, home, away, homeId, awayId) {
+  if (!st || (!st.home && !st.away)) return '<div class="empty">No league table for this competition.</div>';
+  const row = (r, name, id) => r
+    ? `<tr>
+         <td class="num">${r.position}</td>
+         <td>${crest(name, 'sm', id)} ${esc(name)}</td>
+         <td class="num">${r.played}</td>
+         <td class="num">${r.goal_diff > 0 ? '+' : ''}${r.goal_diff}</td>
+         <td class="num"><b>${r.points}</b></td>
+       </tr>`
+    : '';
+  return `
+  <div class="panel">
+    <p class="panel-head">In the table${st.size ? ` · ${st.size} teams` : ''}</p>
+    <div class="scroll-x"><table class="tbl">
+      <thead><tr><th>#</th><th>Team</th><th class="num">P</th><th class="num">GD</th><th class="num">Pts</th></tr></thead>
+      <tbody>${row(st.home, home, homeId)}${row(st.away, away, awayId)}</tbody>
+    </table></div>
+  </div>`;
+}
+
 async function viewFixture(id) {
   app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
   let f;
@@ -678,34 +742,19 @@ async function viewFixture(id) {
 
   const p = f.odds_1x2 ?? {};
   const verdicts = f.verdicts ?? [];
-  // Only notes we have a human label for, and only where something was found.
-  // Only notes that found something. A factor is computed whether or not it has
-  // anything to report, and "Not a local derby." under a heading reading "Derby"
-  // is noise dressed as analysis.
   const NOTHING = /^(not a|no |neither side holds a clear|conditions are unremarkable|the sharp book and the wider market agree|the line has barely moved|scoring about what their chances are worth)/i;
   const reads = (f.ledger ?? [])
     .filter((x) => x.state === 'COMPUTED' && READ_LABEL[x.id] && x.note && !NOTHING.test(x.note))
     .map((x) => ({ label: READ_LABEL[x.id], note: x.note }))
     .filter((x, i, arr) => arr.findIndex((y) => y.note === x.note) === i);
 
-  app.innerHTML = `
-  <div class="wrap section">
-    <button class="back">← Back to the board</button>
+  const meta = [
+    kickoffLabel(f.kickoff),
+    f.round_label || f.league,
+    f.neutral ? 'Neutral ground' : null,
+  ].filter(Boolean);
 
-    <div class="fx-hero" data-shot="${f.venue_id ? 'yes' : 'none'}">
-      <div class="fx-hero-media">${venueShot(f.venue_id, '')}</div>
-      <div class="fx-hero-in">
-        <div class="fx-teams">
-          <div class="fx-side">${crest(f.home, 'xl', f.home_id)}<span class="name">${esc(f.home)}</span></div>
-          <div class="fx-mid">
-            <div class="fx-when">${esc(kickoffLabel(f.kickoff))}</div>
-            <div class="fx-league">${esc(f.league ?? '')}</div>
-          </div>
-          <div class="fx-side">${crest(f.away, 'xl', f.away_id)}<span class="name">${esc(f.away)}</span></div>
-        </div>
-      </div>
-    </div>
-
+  const overview = `
     <div class="grid-2">
       <div>
         <div class="panel">
@@ -714,31 +763,76 @@ async function viewFixture(id) {
             ? verdicts.map((v) => verdictHTML(v, f.home, f.away)).join('')
             : `<p class="narrative">${esc(f.pass ?? 'Nothing here is worth a call. The price looks about right.')}</p>`}
         </div>
-        ${pitchHTML(f.lineups, f.home, f.away, f.home_id, f.away_id)}
         ${reads.length ? `<div class="panel">
           <p class="panel-head">What we looked at</p>
           <div class="reads">${reads.map((r) => `<div class="read"><b>${esc(r.label)}</b><p>${esc(r.note)}</p></div>`).join('')}</div>
         </div>` : ''}
       </div>
-
       <div>
         <div class="panel">
           <p class="panel-head">How we see it</p>
-          <div class="bars">
-            ${bar(f.home, p.HOME)}${bar('Draw', p.DRAW)}${bar(f.away, p.AWAY)}
-          </div>
+          <div class="bars">${bar(f.home, p.HOME)}${bar('Draw', p.DRAW)}${bar(f.away, p.AWAY)}</div>
           <div class="numbers" style="margin-top:18px">
             <span>goals expected <b>${dec((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0))}</b></span>
             ${f.provisional ? `<span class="tag prov" style="padding:7px 12px">line-ups not final</span>` : ''}
           </div>
         </div>
+        ${f.venue_id ? `<div class="panel venue" data-shot="yes">
+          <p class="panel-head">The ground</p>
+          <div class="venue-shot">${venueShot(f.venue_id, '')}</div>
+        </div>` : ''}
+      </div>
+    </div>`;
+
+  const TABS = [
+    ['overview', 'Overview', overview],
+    ['lineups', 'Line-ups', pitchHTML(f.lineups, f.home, f.away, f.home_id, f.away_id) || '<div class="empty">No team sheet published yet.</div>'],
+    ['h2h', 'Head to head', h2hHTML(f.h2h, f.home, f.away)],
+    ['table', 'Table', standingsHTML(f.standings, f.home, f.away, f.home_id, f.away_id)],
+  ];
+
+  app.innerHTML = `
+  <div class="wrap section">
+    <button class="back">← Back to the board</button>
+
+    <div class="fx-hero" data-shot="${f.venue_id ? 'yes' : 'none'}">
+      <div class="fx-hero-media">${venueShot(f.venue_id, '')}</div>
+      <div class="fx-hero-in">
+        <p class="kicker">${esc(f.league ?? '')}</p>
+        <div class="fx-teams">
+          <div class="fx-side">
+            ${crest(f.home, 'xl', f.home_id)}
+            <span class="name">${esc(f.home)}</span>
+            ${formChips(f.form?.home)}
+          </div>
+          <div class="fx-mid">
+            <div class="fx-when">${esc(kickoffLabel(f.kickoff))}</div>
+            <div class="fx-league">${meta.slice(1).map(esc).join(' · ')}</div>
+          </div>
+          <div class="fx-side">
+            ${crest(f.away, 'xl', f.away_id)}
+            <span class="name">${esc(f.away)}</span>
+            ${formChips(f.form?.away)}
+          </div>
+        </div>
       </div>
     </div>
+
+    <div class="tabs" role="tablist">
+      ${TABS.map(([k, label], i) => `<button class="tab${i === 0 ? ' on' : ''}" data-tab="${k}" role="tab">${esc(label)}</button>`).join('')}
+    </div>
+    ${TABS.map(([k, , html], i) => `<div class="tabpane" data-pane="${k}"${i === 0 ? '' : ' hidden'}>${html}</div>`).join('')}
   </div>`;
 
   app.querySelector('.back').onclick = () => {
     if (history.length > 1) history.back(); else location.hash = '#/board';
   };
+  for (const t of app.querySelectorAll('.tab')) {
+    t.onclick = () => {
+      for (const o of app.querySelectorAll('.tab')) o.classList.toggle('on', o === t);
+      for (const pane of app.querySelectorAll('.tabpane')) pane.hidden = pane.dataset.pane !== t.dataset.tab;
+    };
+  }
 }
 
 function bar(label, v) {

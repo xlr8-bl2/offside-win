@@ -1,4 +1,4 @@
-import { bsdList, num, stats as bsdStats, toEpoch } from './bsd.ts';
+import { bsdList, num, str, stats as bsdStats, toEpoch } from './bsd.ts';
 import { config } from './config.ts';
 import { analyseFixture } from './context/index.ts';
 import { checkComparisonEntitlement, gatherFixture } from './context/gather.ts';
@@ -291,6 +291,22 @@ export async function runSlate(): Promise<SlateReport> {
               unavailable: ctx.lineups.unavailable,
             }
           : null,
+        // Everything the match page shows in its own panels. All of it was
+        // gathered for the factors already and then dropped on the floor.
+        round_label: str(event['round_label']) || null,
+        neutral: event['is_neutral_ground'] === true,
+        h2h: ctx.h2h ?? null,
+        standings: ctx.standings
+          ? {
+              home: ctx.home.standing ?? null,
+              away: ctx.away.standing ?? null,
+              size: ctx.standings.length,
+            }
+          : null,
+        form: {
+          home: factors.find((f) => f.id === 'form.home')?.evidence ?? null,
+          away: factors.find((f) => f.id === 'form.away')?.evidence ?? null,
+        },
         ledger: factors.map(forStorage),
         markets: analysis.model.map((m) => ({
           market: m.market,
