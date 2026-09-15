@@ -16,8 +16,15 @@ export const config = {
   bsd: {
     base: process.env.BSD_BASE_URL ?? 'https://sports.bzzoiro.com',
     key: process.env.BSD_API_KEY ?? '',
-    /** Provider is uncapped, but be a good citizen and stay reproducible. */
-    concurrency: num('BSD_CONCURRENCY', 6),
+    /**
+     * In-flight requests. The first live slate ran 58 minutes at 6, almost all
+     * of it waiting: the account's request quota was exhausted, every call came
+     * back 429, and each one then sat out a 2/4/8/16s backoff. Backoff no longer
+     * holds a slot (see bsd.ts), which is the fix that matters; this raises the
+     * ceiling now that the account is not rate-limited. Lower it to 6 again if
+     * the provider ever starts pushing back.
+     */
+    concurrency: num('BSD_CONCURRENCY', 12),
     retries: num('BSD_RETRIES', 4),
     timeoutMs: num('BSD_TIMEOUT_MS', 30_000),
   },

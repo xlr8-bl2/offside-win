@@ -107,7 +107,8 @@ async function main(): Promise<void> {
     const secs = ((Date.now() - started) / 1000).toFixed(1);
     console.log(
       `\n${name} finished in ${secs}s — ${bsdStats.requests} provider requests ` +
-        `(${bsdStats.retries} retries, ${bsdStats.errors} errors, ${bsdStats.notEntitled} not entitled), ` +
+        `(${bsdStats.retries} retries, ${bsdStats.errors} errors, ${bsdStats.notEntitled} not entitled, ` +
+        `${bsdStats.cacheHits} served from cache), ` +
         `${d1Stats.queries} D1 queries, ${d1Stats.rowsWritten} rows written.`,
     );
   } catch (err) {
