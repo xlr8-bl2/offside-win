@@ -11,11 +11,15 @@
     "backtest": "tsx src/run.ts backtest",
     "migrate": "tsx src/run.ts migrate",
     "test": "tsx --test test/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "supabase:check": "node scripts/supabase-check.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "postgres": "^3.4.5"
   }
 }

@@ -2,8 +2,13 @@
   "name": "offside-win",
   "private": true,
   "type": "module",
-  "workspaces": ["engine", "worker"],
-  "engines": { "node": ">=22" },
+  "workspaces": [
+    "engine",
+    "worker"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "probe": "npm -w engine run probe",
     "history": "npm -w engine run history",
@@ -15,6 +20,7 @@
     "test": "npm -w engine test",
     "typecheck": "npm -w engine run typecheck && npm -w worker run typecheck",
     "dev": "npm -w worker run dev",
-    "deploy": "npm -w worker run deploy"
+    "deploy": "npm -w worker run deploy",
+    "supabase:check": "npm -w engine run supabase:check"
   }
 }
