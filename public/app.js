@@ -1,20 +1,39 @@
-// offside.win — the whole client. No framework, no build step, no bundler.
-// Every number rendered here was computed in GitHub Actions and stored as JSON;
-// this file only arranges it.
+/**
+ * offside.win — the front end.
+ *
+ * Everything on screen comes from /api/*, which serves finished JSON computed
+ * in GitHub Actions. This file fetches, routes and renders; it calculates
+ * nothing about football.
+ *
+ * One thing it does generate: team identity. The provider returns names and ids
+ * and no images at all — no crests, no player photos, no league marks — so a
+ * design built on badge rows would be a design full of holes. Instead each club
+ * gets a monogram whose colours are derived from its own name, which is stable
+ * for the life of the site, needs no asset pipeline, and never 404s.
+ */
 
 const app = document.getElementById('app');
-const statusEl = document.getElementById('status');
 
 // ---------------------------------------------------------------- helpers
 
 const esc = (s) =>
-  String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const pct = (v, dp = 1) => (v == null || !isFinite(v) ? '—' : `${(v * 100).toFixed(dp)}%`);
-const dec = (v, dp = 2) => (v == null || !isFinite(v) ? '—' : Number(v).toFixed(dp));
+const pct = (v, dp = 0) => (typeof v === 'number' && isFinite(v) ? `${(v * 100).toFixed(dp)}%` : '—');
+const dec = (v) => (typeof v === 'number' && isFinite(v) ? v.toFixed(2) : '—');
+
+async function getJSON(path) {
+  const res = await fetch(path);
+  if (!res.ok) {
+    let msg = `Request failed (${res.status})`;
+    try { msg = (await res.json()).error ?? msg; } catch { /* body was not json */ }
+    throw new Error(msg);
+  }
+  return res.json();
+}
 
 function kickoffLabel(epoch) {
+  if (!epoch) return '';
   const d = new Date(epoch * 1000);
   const now = new Date();
   const sameDay = d.toDateString() === now.toDateString();
@@ -25,176 +44,80 @@ function kickoffLabel(epoch) {
   return `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} ${time}`;
 }
 
-/** Turn a market code and outcome into something a person would say. */
-function marketLabel(market, outcome, line) {
-  const L = line == null ? '' : (line > 0 ? `+${line}` : String(line));
+/**
+ * A club's colours, from its own name.
+ *
+ * Hashed rather than random so a team looks the same on every page and every
+ * visit, and drawn from a hand-picked set of deep tones rather than the full
+ * hue wheel — an unconstrained hash produces the neon greens and muddy browns
+ * that make generated palettes look generated.
+ */
+const PALETTE = [
+  ['#1e3a8a', '#3b82f6'], ['#7f1d1d', '#ef4444'], ['#14532d', '#22c55e'],
+  ['#3b0764', '#a855f7'], ['#7c2d12', '#f97316'], ['#134e4a', '#14b8a6'],
+  ['#1e1b4b', '#6366f1'], ['#831843', '#ec4899'], ['#365314', '#84cc16'],
+  ['#422006', '#d4a574'], ['#0c4a6e', '#0ea5e9'], ['#4c0519', '#f43f5e'],
+];
+
+function hash(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h);
+}
+
+/** Up to three initials, skipping the club-type words that every side shares. */
+function initials(name) {
+  const skip = /^(fc|afc|ac|as|sv|sc|cf|cd|ud|rc|us|ss|ssc|bk|if|ik|fk|nk|hk|gks|kv|rkc|vfl|vfb|tsg|tsv|spvgg|1|de|do|la|le|el|al|club|the)$/i;
+  const words = String(name || '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  const core = words.filter((w) => !skip.test(w));
+  const use = (core.length ? core : words).slice(0, 3);
+  return use.map((w) => w[0].toUpperCase()).join('') || '?';
+}
+
+function crest(name, size = 'md') {
+  const [dark, light] = PALETTE[hash(String(name || '')) % PALETTE.length];
+  const text = initials(name);
+  const fit = text.length >= 3 ? 'font-size:0.72em' : '';
+  return `<span class="crest crest-${size}" style="background:linear-gradient(145deg,${light},${dark});${fit}"
+    aria-hidden="true">${esc(text)}</span>`;
+}
+
+// ---------------------------------------------------------------- markets
+
+const OUTCOME_WORD = {
+  HOME: 'Home win', DRAW: 'Draw', AWAY: 'Away win',
+  '1X': 'Home or draw', '12': 'Home or away', 'X2': 'Draw or away',
+  over: 'Over', under: 'Under', yes: 'Yes', no: 'No',
+};
+
+function marketLabel(market, outcome, line, home, away) {
+  const o = OUTCOME_WORD[outcome] ?? outcome;
   switch (market) {
-    case '1x2': return outcome === 'DRAW' ? 'Draw' : outcome === 'HOME' ? 'Home win' : 'Away win';
-    case 'double_chance': return `Double chance ${outcome}`;
-    case 'draw_no_bet': return `${outcome === 'HOME' ? 'Home' : 'Away'} draw-no-bet`;
-    case 'btts': return `Both teams to score — ${outcome}`;
-    case 'over_under_05': case 'over_under_15':
-    case 'over_under_25': case 'over_under_35':
-      return `${outcome === 'over' ? 'Over' : 'Under'} ${line ?? ''} goals`.trim();
-    case 'total_corners': return `${outcome === 'over' ? 'Over' : 'Under'} ${line ?? ''} corners`.trim();
-    case 'corners_1x2': return `Most corners — ${outcome === 'DRAW' ? 'tie' : outcome === 'HOME' ? 'home' : 'away'}`;
-    case 'total_red_cards': return `${outcome === 'over' ? 'Over' : 'Under'} ${line ?? ''} red cards`.trim();
-    case 'red_card': return outcome === 'yes' ? 'A red card shown' : 'No red card';
-    case 'european_handicap': return `${outcome === 'DRAW' ? 'Draw' : outcome === 'HOME' ? 'Home' : 'Away'} ${L} handicap`.trim();
-    case 'asian_handicap': return `${outcome === 'HOME' ? 'Home' : 'Away'} ${L} Asian`.trim();
-    default: return `${market} ${outcome}`;
+    case '1x2':
+      if (outcome === 'HOME' && home) return `${home} to win`;
+      if (outcome === 'AWAY' && away) return `${away} to win`;
+      return o;
+    case 'double_chance':
+      if (outcome === '1X' && home) return `${home} to win or draw`;
+      if (outcome === 'X2' && away) return `${away} to win or draw`;
+      return o;
+    case 'draw_no_bet': return `${outcome === 'HOME' ? home ?? 'Home' : away ?? 'Away'} (draw no bet)`;
+    case 'btts': return `Both teams to score — ${o.toLowerCase()}`;
+    case 'over_under_05': case 'over_under_15': case 'over_under_25': case 'over_under_35':
+      return `${o} ${line ?? ''} goals`.replace(/\s+/g, ' ').trim();
+    case 'total_corners': return `${o} ${line ?? ''} corners`.trim();
+    case 'asian_handicap': return `Asian handicap ${outcome} ${line > 0 ? '+' : ''}${line}`;
+    case 'european_handicap': return `European handicap ${outcome} ${line > 0 ? '+' : ''}${line}`;
+    case 'total_red_cards': return `${o} ${line ?? ''} red cards`.trim();
+    case 'red_card': return `A red card — ${o.toLowerCase()}`;
+    default: return `${market} ${o} ${line ?? ''}`.trim();
   }
-}
-
-async function getJSON(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText);
-  return res.json();
-}
-
-// ------------------------------------------------------------------ views
-
-async function viewBoard() {
-  app.innerHTML = '<div class="spinner">Loading the board…</div>';
-  const data = await getJSON('/api/board?hours=' + (state.hours ?? 72));
-
-  const leagues = [...new Map(data.fixtures.map((f) => [f.league_id, f.league])).entries()]
-    .sort((a, b) => String(a[1]).localeCompare(String(b[1])));
-
-  const shown = state.league
-    ? data.fixtures.filter((f) => String(f.league_id) === state.league)
-    : data.fixtures;
-
-  app.innerHTML = `
-    <h1>The board</h1>
-    <p class="lede">
-      Every fixture in the window with fitted ratings behind it. Cards show what the market
-      makes of the game and what, if anything, we would take against it. Most fixtures should
-      read <em>no call</em> — a correctly priced market is supposed to produce one.
-    </p>
-    <div class="filters">
-      <select id="league-filter">
-        <option value="">All competitions (${data.fixtures.length})</option>
-        ${leagues.map(([id, name]) =>
-          `<option value="${id}"${state.league === String(id) ? ' selected' : ''}>${esc(name)}</option>`).join('')}
-      </select>
-      <select id="hours-filter">
-        ${[24, 48, 72, 168].map((h) =>
-          `<option value="${h}"${(state.hours ?? 72) === h ? ' selected' : ''}>Next ${h} hours</option>`).join('')}
-      </select>
-    </div>
-    ${shown.length === 0
-      ? `<div class="empty">No fixtures priced in this window yet.</div>`
-      : `<div class="grid">${shown.map(cardHTML).join('')}</div>`}
-  `;
-
-  document.getElementById('league-filter').onchange = (e) => {
-    state.league = e.target.value;
-    viewBoard();
-  };
-  document.getElementById('hours-filter').onchange = (e) => {
-    state.hours = Number(e.target.value);
-    viewBoard();
-  };
-  for (const el of app.querySelectorAll('.card')) {
-    el.onclick = () => { location.hash = `#/fixture/${el.dataset.id}`; };
-  }
-}
-
-function cardHTML(f) {
-  const p = f.odds_1x2 ?? {};
-  const pick = f.top_pick;
-  return `
-  <article class="card" data-id="${f.id}">
-    <div class="card-top">
-      <span>${esc(f.league ?? '')}</span>
-      <span>${esc(kickoffLabel(f.kickoff))}</span>
-    </div>
-    <div class="teams">${esc(f.home)}<span class="v">v</span>${esc(f.away)}</div>
-    <div class="probs">
-      <div class="prob"><span>H</span><b>${pct(p.HOME, 0)}</b></div>
-      <div class="prob"><span>D</span><b>${pct(p.DRAW, 0)}</b></div>
-      <div class="prob"><span>A</span><b>${pct(p.AWAY, 0)}</b></div>
-    </div>
-    <div class="pick-line${pick ? '' : ' pass'}">
-      ${pick
-        ? `<span class="tag ${pick.kind.toLowerCase()}">${pick.kind === 'CONFIDENT' ? 'CALL' : pick.kind}</span>
-           <span>${esc(marketLabel(pick.market, pick.outcome, pick.line))}</span>
-           <span class="odds">${pick.kind === 'CONFIDENT' && pick.prob ? pct(pick.prob, 0) : dec(pick.odds)}</span>`
-        : `<span>No call — see the reasoning</span>`}
-    </div>
-    ${(f.confident ?? []).length > 1
-      ? `<div class="also">${(f.confident ?? []).slice(1).map((c) =>
-          `<span class="also-call">${esc(marketLabel(c.market, c.outcome, c.line))} <b>${pct(c.prob, 0)}</b>${
-            c.caveat ? '<i class="caveat" title="our context argues against this">!</i>' : ''}</span>`).join('')}</div>`
-      : ''}
-    ${f.provisional
-      ? `<div class="factor-meta" style="margin-top:8px"><span class="tag prov">provisional</span>
-         <span>lineup ${esc(f.lineup_status)}</span></div>`
-      : ''}
-  </article>`;
-}
-
-async function viewFixture(id) {
-  app.innerHTML = '<div class="spinner">Loading the analysis…</div>';
-  let f;
-  try {
-    f = await getJSON(`/api/fixture/${id}`);
-  } catch (err) {
-    app.innerHTML = `<button class="back">← Board</button><div class="empty">${esc(err.message)}</div>`;
-    app.querySelector('.back').onclick = () => { location.hash = '#/board'; };
-    return;
-  }
-
-  const counts = (f.ledger ?? []).reduce((a, x) => { a[x.state] = (a[x.state] ?? 0) + 1; return a; }, {});
-
-  app.innerHTML = `
-    <button class="back">← Board</button>
-    <h1>${esc(f.home)} <span style="color:var(--ink-faint);font-weight:400">v</span> ${esc(f.away)}</h1>
-    <p class="lede">
-      ${esc(f.league ?? '')} · ${esc(kickoffLabel(f.kickoff))} ·
-      lineup ${esc(f.lineup_status)}${f.provisional ? ' — every call here is provisional until the eleven is named' : ''}
-    </p>
-
-    <div class="stat-row">
-      <div class="stat"><div class="k">Expected goals</div><div class="v">${dec(f.lambda_home)}–${dec(f.lambda_away)}</div></div>
-      <div class="stat"><div class="k">Expected corners</div><div class="v">${dec(f.corner_rate, 1)}</div></div>
-      <div class="stat"><div class="k">Expected reds</div><div class="v">${dec(f.card_rate, 2)}</div></div>
-      <div class="stat"><div class="k">Confidence</div><div class="v">${pct(f.confidence, 0)}</div></div>
-    </div>
-
-    ${(f.verdicts ?? []).map(verdictHTML).join('')}
-    ${f.pass_reason ? `<div class="pass-box">${esc(f.pass ?? f.pass_reason)}</div>` : ''}
-
-    <h2>The evidence</h2>
-    <p class="lede" style="margin-bottom:14px">
-      Every factor the model looked at, in the order the doctrine ranks them.
-      <b>${counts.COMPUTED ?? 0} computed</b>, ${counts.THIN ?? 0} too thin to use,
-      ${counts.UNAVAILABLE ?? 0} unavailable. Thin and unavailable factors are shown in place
-      rather than hidden — a fixture we know little about should look like one.
-    </p>
-    <div class="ledger">${(f.ledger ?? []).map(factorHTML).join('')}</div>
-
-    <h2>Every market</h2>
-    <div class="scroll"><table>
-      <thead><tr>
-        <th>Market</th><th>Outcome</th><th style="text-align:right">Our price</th>
-        <th style="text-align:right">Book</th><th style="text-align:right">Edge</th>
-        <th style="text-align:right">Best</th><th>Where</th>
-      </tr></thead>
-      <tbody>${marketRows(f)}</tbody>
-    </table></div>
-
-    ${f.external && Object.keys(f.external).length
-      ? `<h2>Other opinions</h2>
-         <p class="lede">Recorded alongside ours and never used as the call.</p>
-         <details class="evidence" style="background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px">
-           <summary>Provider model and prediction-market prices</summary>
-           <pre>${esc(JSON.stringify(f.external, null, 2))}</pre>
-         </details>`
-      : ''}
-  `;
-  app.querySelector('.back').onclick = () => { location.hash = '#/board'; };
 }
 
 const VERDICT_LABEL = {
@@ -203,26 +126,239 @@ const VERDICT_LABEL = {
   CONFIDENT: 'high-confidence call',
 };
 
-function verdictHTML(v) {
+// ------------------------------------------------------------------ state
+
+const state = { board: null, hours: 72, league: '', model: null };
+
+// ------------------------------------------------------------------ views
+
+function heroHTML() {
+  return `
+  <section class="hero">
+    <div class="hero-media">
+      <img src="https://images.unsplash.com/photo-1522778119026-d647f0596c20?auto=format&fit=crop&w=2000&q=70"
+           alt="" loading="eager" fetchpriority="high">
+    </div>
+    <div class="hero-inner">
+      <p class="eyebrow">88 leagues · updated every 30 minutes</p>
+      <h1 class="display">The picks for<br>the biggest games.</h1>
+      <p class="script hero-script">Every pick,<br>explained.</p>
+      <p class="lede">
+        Every call on this site shows its working: the ratings behind it, the team news,
+        the schedule, and what the price actually pays. Including the reasons not to like it.
+      </p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <a class="btn btn-primary" href="#/board">View today's picks
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        <a class="btn btn-ghost" href="#/model">How it works</a>
+      </div>
+    </div>
+  </section>`;
+}
+
+function railHTML(fixtures) {
+  const byLeague = new Map();
+  for (const f of fixtures) {
+    const k = f.league ?? `League ${f.league_id}`;
+    byLeague.set(k, (byLeague.get(k) ?? 0) + 1);
+  }
+  const top = [...byLeague].sort((a, b) => b[1] - a[1]).slice(0, 14);
+  if (!top.length) return '';
+  return `
+  <div class="rail"><div class="rail-inner">
+    <span class="rail-label">On the board</span>
+    ${top.map(([name, n]) => `
+      <a class="rail-item" href="#/board">${crest(name, 'sm')}<b>${esc(name)}</b><span class="count">${n}</span></a>`).join('')}
+  </div></div>`;
+}
+
+function cardHTML(f) {
+  const p = f.odds_1x2 ?? {};
+  const pick = f.top_pick;
+  const extra = (f.confident ?? []).slice(pick && pick.kind === 'CONFIDENT' ? 1 : 0);
+  return `
+  <article class="card" data-id="${f.id}" tabindex="0" role="link" aria-label="${esc(f.home)} versus ${esc(f.away)}">
+    <div class="card-top">
+      <span class="card-league">${crest(f.league ?? '', 'sm')}<span>${esc(f.league ?? '')}</span></span>
+      <span class="card-kick">${esc(kickoffLabel(f.kickoff))}</span>
+    </div>
+    <div class="card-teams">
+      <div class="team-row">${crest(f.home, 'md')}<span class="name">${esc(f.home)}</span><span class="pc">${pct(p.HOME)}</span></div>
+      <div class="team-row">${crest(f.away, 'md')}<span class="name">${esc(f.away)}</span><span class="pc">${pct(p.AWAY)}</span></div>
+    </div>
+    ${pick
+      ? `<div class="card-pick">
+           <span class="tag ${esc(pick.kind.toLowerCase())}">${pick.kind === 'CONFIDENT' ? 'Call' : esc(pick.kind)}</span>
+           <span class="sel">${esc(marketLabel(pick.market, pick.outcome, pick.line, f.home, f.away))}</span>
+           <span class="num">${pick.kind === 'CONFIDENT' && pick.prob ? pct(pick.prob) : dec(pick.odds)}</span>
+         </div>`
+      : `<div class="card-pick none">No call here — the price looks right</div>`}
+    ${extra.length
+      ? `<div class="also">${extra.map((c) => `
+          <span class="also-call">${esc(marketLabel(c.market, c.outcome, c.line, f.home, f.away))} <b>${pct(c.prob)}</b>${
+            c.caveat ? '<i class="caveat" title="our context argues against this">!</i>' : ''}</span>`).join('')}</div>`
+      : ''}
+    ${f.provisional ? `<div><span class="tag prov">lineup ${esc(f.lineup_status ?? 'unconfirmed')}</span></div>` : ''}
+  </article>`;
+}
+
+function explainHTML(sample) {
+  if (!sample) return '';
+  const { fixture, verdict } = sample;
+  return `
+  <section class="explain">
+    <div class="wrap section">
+      <div class="explain-grid">
+        <div>
+          <p class="eyebrow">What makes this different</p>
+          <h2 class="display">Anyone can post<br>a favourite.</h2>
+          <p class="lede" style="margin-top:18px">
+            The hard part is saying why — and saying what the number has not accounted for.
+            Every pick here carries its reasoning, drawn from the same evidence the model priced it on.
+          </p>
+          <ul class="points">
+            <li><span class="n">01</span><div><b>The case, with numbers</b><span>Expected goals, team news, schedule and stakes — each cited from what was actually measured.</span></div></li>
+            <li><span class="n">02</span><div><b>The reservation, out loud</b><span>Where our context argues against the call, it says so. That is the sentence nobody else prints.</span></div></li>
+            <li><span class="n">03</span><div><b>What it pays</b><span>A high strike rate at short odds is not a profit. The return sits next to the confidence, every time.</span></div></li>
+          </ul>
+        </div>
+        <div class="quote">
+          <div class="qmeta">
+            ${crest(fixture.home, 'sm')}<b style="color:var(--ink);font-weight:600">${esc(fixture.home)} v ${esc(fixture.away)}</b>
+            <span class="tag ${esc(verdict.kind.toLowerCase())}">${esc(VERDICT_LABEL[verdict.kind] ?? verdict.kind)}</span>
+          </div>
+          ${esc(verdict.narrative)}
+        </div>
+      </div>
+    </div>
+  </section>`;
+}
+
+async function viewHome() {
+  app.innerHTML = heroHTML() + '<div class="spinner">Loading the board…</div>';
+  let board;
+  try {
+    board = await loadBoard();
+  } catch (err) {
+    app.innerHTML = heroHTML() + `<div class="wrap section"><div class="empty">${esc(err.message)}</div></div>`;
+    return;
+  }
+  const fixtures = board.fixtures ?? [];
+  const withPicks = fixtures.filter((f) => f.top_pick);
+  const top = [...withPicks]
+    .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
+    .slice(0, 8);
+
+  app.innerHTML =
+    heroHTML() +
+    railHTML(fixtures) +
+    `<div class="wrap section">
+      <div class="section-head">
+        <div>
+          <h2 class="display">Today's top picks</h2>
+          <p>${withPicks.length} calls across ${new Set(fixtures.map((f) => f.league)).size} leagues, recomputed every 30 minutes.</p>
+        </div>
+        <a class="btn btn-ghost" href="#/board">All ${fixtures.length} fixtures</a>
+      </div>
+      ${top.length ? `<div class="cards">${top.map(cardHTML).join('')}</div>`
+                   : `<div class="empty">Nothing clears the bar right now. That is the analysis working, not failing.</div>`}
+    </div>` +
+    explainHTML(await sampleNarrative(top));
+
+  wireCards();
+}
+
+/** Pull one real narrative for the explainer band rather than inventing one. */
+async function sampleNarrative(candidates) {
+  for (const f of candidates.slice(0, 4)) {
+    try {
+      const full = await getJSON(`/api/fixture/${f.id}`);
+      const v = (full.verdicts ?? []).find((x) => x.narrative && x.narrative.length > 120);
+      if (v) return { fixture: full, verdict: v };
+    } catch { /* try the next one */ }
+  }
+  return null;
+}
+
+async function loadBoard() {
+  const q = new URLSearchParams({ hours: String(state.hours) });
+  if (state.league) q.set('league', state.league);
+  state.board = await getJSON(`/api/board?${q}`);
+  return state.board;
+}
+
+async function viewBoard() {
+  app.innerHTML = '<div class="wrap section"><div class="spinner">Loading the board…</div></div>';
+  let board;
+  try {
+    board = await loadBoard();
+  } catch (err) {
+    app.innerHTML = `<div class="wrap section"><div class="empty">${esc(err.message)}</div></div>`;
+    return;
+  }
+  const fixtures = board.fixtures ?? [];
+  const leagues = [...new Set(fixtures.map((f) => f.league).filter(Boolean))].sort();
+
+  app.innerHTML = `
+  <div class="wrap section">
+    <div class="section-head">
+      <div>
+        <h2 class="display">The board</h2>
+        <p>${fixtures.length} fixtures in the window. ${fixtures.filter((f) => f.top_pick).length} carry a call.</p>
+      </div>
+      <div class="filters">
+        <select id="hours-filter" aria-label="Time window">
+          ${[24, 48, 72, 120, 240].map((h) => `<option value="${h}"${h === state.hours ? ' selected' : ''}>Next ${h}h</option>`).join('')}
+        </select>
+        <select id="league-filter" aria-label="League">
+          <option value="">All leagues</option>
+          ${leagues.map((l) => `<option${l === state.leagueName ? ' selected' : ''}>${esc(l)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    ${fixtures.length ? `<div class="cards" id="grid">${fixtures.map(cardHTML).join('')}</div>`
+                      : `<div class="empty">No fixtures in this window.</div>`}
+  </div>`;
+
+  document.getElementById('hours-filter').onchange = (e) => {
+    state.hours = Number(e.target.value);
+    viewBoard();
+  };
+  document.getElementById('league-filter').onchange = (e) => {
+    state.leagueName = e.target.value;
+    const grid = document.getElementById('grid');
+    const shown = e.target.value ? fixtures.filter((f) => f.league === e.target.value) : fixtures;
+    grid.innerHTML = shown.length ? shown.map(cardHTML).join('') : '';
+    wireCards();
+  };
+  wireCards();
+}
+
+function wireCards() {
+  for (const el of app.querySelectorAll('.card')) {
+    const go = () => { location.hash = `#/fixture/${el.dataset.id}`; };
+    el.onclick = go;
+    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+  }
+}
+
+function verdictHTML(v, home, away) {
   const c = v.candidate;
   const confident = v.kind === 'CONFIDENT';
   return `
-  <div class="verdict ${v.kind.toLowerCase()}">
+  <div class="verdict">
     <div class="verdict-head">
-      <span class="tag ${v.kind.toLowerCase()}">${VERDICT_LABEL[v.kind] ?? esc(v.kind)}</span>
-      <span class="sel">${esc(marketLabel(c.market, c.outcome, c.line))}</span>
+      <span class="tag ${esc(v.kind.toLowerCase())}">${esc(VERDICT_LABEL[v.kind] ?? v.kind)}</span>
+      <span class="sel">${esc(marketLabel(c.market, c.outcome, c.line, home, away))}</span>
       <span class="odds">${dec(c.odds)}</span>
-      <span class="tag muted">${esc(c.bookmaker ?? '')}</span>
     </div>
     <p class="narrative">${esc(v.narrative)}</p>
     ${confident
-      // Edge and stake are meaningless on a call that agrees with the price —
-      // both are ~0 by construction — and printing them would imply a value the
-      // call does not claim. What a reader needs instead is what it returns.
       ? `<div class="numbers">
            <span>confidence <b>${pct(c.model_prob)}</b></span>
            <span>price <b>${dec(c.odds)}</b></span>
            <span>returns <b>${((c.odds - 1) * 100).toFixed(0)}p</b> in the pound</span>
+           ${c.bookmaker ? `<span>at <b>${esc(c.bookmaker)}</b></span>` : ''}
          </div>
          <p class="disclosure">A confidence, not a tip. This agrees with the market price rather than
          disputing it, so it is a read on the match — not a claim that betting it makes money.</p>`
@@ -231,237 +367,283 @@ function verdictHTML(v) {
            <span>market <b>${pct(c.book_prob)}</b></span>
            <span>edge <b>${(c.edge * 100).toFixed(1)} pts</b></span>
            <span>stake <b>${pct(c.kelly, 2)}</b> of bank</span>
+           ${c.bookmaker ? `<span>at <b>${esc(c.bookmaker)}</b></span>` : ''}
          </div>`}
-    ${v.set_aside && v.set_aside.length
-      ? `<details class="evidence"><summary>Assessed and set aside (${v.set_aside.length})</summary>
-         <pre>${esc(v.set_aside.map((s) => `${s.section} ${s.note}`).join('\n\n'))}</pre></details>`
+  </div>`;
+}
+
+function factorHTML(f) {
+  return `
+  <div class="factor">
+    <div class="factor-top">
+      <span class="state ${esc((f.state ?? '').toLowerCase())}">${esc(f.state ?? '')}</span>
+      <b style="font-size:0.85rem">${esc(f.id ?? '')}</b>
+      <span class="sec">${esc(f.section ?? '')}</span>
+    </div>
+    <p class="factor-note">${esc(f.note ?? '')}</p>
+  </div>`;
+}
+
+async function viewFixture(id) {
+  app.innerHTML = '<div class="wrap section"><div class="spinner">Loading the analysis…</div></div>';
+  let f;
+  try {
+    f = await getJSON(`/api/fixture/${id}`);
+  } catch (err) {
+    app.innerHTML = `<div class="wrap section"><button class="back">← Board</button><div class="empty">${esc(err.message)}</div></div>`;
+    app.querySelector('.back').onclick = () => { location.hash = '#/board'; };
+    return;
+  }
+
+  const p = f.odds_1x2 ?? {};
+  const verdicts = f.verdicts ?? [];
+  const ledger = f.ledger ?? [];
+  const computed = ledger.filter((x) => x.state === 'COMPUTED');
+  const other = ledger.filter((x) => x.state !== 'COMPUTED');
+
+  app.innerHTML = `
+  <div class="wrap section">
+    <button class="back">← Back to the board</button>
+
+    <div class="fx-hero">
+      <div class="fx-teams">
+        <div class="fx-side">${crest(f.home, 'lg')}<span class="name">${esc(f.home)}</span></div>
+        <div class="fx-mid">
+          <div class="fx-score">${pct(p.HOME)} <span style="color:var(--ink-3);font-size:0.5em">/</span> ${pct(p.DRAW)} <span style="color:var(--ink-3);font-size:0.5em">/</span> ${pct(p.AWAY)}</div>
+          <div class="fx-when">${esc(kickoffLabel(f.kickoff))}</div>
+        </div>
+        <div class="fx-side">${crest(f.away, 'lg')}<span class="name">${esc(f.away)}</span></div>
+      </div>
+      <div class="fx-meta">
+        <span>${esc(f.league ?? '')}</span>
+        <span>·</span>
+        <span>model rates ${dec(f.lambda?.[0])} — ${dec(f.lambda?.[1])} goals</span>
+        ${f.provisional ? `<span>·</span><span class="tag prov">lineup ${esc(f.lineup_status ?? 'unconfirmed')}</span>` : ''}
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <div class="panel">
+          <p class="panel-head">${verdicts.length ? 'The calls' : 'No call'}</p>
+          ${verdicts.length
+            ? verdicts.map((v) => verdictHTML(v, f.home, f.away)).join('')
+            : `<p class="narrative">${esc(f.pass ?? 'Nothing here cleared the evidence bar. A pass is the analysis working, not failing.')}</p>`}
+        </div>
+        ${computed.length ? `<div class="panel">
+          <p class="panel-head">What the model found (${computed.length})</p>
+          ${computed.map(factorHTML).join('')}
+        </div>` : ''}
+      </div>
+
+      <div>
+        <div class="panel">
+          <p class="panel-head">Model rates</p>
+          <div class="bars">
+            ${barRow('H', p.HOME)}${barRow('D', p.DRAW)}${barRow('A', p.AWAY)}
+          </div>
+          <div class="numbers" style="margin-top:16px">
+            <span>corners <b>${dec(f.corner_rate)}</b></span>
+            <span>cards <b>${dec(f.card_rate)}</b></span>
+            <span>confidence <b>${pct(f.confidence)}</b></span>
+          </div>
+        </div>
+        ${other.length ? `<div class="panel">
+          <p class="panel-head">Assessed, not used (${other.length})</p>
+          ${other.map(factorHTML).join('')}
+        </div>` : ''}
+      </div>
+    </div>
+  </div>`;
+
+  app.querySelector('.back').onclick = () => { history.length > 1 ? history.back() : (location.hash = '#/board'); };
+}
+
+function barRow(label, v) {
+  const w = typeof v === 'number' ? Math.round(v * 100) : 0;
+  return `<div class="bar-row"><span>${label}</span><span class="bar"><i class="${label === 'A' ? 'a' : 'h'}" style="width:${w}%"></i></span><span>${w}%</span></div>`;
+}
+
+async function viewResults() {
+  app.innerHTML = '<div class="wrap section"><div class="spinner">Loading the ledger…</div></div>';
+  let data;
+  try {
+    data = await getJSON('/api/picks?limit=120');
+  } catch (err) {
+    app.innerHTML = `<div class="wrap section"><div class="empty">${esc(err.message)}</div></div>`;
+    return;
+  }
+  const byKind = data.summary_by_kind ?? {};
+  const picks = data.picks ?? [];
+  const settled = picks.filter((x) => x.result);
+
+  const kindBlock = (kind, s) => `
+    <div class="stat"><b>${s.n ?? 0}</b><span>${esc(kind)} settled</span></div>
+    <div class="stat"><b>${s.n ? `${Math.round((100 * (s.wins ?? 0)) / s.n)}%` : '—'}</b><span>${esc(kind)} strike</span></div>
+    <div class="stat"><b>${typeof s.pnl === 'number' ? (s.pnl >= 0 ? '+' : '') + s.pnl.toFixed(2) : '—'}</b><span>${esc(kind)} units</span></div>`;
+
+  app.innerHTML = `
+  <div class="wrap section">
+    <div class="section-head"><div>
+      <h2 class="display">Results</h2>
+      <p>Every settled pick, graded against the real result. Kinds are kept apart on purpose —
+         a call at 1.16 and a value bet at 2.50 are different products and averaging them describes neither.</p>
+    </div></div>
+    ${Object.keys(byKind).length
+      ? `<div class="ledger">${Object.entries(byKind).map(([k, s]) => kindBlock(k, s)).join('')}</div>`
+      : `<div class="empty" style="margin-bottom:22px">Nothing has settled yet. The ledger fills as fixtures finish — and an empty one is
+         stated as empty rather than filled with a number that would flatter us.</div>`}
+    ${picks.length ? `<div class="scroll-x"><table class="tbl">
+      <thead><tr><th>Fixture</th><th>Call</th><th>Kind</th><th class="num">Odds</th><th class="num">Result</th><th class="num">P/L</th></tr></thead>
+      <tbody>${picks.map((x) => `
+        <tr>
+          <td>${x.home_team ? `${esc(x.home_team)} v ${esc(x.away_team)}` : `Fixture ${x.fixture_id}`}</td>
+          <td>${esc(marketLabel(x.market, x.outcome, x.line, x.home_team, x.away_team))}</td>
+          <td><span class="tag ${esc((x.kind ?? '').toLowerCase())}">${x.kind === 'CONFIDENT' ? 'Call' : esc(x.kind ?? '')}</span></td>
+          <td class="num">${dec(x.odds)}</td>
+          <td class="num">${x.result ? `<span class="tag ${x.result === 'WON' || x.result === 'HALF_WON' ? 'won' : 'lost'}">${esc(x.result)}</span>` : '<span style="color:var(--ink-3)">open</span>'}</td>
+          <td class="num">${typeof x.pnl === 'number' ? (x.pnl >= 0 ? '+' : '') + x.pnl.toFixed(2) : '—'}</td>
+        </tr>`).join('')}</tbody></table></div>`
+      : `<div class="empty">No picks published yet.</div>`}
+    ${settled.length === 0 && picks.length > 0
+      ? `<p class="foot-note" style="margin-top:18px">${picks.length} picks are open and none have settled, so there is no strike rate or return to show yet.</p>`
       : ''}
   </div>`;
 }
 
-function factorHTML(x) {
-  const moves = (x.moves ?? [])
-    .map((m) => `<span class="move ${m.pct > 0 ? 'up' : 'down'}">${m.channel} ${m.side} ${m.pct > 0 ? '+' : ''}${m.pct}%</span>`)
-    .join('');
-  const hasEvidence = x.evidence && Object.keys(x.evidence).length > 0;
-  return `
-  <div class="factor ${x.state.toLowerCase()}">
-    <div class="factor-state">${x.state}</div>
-    <div>
-      <div class="factor-note">${esc(x.note)}</div>
-      <div class="factor-meta">
-        <span>${esc(x.section)}</span>
-        <span>tier ${x.tier}</span>
-        ${moves}
-      </div>
-      ${hasEvidence
-        ? `<details class="evidence"><summary>evidence</summary><pre>${esc(JSON.stringify(x.evidence, null, 2))}</pre></details>`
-        : ''}
+async function viewModel() {
+  app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
+  let m;
+  try {
+    m = await getJSON('/api/model');
+  } catch (err) {
+    app.innerHTML = `<div class="wrap section"><div class="empty">${esc(err.message)}</div></div>`;
+    return;
+  }
+  const bt = m.backtest?.report;
+  const leagues = m.leagues ?? [];
+
+  app.innerHTML = `
+  <div class="wrap section">
+    <div class="section-head"><div>
+      <h2 class="display">How it works</h2>
+      <p>Ratings are fitted from match history; prices come from real bookmaker quotes; context is
+         read per fixture. Nothing on this page is an estimate of what it could be.</p>
+    </div></div>
+
+    ${bt ? `<div class="ledger">
+      <div class="stat"><b>${(bt.models?.full && meanLL(bt.models.full).toFixed(4)) ?? '—'}</b><span>log loss</span></div>
+      <div class="stat"><b>${(bt.matches ?? bt.total_matches ?? 0).toLocaleString()}</b><span>matches tested</span></div>
+      <div class="stat"><b>${bt.leagues ?? leagues.length}</b><span>leagues</span></div>
+      <div class="stat"><b>${bt.refits ?? '—'}</b><span>walk-forward refits</span></div>
+    </div>` : ''}
+
+    <div class="panel">
+      <p class="panel-head">Fitted leagues (${leagues.length})</p>
+      <div class="scroll-x"><table class="tbl">
+        <thead><tr><th>League</th><th class="num">Matches</th><th class="num">Home edge</th><th class="num">Mean goals</th><th class="num">Fitted</th></tr></thead>
+        <tbody>${leagues.slice(0, 40).map((l) => `
+          <tr>
+            <td>${crest(l.name ?? '', 'sm')} ${esc(l.name ?? `League ${l.league_id}`)}</td>
+            <td class="num">${(l.n_matches ?? 0).toLocaleString()}</td>
+            <td class="num">${dec(l.home_adv)}</td>
+            <td class="num">${dec(l.mean_goals)}</td>
+            <td class="num">${l.fitted_at ? new Date(l.fitted_at * 1000).toLocaleDateString() : '—'}</td>
+          </tr>`).join('')}</tbody>
+      </table></div>
     </div>
   </div>`;
 }
 
-function marketRows(f) {
-  const rows = [];
-  for (const m of f.markets ?? []) {
-    for (const [outcome, ourP] of Object.entries(m.model ?? {})) {
-      const bookP = (m.book ?? {})[outcome];
-      const best = (m.best ?? {})[outcome];
-      const edge = bookP == null ? null : ourP - bookP;
-      rows.push({ m, outcome, ourP, bookP, best, edge });
-    }
+function meanLL(set) {
+  const vals = Object.values(set).filter((s) => s && s.n > 0).map((s) => s.logLoss);
+  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : NaN;
+}
+
+async function viewLeagues() {
+  app.innerHTML = '<div class="wrap section"><div class="spinner">Loading leagues…</div></div>';
+  const board = state.board ?? (await loadBoard());
+  const fixtures = board.fixtures ?? [];
+  const byLeague = new Map();
+  for (const f of fixtures) {
+    const k = f.league ?? `League ${f.league_id}`;
+    const e = byLeague.get(k) ?? { n: 0, picks: 0 };
+    e.n++;
+    if (f.top_pick) e.picks++;
+    byLeague.set(k, e);
   }
-  rows.sort((a, b) => (b.edge ?? -9) - (a.edge ?? -9));
-  if (rows.length === 0) return `<tr><td colspan="7" class="empty">No priced markets yet.</td></tr>`;
-  return rows
-    .map((r) => `
-      <tr>
-        <td>${esc(r.m.market)}${r.m.line != null ? ` <span style="color:var(--ink-faint)">${r.m.line}</span>` : ''}</td>
-        <td>${esc(r.outcome)}</td>
-        <td class="num">${pct(r.ourP)}</td>
-        <td class="num">${r.bookP == null ? '—' : pct(r.bookP)}</td>
-        <td class="num ${r.edge > 0 ? 'pos' : r.edge < 0 ? 'neg' : ''}">${r.edge == null ? '—' : (r.edge * 100).toFixed(1)}</td>
-        <td class="num">${r.best ? dec(r.best.odds) : '—'}</td>
-        <td style="color:var(--ink-faint)">${esc(r.best?.bookmaker ?? '')}</td>
-      </tr>`)
-    .join('');
-}
-
-async function viewPicks() {
-  app.innerHTML = '<div class="spinner">Loading picks…</div>';
-  const data = await getJSON('/api/picks?limit=120');
-  const s = data.summary ?? {};
-  const settled = Number(s.n ?? 0);
-  const roi = settled > 0 ? Number(s.pnl ?? 0) / settled : null;
+  const rows = [...byLeague].sort((a, b) => b[1].n - a[1].n);
 
   app.innerHTML = `
-    <h1>Picks</h1>
-    <p class="lede">
-      Every call published, graded at the price taken once the match finishes.
-      Returns are shown to one unit staked flat, not to the Kelly fraction — a flat record is
-      the honest one to judge a model by.
-    </p>
-    <div class="stat-row">
-      <div class="stat"><div class="k">Settled</div><div class="v">${settled}</div></div>
-      <div class="stat"><div class="k">Won</div><div class="v">${s.wins ?? 0}</div></div>
-      <div class="stat"><div class="k">Units</div><div class="v" style="color:${Number(s.pnl ?? 0) >= 0 ? 'var(--accent)' : 'var(--bad)'}">${settled ? (Number(s.pnl) >= 0 ? '+' : '') + dec(s.pnl) : '—'}</div></div>
-      <div class="stat"><div class="k">ROI</div><div class="v" style="color:${(roi ?? 0) >= 0 ? 'var(--accent)' : 'var(--bad)'}">${roi == null ? '—' : pct(roi)}</div></div>
-      <div class="stat"><div class="k">Avg price</div><div class="v">${dec(s.avg_odds)}</div></div>
+  <div class="wrap section">
+    <div class="section-head"><div>
+      <h2 class="display">Leagues</h2>
+      <p>${rows.length} leagues have fixtures in the current window, out of 88 tracked.</p>
+    </div></div>
+    <div class="cards">
+      ${rows.map(([name, e]) => `
+        <article class="card" data-league="${esc(name)}">
+          <div class="card-top"><span class="card-league">${crest(name, 'md')}<span>${esc(name)}</span></span></div>
+          <div class="numbers" style="margin:0">
+            <span>fixtures <b>${e.n}</b></span>
+            <span>calls <b>${e.picks}</b></span>
+          </div>
+        </article>`).join('')}
     </div>
-    ${settled < 50 ? `<div class="note">
-      <b>Too early to judge.</b> ${settled} settled ${settled === 1 ? 'pick' : 'picks'} is nowhere near
-      enough to separate skill from variance — several hundred is the region where a record starts
-      meaning something. The number above is reported because hiding it would be worse, not because
-      it is yet evidence of anything.
-    </div>` : ''}
-    <div class="scroll"><table>
-      <thead><tr>
-        <th>Kickoff</th><th>Fixture</th><th>Selection</th>
-        <th style="text-align:right">Odds</th><th style="text-align:right">Ours</th>
-        <th style="text-align:right">Edge</th><th>Result</th><th style="text-align:right">P/L</th>
-      </tr></thead>
-      <tbody>${(data.picks ?? []).map(pickRow).join('') || `<tr><td colspan="8" class="empty">No picks published yet.</td></tr>`}</tbody>
-    </table></div>
-  `;
+  </div>`;
+
+  for (const el of app.querySelectorAll('[data-league]')) {
+    el.onclick = () => { state.leagueName = el.dataset.league; location.hash = '#/board'; };
+  }
 }
 
-function pickRow(p) {
-  const resultColour = ['WON', 'HALF_WON'].includes(p.result) ? 'pos'
-    : ['LOST', 'HALF_LOST'].includes(p.result) ? 'neg' : '';
-  return `
-  <tr style="cursor:pointer" onclick="location.hash='#/fixture/${p.fixture_id}'">
-    <td style="color:var(--ink-faint)">${esc(kickoffLabel(p.kickoff))}</td>
-    <td>${esc(p.home_team ?? '')} v ${esc(p.away_team ?? '')}</td>
-    <td>${esc(marketLabel(p.market, p.outcome, p.line))} <span class="tag ${String(p.kind).toLowerCase()}">${esc(p.kind)}</span></td>
-    <td class="num">${dec(p.odds)}</td>
-    <td class="num">${pct(p.model_prob, 0)}</td>
-    <td class="num ${p.edge > 0 ? 'pos' : 'neg'}">${(p.edge * 100).toFixed(1)}</td>
-    <td class="${resultColour}">${p.result ? esc(p.result.replace('_', ' ').toLowerCase()) : '<span style="color:var(--ink-faint)">pending</span>'}</td>
-    <td class="num ${p.pnl > 0 ? 'pos' : p.pnl < 0 ? 'neg' : ''}">${p.pnl == null ? '—' : (p.pnl > 0 ? '+' : '') + dec(p.pnl)}</td>
-  </tr>`;
-}
-
-async function viewModel() {
-  app.innerHTML = '<div class="spinner">Loading model diagnostics…</div>';
-  const data = await getJSON('/api/model');
-  const bt = data.backtest?.report;
-
-  app.innerHTML = `
-    <h1>The model</h1>
-    <p class="lede">
-      Attack and defence fitted per league by maximum likelihood with time decay, a low-score
-      correction and shrinkage toward the league mean. Every market is priced off one score
-      distribution, so the numbers cannot contradict each other.
-    </p>
-
-    ${bt ? `
-      <h2>Walk-forward backtest</h2>
-      <div class="note" style="border-left-color:${bt.improvement.vs_naive_poisson > 0 && bt.improvement.vs_base_rate > 0 ? 'var(--accent)' : 'var(--bad)'}">
-        ${esc(bt.verdict)}
-      </div>
-      <p class="lede">
-        ${bt.matches.toLocaleString()} matches across ${bt.leagues} leagues, ${bt.refits} refits.
-        The model never saw the match it was predicting. No return figure is shown here: that needs
-        historical closing prices we do not hold, and a backtested ROI from reconstructed odds would
-        be the most flattering and least trustworthy number on this page.
-      </p>
-      <div class="scroll"><table>
-        <thead><tr><th>Market</th><th style="text-align:right">n</th>
-          <th style="text-align:right">Log loss</th><th style="text-align:right">Brier</th>
-          <th style="text-align:right">vs naive</th></tr></thead>
-        <tbody>${Object.entries(bt.models.full ?? {}).filter(([, v]) => v.n > 0).map(([k, v]) => {
-          const naive = bt.models.naive_poisson?.[k];
-          const diff = naive ? naive.logLoss - v.logLoss : null;
-          return `<tr>
-            <td>${esc(k)}</td>
-            <td class="num">${v.n.toLocaleString()}</td>
-            <td class="num">${dec(v.logLoss, 4)}</td>
-            <td class="num">${dec(v.brier, 4)}</td>
-            <td class="num ${diff > 0 ? 'pos' : 'neg'}">${diff == null ? '—' : (diff > 0 ? '+' : '') + dec(diff, 4)}</td>
-          </tr>`;
-        }).join('')}</tbody>
-      </table></div>
-    ` : `<div class="note">No backtest has been run yet. Trigger the <code>backtest</code> workflow to produce one — until then there is no evidence on this page that the model works.</div>`}
-
-    <h2>Live calibration</h2>
-    <p class="lede">
-      What the model said would happen, against what did. Markets it has been overconfident on have
-      their edge cut automatically — that multiplier is the <em>shrink</em> column, and it is applied
-      before anything is ranked.
-    </p>
-    <div class="scroll"><table>
-      <thead><tr><th>Market family</th><th style="text-align:right">n</th>
-        <th style="text-align:right">We said</th><th style="text-align:right">Happened</th>
-        <th style="text-align:right">Brier</th><th style="text-align:right">ROI</th>
-        <th style="text-align:right">Shrink</th></tr></thead>
-      <tbody>${(data.calibration ?? []).map((c) => `
-        <tr>
-          <td>${esc(c.market_family)}</td>
-          <td class="num">${c.n}</td>
-          <td class="num">${pct(c.mean_model_p)}</td>
-          <td class="num">${pct(c.mean_actual)}</td>
-          <td class="num">${dec(c.brier, 4)}</td>
-          <td class="num ${c.roi > 0 ? 'pos' : 'neg'}">${pct(c.roi)}</td>
-          <td class="num">${dec(c.shrink)}</td>
-        </tr>`).join('') || `<tr><td colspan="7" class="empty">No settled picks yet — calibration starts once results arrive.</td></tr>`}
-      </tbody>
-    </table></div>
-
-    <h2>Fitted leagues</h2>
-    <div class="scroll"><table>
-      <thead><tr><th>League</th><th style="text-align:right">Matches</th>
-        <th style="text-align:right">Home adv</th><th style="text-align:right">Rho</th>
-        <th style="text-align:right">Mean goals</th><th>Fitted</th></tr></thead>
-      <tbody>${(data.leagues ?? []).map((l) => `
-        <tr>
-          <td>${esc(l.name ?? `league ${l.league_id}`)}</td>
-          <td class="num">${l.n_matches?.toLocaleString?.() ?? l.n_matches}</td>
-          <td class="num">${dec(l.home_adv, 3)}</td>
-          <td class="num">${dec(l.rho, 3)}</td>
-          <td class="num">${dec(l.mean_goals)}</td>
-          <td style="color:var(--ink-faint)">${l.fitted_at ? new Date(l.fitted_at * 1000).toLocaleDateString() : '—'}</td>
-        </tr>`).join('') || `<tr><td colspan="6" class="empty">No leagues fitted yet.</td></tr>`}
-      </tbody>
-    </table></div>
-  `;
-}
-
-// ----------------------------------------------------------------- router
-
-const state = { league: '', hours: 72 };
+// ---------------------------------------------------------------- routing
 
 async function route() {
-  const hash = location.hash || '#/board';
-  const [, name, arg] = hash.split('/');
+  const hash = location.hash || '#/home';
+  const parts = hash.slice(2).split('/');
+  const name = parts[0] || 'home';
 
-  for (const b of document.querySelectorAll('nav button')) {
-    b.setAttribute('aria-current', String(b.dataset.route === (name || 'board')));
+  for (const a of document.querySelectorAll('.nav a')) {
+    a.classList.toggle('on', a.dataset.route === name);
   }
+  document.getElementById('nav').classList.remove('open');
+  document.getElementById('burger').setAttribute('aria-expanded', 'false');
+  window.scrollTo(0, 0);
 
   try {
-    if (name === 'fixture' && arg) await viewFixture(arg);
-    else if (name === 'picks') await viewPicks();
-    else if (name === 'model') await viewModel();
-    else await viewBoard();
+    if (name === 'fixture' && parts[1]) return await viewFixture(parts[1]);
+    if (name === 'board') return await viewBoard();
+    if (name === 'leagues') return await viewLeagues();
+    if (name === 'results') return await viewResults();
+    if (name === 'model') return await viewModel();
+    return await viewHome();
   } catch (err) {
-    app.innerHTML = `<div class="empty">Could not load: ${esc(err.message)}</div>`;
+    app.innerHTML = `<div class="wrap section"><div class="empty">${esc(err.message ?? 'Something went wrong.')}</div></div>`;
   }
 }
 
-async function refreshStatus() {
+async function health() {
   try {
     const h = await getJSON('/api/health');
-    statusEl.className = 'status' + (h.stale ? ' stale' : '');
-    statusEl.innerHTML = `<span class="dot"></span>${h.fixtures} priced · updated ${
-      h.last_computed_minutes_ago == null ? 'never' : h.last_computed_minutes_ago + 'm ago'}`;
-  } catch {
-    statusEl.textContent = '';
-  }
+    const dot = document.getElementById('health');
+    dot.className = `health ${h.stale ? 'stale' : 'ok'}`;
+    dot.title = h.stale
+      ? `The board is ${h.last_computed_minutes_ago} minutes old`
+      : `Board updated ${h.last_computed_minutes_ago ?? 0} minutes ago`;
+    document.getElementById('foot-stats').innerHTML = `
+      <div><b>88</b><span>Leagues tracked</span></div>
+      <div><b>${(h.fixtures ?? 0).toLocaleString()}</b><span>Fixtures analysed</span></div>
+      <div><b>${h.last_computed_minutes_ago ?? '—'}m</b><span>Since last update</span></div>`;
+  } catch { /* the dot stays grey, which is the honest state */ }
 }
 
-for (const b of document.querySelectorAll('nav button')) {
-  b.onclick = () => { location.hash = `#/${b.dataset.route}`; };
-}
-addEventListener('hashchange', route);
+document.getElementById('burger').onclick = (e) => {
+  const nav = document.getElementById('nav');
+  const open = nav.classList.toggle('open');
+  e.currentTarget.setAttribute('aria-expanded', String(open));
+};
+
+window.addEventListener('hashchange', route);
 route();
-refreshStatus();
+health();
