@@ -300,6 +300,18 @@ export async function backfillHistory(opts: BackfillOptions = {}): Promise<Backf
     { conflictTarget: 'id' },
   );
 
+  // Anything tracked by an earlier, wider run must stop being tracked, or
+  // ratings and slate keep grinding over leagues this run no longer maintains —
+  // on partial history, which is worse than none. markUntracked existed for
+  // exactly this and was never called. With a blank LEAGUES the discovered set
+  // is everything, so this correctly untracks nothing.
+  const inScope = new Set(leagues.map((l) => l.id));
+  const stale = (await trackedLeagues()).map((l) => l.id).filter((id) => !inScope.has(id));
+  if (stale.length) {
+    await markUntracked(stale);
+    console.log(`Untracked ${stale.length} leagues no longer in scope`);
+  }
+
   for (const league of leagues) {
     const seasonIds = await currentSeasonIds(league.id, opts.seasons ?? config.history.seasons);
     const seasons = seasonIds.length ? seasonIds : [league.season_id].filter((s): s is number => s !== null);
@@ -495,8 +507,14 @@ export async function trackedLeagues(): Promise<Array<{ id: number; name: string
 
 export async function markUntracked(leagueIds: number[]): Promise<void> {
   if (leagueIds.length === 0) return;
-  await exec(
-    `UPDATE league SET tracked = 0 WHERE id IN (${leagueIds.map(() => '?').join(',')})`,
-    leagueIds,
-  );
+  // Chunk for the same reason insertMany does: D1 caps bound parameters per
+  // query at 100, and this list is as long as the provider's league count.
+  const perQuery = config.d1.maxParams;
+  for (let i = 0; i < leagueIds.length; i += perQuery) {
+    const chunk = leagueIds.slice(i, i + perQuery);
+    await exec(
+      `UPDATE league SET tracked = 0 WHERE id IN (${chunk.map(() => '?').join(',')})`,
+      chunk,
+    );
+  }
 }
