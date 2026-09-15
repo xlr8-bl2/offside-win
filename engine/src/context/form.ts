@@ -39,6 +39,8 @@ export interface FormRead {
   cleanSheets: number;
   /** Unbeaten or winless streak, counted from the most recent match back. */
   streak: { kind: 'won' | 'unbeaten' | 'lost' | 'winless' | 'none'; length: number };
+  /** Oldest to newest, so the page can draw the run left to right as chips. */
+  sequence: Array<'W' | 'D' | 'L'>;
   /** The same read restricted to this side's home or away matches. */
   venue: { played: number; ppg: number; goalsFor: number; goalsAgainst: number } | null;
 }
@@ -93,6 +95,7 @@ export function readForm(side: SideContext, atHome: boolean): FormRead | null {
     goalsAgainst: goalsAgainst / n,
     cleanSheets,
     streak: streakOf(outcomes),
+    sequence: [...outcomes].reverse(),
     venue: venueRows.length >= 2
       ? {
           played: venueRows.length,
@@ -202,6 +205,7 @@ function sideForm(ctx: FixtureContext, which: 'home' | 'away'): Factor {
       goals_against: Number(form.goalsAgainst.toFixed(2)),
       clean_sheets: form.cleanSheets,
       streak: form.streak.kind === 'none' ? 'none' : `${form.streak.kind} ${form.streak.length}`,
+      sequence: form.sequence.join(''),
       ...(form.venue ? { venue_ppg: Number(form.venue.ppg.toFixed(2)) } : {}),
     },
     // None. The ratings are fitted on these same results with time decay, so a
