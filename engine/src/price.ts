@@ -23,21 +23,26 @@ export interface ScoreMatrix {
   rho: number;
 }
 
-function poissonPmf(lambda: number, max: number): number[] {
-  const out = new Array<number>(max + 1);
-  let term = Math.exp(-lambda);
-  out[0] = term;
-  for (let k = 1; k <= max; k++) {
-    term = (term * lambda) / k;
-    out[k] = term;
-  }
-  return out;
+/**
+ * Goal counts for one team.
+ *
+ * Poisson at dispersion 1, negative binomial above it. Which one this is
+ * matters most at the outer lines: Poisson puts too little mass on 0 and on 4+,
+ * so "under 3.5" and "over 1.5" come out more certain than they are.
+ */
+function goalPmf(lambda: number, max: number, dispersion: number): number[] {
+  return negBinomPmf(lambda, dispersion, max);
 }
 
-export function buildScoreMatrix(lambdaHome: number, lambdaAway: number, rho: number): ScoreMatrix {
+export function buildScoreMatrix(
+  lambdaHome: number,
+  lambdaAway: number,
+  rho: number,
+  dispersion: number = config.pricing.goalDispersion,
+): ScoreMatrix {
   const max = config.pricing.maxGoals;
-  const ph = poissonPmf(lambdaHome, max);
-  const pa = poissonPmf(lambdaAway, max);
+  const ph = goalPmf(lambdaHome, max, dispersion);
+  const pa = goalPmf(lambdaAway, max, dispersion);
 
   const p: number[][] = [];
   let total = 0;
@@ -294,7 +299,7 @@ export function priceCornersResult(
 
 /** Red cards: rare enough that Poisson is the right call and the sample is the risk. */
 export function priceTotalReds(meanReds: number, line: number): Map<Outcome, number> {
-  const pmf = poissonPmf(meanReds, config.pricing.maxCards);
+  const pmf = negBinomPmf(meanReds, 1, config.pricing.maxCards);
   let over = 0;
   for (let k = 0; k < pmf.length; k++) if (k > line) over += pmf[k]!;
   return new Map<Outcome, number>([

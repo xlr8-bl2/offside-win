@@ -47,8 +47,8 @@ interface Sel {
  * scored 1x2 and over 2.5 instead — a different, harder set of markets, which
  * made the two sides incomparable.
  */
-function selections(lh: number, la: number, rho: number, hg: number, ag: number): Sel[] {
-  const m = buildScoreMatrix(lh, la, rho);
+function selections(lh: number, la: number, rho: number, hg: number, ag: number, disp: number): Sel[] {
+  const m = buildScoreMatrix(lh, la, rho, disp);
   const r = priceResult(m);
   const H = r.get('HOME')!;
   const D = r.get('DRAW')!;
@@ -110,9 +110,17 @@ function theirSelections(p: Record<string, any>): Map<string, number> {
 interface Row {
   id: number;
   kickoff: number;
-  /** Every selection graded, so either side's call can be looked up by label. */
-  graded: Map<string, Sel>;
+  /** The fitted rates, kept rather than the prices, so the same walk-forward
+   *  fit can be re-priced at several dispersions without refitting. */
+  lh: number;
+  la: number;
+  rho: number;
+  hg: number;
+  ag: number;
 }
+
+const gradedAt = (r: Row, disp: number): Map<string, Sel> =>
+  new Map(selections(r.lh, r.la, r.rho, r.hg, r.ag, disp).map((x) => [x.label, x]));
 
 // ------------------------------------------------- our side, walk-forward
 
@@ -139,8 +147,15 @@ for (const league of await trackedLeagues()) {
       refits++;
     }
     const { home, away } = expectedGoals(fit, m.home_team_id, m.away_team_id);
-    const sels = selections(home, away, fit.params.rho, m.home_goals!, m.away_goals!);
-    rows.push({ id: m.id, kickoff: m.kickoff, graded: new Map(sels.map((x) => [x.label, x])) });
+    rows.push({
+      id: m.id,
+      kickoff: m.kickoff,
+      lh: home,
+      la: away,
+      rho: fit.params.rho,
+      hg: m.home_goals!,
+      ag: m.away_goals!,
+    });
   }
 }
 
@@ -151,8 +166,6 @@ console.log(`${sample.length} matches across ${leaguesUsed} leagues, ${refits} r
 // --------------------------------------------------------- their side
 
 const theirProbs = new Map<number, Map<string, number>>();
-let shapeShown = false;
-
 const queue = [...sample];
 await Promise.all(
   Array.from({ length: CONCURRENCY }, async () => {
@@ -160,30 +173,12 @@ await Promise.all(
       const row = queue.shift();
       if (!row) break;
       const p = (await bsdOrNull(`/api/v2/events/${row.id}/prediction/`)) as Record<string, any> | null;
-      if (!p) continue;
-      if (!shapeShown) {
-        shapeShown = true;
-        console.log('\n--- one prediction payload, as it actually arrives ---');
-        for (const [k, v] of Object.entries(p)) {
-          if (k === 'markets') continue;
-          console.log(`  ${k}: ${JSON.stringify(v).slice(0, 240)}`);
-        }
-        for (const [k, v] of Object.entries(p.markets ?? {})) {
-          console.log(`  markets.${k}: ${JSON.stringify(v).slice(0, 240)}`);
-        }
-        console.log('---\n');
-      }
-      theirProbs.set(row.id, theirSelections(p));
+      if (p) theirProbs.set(row.id, theirSelections(p));
     }
   }),
 );
 
 // ------------------------------------------------------------- report
-//
-// Their published rule, reconstructed from their own page: every market whose
-// probability clears a confidence bar becomes a call, and a match can carry
-// several ("+N more"). Applying the identical rule to our probabilities is the
-// only comparison that isolates the models rather than the selection policy.
 
 const pct = (h: number, n: number) => (n ? `${((100 * h) / n).toFixed(1)}%` : '—');
 
@@ -198,67 +193,65 @@ function callsFor(probs: Map<string, number>, graded: Map<string, Sel>, floor: n
   for (const [label, prob] of probs) {
     if (prob < floor) continue;
     const g = graded.get(label);
-    if (!g) continue;
-    out.push({ label, prob, won: g.won });
+    if (g) out.push({ label, prob, won: g.won });
   }
   return out;
 }
 
+const hit = (c: Call[]) => c.filter((x) => x.won).length;
+const byLabel = (c: Call[]) => {
+  const m = new Map<string, { n: number; hit: number }>();
+  for (const x of c) {
+    const e = m.get(x.label) ?? { n: 0, hit: 0 };
+    e.n++;
+    if (x.won) e.hit++;
+    m.set(x.label, e);
+  }
+  return [...m].sort((a, b) => b[1].n - a[1].n);
+};
+
 const graded = sample.filter((r) => theirProbs.has(r.id));
 console.log(`\nprovider answered for ${graded.length}/${sample.length} matches`);
 
-for (const floor of [0.8, 0.75, 0.7]) {
-  const theirCalls: Call[] = [];
-  const ourCalls: Call[] = [];
+const BAR = Number(process.env.H2H_BAR ?? 0.8);
+const theirCalls: Call[] = [];
+for (const r of graded) {
+  theirCalls.push(...callsFor(theirProbs.get(r.id)!, gradedAt(r, 1), BAR));
+}
+console.log(`\n=== at the ${Math.round(BAR * 100)}% confidence bar ===`);
+console.log(
+  `  them          ${pct(hit(theirCalls), theirCalls.length).padStart(6)}  (${hit(theirCalls)}/${theirCalls.length})` +
+    `  ${(theirCalls.length / graded.length).toFixed(2)} calls/match`,
+);
+
+// Sweep the dispersion. Everything expensive — the walk-forward fits and the
+// provider calls — is already done, so each extra value costs only arithmetic.
+// 1.0 is the Poisson the model ships with today, and is the row to beat.
+console.log(`\n=== us, sweeping goal dispersion (1.0 = Poisson = today) ===`);
+let best = { disp: 1, rate: -1, calls: [] as Call[] };
+for (const disp of [1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.4, 1.5]) {
+  const ours: Call[] = [];
   for (const r of graded) {
-    theirCalls.push(...callsFor(theirProbs.get(r.id)!, r.graded, floor));
-    const ourProbs = new Map([...r.graded].map(([k, v]) => [k, v.prob] as const));
-    ourCalls.push(...callsFor(ourProbs, r.graded, floor));
+    const g = gradedAt(r, disp);
+    ours.push(...callsFor(new Map([...g].map(([k, v]) => [k, v.prob])), g, BAR));
   }
-  const hit = (c: Call[]) => c.filter((x) => x.won).length;
-  const mpp = (c: Call[]) => (c.length / graded.length).toFixed(2);
-  // Break-even: a call at hit rate h needs odds above 1/h to make money.
-  const be = (c: Call[]) => (c.length ? (c.length / Math.max(1, hit(c))).toFixed(2) : '—');
-
-  console.log(`\n=== every market at or above ${Math.round(floor * 100)}% confidence ===`);
+  const rate = ours.length ? hit(ours) / ours.length : 0;
+  const mark = rate > best.rate ? ' <-- best' : '';
+  if (rate > best.rate) best = { disp, rate, calls: ours };
   console.log(
-    `  them  ${pct(hit(theirCalls), theirCalls.length).padStart(6)}  ` +
-      `(${hit(theirCalls)}/${theirCalls.length})  ${mpp(theirCalls)} calls/match  break-even odds ${be(theirCalls)}`,
+    `  dispersion ${disp.toFixed(2)}  ${pct(hit(ours), ours.length).padStart(6)}  (${hit(ours)}/${ours.length})` +
+      `  ${(ours.length / graded.length).toFixed(2)} calls/match${mark}`,
   );
+}
+
+console.log(`\n=== per selection, dispersion ${best.disp.toFixed(2)} vs them ===`);
+const theirBy = new Map(byLabel(theirCalls));
+for (const [label, c] of byLabel(best.calls)) {
+  const t = theirBy.get(label);
   console.log(
-    `  us    ${pct(hit(ourCalls), ourCalls.length).padStart(6)}  ` +
-      `(${hit(ourCalls)}/${ourCalls.length})  ${mpp(ourCalls)} calls/match  break-even odds ${be(ourCalls)}`,
+    `  ${label.padEnd(14)} us ${pct(c.hit, c.n).padStart(6)} (${String(c.n).padStart(4)})` +
+      `   them ${t ? `${pct(t.hit, t.n).padStart(6)} (${String(t.n).padStart(4)})` : '     —'}`,
   );
-
-  // Same markets, same matches, same number of calls: the cleanest read, because
-  // it removes any advantage that comes from simply publishing more or less.
-  if (ourCalls.length && theirCalls.length) {
-    const n = Math.min(ourCalls.length, theirCalls.length);
-    const top = (c: Call[]) => [...c].sort((a, b) => b.prob - a.prob).slice(0, n);
-    const t = top(theirCalls);
-    const u = top(ourCalls);
-    console.log(`  at a matched ${n} calls each:  them ${pct(hit(t), n)}   us ${pct(hit(u), n)}`);
-  }
-
-  if (floor === 0.8) {
-    const byLabel = (c: Call[]) => {
-      const m = new Map<string, { n: number; hit: number }>();
-      for (const x of c) {
-        const e = m.get(x.label) ?? { n: 0, hit: 0 };
-        e.n++;
-        if (x.won) e.hit++;
-        m.set(x.label, e);
-      }
-      return [...m].sort((a, b) => b[1].n - a[1].n);
-    };
-    console.log(`  what each side called:`);
-    for (const [label, c] of byLabel(theirCalls)) {
-      console.log(`    them  ${label.padEnd(14)} ${String(c.n).padStart(5)}  ${pct(c.hit, c.n)}`);
-    }
-    for (const [label, c] of byLabel(ourCalls)) {
-      console.log(`    us    ${label.padEnd(14)} ${String(c.n).padStart(5)}  ${pct(c.hit, c.n)}`);
-    }
-  }
 }
 
 console.log(`\nprovider requests: ${stats.requests} (${stats.errors} errors)`);
