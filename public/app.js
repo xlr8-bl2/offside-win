@@ -220,8 +220,14 @@ function heroHTML(hero = null, venueIds = []) {
   // With a fixture chosen, the masthead is about tonight's game. Without one —
   // an empty board, a failed slate — it falls back to the standing headline
   // rather than to an empty stage.
+  // Long club names have to be allowed to shrink. "RSC Anderlecht v Olympique
+  // Lyonnais" at the size "Arsenal v Everton" wants filled the whole viewport and
+  // pushed the buttons off the bottom of it.
+  const longest = hero ? Math.max(hero.home.length, hero.away.length) : 0;
+  const size = longest > 20 ? '3.1vw' : longest > 14 ? '4vw' : '5.2vw';
+
   const body = hero
-    ? `<h1 class="display hero-fx">
+    ? `<h1 class="display hero-fx" style="--fx: clamp(1.9rem, ${size}, 4.6rem)">
          <span>${esc(hero.home)}</span>
          <em>vs</em>
          <span>${esc(hero.away)}</span>
