@@ -210,6 +210,11 @@ export async function runSlate(): Promise<SlateReport> {
         // never travelled.
         home_id: analysis.home_team_id,
         away_id: analysis.away_team_id,
+        // The provider's image service also serves grounds — /img/venue/{id}/
+        // returns a real photograph of the stadium this match is played at.
+        // That is the matchday imagery the site is built on, so the id travels
+        // with the fixture rather than the page reaching for stock.
+        venue_id: num(event['venue_id']) ?? null,
         status: analysis.status,
         provisional: analysis.provisional,
         lineup_status: analysis.lineup_status,

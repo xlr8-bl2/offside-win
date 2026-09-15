@@ -3,14 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>offside.win — every pick, explained</title>
-<meta name="description" content="Football picks across 88 leagues, each one with the reasoning shown in full: the ratings, the team news, the schedule, and what the call actually pays.">
-<meta name="theme-color" content="#07080b">
+<title>offside.win — the picks for the biggest games</title>
+<meta name="description" content="Football picks across 88 leagues. Every call comes with the reason behind it — and the reason not to like it.">
+<meta name="theme-color" content="#06070a">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Caveat:wght@600&display=swap">
+<link rel="preconnect" href="https://sports.bzzoiro.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100,400;100,600;100,700;100,800;100,900;112,800&family=Caveat:wght@600;700&display=swap">
 <link rel="stylesheet" href="/style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%2307080b'/><path d='M22 72 L44 28 M40 72 L62 28 M58 72 L80 28' stroke='%23f0ead8' stroke-width='11' stroke-linecap='round'/></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%2306070a'/><path d='M22 72 L44 28 M40 72 L62 28 M58 72 L80 28' stroke='%23f2ead9' stroke-width='11' stroke-linecap='round'/></svg>">
 </head>
 <body>
 
@@ -27,10 +28,10 @@
       <a href="#/board" data-route="board">Picks</a>
       <a href="#/leagues" data-route="leagues">Leagues</a>
       <a href="#/results" data-route="results">Results</a>
-      <a href="#/model" data-route="model">Model</a>
     </nav>
     <div class="top-right">
-      <span class="health" id="health" title="Board freshness"></span>
+      <span class="live" id="live"><i></i>Live</span>
+      <a class="btn btn-primary btn-sm" href="#/board">Today's picks</a>
       <button class="burger" id="burger" aria-label="Menu" aria-expanded="false">
         <span></span><span></span><span></span>
       </button>
@@ -41,6 +42,14 @@
 <main id="app"><div class="spinner">Loading…</div></main>
 
 <footer class="foot">
+  <div class="foot-top">
+    <div class="foot-cta">
+      <p class="script" style="margin:0 0 6px">Same games.</p>
+      <h2 class="display">Better picks.</h2>
+    </div>
+    <a class="btn btn-primary btn-lg" href="#/board">See today's board
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+  </div>
   <div class="foot-inner">
     <div class="foot-brand">
       <svg class="brand-mark" viewBox="0 0 100 100" aria-hidden="true">
@@ -50,9 +59,8 @@
     </div>
     <div class="foot-stats" id="foot-stats"></div>
     <p class="foot-note">
-      Analysis, not advice. Every number on this site is computed from public match data and
-      bookmaker prices, and every call shows the reasoning behind it. Nothing here is a promise
-      of profit. 18+ — <a href="https://www.begambleaware.org" rel="noopener noreferrer" target="_blank">BeGambleAware.org</a>
+      For information only. Nothing here is a promise of profit, and no pick is advice to place a bet.
+      18+ — <a href="https://www.begambleaware.org" rel="noopener noreferrer" target="_blank">BeGambleAware.org</a>
     </p>
   </div>
 </footer>
