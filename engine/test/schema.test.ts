@@ -55,3 +55,22 @@ test('picks are unique even when the market has no line', () => {
   // every 1x2 pick duplicated on each rerun.
   assert.match(sql, /CREATE UNIQUE INDEX IF NOT EXISTS pick_unique_line[\s\S]*?NULLS NOT DISTINCT/);
 });
+
+test('decay-weighted counts are floating point, not integer', () => {
+  // rating.matches and team_rate.matches are *effective* match counts: the sum
+  // of per-match decay weights, so 12.859... is a normal value. SQLite accepted
+  // that in a column it called INTEGER; Postgres rejects it outright, which is
+  // how the mistake finally surfaced. Both the definition and the ALTER matter —
+  // CREATE TABLE IF NOT EXISTS will not retype a table that already exists.
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS rating \([\s\S]*?matches\s+double precision NOT NULL/);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS team_rate \([\s\S]*?matches\s+double precision NOT NULL/);
+  assert.match(sql, /ALTER TABLE rating ALTER COLUMN matches TYPE double precision/);
+  assert.match(sql, /ALTER TABLE team_rate ALTER COLUMN matches TYPE double precision/);
+});
+
+test('true counts stay integer', () => {
+  // referee_rate.matches counts `+= 1` and rating_meta.n_matches is obs.length.
+  // Widening these too would hide a real type error behind a float.
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS referee_rate \([\s\S]*?matches\s+bigint NOT NULL/);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS rating_meta \([\s\S]*?n_matches\s+bigint NOT NULL/);
+});

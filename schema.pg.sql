@@ -92,7 +92,9 @@ CREATE TABLE IF NOT EXISTS rating (
   defence       double precision NOT NULL,
   attack_se     double precision,
   defence_se    double precision,
-  matches       bigint NOT NULL,
+  -- Effective, decay-weighted match count, so fractional. SQLite stored 12.86
+  -- in a column it called INTEGER without complaint; Postgres rejects it.
+  matches       double precision NOT NULL,
   shrunk        double precision,
   fitted_at     bigint NOT NULL,
   PRIMARY KEY (league_id, team_id)
@@ -106,10 +108,18 @@ CREATE TABLE IF NOT EXISTS team_rate (
   corners_disp    double precision,
   yellows_for     double precision,
   reds_for        double precision,
-  matches         bigint NOT NULL,
+  -- Decay-weighted, like rating.matches above.
+  matches         double precision NOT NULL,
   fitted_at       bigint NOT NULL,
   PRIMARY KEY (league_id, team_id)
 );
+
+-- These two are decay-weighted counts and must be floating point. Stated as
+-- alters as well as in the definitions above, because CREATE TABLE IF NOT
+-- EXISTS silently leaves an existing table's types alone — a database created
+-- before this was noticed would keep rejecting every ratings run otherwise.
+ALTER TABLE rating ALTER COLUMN matches TYPE double precision;
+ALTER TABLE team_rate ALTER COLUMN matches TYPE double precision;
 
 CREATE TABLE IF NOT EXISTS referee_rate (
   referee_id    bigint PRIMARY KEY,
