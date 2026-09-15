@@ -743,7 +743,11 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     (c) => {
       const f = n(c.evidence.xg_for);
       const a = n(c.evidence.xg_against);
-      only(f - a < 0.7);
+      // "The better side" needs to actually be the better side. The live board
+      // carried "Sunderland are the better side at 1.21 to 1.37", which is the
+      // wrong way round — a double chance is often backed precisely because the
+      // side is *not* favoured and the draw is carrying the bet.
+      only(f > a && f - a < 0.7);
       return `${cap(s(c.evidence.team))} are the better side at ${f.toFixed(2)} to ${a.toFixed(2)}, though not by the margin the confidence number might suggest — the cushion here is the draw, not the win.`;
     },
     (c) => {
@@ -766,6 +770,18 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
       const a = n(c.evidence.xg_against);
       const total = f + a;
       return `Expected goals split ${f.toFixed(2)} to ${a.toFixed(2)}, ${total.toFixed(2)} in the match. The shape of that total is what this call reads.`;
+    },
+    (c) => {
+      const f = n(c.evidence.xg_for);
+      const a = n(c.evidence.xg_against);
+      only(f <= a);
+      return `${cap(s(c.evidence.team))} are not favoured here — ${f.toFixed(2)} to ${a.toFixed(2)} on expected goals — so what makes this a call is the draw counting, not a win being likely.`;
+    },
+    (c) => {
+      const f = n(c.evidence.xg_for);
+      const a = n(c.evidence.xg_against);
+      only(f <= a);
+      return `The numbers give ${s(c.evidence.opponent)} the better of it, ${a.toFixed(2)} to ${f.toFixed(2)}. This call survives that because it only needs ${s(c.evidence.team)} to avoid losing.`;
     },
   ],
 

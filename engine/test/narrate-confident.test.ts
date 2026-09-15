@@ -52,7 +52,10 @@ test('every sentence still appears when the evidence is there', () => {
     ledger: ledger(),
   });
   assert.match(out, /1\.16/, 'the price is missing');
-  assert.match(out, /2\.02/, 'the mismatch is missing');
+  // Any strength_gap frame is fine — they cite the rates, the ratio, or the
+  // opponent's number. Pinning one spelling makes this fail whenever a frame is
+  // added, which is not a regression.
+  assert.match(out, /2\.02|0\.82|2\.5 times|stronger side|better of it/, 'the mismatch is missing');
   assert.match(out, /86%/, 'the confidence is missing');
   assert.match(out, /34%/, 'the context is missing');
 });
@@ -202,4 +205,19 @@ test('a 94% call at 1.04 is not published', () => {
   const usable = cand('over_under_15', 'over', 1.5, 0.83, 1.18);
   const out = selectConfident([short, usable]);
   assert.deepEqual(out.map((c) => c.odds), [1.18], 'published a call at 1.04');
+});
+
+test('the backed side is never called "the better side" when it is not', () => {
+  // Live board: "Sunderland are the better side at 1.21 to 1.37". A double
+  // chance is often backed precisely because the side is not favoured and the
+  // draw is carrying the bet.
+  const out = narrateConfident({
+    candidate: cand('double_chance', '1X', null, 0.8, 1.2),
+    drivers: [],
+    homeTeam: 'Sunderland', awayTeam: 'Leeds United', fixtureId: 77,
+    expectedGoals: { home: 1.21, away: 1.37 },
+    ledger: ledger(),
+  });
+  assert.doesNotMatch(out, /better side at 1\.21|stronger side on expected goals, 1\.21/,
+    `called the weaker side the better one: ${out}`);
 });
