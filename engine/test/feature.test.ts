@@ -55,3 +55,32 @@ test('an empty board has no hero rather than a wrong one', () => {
   assert.equal(chooseHero([], NOW), null);
   assert.equal(chooseHero([fx({ kickoff: NOW - 86400 })], NOW), null);
 });
+
+test('a top-five league game outranks a Europa League tie in the same window', () => {
+  // The live board did exactly this the wrong way round: Anderlecht v Lyon led
+  // over Barcelona kicking off two hours later, because a flat marquee bonus was
+  // bigger than the gap between league tiers.
+  const hero = chooseHero([
+    fx({ id: 1, league_id: 8, league: 'Europa League', kickoff: NOW + 2 * 3600, confidence: 0.7 }),
+    fx({ id: 2, league_id: 3, league: 'La Liga', kickoff: NOW + 2 * 3600, confidence: 0.6,
+         home: 'FC Barcelona', away: 'Real Racing Club' }),
+  ], NOW)!;
+  assert.equal(hero.fixture_id, 2, 'Europa League led over La Liga');
+});
+
+test('but a Europa League night still leads when nothing bigger is on', () => {
+  const hero = chooseHero([
+    fx({ id: 1, league_id: 8, league: 'Europa League', kickoff: NOW + 2 * 3600, confidence: 0.6 }),
+    fx({ id: 2, league_id: 91, league: 'National League', kickoff: NOW + 2 * 3600, confidence: 0.9 }),
+  ], NOW)!;
+  assert.equal(hero.fixture_id, 1);
+  assert.equal(hero.kicker, 'Europa League night');
+});
+
+test('the Champions League still leads over anything', () => {
+  const hero = chooseHero([
+    fx({ id: 1, league_id: 1, league: 'Premier League', kickoff: NOW + 2 * 3600, confidence: 0.9 }),
+    fx({ id: 2, league_id: 7, league: 'Champions League', kickoff: NOW + 2 * 3600, confidence: 0.4 }),
+  ], NOW)!;
+  assert.equal(hero.fixture_id, 2);
+});
