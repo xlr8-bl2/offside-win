@@ -318,7 +318,7 @@ function finishingFactor(
     note:
       `${side.team_name} have been ${gap > 0 ? 'outscoring' : 'underscoring'} their expected goals by ` +
       `${Math.abs(gap).toFixed(2)} per match over ${style.matches} games — a gap that historically ` +
-      `regresses rather than persists.`,
+      `closes rather than holds.`,
     evidence: {
       goals_minus_xg_per_match: Number(gap.toFixed(2)),
       matches: style.matches,

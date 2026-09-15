@@ -52,9 +52,8 @@ function overroundFactor(ctx: FixtureContext): Factor {
     section: '§7.3',
     tier: 7,
     note:
-      `Match odds carry a ${(margin * 100).toFixed(1)}% margin, de-vigged with ` +
-      `${main.method === 'shin' ? "Shin's method" : 'proportional normalisation'}. ` +
-      `A bigger margin raises the edge we need before calling a price wrong.`,
+      `The bookmakers are taking a ${(margin * 100).toFixed(1)}% cut on this match. ` +
+      `The bigger their cut, the further out a price has to be before it is worth backing.`,
     evidence: {
       overround: Number(main.overround.toFixed(4)),
       margin_pct: Number((margin * 100).toFixed(2)),
@@ -126,7 +125,7 @@ function movementFactor(ctx: FixtureContext): Factor {
     note:
       Math.abs(biggest.pct) >= 0.04
         ? `Since opening, ${biggest.outcome} has ${biggest.pct > 0 ? 'shortened' : 'drifted'} ` +
-          `${Math.abs(biggest.pct * 100).toFixed(1)}% in implied-probability terms.`
+          `${Math.abs(biggest.pct * 100).toFixed(1)}% since the market opened.`
         : 'The line has barely moved since it opened.',
     evidence: {
       moves: moves.map((m) => ({
