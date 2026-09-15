@@ -1,0 +1,24 @@
+name: supabase-check
+
+# Preflight for the Supabase migration: proves the three secrets are set and
+# that both access paths work — the pooler connection the engine writes through,
+# and the anon/PostgREST endpoint the Worker will read through. Prints presence
+# and server-side facts only, never a secret value, because this repo is public.
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+      - name: Check Supabase connectivity
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: npm run supabase:check
