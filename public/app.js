@@ -155,7 +155,7 @@ const READ_LABEL = {
 
 // ------------------------------------------------------------------ state
 
-const state = { board: null, hours: 72, leagueName: '', heroVenue: null };
+const state = { board: null, hours: 72, leagueName: '', heroVenue: [] };
 
 async function loadBoard() {
   state.board = await getJSON(`/api/board?hours=${state.hours}`);
@@ -179,27 +179,45 @@ async function loadBoard() {
  * And a missing shot must degrade to something deliberate rather than to a
  * blank rectangle.
  */
+/**
+ * Only about a third of grounds have a photograph — the board is mostly lower
+ * divisions the provider has no stadium art for — so the masthead is given a
+ * queue of candidates rather than one id. A miss advances to the next ground
+ * instead of collapsing the hero, and only an exhausted queue falls back to the
+ * gradient.
+ */
 window.__shotMissing = (img) => {
+  const next = (img.dataset.rest ?? '').split(',').filter(Boolean);
+  if (next.length) {
+    img.dataset.rest = next.slice(1).join(',');
+    img.src = `${IMG_BASE}/venue/${encodeURIComponent(next[0])}/`;
+    return;
+  }
   img.closest('[data-shot]')?.setAttribute('data-shot', 'none');
   img.remove();
 };
-// A ground with no photograph answers 200 with a 1x1 transparent PNG, so the
-// load handler has to measure it. Anything that small is the placeholder.
+// A ground with no photograph answers 200 with a 1x1 transparent PNG rather
+// than a 404, so the load handler has to measure it.
 window.__shotCheck = (img) => {
   if (img.naturalWidth < 40) window.__shotMissing(img);
 };
 
-function venueShot(venueId, className, eager = false) {
-  if (!Number.isFinite(Number(venueId))) return '';
-  return `<img src="${IMG_BASE}/venue/${encodeURIComponent(venueId)}/" alt="" class="${className}"
+function venueShot(venueIds, className, eager = false) {
+  const queue = (Array.isArray(venueIds) ? venueIds : [venueIds])
+    .map(Number)
+    .filter((v) => Number.isFinite(v));
+  if (!queue.length) return '';
+  return `<img src="${IMG_BASE}/venue/${encodeURIComponent(queue[0])}/" alt="" class="${className}"
+    data-rest="${queue.slice(1, 14).join(',')}"
     ${eager ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async"
     onload="window.__shotCheck(this)" onerror="window.__shotMissing(this)">`;
 }
 
-function heroHTML(venueId = null) {
+function heroHTML(venueIds = []) {
+  const queue = [].concat(venueIds).filter(Boolean);
   return `
-  <section class="hero" data-shot="${venueId ? 'yes' : 'none'}">
-    <div class="hero-media">${venueShot(venueId, '', true)}</div>
+  <section class="hero" data-shot="${queue.length ? 'yes' : 'none'}">
+    <div class="hero-media">${venueShot(queue, '', true)}</div>
     <div class="hero-inner">
       <p class="eyebrow">88 leagues · every day</p>
       <h1 class="display">The picks for the <em>biggest</em> games.</h1>
@@ -357,9 +375,10 @@ async function viewHome() {
   let recent = [];
   try { recent = (await getJSON('/api/picks?limit=40&settled=true')).picks ?? []; } catch { /* strip is optional */ }
 
-  // The ground hosting the strongest call on the board, so the masthead is a
-  // real venue playing a real game today rather than a mood shot.
-  state.heroVenue = (top.find((f) => f.venue_id) ?? fixtures.find((f) => f.venue_id))?.venue_id ?? null;
+  // Grounds hosting today's games, strongest call first. The browser works down
+  // the list until one has a photograph, so the masthead is always a real
+  // stadium with a real fixture in it tonight.
+  state.heroVenue = [...top, ...fixtures].map((f) => f.venue_id).filter(Boolean);
 
   app.innerHTML =
     heroHTML(state.heroVenue) +
