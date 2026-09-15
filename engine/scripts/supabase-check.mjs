@@ -87,7 +87,7 @@ const attempts = {
 let anyOk = false;
 for (const [label, headers] of Object.entries(attempts)) {
   try {
-    const r = await fetch(`${process.env.SUPABASE_URL}/rest/v1/`, { headers });
+    const r = await fetch(`${process.env.SUPABASE_URL}/rest/v1/league?select=id&limit=1`, { headers });
     console.log(`  ${label.padEnd(12)} -> ${r.status} ${r.statusText}`);
     if (r.ok) anyOk = true;
     else if (r.status === 401) {
