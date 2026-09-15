@@ -308,7 +308,11 @@ export async function runSlate(): Promise<SlateReport> {
       pickRows,
       {
         onConflict:
-          'ON CONFLICT(fixture_id, market, outcome, line, kind) DO UPDATE SET ' +
+          // Must match pick_unique_line in schema.sql expression-for-expression:
+          // `line` is NULL on marketless-line picks and NULLs do not collide in
+          // a UNIQUE index, so a bare `line` here silently matches no index and
+          // every rerun inserts a duplicate instead of refreshing.
+          'ON CONFLICT(fixture_id, market, outcome, COALESCE(line, -1e9), kind) DO UPDATE SET ' +
           'model_prob = excluded.model_prob, book_prob = excluded.book_prob, ' +
           'edge = excluded.edge, shrunk_edge = excluded.shrunk_edge, odds = excluded.odds, ' +
           'bookmaker = excluded.bookmaker, kelly = excluded.kelly, ' +

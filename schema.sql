@@ -167,7 +167,28 @@ CREATE TABLE IF NOT EXISTS pick (
 CREATE INDEX IF NOT EXISTS pick_fixture ON pick(fixture_id);
 CREATE INDEX IF NOT EXISTS pick_unsettled ON pick(settled_at, kickoff);
 CREATE INDEX IF NOT EXISTS pick_created ON pick(created_at);
-CREATE UNIQUE INDEX IF NOT EXISTS pick_unique ON pick(fixture_id, market, outcome, line, kind);
+-- A pick is identified by fixture, market, outcome, line and kind — but `line`
+-- is NULL for every market that has no line (1x2, BTTS, double chance), and
+-- SQLite treats NULLs in a UNIQUE index as distinct from one another. So the
+-- original index over the bare `line` column constrained nothing for exactly
+-- those markets, ON CONFLICT never fired, and each slate published another copy
+-- of every 1x2 pick instead of refreshing the one already there. Observed live:
+-- ten picks across five fixtures, three of them duplicated verbatim.
+--
+-- COALESCE gives the absent line one concrete value so the constraint applies.
+-- The ON CONFLICT target in slate.ts must spell the expression identically, or
+-- SQLite will not match it to this index.
+DROP INDEX IF EXISTS pick_unique;
+DELETE FROM pick WHERE id NOT IN (
+  SELECT id FROM (
+    SELECT id, ROW_NUMBER() OVER (
+      PARTITION BY fixture_id, market, outcome, COALESCE(line, -1e9), kind
+      ORDER BY (settled_at IS NOT NULL) DESC, id DESC
+    ) rn FROM pick
+  ) WHERE rn = 1
+);
+CREATE UNIQUE INDEX IF NOT EXISTS pick_unique_line
+  ON pick(fixture_id, market, outcome, COALESCE(line, -1e9), kind);
 
 -- Rolling calibration per market family. Feeds selection shrinkage: markets we
 -- have been wrong about are trusted less, automatically.
