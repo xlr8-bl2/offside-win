@@ -149,23 +149,25 @@ working directory to the workspace, so the old `engine/backtest-report.json` pat
 Same shape as the probe output-path bug; worth suspecting first whenever an artifact step warns that
 it found no files.
 
-**The provider's own predictions are worse than ours, and worse than the market.** The provider
-ships a `/prediction/` endpoint and advertises "over 87% accuracy". Scored against 373 finished
-matches out of our own history (`npm run eval:provider`, or the `pg` workflow with
-`command: eval:provider`):
+**The provider recommends no bets at all, and hit rate is the wrong scoreboard.**
+`npm run h2h` scores both models the way a tipster is scored. Over 600 recent finished matches
+(569 answered, every one carrying a `recommendations` block):
 
-| | provider | ours | base rate |
-|---|---|---|---|
-| 1x2 log loss | 1.0102 | 0.6200 | 0.6277 |
-| favourite actually wins | 45.8% | — | — |
-| over 2.5 accuracy | 53.6% | — | 55.2% always-yes |
-| btts accuracy | 51.7% | — | 58.4% always-yes |
+- **Their recommendation engine flagged zero bets.** `winner`, `bet_favorite`, `over_15`,
+  `over_25`, `over_35`, `btts` — all false, on all 569. There is no set of published picks to
+  reproduce an accuracy claim over, so do not repeat one.
+- **1x2 top pick:** them 51.7%, us 46.9%, always-pick-home 45.5%. They beat us here, largely by
+  calling home in 413 of 569 — naming the modal outcome is how you maximise raw accuracy.
+- **Our goal markets are genuinely weak:** over 2.5 51.1% against 54.8% for always-yes; btts
+  52.2% against 56.8%. Below the do-nothing baseline. This is a real defect, not a framing issue.
+- **Ours by selectivity** (near-free markets excluded): top 25% hits 59.3%, break-even odds 1.69.
 
-A uniform guess on 1x2 scores 1.0986, so their probabilities carry almost no information, and
-their over/BTTS calls are less accurate than saying "yes" every time. Their payload reports
-`model.version: "dc-blend-v1"` — the same Dixon-Coles family as ours, as a black box that cannot
-be fitted, audited or corrected. **Do not republish the 87% figure.** It is not supported by
-their own endpoint's output, and it would be an advertising claim made to paying customers.
+Hit rate and log loss disagree here and both are correct. Ours is far better calibrated (0.6200
+against their 1.0102) and worse at naming the single most likely outcome. Only one of those pays:
+you are settled at odds, so being right about *how likely* something is beats being right *more
+often* at prices that already reflect it. Neither number supports 87%, and neither proves a
+profitable business — that needs settled ROI and CLV, which the `pick` table is only now
+starting to accumulate on Postgres.
 
 **Six context factors are still dark**, losing 19 of the weight: `stakes.table` (6),
 `manager.home` (5), `style.press_matchup` (3), `environment.pitch` (2), `environment.venue` (2),
