@@ -7,7 +7,7 @@ import { probe } from './probe.ts';
 import { fitAllLeagues } from './ratings/fit.ts';
 import { runSettle } from './settle.ts';
 import { pruneBoard, runSlate } from './slate.ts';
-import { d1Stats, migrate, select } from './store.ts';
+import { closeDb, dbStats, migrate, schemaFile, select } from './store.ts';
 
 /**
  * Entry points for the scheduled workflows.
@@ -28,7 +28,8 @@ import { d1Stats, migrate, select } from './store.ts';
 
 /** CREATE TABLE IF NOT EXISTS throughout, so this is safe to run every time. */
 async function ensureSchema(): Promise<void> {
-  const sql = readFileSync(new URL('../../schema.sql', import.meta.url), 'utf8');
+  // The two backends take different dialects, so the active one names its file.
+  const sql = readFileSync(new URL(`../../${schemaFile()}`, import.meta.url), 'utf8');
   await migrate(sql);
 }
 
@@ -109,12 +110,16 @@ async function main(): Promise<void> {
       `\n${name} finished in ${secs}s — ${bsdStats.requests} provider requests ` +
         `(${bsdStats.retries} retries, ${bsdStats.errors} errors, ${bsdStats.notEntitled} not entitled, ` +
         `${bsdStats.cacheHits} served from cache), ` +
-        `${d1Stats.queries} D1 queries, ${d1Stats.rowsWritten} rows written.`,
+        `${dbStats.queries} DB queries, ${dbStats.rowsWritten} rows written.`,
     );
   } catch (err) {
     console.error(`\n${name} failed:`, err instanceof Error ? err.stack ?? err.message : err);
+    await closeDb();
     process.exit(1);
   }
+  // Postgres holds a pooled socket open, which would keep the process alive
+  // after the work is done and turn a finished job into a job that hangs.
+  await closeDb();
 }
 
 void main();

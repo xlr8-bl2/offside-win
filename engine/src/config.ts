@@ -29,6 +29,24 @@ export const config = {
     timeoutMs: num('BSD_TIMEOUT_MS', 30_000),
   },
 
+  /**
+   * Which database the engine writes to. D1 stays the default until Postgres
+   * has reproduced the board and the backtest, so a bad deploy cannot take the
+   * live site with it — set DB_BACKEND=postgres to switch.
+   */
+  dbBackend: (process.env.DB_BACKEND ?? 'd1') as 'd1' | 'postgres',
+
+  pg: {
+    url: process.env.SUPABASE_DB_URL ?? '',
+    /**
+     * Postgres allows 65535 bound parameters per statement against D1's 100.
+     * Held well under that so a wide table cannot silently cross it, and so one
+     * statement stays a sane size to build and send.
+     */
+    maxParams: num('PG_MAX_PARAMS', 20_000),
+    poolSize: num('PG_POOL_SIZE', 8),
+  },
+
   d1: {
     accountId: process.env.CF_ACCOUNT_ID ?? '',
     databaseId: process.env.CF_D1_DATABASE_ID ?? '',
@@ -175,9 +193,15 @@ export const config = {
 export function requireEnv(): void {
   const missing: string[] = [];
   if (!config.bsd.key) missing.push('BSD_API_KEY');
-  if (!config.d1.accountId) missing.push('CF_ACCOUNT_ID');
-  if (!config.d1.databaseId) missing.push('CF_D1_DATABASE_ID');
-  if (!config.d1.token) missing.push('CF_API_TOKEN');
+  // Only the active backend's credentials are required. Demanding the other
+  // one's would make the cutover need secrets it has no use for.
+  if (config.dbBackend === 'postgres') {
+    if (!config.pg.url) missing.push('SUPABASE_DB_URL');
+  } else {
+    if (!config.d1.accountId) missing.push('CF_ACCOUNT_ID');
+    if (!config.d1.databaseId) missing.push('CF_D1_DATABASE_ID');
+    if (!config.d1.token) missing.push('CF_API_TOKEN');
+  }
   if (missing.length) {
     throw new Error(
       `Missing required environment: ${missing.join(', ')}.\n` +

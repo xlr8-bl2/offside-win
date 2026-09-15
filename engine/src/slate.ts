@@ -4,7 +4,7 @@ import { analyseFixture } from './context/index.ts';
 import { checkComparisonEntitlement, gatherFixture } from './context/gather.ts';
 import { RepetitionLedger, narrate, narratePass } from './narrate/compose.ts';
 import { buildCandidates, driversFor, select, setAsideFor, type CalibrationMap } from './select.ts';
-import { d1Stats, insertMany, kvGetJSON, kvSetJSON, select as dbSelect } from './store.ts';
+import { dbStats, insertMany, kvGetJSON, kvSetJSON, pickConflictTarget, select as dbSelect } from './store.ts';
 import type { CalibrationRow } from './select.ts';
 import type { Candidate, Factor, MarketFamily } from './types.ts';
 
@@ -94,7 +94,7 @@ export async function runSlate(): Promise<SlateReport> {
   );
 
   if (candidates.length === 0) {
-    return { fixtures: events.length, analysed: 0, picks: 0, passes: 0, skipped: events.length, requests: bsdStats.requests, d1Queries: d1Stats.queries };
+    return { fixtures: events.length, analysed: 0, picks: 0, passes: 0, skipped: events.length, requests: bsdStats.requests, d1Queries: dbStats.queries };
   }
 
   // Probe the paid-tier entitlement once per run rather than per fixture.
@@ -308,11 +308,10 @@ export async function runSlate(): Promise<SlateReport> {
       pickRows,
       {
         onConflict:
-          // Must match pick_unique_line in schema.sql expression-for-expression:
-          // `line` is NULL on marketless-line picks and NULLs do not collide in
-          // a UNIQUE index, so a bare `line` here silently matches no index and
-          // every rerun inserts a duplicate instead of refreshing.
-          'ON CONFLICT(fixture_id, market, outcome, COALESCE(line, -1e9), kind) DO UPDATE SET ' +
+          // Must match pick_unique_line for the active backend exactly, or the
+          // upsert matches no index and every rerun inserts a duplicate rather
+          // than refreshing. See pickConflictTarget.
+          `ON CONFLICT (${pickConflictTarget()}) DO UPDATE SET ` +
           'model_prob = excluded.model_prob, book_prob = excluded.book_prob, ' +
           'edge = excluded.edge, shrunk_edge = excluded.shrunk_edge, odds = excluded.odds, ' +
           'bookmaker = excluded.bookmaker, kelly = excluded.kelly, ' +
@@ -327,7 +326,7 @@ export async function runSlate(): Promise<SlateReport> {
   await kvSetJSON('slate:last_run', { at: now, ...report });
 
   report.requests = bsdStats.requests;
-  report.d1Queries = d1Stats.queries;
+  report.d1Queries = dbStats.queries;
 
   console.log(
     `Analysed ${report.analysed}, published ${report.picks} picks, ${report.passes} passes, ` +
