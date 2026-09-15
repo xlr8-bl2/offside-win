@@ -411,8 +411,16 @@ export async function fetchMissingStats(
 ): Promise<{ fetched: number; failed: number }> {
   const cutoff =
     Math.floor(Date.now() / 1000) - (windowDays ?? config.history.statsWindowDays) * 86400;
-  const pending = await select<{ id: number; home_team_id: number }>(
-    `SELECT id, home_team_id FROM match
+  // league_id, kickoff and away_team_id are carried purely to satisfy the
+  // match table's NOT NULL columns on the way back out — see the flush below.
+  const pending = await select<{
+    id: number;
+    home_team_id: number;
+    league_id: number;
+    kickoff: number;
+    away_team_id: number;
+  }>(
+    `SELECT id, home_team_id, league_id, kickoff, away_team_id FROM match
      WHERE stats_fetched = 0 AND kickoff >= ?
      ORDER BY kickoff DESC LIMIT ?`,
     [cutoff, limit],
@@ -430,8 +438,16 @@ export async function fetchMissingStats(
     if (batch.length === 0) return;
     await insertMany(
       'match',
+      // league_id, kickoff, home_team_id and away_team_id are NOT NULL on match
+      // and are listed here only so the *proposed* row is valid. SQLite checks
+      // NOT NULL against that row before it resolves the uniqueness conflict, so
+      // an upsert that omits them fails with "NOT NULL constraint failed" even
+      // when the row already exists and only the UPDATE branch can run. They are
+      // deliberately absent from DO UPDATE SET, so a stats pass never rewrites a
+      // match's identity — it only ever fills in the statistics.
       [
-        'id', 'home_xg', 'away_xg', 'xg_estimated', 'home_corners', 'away_corners',
+        'id', 'league_id', 'kickoff', 'home_team_id', 'away_team_id',
+        'home_xg', 'away_xg', 'xg_estimated', 'home_corners', 'away_corners',
         'home_yellows', 'away_yellows', 'home_reds', 'away_reds',
         'home_possession', 'away_possession', 'home_shots', 'away_shots',
         'home_sot', 'away_sot', 'stats_fetched', 'updated_at',
@@ -462,7 +478,11 @@ export async function fetchMissingStats(
         failed++;
         // Mark as attempted so a permanently statless match is not retried
         // every night for the rest of its life.
-        batch.push({ id: m.id, ...EMPTY_STATS, stats_fetched: 1, updated_at: now });
+        batch.push({
+          id: m.id, league_id: m.league_id, kickoff: m.kickoff,
+          home_team_id: m.home_team_id, away_team_id: m.away_team_id,
+          ...EMPTY_STATS, stats_fetched: 1, updated_at: now,
+        });
         continue;
       }
       const extracted = extractStats(payload);
@@ -474,7 +494,11 @@ export async function fetchMissingStats(
         if (cards) Object.assign(extracted, cards);
       }
 
-      batch.push({ id: m.id, ...extracted, stats_fetched: 1, updated_at: now });
+      batch.push({
+        id: m.id, league_id: m.league_id, kickoff: m.kickoff,
+        home_team_id: m.home_team_id, away_team_id: m.away_team_id,
+        ...extracted, stats_fetched: 1, updated_at: now,
+      });
       fetched++;
       if (batch.length >= 200) await flush();
     }
