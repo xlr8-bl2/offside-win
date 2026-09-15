@@ -43,7 +43,46 @@ function release(): void {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Requests counted for the run log — useful when diagnosing a slow slate. */
-export const stats = { requests: 0, retries: 0, errors: 0, notEntitled: 0 };
+export const stats = { requests: 0, retries: 0, errors: 0, notEntitled: 0, cacheHits: 0 };
+
+/**
+ * Per-run response cache.
+ *
+ * Every read here is a GET of immutable-enough data, and a slate asks for the
+ * same things repeatedly: one standings table serves every fixture in its
+ * league, one squad serves both of a team's fixtures. Caching the *outcome*
+ * rather than the payload means a 403 or 404 is remembered too — the provider
+ * is asked once whether we are entitled to a route, not once per fixture.
+ *
+ * Transient errors are deliberately not cached: retrying those is the whole
+ * point of the retry loop, and freezing one would turn a blip into a run-long
+ * absence. The cache lives for the process, which is one job, so staleness
+ * cannot outlive the run that created it.
+ */
+const cache = new Map<string, FetchOutcome<unknown>>();
+/** Identical concurrent requests share one flight rather than racing. */
+const pending = new Map<string, Promise<FetchOutcome<unknown>>>();
+
+/**
+ * Bounded, because a backfill walks thousands of per-match stats payloads it
+ * will never ask for twice — caching those is pure memory cost. Oldest out
+ * first: the repeat-heavy reads (standings, squads, entitlement) are asked for
+ * often enough to keep re-entering, while a one-shot payload falls out.
+ */
+const CACHE_MAX = 2000;
+
+function remember(key: string, out: FetchOutcome<unknown>): void {
+  if (cache.size >= CACHE_MAX) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(key, out);
+}
+
+export function clearCache(): void {
+  cache.clear();
+  pending.clear();
+}
 
 export async function bsdRaw<T = unknown>(
   path: string,
@@ -53,73 +92,105 @@ export async function bsdRaw<T = unknown>(
   for (const [k, v] of Object.entries(params ?? {})) {
     if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
   }
+  const key = url.toString();
 
-  await acquire();
+  const hit = cache.get(key);
+  if (hit) {
+    stats.cacheHits++;
+    return hit as FetchOutcome<T>;
+  }
+  const inFlightSame = pending.get(key);
+  if (inFlightSame) {
+    stats.cacheHits++;
+    return inFlightSame as Promise<FetchOutcome<T>>;
+  }
+
+  const flight = fetchOnce<T>(url) as Promise<FetchOutcome<unknown>>;
+  pending.set(key, flight);
   try {
-    let lastMessage = '';
-    let lastStatus = 0;
+    const out = (await flight) as FetchOutcome<T>;
+    // A settled answer — including "you may not have this" — is worth keeping.
+    // An 'error' is not: it may well succeed next time.
+    if (out.ok || out.reason === 'not_entitled' || out.reason === 'not_found') {
+      remember(key, out as FetchOutcome<unknown>);
+    }
+    return out;
+  } finally {
+    pending.delete(key);
+  }
+}
 
-    for (let attempt = 0; attempt <= config.bsd.retries; attempt++) {
-      if (attempt > 0) {
-        stats.retries++;
-        // 2s, 4s, 8s, 16s with jitter so parallel workers don't resynchronise.
-        await sleep(2 ** attempt * 1000 + Math.random() * 500);
-      }
+async function fetchOnce<T = unknown>(url: URL): Promise<FetchOutcome<T>> {
+  let lastMessage = '';
+  let lastStatus = 0;
+  let retryAfterMs = 0;
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), config.bsd.timeoutMs);
-      try {
-        stats.requests++;
-        const res = await fetch(url, {
-          headers: {
-            Authorization: `Token ${config.bsd.key}`,
-            Accept: 'application/json',
-            'User-Agent': 'offside-win/1.0 (+https://github.com/xlr8-bl/offside-win)',
-          },
-          signal: controller.signal,
-        });
-        lastStatus = res.status;
-
-        if (res.status === 403) {
-          const body = await res.text();
-          stats.notEntitled++;
-          return {
-            ok: false,
-            reason: 'not_entitled',
-            status: 403,
-            message: body.slice(0, 300),
-          };
-        }
-        if (res.status === 404) {
-          return { ok: false, reason: 'not_found', status: 404, message: 'not found' };
-        }
-        // 429 and 5xx are worth another go; other 4xx are our bug, not theirs.
-        if (res.status === 429 || res.status >= 500) {
-          lastMessage = `${res.status} ${(await res.text()).slice(0, 200)}`;
-          continue;
-        }
-        if (!res.ok) {
-          stats.errors++;
-          return {
-            ok: false,
-            reason: 'error',
-            status: res.status,
-            message: (await res.text()).slice(0, 300),
-          };
-        }
-        return { ok: true, data: (await res.json()) as T, status: res.status };
-      } catch (err) {
-        lastMessage = err instanceof Error ? err.message : String(err);
-      } finally {
-        clearTimeout(timer);
-      }
+  for (let attempt = 0; attempt <= config.bsd.retries; attempt++) {
+    if (attempt > 0) {
+      stats.retries++;
+      // Backoff happens *outside* the concurrency slot. Sleeping while holding
+      // one is what turns a rate-limited run into a stalled one: with six slots
+      // and a 2/4/8/16s backoff, six throttled requests are enough to stop
+      // every other request in the process for half a minute at a time.
+      // Jittered so parallel workers do not resynchronise, and never shorter
+      // than a Retry-After the provider asked for.
+      const backoff = 2 ** attempt * 1000 + Math.random() * 500;
+      await sleep(Math.max(backoff, retryAfterMs));
+      retryAfterMs = 0;
     }
 
-    stats.errors++;
-    return { ok: false, reason: 'error', status: lastStatus, message: lastMessage };
-  } finally {
-    release();
+    await acquire();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), config.bsd.timeoutMs);
+    try {
+      stats.requests++;
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Token ${config.bsd.key}`,
+          Accept: 'application/json',
+          'User-Agent': 'offside-win/1.0 (+https://github.com/xlr8-bl/offside-win)',
+        },
+        signal: controller.signal,
+      });
+      lastStatus = res.status;
+
+      if (res.status === 403) {
+        const body = await res.text();
+        stats.notEntitled++;
+        return { ok: false, reason: 'not_entitled', status: 403, message: body.slice(0, 300) };
+      }
+      if (res.status === 404) {
+        return { ok: false, reason: 'not_found', status: 404, message: 'not found' };
+      }
+      // 429 and 5xx are worth another go; other 4xx are our bug, not theirs.
+      if (res.status === 429 || res.status >= 500) {
+        const after = Number(res.headers.get('retry-after'));
+        // Honour the provider's own number when it gives one, capped so a wild
+        // value cannot park the run for the rest of the job.
+        if (Number.isFinite(after) && after > 0) retryAfterMs = Math.min(after * 1000, 60_000);
+        lastMessage = `${res.status} ${(await res.text()).slice(0, 200)}`;
+        continue;
+      }
+      if (!res.ok) {
+        stats.errors++;
+        return {
+          ok: false,
+          reason: 'error',
+          status: res.status,
+          message: (await res.text()).slice(0, 300),
+        };
+      }
+      return { ok: true, data: (await res.json()) as T, status: res.status };
+    } catch (err) {
+      lastMessage = err instanceof Error ? err.message : String(err);
+    } finally {
+      clearTimeout(timer);
+      release();
+    }
   }
+
+  stats.errors++;
+  return { ok: false, reason: 'error', status: lastStatus, message: lastMessage };
 }
 
 /** Throwing variant, for callers where an absence genuinely is fatal. */
