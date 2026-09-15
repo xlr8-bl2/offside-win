@@ -13,7 +13,7 @@ on:
       command:
         description: 'Engine command to run against Postgres'
         type: choice
-        options: [migrate, history, ratings, slate, settle, backtest, board:stats, eval:provider]
+        options: [migrate, history, ratings, slate, settle, backtest, board:stats, eval:provider, h2h]
         default: migrate
       leagues:
         # "all" rather than blank, because GitHub substitutes the default for an
