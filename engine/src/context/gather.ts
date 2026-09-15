@@ -23,18 +23,30 @@ import type {
 const ENTITLEMENT_KEY = 'entitlement:odds_comparison';
 
 /**
- * The per-bookmaker grid sits behind the provider's paid tier. Probe once a day
- * rather than 403-ing on every fixture, and cache the answer so that buying the
- * tier later lifts the restriction on its own with no code change.
+ * The per-bookmaker grid sits behind the provider's paid tier, and the promise
+ * is that buying the tier lifts the restriction on its own with no code change.
+ *
+ * That only works if a "no" expires quickly. Caching one for a day meant the
+ * grid stayed UNAVAILABLE for up to 24 hours after the tier was actually
+ * bought — the restriction lifting itself, a day late. So only a "yes" is
+ * cached: an entitlement does not get revoked mid-day, while a "no" is exactly
+ * the answer that changes when someone upgrades.
+ *
+ * Re-probing a "no" is close to free. This runs once per slate, not once per
+ * fixture, and within a run the client caches the 403 anyway.
  */
 export async function checkComparisonEntitlement(sampleEventId: number): Promise<boolean> {
   const cached = await kvGetJSON<{ entitled: boolean }>(ENTITLEMENT_KEY);
-  if (cached !== null) return cached.entitled;
+  if (cached?.entitled === true) return true;
 
   const res = await bsdRaw(`/api/v2/events/${sampleEventId}/odds/comparison/`);
   const entitled = res.ok;
-  await kvSetJSON(ENTITLEMENT_KEY, { entitled }, 86400);
-  if (!entitled) {
+  if (entitled) {
+    await kvSetJSON(ENTITLEMENT_KEY, { entitled: true }, 86400);
+    if (cached?.entitled === false) {
+      console.log('  per-bookmaker comparison is now entitled — sharp-reference factor is live');
+    }
+  } else {
     console.log('  per-bookmaker comparison is not entitled on this tier — sharp-reference factor will read UNAVAILABLE');
   }
   return entitled;
