@@ -1,4 +1,5 @@
 import { config } from './config.ts';
+import { splitStatements } from './sql-split.ts';
 
 /**
  * D1 access over Cloudflare's REST API.
@@ -183,13 +184,6 @@ export function kvSetJSON(key: string, value: unknown, ttlSeconds?: number): Pro
  * one of those lines and the migration breaks. Stripping first removes the
  * whole class rather than relying on where the punctuation lands.
  */
-export function splitStatements(schemaSql: string): string[] {
-  return schemaSql
-    .replace(/^\s*--.*$/gm, '')
-    .split(';')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
 
 export async function migrate(schemaSql: string): Promise<void> {
   for (const stmt of splitStatements(schemaSql)) await exec(stmt);

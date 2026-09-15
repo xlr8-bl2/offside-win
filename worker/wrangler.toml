@@ -8,11 +8,15 @@ workers_dev = true
 directory = "../public"
 binding = "ASSETS"
 
-# The only binding the Worker needs. No secrets, no API keys: every number the
-# Worker serves was computed in GitHub Actions and written here already.
-# Create with:  wrangler d1 create offside-win
-# then paste the returned database_id below.
-[[d1_databases]]
-binding = "DB"
-database_name = "offside-win"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+# Where the read path points. Both values are substituted by .github/workflows/
+# deploy.yml from repository secrets, the same way the D1 database id was before
+# it, so nothing credential-shaped is committed to a public repo.
+#
+# These are vars rather than secrets on purpose. The anon key is not a secret:
+# it is Supabase's public client key, meant to ship in a browser, and what
+# confines it to reading is row-level security and SELECT-only grants in
+# schema.pg.sql — not obscurity. Keeping it a var means a deploy is one step and
+# cannot leave a freshly created Worker briefly unable to reach the database.
+[vars]
+SUPABASE_URL = "REPLACE_WITH_SUPABASE_URL"
+SUPABASE_ANON_KEY = "REPLACE_WITH_SUPABASE_ANON_KEY"

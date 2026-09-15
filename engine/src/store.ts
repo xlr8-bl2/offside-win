@@ -72,7 +72,7 @@ export function migrate(schemaSql: string): Promise<void> {
   return backend().migrate(schemaSql);
 }
 
-export { splitStatements } from './store.d1.ts';
+export { splitStatements } from './sql-split.ts';
 
 /** Release any pooled connections so a finished job exits promptly. */
 export async function closeDb(): Promise<void> {

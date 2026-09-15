@@ -1,9 +1,12 @@
 name: pg
 
-# The Supabase pipeline, run separately from the live D1 workflows so the board
-# keeps serving from D1 while Postgres is proved against it. Same engine, same
-# commands — only DB_BACKEND differs. Once this reproduces the board and the
-# backtest, the scheduled workflows switch over and this one goes away.
+# Run any engine command against Supabase by hand.
+#
+# This began as the parallel pipeline that proved Postgres while D1 kept serving
+# the site. That job is done — every scheduled workflow now writes to Supabase
+# and the Worker reads from it — but the ability to run one command, at a chosen
+# scope, without waiting for a cron is worth keeping, and board:stats and
+# eval:provider have no schedule of their own.
 on:
   workflow_dispatch:
     inputs:

@@ -28,11 +28,9 @@ jobs:
       - run: npm ci
       - env:
           BSD_API_KEY: ${{ secrets.BSD_API_KEY }}
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          CF_D1_DATABASE_ID: ${{ secrets.CF_D1_DATABASE_ID }}
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          # The first run cold-starts by backfilling, so it needs the same
-          # tracked set as ratings — otherwise it would discover all 88 leagues
-          # and exhaust D1's daily row-write quota.
-          LEAGUES: ${{ vars.LEAGUES || '1,3,4,5,6,39,40,41,42,43,44,7,8,83,90' }}
+          DB_BACKEND: postgres
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          # Must match the tracked set ratings fits, or the slate prices
+          # fixtures in leagues that have no ratings. Empty means all of them.
+          LEAGUES: ${{ vars.LEAGUES }}
         run: npm run slate

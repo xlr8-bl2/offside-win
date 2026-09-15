@@ -211,14 +211,139 @@ CREATE TABLE IF NOT EXISTS kv (
   updated_at bigint NOT NULL
 );
 
--- The picks page needs one aggregate row. PostgREST cannot express it, and a
--- view keeps the Worker's promise that it computes nothing.
+-- ------------------------------------------------------------- serving API
+--
+-- The Worker reads through these, not through the tables, and that is a CPU
+-- decision rather than a stylistic one. Cloudflare's free tier allows 10 ms of
+-- CPU per request. Reading rows over PostgREST and reassembling them in the
+-- Worker means JSON.parse over the whole board on every request -- a megabyte
+-- of pre-rendered fixture JSON, parsed only to be serialised straight back --
+-- which is comfortably over that budget. Each function below returns the
+-- finished response body as a single json value, so PostgREST sends exactly the
+-- bytes the Worker needs and the Worker streams them through without parsing
+-- anything at all.
+--
+-- All are STABLE, so PostgREST accepts them over GET and the edge can cache
+-- them, and all are SECURITY INVOKER: they read as the caller, under the same
+-- RLS policies as a direct select, and grant no access the anon key lacks.
+
+-- kv values are written by kvSetJSON and are therefore valid JSON, but a
+-- malformed one would take the whole /api/model response down with it rather
+-- than dropping one row. The engine's own reader has always been forgiving here
+-- and so is this.
+CREATE OR REPLACE FUNCTION try_json(raw text)
+RETURNS json LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE SET search_path = public AS $fn$
+BEGIN
+  RETURN raw::json;
+EXCEPTION WHEN others THEN
+  RETURN to_json(raw);
+END;
+$fn$;
+
+-- The picks page needs one aggregate row. Settled, non-void picks only: a void
+-- bet is a stake returned, so counting it would dilute the strike rate with
+-- results that were never in play. HALF_WON is an Asian-handicap half-win and
+-- counts as a win, as it does in the ledger.
 CREATE OR REPLACE VIEW pick_summary AS
-  SELECT count(*) FILTER (WHERE settled_at IS NOT NULL)            AS n,
-         count(*) FILTER (WHERE result = 'WON')                    AS wins,
-         sum(pnl) FILTER (WHERE settled_at IS NOT NULL)            AS pnl,
-         avg(odds) FILTER (WHERE settled_at IS NOT NULL)           AS avg_odds
-  FROM pick;
+  SELECT count(*)                                                   AS n,
+         count(*) FILTER (WHERE result IN ('WON', 'HALF_WON'))       AS wins,
+         sum(pnl)                                                    AS pnl,
+         avg(odds)                                                   AS avg_odds
+  FROM pick
+  WHERE settled_at IS NOT NULL AND result IS DISTINCT FROM 'VOID';
+
+CREATE OR REPLACE FUNCTION get_board(p_from bigint, p_to bigint, p_league bigint DEFAULT NULL)
+RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+  SELECT json_build_object(
+           'generated_at', floor(extract(epoch FROM now()))::bigint,
+           'count', count(*),
+           'fixtures', coalesce(json_agg(b.board_json::json ORDER BY b.kickoff ASC), '[]'::json)
+         )
+  FROM (
+    SELECT f.board_json, f.kickoff
+    FROM fixture f
+    WHERE f.kickoff BETWEEN p_from AND p_to
+      AND (p_league IS NULL OR f.league_id = p_league)
+    ORDER BY f.kickoff ASC
+    LIMIT 300
+  ) b;
+$fn$;
+
+CREATE OR REPLACE FUNCTION get_fixture(p_id bigint)
+RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+  SELECT f.bundle_json::json FROM fixture f WHERE f.id = p_id;
+$fn$;
+
+-- p_settled: 'true' for settled picks, 'false' for open ones, anything else for
+-- both. A text flag rather than a boolean because the query string carries it
+-- as text and a missing value must mean "both", not false.
+CREATE OR REPLACE FUNCTION get_picks(p_limit integer DEFAULT 60, p_settled text DEFAULT NULL)
+RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+  SELECT json_build_object(
+           'summary', (SELECT to_json(s) FROM pick_summary s),
+           'picks', coalesce((
+             SELECT json_agg(row_to_json(p) ORDER BY p.kickoff DESC)
+             FROM (
+               SELECT pk.id, pk.fixture_id, pk.kickoff, pk.market, pk.outcome, pk.line, pk.kind,
+                      pk.model_prob, pk.book_prob, pk.edge, pk.odds, pk.bookmaker, pk.kelly,
+                      pk.confidence, pk.provisional, pk.narrative, pk.result, pk.pnl,
+                      f.home_team, f.away_team
+               FROM pick pk LEFT JOIN fixture f ON f.id = pk.fixture_id
+               WHERE (p_settled = 'true'  AND pk.settled_at IS NOT NULL)
+                  OR (p_settled = 'false' AND pk.settled_at IS NULL)
+                  OR (p_settled IS DISTINCT FROM 'true' AND p_settled IS DISTINCT FROM 'false')
+               ORDER BY pk.kickoff DESC
+               LIMIT greatest(1, least(200, p_limit))
+             ) p
+           ), '[]'::json)
+         );
+$fn$;
+
+CREATE OR REPLACE FUNCTION get_model()
+RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+  SELECT json_build_object(
+           'calibration', coalesce((
+             SELECT json_agg(row_to_json(c) ORDER BY c.market_family)
+             FROM calibration c
+           ), '[]'::json),
+           'leagues', coalesce((
+             SELECT json_agg(row_to_json(g) ORDER BY g.n_matches DESC)
+             FROM (
+               SELECT rm.league_id, l.name, rm.home_adv, rm.rho, rm.xi, rm.mean_goals,
+                      rm.n_matches, rm.fitted_at
+               FROM rating_meta rm LEFT JOIN league l ON l.id = rm.league_id
+             ) g
+           ), '[]'::json),
+           'runs', coalesce((
+             SELECT json_object_agg(k, try_json(v))
+             FROM kv WHERE k LIKE '%:last_run' OR k LIKE 'ratings:%'
+           ), '{}'::json),
+           'backtest', (
+             SELECT json_build_object('label', b.label, 'created_at', b.created_at,
+                                      'report', try_json(b.report_json))
+             FROM backtest b ORDER BY b.created_at DESC LIMIT 1
+           )
+         );
+$fn$;
+
+-- The slate runs every 30 minutes, so a board much older than that means
+-- Actions is not running. That is the failure this endpoint exists to surface,
+-- and the threshold belongs next to the query that decides it.
+CREATE OR REPLACE FUNCTION get_health()
+RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+  WITH s AS (
+    SELECT count(*) AS fixtures,
+           round((extract(epoch FROM now()) - max(computed_at)) / 60)::bigint AS age_minutes
+    FROM fixture
+  )
+  SELECT json_build_object(
+           'ok', true,
+           'fixtures', s.fixtures,
+           'last_computed_minutes_ago', s.age_minutes,
+           'stale', s.age_minutes IS NULL OR s.age_minutes > 120
+         )
+  FROM s;
+$fn$;
 
 -- ---------------------------------------------------------------- access
 --
@@ -289,3 +414,19 @@ CREATE POLICY kv_read ON kv FOR SELECT TO anon USING (true);
 GRANT SELECT ON kv TO anon;
 
 GRANT SELECT ON pick_summary TO anon;
+
+-- The serving functions are the Worker's whole read path. EXECUTE only: they
+-- are SECURITY INVOKER, so each one still reads under the anon SELECT policies
+-- above and can reach nothing a direct select could not.
+GRANT EXECUTE ON FUNCTION try_json(text) TO anon;
+GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint) TO anon;
+GRANT EXECUTE ON FUNCTION get_fixture(bigint) TO anon;
+GRANT EXECUTE ON FUNCTION get_picks(integer, text) TO anon;
+GRANT EXECUTE ON FUNCTION get_model() TO anon;
+GRANT EXECUTE ON FUNCTION get_health() TO anon;
+
+-- PostgREST caches the schema and will answer 404 for a function it has not
+-- seen yet. Supabase reloads on DDL via an event trigger, but that fires on its
+-- own schedule and a deploy that races it serves a broken read path until the
+-- next one. Asking explicitly costs nothing and removes the race.
+NOTIFY pgrst, 'reload schema';

@@ -40,7 +40,7 @@ const commands: Record<string, () => Promise<unknown>> = {
   },
 
   async migrate() {
-    requireEnv();
+    requireEnv({ provider: false });
     await ensureSchema();
     console.log('Schema applied.');
   },
