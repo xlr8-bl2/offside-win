@@ -1,7 +1,7 @@
 import { config } from '../config.ts';
 import { marketLabel } from '../select.ts';
 import type { Candidate, Claim, Factor } from '../types.ts';
-import { CONNECTIVES, FRAMES, choose, type Rng } from './grammar.ts';
+import { CONNECTIVES, FRAMES, choose, tryFrame, type Rng } from './grammar.ts';
 
 /**
  * Composing a pick's explanation.
@@ -166,6 +166,44 @@ export interface NarrateInput {
 }
 
 /**
+ * Turn one claim into one sentence, or into nothing.
+ *
+ * Frames are tried in the order the ledger prefers, and a frame whose evidence
+ * the claim does not carry is skipped rather than rendered with zeros in the
+ * gaps. If no frame can be written truthfully the claim is dropped — a silent
+ * omission is a smaller failure than a confident sentence about nothing, and
+ * §13 would rather say less than say something unearned.
+ */
+function renderClaim(claim: Claim, rng: Rng, ledger: RepetitionLedger): string | null {
+  const frames = FRAMES[claim.predicate];
+  if (!frames || frames.length === 0) return null;
+
+  const avoid = ledger.avoidFor(claim.predicate, frames.length);
+  const all = frames.map((_, i) => i);
+  const preferred = all.filter((i) => !avoid.has(i));
+
+  // `choose` returns a position within the array it is handed, so it is given
+  // the index list and its `item` — the frame index — is what to use. Reading
+  // its `index` instead silently defeated the ledger and let two consecutive
+  // picks open with the same construction.
+  const first = (preferred.length ? choose(preferred, rng) : choose(all, rng)).item;
+
+  // Preferred frames first, then the ones the ledger wanted to avoid: repeating
+  // a construction is a smaller loss than dropping a real reason because its
+  // freshest phrasing happened to need evidence this claim lacks.
+  const order = [first, ...preferred.filter((i) => i !== first), ...all.filter((i) => i !== first && !preferred.includes(i))];
+
+  for (const i of order) {
+    const out = tryFrame(frames[i]!, claim, rng);
+    if (out !== null) {
+      ledger.record(claim.predicate, i);
+      return out;
+    }
+  }
+  return null;
+}
+
+/**
  * Build the sentence that states the bet itself, with our number against the
  * market's. This always appears, because a reader should never have to infer
  * what was actually being recommended.
@@ -184,10 +222,14 @@ function verdictSentence(c: Candidate, rng: Rng, ledger: RepetitionLedger): stri
     section: '§7.3',
     tier: 7,
   };
-  const frames = FRAMES.rating_gap;
-  const { item, index } = choose(frames, rng, ledger.avoidFor('rating_gap', frames.length));
-  ledger.record('rating_gap', index);
-  return item(claim, rng);
+  // rating_gap frames only cite model_pct, book_pct and edge_points, all set
+  // just above, so this cannot come back null in practice — the fallback is
+  // there so a future frame with a new key degrades to a plain statement rather
+  // than to an empty string.
+  return (
+    renderClaim(claim, rng, ledger) ??
+    `We make it ${(c.model_prob * 100).toFixed(1)}% against the market's ${(c.book_prob * 100).toFixed(1)}%.`
+  );
 }
 
 export function narrate(input: NarrateInput): string {
@@ -206,13 +248,10 @@ export function narrate(input: NarrateInput): string {
   let previous: Claim | null = null;
 
   for (const claim of claims) {
-    const frames = FRAMES[claim.predicate];
-    if (!frames || frames.length === 0) continue;
-    const avoid = ledger.avoidFor(claim.predicate, frames.length);
-    const { item, index } = choose(frames, rng, avoid);
-    ledger.record(claim.predicate, index);
+    const rendered = renderClaim(claim, rng, ledger);
+    if (rendered === null) continue;
 
-    let sentence = item(claim, rng);
+    let sentence = rendered;
     if (previous) {
       sentence = connectiveFor(previous, claim, rng) + joinAfterConnective(sentence, nouns);
     }
@@ -254,3 +293,202 @@ function capitalise(s: string): string {
 }
 
 export const _internals = { connectiveFor, capitalise, joinAfterConnective };
+
+// ------------------------------------------------------- confidence calls
+
+export interface ConfidentInput {
+  candidate: Candidate;
+  drivers: Factor[];
+  homeTeam: string;
+  awayTeam: string;
+  fixtureId: number;
+  ledger: RepetitionLedger;
+  /** The provider's expected goals, which carry the mismatch this call reads. */
+  expectedGoals: { home: number; away: number } | null;
+}
+
+/**
+ * Outcomes whose bet wins when the thing in question happens *less*.
+ *
+ * A factor that suppresses goals argues against "over 2.5" and for "under 2.5",
+ * so the claim polarity has to be read through the direction of the bet or the
+ * supporting and opposing sentences arrive swapped — which would be worse than
+ * saying nothing, because it reads as confident and is backwards.
+ */
+function isSuppressingBet(c: Candidate): boolean {
+  return c.outcome === 'under' || c.outcome === 'no';
+}
+
+/**
+ * The mismatch sentence: why this is lopsided, in expected goals.
+ *
+ * Returns null when the provider gave no expected goals, rather than inventing
+ * a case. A confidence call with no stated mismatch falls back to its context
+ * claims, and if it has none either it says so — see below.
+ */
+function strengthGapClaim(input: ConfidentInput): Claim | null {
+  const xg = input.expectedGoals;
+  if (!xg || xg.home <= 0 || xg.away <= 0) return null;
+
+  // Which side the bet is on decides which way the sentence is written. For a
+  // goals-total bet there is no side, so the stronger team leads and the
+  // sentence is about the shape of the match rather than about a winner.
+  const backsHome =
+    input.candidate.outcome === 'HOME' || input.candidate.outcome === '1X';
+  const backsAway =
+    input.candidate.outcome === 'AWAY' || input.candidate.outcome === 'X2';
+  const homeLeads = backsHome || (!backsAway && xg.home >= xg.away);
+
+  // A goals total or BTTS has no side to be stronger. Asking the strength_gap
+  // frames to describe it produced sentences arguing for the wrong outcome.
+  if (!backsHome && !backsAway) {
+    const total = xg.home + xg.away;
+    return {
+      subject: 'the match',
+      predicate: 'match_shape',
+      polarity: 1,
+      magnitude: Math.min(1, Math.abs(xg.home - xg.away) / 1.6),
+      evidence: {
+        total,
+        xg_home: xg.home,
+        xg_away: xg.away,
+        home: input.homeTeam,
+        away: input.awayTeam,
+        ...(input.candidate.line !== null ? { line: input.candidate.line } : {}),
+      },
+      section: '§7.1',
+      tier: 1,
+    };
+  }
+
+  const forGoals = homeLeads ? xg.home : xg.away;
+  const againstGoals = homeLeads ? xg.away : xg.home;
+  const ratio = againstGoals > 0 ? forGoals / againstGoals : forGoals;
+
+  return {
+    subject: homeLeads ? input.homeTeam : input.awayTeam,
+    predicate: 'strength_gap',
+    polarity: 1,
+    magnitude: Math.min(1, Math.abs(forGoals - againstGoals) / 1.6),
+    evidence: {
+      team: homeLeads ? input.homeTeam : input.awayTeam,
+      opponent: homeLeads ? input.awayTeam : input.homeTeam,
+      xg_for: forGoals,
+      xg_against: againstGoals,
+      ratio,
+    },
+    section: '§7.1',
+    tier: 1,
+  };
+}
+
+/** The verdict: the number, the price, and what the price means. */
+function confidenceVerdict(c: Candidate): Claim {
+  return {
+    subject: 'the call',
+    predicate: 'confidence_case',
+    polarity: 1,
+    magnitude: c.model_prob,
+    evidence: {
+      prob_pct: c.model_prob * 100,
+      odds: c.odds,
+      // What a winning bet actually hands back, which is the fact a hit rate
+      // hides. 86% at 1.16 returns 16p in the pound.
+      return_pct: (c.odds - 1) * 100,
+    },
+    section: '§7.3',
+    tier: 7,
+  };
+}
+
+/**
+ * Explain a high-confidence call.
+ *
+ * Structurally different from `narrate` above, because the argument is
+ * different: there is no pricing disagreement to point at, so the case has to
+ * be the match itself. Order is fixed — what the bet is, why the mismatch
+ * exists, what supports it, what cuts against it, what it pays — because a
+ * reader scanning twenty of these needs the same shape every time, and the
+ * variation belongs inside the sentences rather than in their arrangement.
+ *
+ * The counterweight is the part worth protecting. Anyone can publish a favourite
+ * at 86%; saying out loud what the 86% has not accounted for is the only reason
+ * to read ours instead of theirs.
+ */
+export function narrateConfident(input: ConfidentInput): string {
+  const { candidate, drivers, ledger } = input;
+  const rng = seededRng(
+    `conf:${input.fixtureId}:${candidate.market}:${candidate.outcome}:${candidate.line ?? 'x'}`,
+  );
+
+  // Polarity on a claim is "does this suppress or promote the thing happening".
+  // For a bet that wins when the thing happens *less*, that reading inverts, and
+  // the connectives have to see the inverted value too — otherwise rain, which
+  // supports an under, gets introduced with "Cutting the other way".
+  const flip = isSuppressingBet(candidate) ? -1 : 1;
+  const orient = (c: Claim): Claim =>
+    flip === 1 ? c : { ...c, polarity: (c.polarity * -1) as Claim['polarity'] };
+
+  const all = drivers.flatMap((d) => d.claims).map(orient);
+  const supporting = selectClaims(
+    all.filter((c) => c.polarity > 0),
+    Math.max(1, config.narrate.maxClaims - 1),
+  );
+  const against = selectClaims(all.filter((c) => c.polarity < 0), 1);
+
+  const render = (claim: Claim): string | null => renderClaim(claim, rng, ledger);
+
+  const sentences: string[] = [];
+
+  const gap = strengthGapClaim(input);
+  if (gap) {
+    const s = render(gap);
+    if (s) sentences.push(s);
+  }
+
+  const nouns = properNouns([...supporting, ...against], input.homeTeam, input.awayTeam);
+  let previous: Claim | null = gap;
+  for (const claim of supporting) {
+    const s = render(claim);
+    if (!s) continue;
+    sentences.push(previous ? connectiveFor(previous, claim, rng) + joinAfterConnective(s, nouns) : s);
+    previous = claim;
+  }
+
+  // The counterweight gets its own predicate rather than a connective, because
+  // it is doing a different job from "and also": it is the reservation, and it
+  // should read like one.
+  for (const claim of against) {
+    const detail = render(claim);
+    if (!detail) continue;
+    const framed = render({
+      subject: claim.subject,
+      predicate: 'counterweight',
+      polarity: -1,
+      magnitude: claim.magnitude,
+      // The inner sentence is lowercased so it reads as a clause rather than as
+      // a second sentence bolted on.
+      evidence: { detail: detail.replace(/\.$/, '').replace(/^(.)/, (m) => m.toLowerCase()) },
+      section: claim.section,
+      tier: claim.tier,
+    });
+    if (framed) sentences.push(framed);
+  }
+
+  const lead = `${capitalise(marketLabel(candidate))} at ${candidate.odds.toFixed(2)}.`;
+  const verdict = render(confidenceVerdict(candidate));
+
+  // Nothing contextual cleared: say that, rather than dressing a bare number in
+  // adjectives. §13 — thin evidence is stated as thin.
+  if (sentences.length === 0) {
+    return [
+      lead,
+      `The case here is the matchup itself rather than anything we can point at — no contextual factor cleared its evidence bar for this fixture.`,
+      verdict ?? '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  return [lead, ...sentences, verdict ?? ''].filter(Boolean).join(' ');
+}
