@@ -36,6 +36,12 @@ jobs:
           CF_D1_DATABASE_ID: ${{ secrets.CF_D1_DATABASE_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           FULL_BACKFILL: ${{ inputs.full_backfill }}
+          # Without this the nightly refresh rediscovers every league the
+          # provider covers — 88 of them, cups and youth competitions included —
+          # and backfills the lot, which exhausts D1's daily row-write quota and
+          # takes the board down with it. Set the LEAGUES repository variable to
+          # change the tracked set; the fallback is the scope this is running.
+          LEAGUES: ${{ vars.LEAGUES || '1,3,4,5,6,39,40,41,42,43,44,7,8,83,90' }}
         run: npm run history
       - name: Fit ratings
         env:
