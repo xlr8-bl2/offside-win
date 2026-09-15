@@ -149,25 +149,32 @@ working directory to the workspace, so the old `engine/backtest-report.json` pat
 Same shape as the probe output-path bug; worth suspecting first whenever an artifact step warns that
 it found no files.
 
-**The provider recommends no bets at all, and hit rate is the wrong scoreboard.**
-`npm run h2h` scores both models the way a tipster is scored. Over 600 recent finished matches
-(569 answered, every one carrying a `recommendations` block):
+**The provider's 86.7% is real, reproducible, and beats us — on the markets they publish.**
+`npm run h2h` prices the same fourteen selections from both models over recent finished matches
+and publishes under their rule: every market clearing a confidence bar, several to a match.
+569 matches, walk-forward on our side:
 
-- **Their recommendation engine flagged zero bets.** `winner`, `bet_favorite`, `over_15`,
-  `over_25`, `over_35`, `btts` — all false, on all 569. There is no set of published picks to
-  reproduce an accuracy claim over, so do not repeat one.
-- **1x2 top pick:** them 51.7%, us 46.9%, always-pick-home 45.5%. They beat us here, largely by
-  calling home in 413 of 569 — naming the modal outcome is how you maximise raw accuracy.
-- **Our goal markets are genuinely weak:** over 2.5 51.1% against 54.8% for always-yes; btts
-  52.2% against 56.8%. Below the do-nothing baseline. This is a real defect, not a framing issue.
-- **Ours by selectivity** (near-free markets excluded): top 25% hits 59.3%, break-even odds 1.69.
+| confidence bar | them | us | their calls/match |
+|---|---|---|---|
+| >= 80% | **86.3%** (384/445) | 80.3% (326/406) | 0.78 |
+| >= 75% | **81.5%** (807/990) | 76.8% (677/882) | 1.74 |
+| >= 70% | **77.9%** (1351/1735) | 75.3% (1264/1678) | 3.05 |
 
-Hit rate and log loss disagree here and both are correct. Ours is far better calibrated (0.6200
-against their 1.0102) and worse at naming the single most likely outcome. Only one of those pays:
-you are settled at odds, so being right about *how likely* something is beats being right *more
-often* at prices that already reflect it. Neither number supports 87%, and neither proves a
-profitable business — that needs settled ROI and CLV, which the `pick` table is only now
-starting to accumulate on Postgres.
+86.3% against the 86.7% their own page claims, from an independent sample, which is what says
+the method is right and the claim is honest. At matched volume it holds: 86.2% to 80.3%.
+
+**Our defect is specific and in the goal lines.** Per selection at the 80% bar: under 3.5 —
+us 71.7% on 113 calls against their 75.6% on 45; over 1.5 — us 82.2% on 169 against their 86.6%
+on 134; home-or-draw — us 88.3% against their 89.4%, near parity. So the double chance is fine
+and the totals are not: we call goal lines more often, at higher stated confidence, and land them
+less. A model saying 80%+ and hitting 71.7% is overconfident, not unlucky — Poisson totals are
+too tight for real football, and the fix is over-dispersion in the totals distribution
+(negative binomial or a Poisson mixture), not more context.
+
+**What the hit rate does not say.** Break-even odds on their calls are 1.16, and double chance on
+a strong home side prices 1.15-1.25. Their own page says so in the footer: "A confidence, not a
+tip. We do not claim these beat the bookmakers'." Do not republish 86.7% without that caveat —
+they are careful about it, and they are the ones with the better number.
 
 **Six context factors are still dark**, losing 19 of the weight: `stakes.table` (6),
 `manager.home` (5), `style.press_matchup` (3), `environment.pitch` (2), `environment.venue` (2),
