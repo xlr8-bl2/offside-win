@@ -192,10 +192,16 @@ export function parseStandings(raw: unknown): StandingRow[] | null {
       team_id: teamId,
       position: num(row?.['position'] ?? row?.['rank']) ?? 0,
       played: num(row?.['played'] ?? row?.['matches']) ?? 0,
-      points: num(row?.['points']) ?? 0,
+      // The provider abbreviates: pts, gd, gf, ga. Reading only the spelled-out
+      // names returned undefined and fell through to 0, so every table row
+      // arrived on nil points with no goal difference — which does not fail, it
+      // just quietly tells §5.1 that every side is level on nothing and makes a
+      // run-in indistinguishable from a dead rubber.
+      points: num(row?.['points'] ?? row?.['pts']) ?? 0,
       goal_diff:
-        num(row?.['goal_diff'] ?? row?.['goal_difference']) ??
-        (num(row?.['goals_for']) ?? 0) - (num(row?.['goals_against']) ?? 0),
+        num(row?.['goal_diff'] ?? row?.['goal_difference'] ?? row?.['gd']) ??
+        (num(row?.['goals_for'] ?? row?.['gf']) ?? 0) -
+          (num(row?.['goals_against'] ?? row?.['ga']) ?? 0),
     });
   }
   return out.length ? out.sort((a, b) => a.position - b.position) : null;
