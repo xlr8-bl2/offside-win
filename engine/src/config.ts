@@ -79,6 +79,38 @@ export const config = {
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isFinite(n) && n > 0),
 
+  /**
+   * What leads the board.
+   *
+   * The provider publishes no tier — confirmed against /coverage and the event
+   * payload — so prominence is a judgement we make and maintain. Without it the
+   * board ordered on kickoff alone and led with whatever happened to start
+   * soonest, which on a Premier League Saturday meant a Polish cup tie.
+   *
+   * Lower is more prominent. Anything unlisted sorts at UNRANKED, and friendlies
+   * sort below that: a pre-season kickabout should never outrank a real fixture
+   * however confident the model is about it.
+   */
+  leagueRank: {
+    // The night that owns the week when it is on.
+    7: 1, // Champions League
+    // The big five.
+    1: 2, 3: 2, 4: 2, 5: 2, 6: 2, // Premier League, La Liga, Serie A, Bundesliga, Ligue 1
+    // Secondary European competition and the strong domestic leagues.
+    8: 3, 83: 3, 10: 3, 2: 3, 11: 3, 13: 3, 14: 3,
+    // Major leagues outside Europe, plus Europe's next rung.
+    12: 4, 9: 4, 85: 4, 20: 4, 18: 4, 17: 4, 49: 4, 50: 4,
+    23: 4, 26: 4, 54: 4, 25: 4, 15: 4,
+    // Second tiers, domestic cups and the rest of the covered set.
+    38: 5, 89: 5, 88: 5, 86: 5, 87: 5, 34: 5, 44: 5, 42: 5, 46: 5,
+    91: 5, 57: 5, 80: 5, 52: 5, 22: 5, 82: 5, 28: 5, 47: 5, 36: 5, 72: 5,
+    // Friendlies last, below unranked.
+    79: 9, 31: 9,
+  } as Record<number, number>,
+
+  /** Where a league we have not ranked sorts. */
+  unrankedLeague: num('UNRANKED_LEAGUE_RANK', 6),
+
   history: {
     /** Seasons of history to fit on. Two is the practical minimum. */
     seasons: num('HISTORY_SEASONS', 3),

@@ -10,7 +10,12 @@ name: slate
 # the rest, hence the timeout.
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    # Every fifteen minutes. Team news is the whole edge: a confirmed eleven an
+    # hour before kick-off is the moment a provisional pick becomes a real one,
+    # and a thirty-minute cadence meant half of that window could pass before
+    # the board caught up. The run is idempotent and the provider is not the
+    # bottleneck, so the extra passes cost little and close the gap.
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 concurrency:

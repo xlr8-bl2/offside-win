@@ -92,6 +92,7 @@ export default {
       if (path.startsWith('/api/fixture/')) return await fixture(path, env);
       if (path === '/api/picks') return await picks(url, env);
       if (path === '/api/model') return await passthrough(env, 'get_model', {});
+      if (path === '/api/hero') return await passthrough(env, 'get_hero', {});
       if (path === '/api/health') return await passthrough(env, 'get_health', {});
       return fail('not found', 404);
     } catch (err) {

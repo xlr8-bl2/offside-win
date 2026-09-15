@@ -155,7 +155,7 @@ const READ_LABEL = {
 
 // ------------------------------------------------------------------ state
 
-const state = { board: null, hours: 72, leagueName: '', heroVenue: [] };
+const state = { board: null, hours: 72, leagueName: '', heroVenue: [], hero: null };
 
 async function loadBoard() {
   state.board = await getJSON(`/api/board?hours=${state.hours}`);
@@ -213,36 +213,73 @@ function venueShot(venueIds, className, eager = false) {
     onload="window.__shotCheck(this)" onerror="window.__shotMissing(this)">`;
 }
 
-function heroHTML(venueIds = []) {
-  const queue = [].concat(venueIds).filter(Boolean);
+function heroHTML(hero = null, venueIds = []) {
+  const queue = hero?.venue_id ? [hero.venue_id, ...venueIds] : [].concat(venueIds).filter(Boolean);
+  const kicker = hero?.kicker ?? '88 leagues · every day';
+
+  // With a fixture chosen, the masthead is about tonight's game. Without one —
+  // an empty board, a failed slate — it falls back to the standing headline
+  // rather than to an empty stage.
+  const body = hero
+    ? `<h1 class="display hero-fx">
+         <span>${esc(hero.home)}</span>
+         <em>vs</em>
+         <span>${esc(hero.away)}</span>
+       </h1>
+       <p class="lede">${esc(hero.league)} · ${esc(kickoffLabel(hero.kickoff))}. Our call, and the reasons behind it.</p>
+       <div class="hero-cta">
+         <a class="btn btn-primary btn-lg" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">Read the analysis
+           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+         <a class="btn btn-ghost btn-lg" href="#/board">All of today's picks</a>
+       </div>`
+    : `<h1 class="display">The picks for the <em>biggest</em> games.</h1>
+       <p class="lede">Every call comes with the reason behind it. And the reason not to like it.</p>
+       <div class="hero-cta">
+         <a class="btn btn-primary btn-lg" href="#/board">Today's picks
+           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+         <a class="btn btn-ghost btn-lg" href="#/results">See the results</a>
+       </div>`;
+
   return `
   <section class="hero" data-shot="${queue.length ? 'yes' : 'none'}">
     <div class="hero-media">${venueShot(queue, '', true)}</div>
     <div class="hero-inner">
-      <p class="eyebrow">88 leagues · every day</p>
-      <h1 class="display">The picks for the <em>biggest</em> games.</h1>
+      <p class="kicker">${esc(kicker)}</p>
+      ${body}
       <p class="script hero-script">Same games.<br>Better picks.</p>
-      <p class="lede">
-        Every call comes with the reason behind it. And the reason not to like it.
-      </p>
-      <div class="hero-cta">
-        <a class="btn btn-primary btn-lg" href="#/board">Today's picks
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
-        <a class="btn btn-ghost btn-lg" href="#/results">See the results</a>
-      </div>
+      ${hero
+        ? `<div class="hero-badges">
+             ${crest(hero.home, 'xl', hero.home_id)}
+             <span class="hero-vs">V</span>
+             ${crest(hero.away, 'xl', hero.away_id)}
+           </div>`
+        : ''}
     </div>
-  </section>`;
+  </section>
+  <div class="trust"><div class="trust-inner">
+    ${[
+      ['88 leagues', 'Europe, the Americas, Asia'],
+      ['Updated every 30 minutes', 'Prices and team news'],
+      ['Every pick explained', 'Including what argues against it'],
+      ['Full results published', 'Won and lost, nothing hidden'],
+    ].map(([t, sub]) => `<div class="trust-item"><b>${esc(t)}</b><span>${esc(sub)}</span></div>`).join('')}
+  </div></div>`;
 }
 
 function railHTML(fixtures) {
   const byLeague = new Map();
   for (const f of fixtures) {
     const k = f.league_id ?? f.league;
-    const e = byLeague.get(k) ?? { name: f.league ?? '', id: f.league_id, n: 0 };
+    const e = byLeague.get(k) ?? { name: f.league ?? '', id: f.league_id, n: 0, rank: f.rank ?? 6 };
     e.n++;
+    e.rank = Math.min(e.rank, f.rank ?? 6);
     byLeague.set(k, e);
   }
-  const top = [...byLeague.values()].sort((a, b) => b.n - a.n).slice(0, 16);
+  // By prominence, not by fixture count — otherwise the rail opens on whichever
+  // minor division happens to have the fullest card that day.
+  const top = [...byLeague.values()]
+    .sort((a, b) => (a.rank ?? 6) - (b.rank ?? 6) || b.n - a.n)
+    .slice(0, 16);
   if (!top.length) return '';
   return `
   <div class="rail"><div class="rail-inner">
@@ -269,9 +306,12 @@ function cardHTML(f) {
       ? `<div class="card-pick">
            <div class="pick-meta">
              <span class="tag ${esc(pick.kind.toLowerCase())}">${esc(KIND_TAG[pick.kind] ?? pick.kind)}</span>
-             <span class="num">${pick.kind === 'CONFIDENT' && pick.prob ? pct(pick.prob) : dec(pick.odds)}</span>
+             <span class="num">${dec(pick.odds)}</span>
            </div>
            <span class="sel">${esc(marketLabel(pick.market, pick.outcome, pick.line, f.home, f.away))}</span>
+           ${typeof f.confidence === 'number'
+             ? `<div class="conf"><span class="conf-track"><i style="width:${Math.round(f.confidence * 100)}%"></i></span><span class="conf-pct">${pct(f.confidence)} confidence</span></div>`
+             : ''}
          </div>`
       : `<div class="card-pick none">No call on this one</div>`}
     ${extra.length
@@ -281,12 +321,19 @@ function cardHTML(f) {
 }
 
 /**
- * The front row, chosen for variety as well as confidence. Ranking on
- * confidence alone shows the same two markets eight times — accurate, and a
- * poor shop window.
+ * The front row: prominence first, then variety, then confidence.
+ *
+ * Two things were wrong with ranking on confidence alone. It showed the same two
+ * markets eight times, and it had no idea which competition anybody cares about —
+ * a Polish cup tie led the page on a Premier League Saturday because it kicked
+ * off first and the model happened to like it. `rank` comes off the board card
+ * (lower is more prominent) and leads the sort; the one-market-per-pass rule then
+ * keeps the row from repeating itself inside each band.
  */
 function spread(fixtures, limit) {
-  const ranked = [...fixtures].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+  const ranked = [...fixtures].sort(
+    (a, b) => (a.rank ?? 6) - (b.rank ?? 6) || (b.confidence ?? 0) - (a.confidence ?? 0),
+  );
   const out = [];
   const used = new Set();
   for (let pass = 0; pass < 6 && out.length < limit; pass++) {
@@ -362,10 +409,15 @@ async function sampleNarrative(candidates) {
 }
 
 async function viewHome() {
-  app.innerHTML = heroHTML(state.heroVenue) + '<div class="spinner">Loading the board…</div>';
+  app.innerHTML = heroHTML(state.hero, state.heroVenue) + '<div class="spinner">Loading the board…</div>';
   let board;
-  try { board = await loadBoard(); } catch (err) {
-    app.innerHTML = heroHTML(state.heroVenue) + `<div class="wrap section"><div class="empty">${esc(err.message)}</div></div>`;
+  try {
+    [board, state.hero] = await Promise.all([
+      loadBoard(),
+      getJSON('/api/hero').catch(() => null),
+    ]);
+  } catch (err) {
+    app.innerHTML = heroHTML(null, []) + `<div class="wrap section"><div class="empty">${esc(err.message)}</div></div>`;
     return;
   }
   const fixtures = board.fixtures ?? [];
@@ -381,7 +433,7 @@ async function viewHome() {
   state.heroVenue = [...top, ...fixtures].map((f) => f.venue_id).filter(Boolean);
 
   app.innerHTML =
-    heroHTML(state.heroVenue) +
+    heroHTML(state.hero, state.heroVenue) +
     railHTML(fixtures) +
     `<div class="wrap section">
        <div class="section-head">
@@ -395,9 +447,80 @@ async function viewHome() {
                     : `<div class="empty">Nothing worth calling right now. Check back shortly.</div>`}
      </div>` +
     stripHTML(recent) +
-    bandHTML(await sampleNarrative(top));
+    bandHTML(await sampleNarrative(top)) +
+    statsHTML(fixtures, recent) +
+    leaguesHTML(fixtures) +
+    closingHTML();
 
   wireCards();
+}
+
+/**
+ * Four figures, all of them true.
+ *
+ * The reference designs lead on "500K+ active users" and "78% average prediction
+ * accuracy". We have neither, and inventing them on a page that will eventually
+ * take money is not a shortcut worth taking. These are read from the board and
+ * the ledger, and they say enough.
+ */
+function statsHTML(fixtures, recent) {
+  const calls = fixtures.filter((f) => f.top_pick).length;
+  const settled = recent.filter((x) => x.result && x.result !== 'VOID').length;
+  const items = [
+    ['88', 'Leagues covered'],
+    [String(fixtures.length), 'Games on the board'],
+    [String(calls), 'Calls live right now'],
+    [settled ? String(settled) : 'All', settled ? 'Results settled' : 'Picks published'],
+  ];
+  return `
+  <section class="statband"><div class="wrap">
+    <div class="statgrid">
+      ${items.map(([b, l]) => `<div class="statcell"><b>${esc(b)}</b><span>${esc(l)}</span></div>`).join('')}
+    </div>
+  </div></section>`;
+}
+
+function leaguesHTML(fixtures) {
+  const byLeague = new Map();
+  for (const f of fixtures) {
+    const k = f.league_id ?? f.league;
+    const e = byLeague.get(k) ?? { name: f.league ?? '', id: f.league_id, n: 0, rank: f.rank ?? 6 };
+    e.n++;
+    e.rank = Math.min(e.rank, f.rank ?? 6);
+    byLeague.set(k, e);
+  }
+  const rows = [...byLeague.values()]
+    .sort((a, b) => (a.rank ?? 6) - (b.rank ?? 6) || b.n - a.n)
+    .slice(0, 12);
+  if (!rows.length) return '';
+  return `
+  <div class="wrap section">
+    <div class="section-head">
+      <div><h2 class="display">Every league that matters</h2>
+      <p>From the Champions League down. ${rows.length} in play right now, 88 covered.</p></div>
+      <a class="btn btn-ghost" href="#/leagues">All leagues</a>
+    </div>
+    <div class="lgrid">
+      ${rows.map((e) => `
+        <a class="lcard" href="#/board" data-league="${esc(e.name)}">
+          ${crest(e.name, 'lg', e.id, 'league')}
+          <b>${esc(e.name)}</b>
+          <span>${e.n} ${e.n === 1 ? 'game' : 'games'}</span>
+        </a>`).join('')}
+    </div>
+  </div>`;
+}
+
+function closingHTML() {
+  return `
+  <section class="closing"><div class="wrap closing-in">
+    <div>
+      <p class="script" style="margin:0 0 4px">Your next win</p>
+      <h2 class="display">is one pick away.</h2>
+    </div>
+    <a class="btn btn-primary btn-lg" href="#/board">See today's board
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+  </div></section>`;
 }
 
 // ------------------------------------------------------------------ board
@@ -478,6 +601,66 @@ function verdictHTML(v, home, away) {
   </div>`;
 }
 
+/**
+ * A team sheet laid out on a pitch.
+ *
+ * The formation string — "4-2-3-1" — is the whole layout: keeper, then one row
+ * per number, defence nearest our own goal. Players arrive in selection order,
+ * which is the order the provider lists them, so filling rows front to back from
+ * that list puts everyone roughly where they play without needing coordinates.
+ *
+ * Faces come from /img/player/{id}/ and are small headshots, which is exactly
+ * the size this needs — the same art would fall apart blown up in a masthead.
+ */
+function pitchHTML(lineups, home, away, homeId, awayId) {
+  if (!lineups?.home?.players?.length || !lineups?.away?.players?.length) return '';
+
+  const rowsFor = (side) => {
+    const starters = side.players.filter((p) => p.starting !== false).slice(0, 11);
+    const shape = String(side.formation ?? '')
+      .split(/[-–]/)
+      .map((n) => parseInt(n, 10))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    // No formation on record: an even spread still reads as a team sheet.
+    const bands = shape.length ? shape : [4, 4, 2];
+    const out = [[starters[0]].filter(Boolean)];
+    let i = 1;
+    for (const n of bands) {
+      out.push(starters.slice(i, i + n));
+      i += n;
+    }
+    if (i < starters.length) out.push(starters.slice(i));
+    return out.filter((r) => r.length);
+  };
+
+  const player = (p) => `
+    <div class="pp" title="${esc(p.name)}">
+      ${crest(p.name, 'md', p.id, 'player')}
+      <span class="pp-name">${esc((p.name ?? '').split(' ').slice(-1)[0])}</span>
+    </div>`;
+
+  const half = (side, teamName, teamId, flip) => `
+    <div class="pitch-half${flip ? ' flip' : ''}">
+      <div class="pitch-head">${crest(teamName, 'sm', teamId)}<b>${esc(teamName)}</b>
+        ${side.formation ? `<span class="formation">${esc(side.formation)}</span>` : ''}</div>
+      ${rowsFor(side).map((row) => `<div class="pitch-row">${row.map(player).join('')}</div>`).join('')}
+    </div>`;
+
+  const out = (lineups.unavailable ?? []).filter((u) => u.name);
+  return `
+  <div class="panel">
+    <p class="panel-head">Team sheet · ${esc(lineups.status === 'confirmed' ? 'confirmed' : 'predicted')}</p>
+    <div class="pitch">
+      ${half(lineups.home, home, homeId, false)}
+      <div class="pitch-mid"></div>
+      ${half(lineups.away, away, awayId, true)}
+    </div>
+    ${out.length
+      ? `<div class="outlist"><b>Unavailable</b>${out.map((u) => `<span class="also-call">${esc(u.name)}${u.reason ? ` — ${esc(u.reason)}` : ''}</span>`).join('')}</div>`
+      : ''}
+  </div>`;
+}
+
 async function viewFixture(id) {
   app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
   let f;
@@ -521,6 +704,7 @@ async function viewFixture(id) {
             ? verdicts.map((v) => verdictHTML(v, f.home, f.away)).join('')
             : `<p class="narrative">${esc(f.pass ?? 'Nothing here is worth a call. The price looks about right.')}</p>`}
         </div>
+        ${pitchHTML(f.lineups, f.home, f.away, f.home_id, f.away_id)}
         ${reads.length ? `<div class="panel">
           <p class="panel-head">What we looked at</p>
           <div class="reads">${reads.map((r) => `<div class="read"><b>${esc(r.label)}</b><p>${esc(r.note)}</p></div>`).join('')}</div>
@@ -606,12 +790,13 @@ async function viewLeagues() {
   const byLeague = new Map();
   for (const f of fixtures) {
     const k = f.league_id ?? f.league;
-    const e = byLeague.get(k) ?? { name: f.league ?? '', id: f.league_id, n: 0, picks: 0 };
+    const e = byLeague.get(k) ?? { name: f.league ?? '', id: f.league_id, n: 0, picks: 0, rank: f.rank ?? 6 };
     e.n++;
+    e.rank = Math.min(e.rank, f.rank ?? 6);
     if (f.top_pick) e.picks++;
     byLeague.set(k, e);
   }
-  const rows = [...byLeague.values()].sort((a, b) => b.n - a.n);
+  const rows = [...byLeague.values()].sort((a, b) => (a.rank ?? 6) - (b.rank ?? 6) || b.n - a.n);
 
   app.innerHTML = `
   <div class="wrap section">
@@ -636,6 +821,169 @@ async function viewLeagues() {
   }
 }
 
+// ------------------------------------------------------------------ legal
+
+const UPDATED = 'September 2026';
+
+const LEGAL = {
+  privacy: {
+    title: 'Privacy policy',
+    body: `
+      <p>This policy explains what offside.win collects, why, and what you can do about it.
+         It is written to be read rather than to be survived.</p>
+      <h2>What we collect</h2>
+      <p><b>Nothing that identifies you, unless you give it to us.</b> There is no account to
+         create and no form to fill in, so we hold no name, email address or payment detail.</p>
+      <p>Our host records standard server logs — IP address, browser, page requested, time — which
+         are used to keep the site up and to spot abuse, and are not used to build a profile of you.</p>
+      <h2>Analytics</h2>
+      <p>If analytics are enabled they run only after you accept them in the cookie notice. Decline
+         and none are loaded at all — not loaded-but-anonymised, not loaded. Your choice is stored
+         in your own browser so we do not have to ask again.</p>
+      <h2>What we never do</h2>
+      <ul>
+        <li>Sell or share your data with advertisers or data brokers.</li>
+        <li>Track you across other websites.</li>
+        <li>Send you email, because we do not have your address.</li>
+      </ul>
+      <h2>Third parties</h2>
+      <p>Pages load club crests, league marks and stadium photographs from our data provider, and
+         fonts from Google Fonts. Those requests reach their servers and are subject to their own
+         policies. Match and odds data comes from our provider; none of your information is sent to
+         them.</p>
+      <h2>Your rights</h2>
+      <p>Where the UK GDPR or EU GDPR applies you may ask what we hold, ask for it to be corrected
+         or deleted, and complain to your data protection authority. Since we hold no personal data
+         beyond server logs, most such requests will be answered by telling you exactly that.</p>
+      <h2>Contact</h2>
+      <p>Questions about this policy can be sent to the address on our contact page.</p>`,
+  },
+  cookies: {
+    title: 'Cookie policy',
+    body: `
+      <p>A short policy, because the site uses very few cookies.</p>
+      <h2>Strictly necessary</h2>
+      <p>One item of local storage records whether you accepted or declined non-essential cookies,
+         so the notice is not shown on every visit. It holds a single value and nothing else. It
+         cannot be switched off, because without it we cannot remember that you said no.</p>
+      <h2>Analytics — optional, off until you say otherwise</h2>
+      <p>If you accept, an analytics cookie may be set to count visits and see which pages are
+         read. If you decline, the analytics script is never loaded, so no such cookie can exist.</p>
+      <h2>Advertising</h2>
+      <p>We set no advertising cookies and run no ad network on this site.</p>
+      <h2>Changing your mind</h2>
+      <p>Clear this site's data in your browser settings and the notice will appear again on your
+         next visit, letting you choose differently.</p>`,
+  },
+  terms: {
+    title: 'Terms of use',
+    body: `
+      <p>By using offside.win you agree to these terms. If you do not, please do not use the site.</p>
+      <h2>What this site is</h2>
+      <p>offside.win publishes statistical analysis of football fixtures. Every figure is computed
+         from public match data and publicly quoted bookmaker prices.</p>
+      <h2>What it is not</h2>
+      <p><b>It is not betting advice, and it is not a promise of profit.</b> A pick is our reading of
+         a match. Nothing here is a recommendation that you place a bet, and no past result predicts
+         a future one. You are solely responsible for anything you choose to stake.</p>
+      <h2>Accuracy</h2>
+      <p>Odds move and team news changes. Figures are correct as at the time shown on the page and
+         may be out of date by the time you read them. We publish our losing picks alongside the
+         winning ones, but we do not warrant that any number is free of error.</p>
+      <h2>Eligibility</h2>
+      <p>This site is for people aged 18 or over. Gambling laws differ by country and it is your
+         responsibility to know the law where you are.</p>
+      <h2>Liability</h2>
+      <p>To the fullest extent the law allows, we are not liable for any loss arising from your use
+         of this site, including money lost betting.</p>
+      <h2>Changes</h2>
+      <p>These terms may change. The date below shows when they were last revised.</p>`,
+  },
+  responsible: {
+    title: 'Responsible gambling',
+    body: `
+      <p>Betting should be entertainment you can afford. If it has stopped being that, the
+         information below is more useful than any pick on this site.</p>
+      <h2>Signs worth taking seriously</h2>
+      <ul>
+        <li>Betting more than you planned, or more than you can comfortably lose.</li>
+        <li>Chasing losses — staking more to win back what has gone.</li>
+        <li>Borrowing money to bet, or hiding betting from people close to you.</li>
+        <li>Betting to escape stress or low mood rather than for enjoyment.</li>
+      </ul>
+      <h2>Practical steps</h2>
+      <ul>
+        <li>Set a deposit limit with your bookmaker before you need one.</li>
+        <li>Use self-exclusion — <a href="https://www.gamstop.co.uk" target="_blank" rel="noopener noreferrer">GAMSTOP</a>
+            covers every licensed operator in Great Britain in one step.</li>
+        <li>Block gambling sites with software such as Gamban, and turn on your bank's gambling block.</li>
+      </ul>
+      <h2>Free, confidential help</h2>
+      <ul>
+        <li><a href="https://www.begambleaware.org" target="_blank" rel="noopener noreferrer">BeGambleAware</a> — advice and a 24/7 helpline on 0808 8020 133.</li>
+        <li><a href="https://www.gamcare.org.uk" target="_blank" rel="noopener noreferrer">GamCare</a> — support for anyone affected by gambling, including family.</li>
+        <li><a href="https://www.gamblersanonymous.org" target="_blank" rel="noopener noreferrer">Gamblers Anonymous</a> — meetings worldwide.</li>
+      </ul>
+      <p><b>A high strike rate is not a safe bet.</b> Everything published here can be right more often
+         than not and still lose money at the wrong price. Please treat it accordingly.</p>`,
+  },
+};
+
+function viewLegal(which) {
+  const page = LEGAL[which];
+  if (!page) {
+    app.innerHTML = `<div class="wrap section"><div class="empty">Page not found.</div></div>`;
+    return;
+  }
+  app.innerHTML = `
+  <div class="wrap section">
+    <div class="section-head"><div><h2 class="display">${esc(page.title)}</h2>
+      <p>Last updated ${esc(UPDATED)}.</p></div></div>
+    <div class="prose">${page.body}</div>
+  </div>`;
+}
+
+// -------------------------------------------------------- cookie consent
+
+const CONSENT_KEY = 'ow.consent';
+
+/**
+ * A notice that actually decides something.
+ *
+ * Most cookie banners set their trackers before you answer and then record the
+ * answer. This one loads nothing until a choice is made, and "decline" means the
+ * analytics script is never fetched — not fetched and anonymised. The only thing
+ * stored either way is the answer itself, which is what makes the notice stop
+ * appearing.
+ */
+function readConsent() {
+  try { return localStorage.getItem(CONSENT_KEY); } catch { return null; }
+}
+
+function applyConsent(value) {
+  try { localStorage.setItem(CONSENT_KEY, value); } catch { /* private mode: ask again next visit */ }
+  document.getElementById('cookie-notice')?.remove();
+  // Analytics would be loaded here, and only here, when value === 'accepted'.
+}
+
+function cookieNotice() {
+  if (readConsent()) return;
+  const el = document.createElement('div');
+  el.className = 'cookie';
+  el.id = 'cookie-notice';
+  el.innerHTML = `
+    <p>We use one item of storage to remember this choice. Optional analytics load
+       only if you accept — decline and nothing is loaded at all.
+       <a href="#/legal/cookies">Cookie policy</a></p>
+    <button class="btn btn-ghost" data-consent="declined">Decline</button>
+    <button class="btn btn-primary" data-consent="accepted">Accept</button>`;
+  el.addEventListener('click', (e) => {
+    const v = e.target?.dataset?.consent;
+    if (v) applyConsent(v);
+  });
+  document.body.appendChild(el);
+}
+
 // ---------------------------------------------------------------- routing
 
 async function route() {
@@ -650,6 +998,7 @@ async function route() {
     if (name === 'board') return await viewBoard();
     if (name === 'leagues') return await viewLeagues();
     if (name === 'results') return await viewResults();
+    if (name === 'legal' && parts[1]) return viewLegal(parts[1]);
     return await viewHome();
   } catch (err) {
     app.innerHTML = `<div class="wrap section"><div class="empty">${esc(err.message ?? 'Something went wrong.')}</div></div>`;
@@ -676,3 +1025,4 @@ document.getElementById('burger').onclick = (e) => {
 window.addEventListener('hashchange', route);
 route();
 health();
+cookieNotice();

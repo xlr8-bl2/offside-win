@@ -348,6 +348,18 @@ $fn$;
 -- The slate runs every 30 minutes, so a board much older than that means
 -- Actions is not running. That is the failure this endpoint exists to surface,
 -- and the threshold belongs next to the query that decides it.
+-- What the site leads with. An override set by hand wins over the daily pick,
+-- so a hand-made graphic can go up for a final without a deploy.
+CREATE OR REPLACE FUNCTION get_hero()
+RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+  SELECT coalesce(
+    (SELECT try_json(v) FROM kv WHERE k = 'hero:override'
+       AND (expires_at IS NULL OR expires_at > floor(extract(epoch FROM now())))),
+    (SELECT try_json(v) FROM kv WHERE k = 'hero:today'),
+    'null'::json
+  );
+$fn$;
+
 CREATE OR REPLACE FUNCTION get_health()
 RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
   WITH s AS (
@@ -443,6 +455,7 @@ GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint) TO anon;
 GRANT EXECUTE ON FUNCTION get_fixture(bigint) TO anon;
 GRANT EXECUTE ON FUNCTION get_picks(integer, text) TO anon;
 GRANT EXECUTE ON FUNCTION get_model() TO anon;
+GRANT EXECUTE ON FUNCTION get_hero() TO anon;
 GRANT EXECUTE ON FUNCTION get_health() TO anon;
 
 -- PostgREST caches the schema and will answer 404 for a function it has not
