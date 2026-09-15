@@ -151,6 +151,19 @@ export const config = {
     maxGoals: num('PRICE_MAX_GOALS', 11),
     maxCorners: num('PRICE_MAX_CORNERS', 26),
     maxCards: num('PRICE_MAX_CARDS', 12),
+    /**
+     * Variance-to-mean ratio for a team's goals. FITTED.
+     *
+     * 1.0 is Poisson, which assumes a team's goals are as variable as their
+     * mean. Real football is more variable than that — blowouts and goalless
+     * draws both happen more often than Poisson allows — and the cost is not
+     * spread evenly across markets. It lands on the outer goal lines, where
+     * pure Poisson made us claim 80%+ on "under 3.5" and land 71.7%. Above 1
+     * this switches the marginals to a negative binomial with the same mean
+     * and fatter tails; the low-score tau correction and every downstream
+     * market are unchanged, because they all read the same matrix.
+     */
+    goalDispersion: num('PRICE_GOAL_DISPERSION', 1.0),
   },
 
   selection: {
