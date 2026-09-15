@@ -16,16 +16,28 @@
 import { bsdOrNull, stats } from '../src/bsd.ts';
 import { devig } from '../src/devig.ts';
 import { buildBookMarkets, fetchQuotes } from '../src/odds.ts';
+import { buildScoreMatrix, priceResult } from '../src/price.ts';
 import { closeDb, select } from '../src/store.ts';
 
 const LIMIT = Number(process.env.MARKET_LIMIT ?? 120);
 
-const fixtures = await select<{ id: number; home_team: string; away_team: string; bundle_json: string }>(
-  `SELECT id, home_team, away_team, bundle_json FROM fixture
+const fixtures = await select<{ id: number; league_id: number; bundle_json: string }>(
+  `SELECT id, league_id, bundle_json FROM fixture
    WHERE kickoff > ? ORDER BY kickoff ASC LIMIT ?`,
   [Math.floor(Date.now() / 1000), LIMIT],
 );
 console.log(`${fixtures.length} upcoming fixtures on the board`);
+
+// rho is fitted per league and is not carried on the board card, so our model's
+// 1x2 has to be rebuilt from the rates rather than read off the fixture. The
+// first version of this read `odds_1x2` instead, which is the de-vigged book
+// price — it compared the market against itself and reported 0.54 points, a
+// number that measured nothing but de-vig rounding.
+const rhoByLeague = new Map(
+  (await select<{ league_id: number; rho: number }>('SELECT league_id, rho FROM rating_meta')).map(
+    (r) => [Number(r.league_id), Number(r.rho)],
+  ),
+);
 
 const absDiff: number[] = [];
 const oursDiff: number[] = [];
@@ -54,12 +66,17 @@ await Promise.all(
       const theirs = [pc(mr.prob_home), pc(mr.prob_draw), pc(mr.prob_away)];
       const ts = theirs.reduce((a, b) => a + b, 0) || 1;
 
-      // Ours, as published on the board for this same fixture.
+      // Ours: our own model's 1x2, rebuilt from the rates we published for this
+      // fixture and the rho fitted for its league.
       let ours: number[] | null = null;
       try {
         const b = JSON.parse(f.bundle_json) as Record<string, any>;
-        const o = b.odds_1x2 ?? b.model_1x2 ?? null;
-        if (o && typeof o.HOME === 'number') ours = [o.HOME, o.DRAW, o.AWAY];
+        const lh = Number(b.lambda_home ?? b.lambda?.[0]);
+        const la = Number(b.lambda_away ?? b.lambda?.[1]);
+        if (Number.isFinite(lh) && Number.isFinite(la) && lh > 0 && la > 0) {
+          const r = priceResult(buildScoreMatrix(lh, la, rhoByLeague.get(Number(f.league_id)) ?? 0));
+          ours = [r.get('HOME')!, r.get('DRAW')!, r.get('AWAY')!];
+        }
       } catch {
         ours = null;
       }
