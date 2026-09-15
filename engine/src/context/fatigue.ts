@@ -73,14 +73,24 @@ function sideFatigue(ctx: FixtureContext, which: 'home' | 'away'): Factor {
 
   // §2.8's ladder. Three days is the baseline that sustains full effort; below
   // that the degradation is real, and it steepens rather than falling linearly.
+  //
+  // There used to be a fourth rung here — a 0.25 penalty below four days — which
+  // contradicted the doctrine written at the top of this file and put a fatigue
+  // caveat on any side playing a normal midweek fixture. The live board carried
+  // "Deportivo Alavés have had only 3.3 days since their last match" and
+  // "coming in on 3.0 days' rest, Grasshopper arrive slightly short of fresh",
+  // both on schedules that are simply what a league season looks like.
   let restPenalty = 0;
   if (rest < 2) restPenalty = 1.0;
   else if (rest < 3) restPenalty = 0.6;
-  else if (rest < 4) restPenalty = 0.25;
 
   // §5.5: three in seven, or five in fourteen, degrades from that match on.
-  const congestion =
-    profile.matchesIn7 >= 3 ? 0.7 : profile.matchesIn7 >= 2 ? 0.3 : 0;
+  //
+  // Two in seven is a Saturday and a Wednesday — the ordinary week of any side
+  // in a cup or in Europe, and not congestion by the doctrine's own definition.
+  // Counting it produced "2 matches in a fortnight has left AFC Ajax running on
+  // reserves", which describes a lighter schedule than a normal league month.
+  const congestion = profile.matchesIn7 >= 3 ? 0.7 : 0;
   const deepCongestion = profile.matchesIn14 >= 5 ? 0.4 : 0;
 
   const load = clamp(restPenalty + congestion + deepCongestion, 0, 1.6);
