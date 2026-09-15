@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS rating (
   attack_se     double precision,
   defence_se    double precision,
   -- Effective, decay-weighted match count, so fractional. SQLite stored 12.86
-  -- in a column it called INTEGER without complaint; Postgres rejects it.
+  -- in a column it called INTEGER without complaint. Postgres rejects it.
   matches       double precision NOT NULL,
   shrunk        double precision,
   fitted_at     bigint NOT NULL,
