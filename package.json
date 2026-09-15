@@ -21,6 +21,7 @@
     "typecheck": "npm -w engine run typecheck && npm -w worker run typecheck",
     "dev": "npm -w worker run dev",
     "deploy": "npm -w worker run deploy",
-    "supabase:check": "npm -w engine run supabase:check"
+    "supabase:check": "npm -w engine run supabase:check",
+    "board:stats": "npm -w engine run board:stats"
   }
 }
