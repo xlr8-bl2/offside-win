@@ -44,14 +44,45 @@ function relegationPlaces(tableSize: number): number {
   return tableSize >= 18 ? 3 : tableSize >= 12 ? 2 : 1;
 }
 
+/**
+ * How late in the season a state needs it to be before it means anything.
+ *
+ * Expressed as the share of the season still to play, not as a round count.
+ * The gates were written as absolutes — eight games left for a title race,
+ * twelve for a European chase — which is right for the 38-round league they
+ * were written against and wrong for the other eighty-seven we now track, where
+ * a season can be nineteen rounds or ninety.
+ *
+ * Relegation had no gate at all, which is the bug that reached the board:
+ * Valencia were published as "fighting relegation with 32 to play" — game six of
+ * thirty-eight, where the table is noise and nobody in the dressing room is
+ * thinking about the drop. §5.1 is about motivation and tactical setup, and
+ * those are late-season effects by nature. A relegation fight is real earlier
+ * than a title race is decided, hence the looser share.
+ */
+const LATE_ENOUGH = {
+  title_race: 0.21,
+  european_chase: 0.32,
+  relegation_fight: 0.4,
+  dead_rubber: 0.21,
+} as const;
+
 export function classifySide(
   standing: StandingRow | null,
   standings: StandingRow[] | null,
   gamesLeft: number | null,
+  seasonRounds: number | null = null,
 ): SideStake {
   if (!standing || !standings || standings.length < 4 || gamesLeft === null) {
     return { state: 'unknown', intensity: 0, detail: {} };
   }
+
+  // Without a season length there is no way to know whether this is round six
+  // or round thirty, so the absolute gates stand in — which is what the code
+  // did everywhere before, and is only ever a fallback now.
+  const rounds = seasonRounds && seasonRounds > 0 ? seasonRounds : null;
+  const isLate = (state: keyof typeof LATE_ENOUGH, fallbackRounds: number): boolean =>
+    rounds ? gamesLeft <= Math.round(rounds * LATE_ENOUGH[state]) : gamesLeft <= fallbackRounds;
 
   const size = standings.length;
   const leader = standings[0]!;
@@ -74,13 +105,13 @@ export function classifySide(
   };
 
   // §5.1's title race: genuinely in it, and late enough for it to bite.
-  if (gapToLeader <= Math.min(5, maxPoints) && gamesLeft <= 8 && standing.position <= 4) {
+  if (gapToLeader <= Math.min(5, maxPoints) && isLate('title_race', 8) && standing.position <= 4) {
     return { state: 'title_race', intensity: clamp(1 - gapToLeader / 6, 0.4, 1), detail };
   }
 
   // Relegation: still catchable either way. A side already doomed or already
   // safe is a dead rubber, not a fight.
-  if (standing.position > size - relegationPlaces(size) - 2 && gamesLeft > 0) {
+  if (standing.position > size - relegationPlaces(size) - 2 && gamesLeft > 0 && isLate('relegation_fight', 15)) {
     const reachable = gapToSafety === null || Math.abs(gapToSafety) <= maxPoints;
     if (reachable) {
       return { state: 'relegation_fight', intensity: clamp(1 - Math.abs(gapToSafety ?? 0) / 12, 0.4, 1), detail };
@@ -88,7 +119,7 @@ export function classifySide(
     return { state: 'dead_rubber', intensity: 0.8, detail };
   }
 
-  if (gapToEurope !== null && gapToEurope >= 0 && gapToEurope <= Math.min(6, maxPoints) && gamesLeft <= 12) {
+  if (gapToEurope !== null && gapToEurope >= 0 && gapToEurope <= Math.min(6, maxPoints) && isLate('european_chase', 12)) {
     return { state: 'european_chase', intensity: clamp(1 - gapToEurope / 8, 0.3, 1), detail };
   }
 
@@ -97,7 +128,7 @@ export function classifySide(
   const outOfTitle = gapToLeader > maxPoints;
   const safeFromDrop = gapToSafety !== null && gapToSafety > maxPoints;
   const outOfEurope = gapToEurope !== null && gapToEurope > maxPoints;
-  if (outOfTitle && safeFromDrop && outOfEurope && gamesLeft <= 8) {
+  if (outOfTitle && safeFromDrop && outOfEurope && isLate('dead_rubber', 8)) {
     return { state: 'dead_rubber', intensity: clamp(1 - gamesLeft / 10, 0.4, 1), detail };
   }
 
@@ -129,8 +160,8 @@ export function stakesFactors(ctx: FixtureContext): Factor[] {
       }),
     );
   } else {
-    const home = classifySide(ctx.home.standing, ctx.standings, gamesLeft);
-    const away = classifySide(ctx.away.standing, ctx.standings, gamesLeft);
+    const home = classifySide(ctx.home.standing, ctx.standings, gamesLeft, ctx.seasonRounds);
+    const away = classifySide(ctx.away.standing, ctx.standings, gamesLeft, ctx.seasonRounds);
     out.push(stakeFactor(ctx, home, away, gamesLeft));
   }
 
