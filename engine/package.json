@@ -12,7 +12,8 @@
     "migrate": "tsx src/run.ts migrate",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "supabase:check": "node scripts/supabase-check.mjs"
+    "supabase:check": "node scripts/supabase-check.mjs",
+    "board:stats": "node scripts/board-stats.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
