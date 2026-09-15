@@ -30,6 +30,13 @@ on:
         description: 'Matches to pull per-match stats for in this run'
         type: string
         default: '4000'
+      goal_dispersion:
+        # Variance-to-mean ratio for a team's goals. 1.0 is Poisson. Exposed as
+        # an input so a candidate value can be scored on the backtest's 34,210
+        # matches before it is written into config as a default.
+        description: 'Goal dispersion (1.0 = Poisson)'
+        type: string
+        default: '1.0'
 
 concurrency:
   group: pg-engine-write
@@ -52,4 +59,5 @@ jobs:
           LEAGUES: ${{ inputs.leagues == 'all' && '' || inputs.leagues }}
           HISTORY_SEASONS: ${{ inputs.seasons }}
           STATS_LIMIT: ${{ inputs.stats_limit }}
+          PRICE_GOAL_DISPERSION: ${{ inputs.goal_dispersion }}
         run: npm run ${{ inputs.command }}
