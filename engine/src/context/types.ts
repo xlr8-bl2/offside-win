@@ -23,6 +23,8 @@ export interface LineupPlayer {
 export interface SideLineup {
   formation: string | null;
   players: LineupPlayer[];
+  /** The provider's own confidence in this predicted XI, 0..1, per side. */
+  confidence: number | null;
 }
 
 export interface LineupInfo {

@@ -78,7 +78,11 @@ function parseLineupSide(raw: unknown): SideLineup | null {
       ai_score: num(pr?.['ai_score']) ?? null,
     });
   }
-  return { formation: str(rec['formation']) ?? null, players };
+  return {
+    formation: str(rec['formation']) ?? null,
+    players,
+    confidence: num(rec['confidence']) ?? null,
+  };
 }
 
 export function parseLineups(raw: unknown): LineupInfo {
@@ -119,9 +123,23 @@ export function parseLineups(raw: unknown): LineupInfo {
     });
   }
 
+  // The provider carries confidence *per side*, inside lineups.home and
+  // lineups.away — not at the root, which is where this used to look. Reading
+  // the root always produced undefined, so §3.1 rotation risk went THIN on every
+  // fixture ever priced: a tier-1 factor, the heaviest weight in the coverage
+  // score, permanently dark because of a one-level path error.
+  //
+  // Take the lower of the two sides. Rotation risk is about how sure we are of
+  // the selection, and a fixture is only as settled as its less settled team —
+  // averaging would let a confident home XI paper over a rotating away one.
+  const sideConfidences = [home?.confidence, away?.confidence].filter(
+    (c): c is number => typeof c === 'number',
+  );
+  const confidence = sideConfidences.length ? Math.min(...sideConfidences) : null;
+
   return {
     status,
-    confidence: num(rec?.['confidence']) ?? null,
+    confidence,
     home,
     away,
     unavailable,
