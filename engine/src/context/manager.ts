@@ -140,7 +140,7 @@ function sideManagerFactor(side: SideContext, which: 'home' | 'away'): Factor {
       tier: 3,
       note:
         `${Name} is ${games} games into the job at ${side.team_name} — past the bounce window, ` +
-        `where the doctrine expects regression toward the underlying level` +
+        `where an early lift usually fades back toward the side's real level` +
         (appointmentDelta !== null
           ? `. The appointment has moved the club ${appointmentDelta >= 0 ? '+' : ''}${appointmentDelta.toFixed(2)} points per match.`
           : '.'),
@@ -181,7 +181,7 @@ function sideManagerFactor(side: SideContext, which: 'home' | 'away'): Factor {
     id: `manager.${which}.established`,
     section: '§1.1',
     tier: 3,
-    note: `${Name} is established at ${side.team_name} (${games} matches), with no regime discontinuity to read.`,
+    note: `${Name} has ${games} matches in charge at ${side.team_name} — long enough that the side plays the way he wants it to.`,
     evidence,
     strength: 0.1,
   });

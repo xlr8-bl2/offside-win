@@ -645,7 +645,7 @@ export function narrateConfident(input: ConfidentInput): string {
   if (sentences.length === 0) {
     return [
       lead,
-      `The case here is the matchup itself rather than anything we can point at — no contextual factor cleared its evidence bar for this fixture.`,
+      `Nothing unusual surrounds this one — no injuries, schedule or conditions worth flagging — so the case is the matchup itself.`,
       verdict ?? '',
     ]
       .filter(Boolean)

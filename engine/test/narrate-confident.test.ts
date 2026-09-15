@@ -124,7 +124,10 @@ test('no context at all is stated rather than padded', () => {
     expectedGoals: null,
     ledger: ledger(),
   });
-  assert.match(out, /no contextual factor cleared/i, `invented a case from nothing: ${out}`);
+  // Says the absence in plain English rather than inventing colour. The wording
+  // changed when "no contextual factor cleared its evidence bar" was rewritten
+  // for readers; what must not change is that it admits there is nothing.
+  assert.match(out, /nothing unusual surrounds this one/i, `invented a case from nothing: ${out}`);
 });
 
 test('two calls on one slate do not open with the same construction', () => {

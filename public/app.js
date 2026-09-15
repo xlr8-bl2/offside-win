@@ -265,7 +265,7 @@ function heroHTML(hero = null, venueIds = []) {
   <div class="trust"><div class="trust-inner">
     ${[
       ['88 leagues', 'Europe, the Americas, Asia'],
-      ['Updated every 30 minutes', 'Prices and team news'],
+      ['Updated every 15 minutes', 'Prices and team news'],
       ['Every pick explained', 'Including what argues against it'],
       ['Full results published', 'Won and lost, nothing hidden'],
     ].map(([t, sub]) => `<div class="trust-item"><b>${esc(t)}</b><span>${esc(sub)}</span></div>`).join('')}
@@ -679,8 +679,12 @@ async function viewFixture(id) {
   const p = f.odds_1x2 ?? {};
   const verdicts = f.verdicts ?? [];
   // Only notes we have a human label for, and only where something was found.
+  // Only notes that found something. A factor is computed whether or not it has
+  // anything to report, and "Not a local derby." under a heading reading "Derby"
+  // is noise dressed as analysis.
+  const NOTHING = /^(not a|no |neither side holds a clear|conditions are unremarkable|the sharp book and the wider market agree|the line has barely moved|scoring about what their chances are worth)/i;
   const reads = (f.ledger ?? [])
-    .filter((x) => x.state === 'COMPUTED' && READ_LABEL[x.id] && x.note)
+    .filter((x) => x.state === 'COMPUTED' && READ_LABEL[x.id] && x.note && !NOTHING.test(x.note))
     .map((x) => ({ label: READ_LABEL[x.id], note: x.note }))
     .filter((x, i, arr) => arr.findIndex((y) => y.note === x.note) === i);
 
@@ -1019,7 +1023,7 @@ async function health() {
     document.getElementById('foot-stats').innerHTML = `
       <div><b>88</b><span>Leagues</span></div>
       <div><b>${(h.fixtures ?? 0).toLocaleString()}</b><span>Games on the board</span></div>
-      <div><b>Every 30 min</b><span>Refreshed</span></div>`;
+      <div><b>Every 15 min</b><span>Refreshed</span></div>`;
   } catch { /* the dot stays grey, which is the honest state */ }
 }
 
