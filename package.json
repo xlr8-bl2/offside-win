@@ -22,6 +22,7 @@
     "dev": "npm -w worker run dev",
     "deploy": "npm -w worker run deploy",
     "supabase:check": "npm -w engine run supabase:check",
-    "board:stats": "npm -w engine run board:stats"
+    "board:stats": "npm -w engine run board:stats",
+    "eval:provider": "npm -w engine run eval:provider"
   }
 }
