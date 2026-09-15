@@ -1,5 +1,6 @@
 import postgres from 'postgres';
 import { config } from './config.ts';
+import { splitStatements } from './sql-split.ts';
 
 /**
  * Postgres (Supabase) access, over the transaction pooler.
@@ -268,18 +269,6 @@ export function kvSetJSON(key: string, value: unknown, ttlSeconds?: number): Pro
 }
 
 // --------------------------------------------------------------- migrate
-
-/**
- * Comments are stripped before the split, not after: splitting first tears a
- * comment containing a semicolon in two and executes its tail as SQL.
- */
-export function splitStatements(schemaSql: string): string[] {
-  return schemaSql
-    .replace(/^\s*--.*$/gm, '')
-    .split(';')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
 
 export async function migrate(schemaSql: string): Promise<void> {
   for (const stmt of splitStatements(schemaSql)) await exec(stmt);

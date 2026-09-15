@@ -1,16 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { splitStatements } from '../src/sql-split.ts';
 
 const sql = readFileSync(new URL('../../schema.pg.sql', import.meta.url), 'utf8');
-
-/** Statements as migrate() will see them: split on ';', comments stripped. */
-function statements(src: string): string[] {
-  return src
-    .split(';')
-    .map((s) => s.replace(/^\s*--.*$/gm, '').trim())
-    .filter((s) => s.length > 0);
-}
 
 const tables = [...sql.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]!);
 
@@ -34,21 +27,29 @@ for (const t of tables) {
   });
 }
 
-test('migrate() can split every statement — no dollar-quoted bodies', () => {
-  // migrate() splits naively on ';'. A $$ ... $$ body containing a semicolon
-  // would be torn in half and fail at runtime rather than here. Check the
-  // statements rather than the raw file: prose in a comment may say "$$"
-  // (the header does, explaining this very rule) and is stripped before running.
-  for (const s of statements(sql)) {
-    assert.ok(!s.includes('$$'), `dollar-quoted body would be split wrongly: ${s.slice(0, 60)}`);
-    assert.ok(/^(CREATE|ALTER|DROP|GRANT|COMMENT|INSERT|DELETE)/i.test(s), `unexpected statement: ${s.slice(0, 60)}`);
-  }
-  // And no comment may contain a semicolon: migrate() splits before it strips.
-  for (const line of sql.split('\n')) {
-    const c = line.indexOf('--');
-    if (c >= 0) assert.ok(!line.slice(c).includes(';'), `comment contains ';', which splits a statement: ${line.trim().slice(0, 60)}`);
+test('migrate() sends whole statements, function bodies included', () => {
+  for (const s of splitStatements(sql)) {
+    assert.ok(/^(CREATE|ALTER|DROP|GRANT|COMMENT|INSERT|DELETE|NOTIFY)/i.test(s), `unexpected statement: ${s.slice(0, 60)}`);
+    // A body torn at an interior semicolon arrives with an opening $tag$ and no
+    // closing one, which Postgres reports as an unterminated string a long way
+    // from the cause.
+    const tags = s.match(/\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/g) ?? [];
+    assert.equal(tags.length % 2, 0, `unbalanced dollar quote — body was split: ${s.slice(0, 60)}`);
   }
 });
+
+// The Worker's entire read path. SECURITY DEFINER here would run these as the
+// owner and hand the public anon key whatever the owner can see, which is the
+// one way a read-only surface becomes a data leak.
+for (const fn of [...sql.matchAll(/CREATE OR REPLACE FUNCTION (\w+)\(/g)].map((m) => m[1]!)) {
+  test(`${fn} runs as the caller and is callable by anon`, () => {
+    const body = sql.slice(sql.indexOf(`CREATE OR REPLACE FUNCTION ${fn}(`));
+    const decl = body.slice(0, body.indexOf('$fn$'));
+    assert.doesNotMatch(decl, /SECURITY\s+DEFINER/i, `${fn}: SECURITY DEFINER bypasses RLS`);
+    assert.match(decl, /SET search_path = public/, `${fn}: unpinned search_path`);
+    assert.match(sql, new RegExp(`GRANT EXECUTE ON FUNCTION ${fn}\\(`), `${fn}: anon cannot call it`);
+  });
+}
 
 test('picks are unique even when the market has no line', () => {
   // The SQLite bug this replaces: NULLs compare distinct in a unique index, so

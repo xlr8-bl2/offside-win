@@ -30,11 +30,14 @@ export const config = {
   },
 
   /**
-   * Which database the engine writes to. D1 stays the default until Postgres
-   * has reproduced the board and the backtest, so a bad deploy cannot take the
-   * live site with it — set DB_BACKEND=postgres to switch.
+   * Which database the engine writes to. Postgres, since it reproduced the
+   * board and the backtest (0.6200 against D1's 0.6209 over the same 34,210
+   * matches) and the Worker now reads through it. D1 remains reachable with
+   * DB_BACKEND=d1 so the old path can still be run for comparison, but nothing
+   * is scheduled against it — defaulting to it again would mean a forgotten
+   * environment variable silently publishing to a database no one reads.
    */
-  dbBackend: (process.env.DB_BACKEND ?? 'd1') as 'd1' | 'postgres',
+  dbBackend: (process.env.DB_BACKEND ?? 'postgres') as 'd1' | 'postgres',
 
   pg: {
     url: process.env.SUPABASE_DB_URL ?? '',
@@ -198,9 +201,17 @@ export const config = {
   },
 } as const;
 
-export function requireEnv(): void {
+/**
+ * Fail fast on a missing credential, naming all of them at once.
+ *
+ * `provider: false` for work that only touches the database. Applying the
+ * schema does not call the provider, and demanding its key there means the
+ * deploy workflow has to be handed a secret it never uses — which is both a
+ * wider blast radius than it needs and one more thing to get wrong.
+ */
+export function requireEnv(opts: { provider?: boolean } = {}): void {
   const missing: string[] = [];
-  if (!config.bsd.key) missing.push('BSD_API_KEY');
+  if (opts.provider !== false && !config.bsd.key) missing.push('BSD_API_KEY');
   // Only the active backend's credentials are required. Demanding the other
   // one's would make the cutover need secrets it has no use for.
   if (config.dbBackend === 'postgres') {
