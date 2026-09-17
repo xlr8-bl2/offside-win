@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { splitStatements } from '../src/store.ts';
 
-const isDDL = (s: string) => /^(CREATE|ALTER|DROP|GRANT|COMMENT|INSERT|DELETE|NOTIFY)/i.test(s);
+const isDDL = (s: string) => /^(CREATE|ALTER|DROP|GRANT|REVOKE|COMMENT|INSERT|DELETE|NOTIFY)/i.test(s);
 
 test('a mid-line semicolon in a comment does not leak SQL', () => {
   // The exact shape that broke the Postgres schema: splitting before stripping

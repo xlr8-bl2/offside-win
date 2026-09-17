@@ -196,7 +196,14 @@ export async function runSlate(): Promise<SlateReport> {
         });
       })();
 
+      // Every verdict, for the pick ledger and the calibration that depends on
+      // it. Nothing here is user-facing on its own.
       const allVerdicts = [...verdicts, ...confidentVerdicts];
+
+      // What a reader is actually shown. The split exists because the two
+      // audiences want different things: the ledger wants everything the model
+      // said so it can be marked, the page wants only the calls we stand behind.
+      const publishedVerdicts = confidentVerdicts;
 
       const passNarrative = selection.passReason
         ? narratePass(selection.passReason, analysis.home_team, analysis.away_team, analysis.fixture_id)
@@ -233,22 +240,25 @@ export async function runSlate(): Promise<SlateReport> {
         odds_1x2: Object.fromEntries(
           (analysis.book.find((b) => b.market === '1x2')?.fair ?? new Map()).entries(),
         ),
-        // The board card's headline. A value bet leads when there is one —
-        // it is the rarer and more valuable thing — and a confident call leads
-        // when there is not, so a fixture with something to say never shows an
-        // empty card.
+        // The board card's headline, and the only kind of call that reaches a
+        // reader. Settled results said the other two buckets lose money while
+        // this one is about level, so they keep being computed — they are how
+        // we judge the model — and they stop being published.
+        //
+        // `bookmaker` travels with it because a price without the book offering
+        // it is not a usable price. It was on the candidate all along and was
+        // simply dropped here, so the board showed a number with no source.
         top_pick: ((v) =>
           v
             ? {
-                kind: v.kind,
                 market: v.candidate.market,
                 outcome: v.candidate.outcome,
                 line: v.candidate.line,
                 odds: v.candidate.odds,
-                edge: Number(v.candidate.edge.toFixed(4)),
+                bookmaker: v.candidate.bookmaker ?? null,
                 prob: Number(v.candidate.model_prob.toFixed(3)),
               }
-            : null)(allVerdicts[0]),
+            : null)(publishedVerdicts[0]),
         pass: passNarrative,
         // The confident calls, compact: the board loads every fixture at once,
         // so the reasoning stays in the bundle and only the call travels here.
@@ -258,6 +268,7 @@ export async function runSlate(): Promise<SlateReport> {
           line: v.candidate.line,
           prob: Number(v.candidate.model_prob.toFixed(3)),
           odds: v.candidate.odds,
+          bookmaker: v.candidate.bookmaker ?? null,
           // Whether anything in our context argues against it. This is the
           // differentiator, so it belongs where a reader sees it first.
           caveat: v.drivers.some((d) => d.claims.some((c) => c.polarity < 0)),
@@ -329,8 +340,11 @@ export async function runSlate(): Promise<SlateReport> {
           .sort((a, b) => b.shrunk_edge - a.shrunk_edge)
           .slice(0, 25)
           .map(candidateForStorage),
-        verdicts: allVerdicts.map((v) => ({
-          kind: v.kind,
+        // The fixture page reads this, so it carries published calls only. The
+        // kind is deliberately absent: it is our filing system, not something a
+        // reader has the vocabulary for, and printing it was half of why the
+        // old page read like a debug view.
+        verdicts: publishedVerdicts.map((v) => ({
           candidate: candidateForStorage(v.candidate),
           narrative: v.narrative,
           drivers: v.drivers.map(forStorage),
@@ -349,6 +363,9 @@ export async function runSlate(): Promise<SlateReport> {
         away_team: analysis.away_team,
         status: analysis.status,
         provisional: analysis.provisional ? 1 : 0,
+        // Also a column, not just a field inside board_json, because the board
+        // has to sort on it and SQL cannot see inside the blob.
+        rank: leagueRank(analysis.league_id),
         board_json: JSON.stringify(board),
         bundle_json: JSON.stringify(bundle),
         computed_at: analysis.computed_at,
@@ -420,7 +437,7 @@ export async function runSlate(): Promise<SlateReport> {
       'fixture',
       [
         'id', 'league_id', 'kickoff', 'home_team', 'away_team', 'status',
-        'provisional', 'board_json', 'bundle_json', 'computed_at',
+        'provisional', 'rank', 'board_json', 'bundle_json', 'computed_at',
       ],
       fixtureRows,
       { conflictTarget: 'id' },
