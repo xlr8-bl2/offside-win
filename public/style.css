@@ -724,3 +724,97 @@ h3.display { font-size: clamp(1.2rem, 2.1vw, 1.7rem); }
 .run { font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); white-space: nowrap; }
 .form-split { margin: 16px 0 0; font-size: 0.86rem; color: var(--ink-2); }
 .form-split b { color: var(--ink); }
+
+/* The record, said in money. The figure is the headline and the sample-size
+   caveat sits under it — never the other way round, and never omitted. */
+.record { margin-bottom: var(--space-8, 32px); }
+.record-line {
+  margin: 0; font-family: var(--display); font-weight: 800;
+  font-size: clamp(1.4rem, 3.4vw, 2.3rem); line-height: 1.15; letter-spacing: -0.015em;
+}
+.record-sub { margin: 10px 0 0; font-size: 1.02rem; color: var(--ink-2); }
+.record-note { margin: 14px 0 0; font-size: 0.88rem; color: var(--ink-3); max-width: 58ch; }
+.tag.won  { background: rgba(79,211,154,0.14); color: var(--won, #4fd39a); }
+.tag.lost { background: rgba(232,115,95,0.14); color: var(--lost, #e8735f); }
+.tag.void { background: rgba(121,131,155,0.16); color: var(--void, #79839b); }
+.pending { color: var(--ink-3); }
+
+/* ------------------------------------------------ the call, as a reader sees it
+
+   Four things: what it is, what has to happen, the price, and the book. The
+   old version showed a class tag, two percentages and a confidence meter, and
+   none of those told anyone what they were being asked to believe. */
+
+.card-pick .sel,
+.verdict .sel {
+  display: block;
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: clamp(1rem, 1.6vw, 1.2rem);
+  line-height: 1.2;
+}
+.card-pick .wins,
+.verdict .wins {
+  margin: 8px 0 0;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.pick-meta,
+.verdict-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 12px;
+  font-size: 0.84rem;
+  color: var(--ink-3);
+}
+.price {
+  font-family: var(--numeric, var(--display));
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 1.5rem;
+  color: var(--gold);
+  line-height: 1;
+}
+.pick-meta .book { color: var(--ink-2); }
+.pick-meta .ret { margin-left: auto; }
+.verdict-meta b { color: var(--ink); }
+
+/* No call. An empty state says what this is, why it is empty, and that the
+   emptiness is deliberate — otherwise 44% of the board reads as broken. */
+.card-pick.none { display: block; }
+.card-pick.none b {
+  display: block;
+  font-family: var(--display);
+  font-weight: 700;
+  color: var(--ink-2);
+  margin-bottom: 6px;
+}
+.card-pick.none span { font-size: 0.84rem; color: var(--ink-3); line-height: 1.45; }
+
+/* How a handicap settles. Collapsed by default — it is the answer to a
+   question most readers will not ask, and unmissable for the ones who do. */
+.settles { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+.settles summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  letter-spacing: var(--tracking-wide, 0.06em);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.settles summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 4px; }
+.settle-tbl { margin-top: 12px; font-size: 0.86rem; }
+.settle-tbl td { padding: 7px 0; border-bottom: 1px solid var(--line-soft); }
+.settle-tbl .win  { color: var(--won, #4fd39a); }
+.settle-tbl .loss { color: var(--ink-3); }
+.settle-tbl .push,
+.settle-tbl .part { color: var(--warn, #e0a949); }
+
+.qodds {
+  font-family: var(--numeric, var(--display));
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  color: var(--gold);
+}

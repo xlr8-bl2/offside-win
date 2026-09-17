@@ -10,6 +10,8 @@
  * reasoning is the product and it ships in full; the machinery does not.
  */
 
+import { describe as market } from './js/lib/markets.js';
+
 const app = document.getElementById('app');
 
 const esc = (s) =>
@@ -75,45 +77,7 @@ function crest(name, size = 'md', id = null, type = 'team') {
     ><i>${esc(text)}</i></span>`;
 }
 
-// ---------------------------------------------------------------- markets
 
-const OUTCOME_WORD = {
-  HOME: 'Home win', DRAW: 'Draw', AWAY: 'Away win',
-  '1X': 'Home or draw', '12': 'Home or away', X2: 'Draw or away',
-  over: 'Over', under: 'Under', yes: 'Yes', no: 'No',
-};
-
-function marketLabel(market, outcome, line, home, away) {
-  const o = OUTCOME_WORD[outcome] ?? outcome;
-  switch (market) {
-    case '1x2':
-      if (outcome === 'HOME' && home) return `${home} to win`;
-      if (outcome === 'AWAY' && away) return `${away} to win`;
-      return o;
-    case 'double_chance':
-      if (outcome === '1X' && home) return `${home} to win or draw`;
-      if (outcome === 'X2' && away) return `${away} to win or draw`;
-      if (outcome === '12') return 'Either team to win';
-      return o;
-    case 'draw_no_bet': return `${outcome === 'HOME' ? home ?? 'Home' : away ?? 'Away'} — draw no bet`;
-    case 'btts': return `Both teams to score — ${o.toLowerCase()}`;
-    case 'over_under_05': case 'over_under_15': case 'over_under_25': case 'over_under_35':
-      return `${o} ${line ?? ''} goals`.replace(/\s+/g, ' ').trim();
-    case 'total_corners': return `${o} ${line ?? ''} corners`.trim();
-    case 'asian_handicap': return `${outcome === 'HOME' ? home ?? 'Home' : away ?? 'Away'} ${line > 0 ? '+' : ''}${line}`;
-    case 'european_handicap': return `${outcome} ${line > 0 ? '+' : ''}${line}`;
-    case 'total_red_cards': return `${o} ${line ?? ''} red cards`.trim();
-    case 'red_card': return `A red card — ${o.toLowerCase()}`;
-    default: return `${o} ${line ?? ''}`.trim();
-  }
-}
-
-const KIND_TAG = { VALUE: 'Value', LIKELY: 'Likely', CONFIDENT: 'Call' };
-const KIND_TITLE = {
-  VALUE: 'The price looks wrong',
-  LIKELY: 'Most likely to land',
-  CONFIDENT: 'High-confidence call',
-};
 
 /**
  * Factor ids to plain English. Anything not listed here is not shown — an id
@@ -294,9 +258,35 @@ function railHTML(fixtures) {
   </div></div>`;
 }
 
+
+/**
+ * A pick, and the only four things a reader gets: what it is, what has to
+ * happen, the price, and who is offering it.
+ *
+ * No class tag, no percentage, no meter. Those were our filing system and our
+ * scoring leaking onto the page; see engine/src/vocabulary.ts.
+ */
+function pickHTML(pick, f) {
+  const d = market({
+    market: pick.market, outcome: pick.outcome, line: pick.line,
+    home: f.home, away: f.away, odds: pick.odds,
+  });
+  return `
+  <div class="card-pick">
+    <span class="sel">${esc(d.name)}</span>
+    <p class="wins">${esc(d.wins)}</p>
+    <div class="pick-meta">
+      <span class="price">${dec(pick.odds)}</span>
+      ${pick.bookmaker ? `<span class="book">at ${esc(pick.bookmaker)}</span>` : ''}
+      <span class="ret">${esc(d.returns)}</span>
+    </div>
+  </div>`;
+}
+
 function cardHTML(f) {
   const pick = f.top_pick;
-  const extra = (f.confident ?? []).slice(pick && pick.kind === 'CONFIDENT' ? 1 : 0).slice(0, 2);
+  // top_pick is the first confident call, so the rest start at one.
+  const extra = (f.confident ?? []).slice(pick ? 1 : 0).slice(0, 2);
   return `
   <article class="card" data-id="${f.id}" tabindex="0" role="link" aria-label="${esc(f.home)} versus ${esc(f.away)}">
     <div class="card-top">
@@ -310,20 +300,15 @@ function cardHTML(f) {
       <div class="vs-side">${crest(f.away, 'lg', f.away_id)}<span>${esc(f.away)}</span></div>
     </div>
 
-    ${pick
-      ? `<div class="card-pick">
-           <span class="sel">${esc(marketLabel(pick.market, pick.outcome, pick.line, f.home, f.away))}</span>
-           <div class="pick-meta">
-             <span class="tag ${esc(pick.kind.toLowerCase())}">${esc(KIND_TAG[pick.kind] ?? pick.kind)}</span>
-             <span class="num">${dec(pick.odds)}</span>
-           </div>
-           ${typeof f.confidence === 'number'
-             ? `<div class="conf"><span class="conf-track"><i style="width:${Math.round(f.confidence * 100)}%"></i></span><span class="conf-pct">${pct(f.confidence)}</span></div>`
-             : ''}
-         </div>`
-      : `<div class="card-pick none">No call on this one</div>`}
+    ${pick ? pickHTML(pick, f) : `<div class="card-pick none">
+           <b>No call here</b>
+           <span>The price looks about right to us. We would rather say nothing than pad the board.</span>
+         </div>`}
     ${extra.length
-      ? `<div class="also">${extra.map((c) => `<span class="also-call">${esc(marketLabel(c.market, c.outcome, c.line, f.home, f.away))} <b>${pct(c.prob)}</b>${c.caveat ? '<i class="caveat" title="worth reading the caveat">!</i>' : ''}</span>`).join('')}</div>`
+      ? `<div class="also">${extra.map((c) => {
+           const d = market({ market: c.market, outcome: c.outcome, line: c.line, home: f.home, away: f.away, odds: c.odds });
+           return `<span class="also-call">${esc(d.name)} <b>${dec(c.odds)}</b></span>`;
+         }).join('')}</div>`
       : ''}
     <span class="card-go">Read the analysis →</span>
   </article>`;
@@ -384,7 +369,7 @@ function bandHTML(sample) {
         <div class="qmeta">
           ${crest(fixture.home, 'sm', fixture.home_id)}
           <b style="color:var(--ink);font-weight:700">${esc(fixture.home)} v ${esc(fixture.away)}</b>
-          <span class="tag ${esc(verdict.kind.toLowerCase())}">${esc(KIND_TAG[verdict.kind] ?? verdict.kind)}</span>
+          <span class="qodds">${dec(verdict.candidate?.odds ?? verdict.odds)}</span>
         </div>
         ${esc(verdict.narrative)}
       </div>
@@ -585,28 +570,46 @@ function wireCards() {
 
 // ---------------------------------------------------------------- fixture
 
+/**
+ * The call, on the fixture page.
+ *
+ * What this used to show, and no longer does: the class we file it under, our
+ * own probability, the bookmaker's implied one, what it returns "in the pound",
+ * and a paragraph explaining that the call agrees with the bookmakers and is
+ * therefore not worth much. That last one was actively talking the reader out
+ * of it. All of it was our vocabulary, none of it was theirs.
+ *
+ * What it shows instead: the call, what has to happen for it to land, the price
+ * and who is offering it, the reasoning, and — where the market has one — the
+ * table of what each result does, because a quarter-line handicap cannot be
+ * explained in a sentence.
+ */
 function verdictHTML(v, home, away) {
   const c = v.candidate;
-  const confident = v.kind === 'CONFIDENT';
+  const d = market({
+    market: c.market, outcome: c.outcome, line: c.line,
+    home, away, odds: c.odds,
+  });
+
   return `
   <div class="verdict">
     <div class="verdict-head">
-      <span class="tag ${esc(v.kind.toLowerCase())}">${esc(KIND_TITLE[v.kind] ?? v.kind)}</span>
-      <span class="sel">${esc(marketLabel(c.market, c.outcome, c.line, home, away))}</span>
-      <span class="odds">${dec(c.odds)}</span>
+      <span class="sel">${esc(d.name)}</span>
+      <span class="price">${dec(c.odds)}</span>
     </div>
+    <p class="wins">${esc(d.wins)}</p>
     <p class="narrative">${esc(v.narrative)}</p>
-    <div class="numbers">
-      <span>${confident ? 'confidence' : 'our number'} <b>${pct(c.model_prob)}</b></span>
-      ${confident
-        ? `<span>returns <b>${((c.odds - 1) * 100).toFixed(0)}p</b> in the pound</span>`
-        : `<span>the price says <b>${pct(c.book_prob)}</b></span>`}
-      ${c.bookmaker ? `<span>best at <b>${esc(c.bookmaker)}</b></span>` : ''}
+    <div class="verdict-meta">
+      ${c.bookmaker ? `<span>Best price at <b>${esc(c.bookmaker)}</b></span>` : ''}
+      <span>${esc(d.returns)}</span>
     </div>
-    ${confident
-      ? `<p class="disclosure">A confidence, not a tip — this one agrees with the bookmakers rather than
-         disputing them, so treat it as a read on the game rather than on the price.</p>`
-      : ''}
+    ${d.outcomes?.length ? `
+      <details class="settles">
+        <summary>How this settles</summary>
+        <table class="tbl settle-tbl"><tbody>
+          ${d.outcomes.map((r) => `<tr><td>${esc(r.label)}</td><td class="num ${r.result.startsWith('half') ? 'part' : r.result}">${esc(r.effect)}</td></tr>`).join('')}
+        </tbody></table>
+      </details>` : ''}
   </div>`;
 }
 
@@ -908,39 +911,76 @@ async function viewResults() {
     app.innerHTML = `<div class="wrap section"><div class="empty">${esc(err.message)}</div></div>`;
     return;
   }
-  const byKind = data.summary_by_kind ?? {};
+
+  const summary = data.summary ?? {};
   const picks = data.picks ?? [];
   const settled = picks.filter((x) => x.result && x.result !== 'VOID');
 
-  const block = (kind, s) => `
-    <div class="stat"><b>${s.n ? `${Math.round((100 * (s.wins ?? 0)) / s.n)}%` : '—'}</b><span>${esc(KIND_TAG[kind] ?? kind)} strike rate</span></div>
-    <div class="stat"><b>${s.n ?? 0}</b><span>${esc(KIND_TAG[kind] ?? kind)} settled</span></div>
-    <div class="stat"><b>${typeof s.pnl === 'number' ? (s.pnl >= 0 ? '+' : '') + s.pnl.toFixed(1) : '—'}</b><span>${esc(KIND_TAG[kind] ?? kind)} units</span></div>`;
+  // A tenner a pick, because "-6.99 units" is a sentence in a language the
+  // reader does not speak. The sign is not softened: if it is down, it says
+  // down, which is the entire point of publishing this page at all.
+  const STAKE = 10;
+  const n = Number(summary.n ?? 0);
+  const wins = Number(summary.wins ?? 0);
+  const profit = typeof summary.pnl === 'number' ? summary.pnl * STAKE : null;
+
+  const money = (v) => `£${Math.abs(v).toFixed(2).replace(/\.00$/, '')}`;
+  const verdict = profit === null ? ''
+    : profit > 0 ? `you would be ${money(profit)} up`
+    : profit < 0 ? `you would be ${money(profit)} down`
+    : 'you would be exactly even';
+
+  const headline = n === 0
+    ? 'Nothing has finished yet. The first results land as today\'s games do.'
+    : `Of the last ${n} picks, ${wins} won.`;
 
   app.innerHTML = `
   <div class="wrap section">
     <div class="section-head"><div>
       <h2 class="display">Results</h2>
-      <p>Every pick we have published, settled against the real result. Nothing removed.</p>
+      <p>Every pick we have published, marked against the real result. Nothing removed, nothing hidden.</p>
     </div></div>
-    ${Object.keys(byKind).length
-      ? `<div class="ledger">${Object.entries(byKind).map(([k, s]) => block(k, s)).join('')}</div>`
-      : `<div class="empty" style="margin-bottom:24px">Nothing has settled yet — the first results land as today's games finish.</div>`}
+
+    <div class="record">
+      <p class="record-line">${esc(headline)}</p>
+      ${profit === null ? '' : `<p class="record-sub">Backing every one of them with £${STAKE}, ${esc(verdict)}.</p>`}
+      ${n > 0 && n < 100
+        ? `<p class="record-note">That is ${n} results. It is not enough to tell a good run from a good model, and we will say so until it is.</p>`
+        : ''}
+    </div>
+
     ${picks.length ? `<div class="scroll-x"><table class="tbl">
       <thead><tr><th>Game</th><th>Call</th><th class="num">Odds</th><th class="num">Result</th></tr></thead>
-      <tbody>${picks.map((x) => `
+      <tbody>${picks.map((x) => {
+        const d = market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team, odds: x.odds });
+        return `
         <tr>
           <td>${x.home_team ? `${esc(x.home_team)} v ${esc(x.away_team)}` : '—'}</td>
-          <td>${esc(marketLabel(x.market, x.outcome, x.line, x.home_team, x.away_team))}</td>
+          <td>${esc(d.name)}</td>
           <td class="num">${dec(x.odds)}</td>
-          <td class="num">${x.result
-            ? `<span class="tag ${x.result === 'WON' || x.result === 'HALF_WON' ? 'won' : 'lost'}">${x.result === 'HALF_WON' ? 'Won' : esc(x.result[0] + x.result.slice(1).toLowerCase())}</span>`
-            : '<span style="color:var(--ink-3)">Pending</span>'}</td>
-        </tr>`).join('')}</tbody></table></div>`
+          <td class="num">${resultTag(x.result)}</td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`
       : `<div class="empty">Nothing published yet.</div>`}
+
     ${settled.length === 0 && picks.length > 0
-      ? `<p class="foot-note" style="margin-top:20px">${picks.length} picks are live and none have finished yet, so there is no strike rate to show.</p>` : ''}
+      ? `<p class="foot-note" style="margin-top:20px">${picks.length} are still to play.</p>` : ''}
   </div>`;
+}
+
+/** Won, lost, or the stake came back — said the way it happened. */
+function resultTag(result) {
+  if (!result) return '<span class="pending">To play</span>';
+  const map = {
+    WON: ['won', 'Won'],
+    HALF_WON: ['won', 'Won half'],
+    LOST: ['lost', 'Lost'],
+    HALF_LOST: ['lost', 'Lost half'],
+    PUSH: ['void', 'Stake back'],
+    VOID: ['void', 'Void'],
+  };
+  const [cls, label] = map[result] ?? ['void', result[0] + result.slice(1).toLowerCase()];
+  return `<span class="tag ${cls}">${esc(label)}</span>`;
 }
 
 // ---------------------------------------------------------------- leagues

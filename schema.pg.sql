@@ -147,6 +147,14 @@ CREATE TABLE IF NOT EXISTS fixture (
 CREATE INDEX IF NOT EXISTS fixture_kickoff ON fixture(kickoff);
 CREATE INDEX IF NOT EXISTS fixture_league_kickoff ON fixture(league_id, kickoff);
 
+-- Competition prominence, lower is bigger. It lived only inside board_json, so
+-- the board could not sort on it and did not -- which is how a Europa League
+-- tie came to lead a day with La Liga on it, and a fourth-round cup tie sat
+-- third. Added as a separate ALTER because the guarded create above is a
+-- no-op against a table that already exists, so a new column never lands.
+ALTER TABLE fixture ADD COLUMN IF NOT EXISTS rank integer NOT NULL DEFAULT 6;
+CREATE INDEX IF NOT EXISTS fixture_day_rank ON fixture((kickoff / 86400), rank, kickoff);
+
 CREATE TABLE IF NOT EXISTS pick (
   id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   fixture_id   bigint NOT NULL,
@@ -244,13 +252,19 @@ $fn$;
 -- bet is a stake returned, so counting it would dilute the strike rate with
 -- results that were never in play. HALF_WON is an Asian-handicap half-win and
 -- counts as a win, as it does in the ledger.
+-- The published record, and only the published record. We compute calls in
+-- three kinds but show one, so a summary spanning all three would describe
+-- picks nobody was ever shown -- which is the opposite of what a results page
+-- is for. The other kinds keep being marked; they live in the by-kind view
+-- below, which is how we judge the model rather than how we present it.
 CREATE OR REPLACE VIEW pick_summary AS
   SELECT count(*)                                                   AS n,
          count(*) FILTER (WHERE result IN ('WON', 'HALF_WON'))       AS wins,
          sum(pnl)                                                    AS pnl,
          avg(odds)                                                   AS avg_odds
   FROM pick
-  WHERE settled_at IS NOT NULL AND result IS DISTINCT FROM 'VOID';
+  WHERE settled_at IS NOT NULL AND result IS DISTINCT FROM 'VOID'
+    AND kind = 'CONFIDENT';
 
 -- The same aggregate, split by what kind of call it was. Mixing them produces a
 -- number that describes nothing: a value bet is taken at 2.50 expecting to lose
@@ -273,14 +287,14 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
   SELECT json_build_object(
            'generated_at', floor(extract(epoch FROM now()))::bigint,
            'count', count(*),
-           'fixtures', coalesce(json_agg(b.board_json::json ORDER BY b.kickoff ASC), '[]'::json)
+           'fixtures', coalesce(json_agg(b.board_json::json ORDER BY (b.kickoff / 86400) ASC, b.rank ASC, b.kickoff ASC), '[]'::json)
          )
   FROM (
-    SELECT f.board_json, f.kickoff
+    SELECT f.board_json, f.kickoff, f.rank
     FROM fixture f
     WHERE f.kickoff BETWEEN p_from AND p_to
       AND (p_league IS NULL OR f.league_id = p_league)
-    ORDER BY f.kickoff ASC
+    ORDER BY (f.kickoff / 86400) ASC, f.rank ASC, f.kickoff ASC
     LIMIT 300
   ) b;
 $fn$;
@@ -297,9 +311,6 @@ CREATE OR REPLACE FUNCTION get_picks(p_limit integer DEFAULT 60, p_settled text 
 RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
   SELECT json_build_object(
            'summary', (SELECT to_json(s) FROM pick_summary s),
-           'summary_by_kind', coalesce((
-             SELECT json_object_agg(k.kind, to_json(k)) FROM pick_summary_by_kind k
-           ), '{}'::json),
            'picks', coalesce((
              SELECT json_agg(row_to_json(p) ORDER BY p.kickoff DESC)
              FROM (
@@ -308,9 +319,10 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
                       pk.confidence, pk.provisional, pk.narrative, pk.result, pk.pnl,
                       f.home_team, f.away_team
                FROM pick pk LEFT JOIN fixture f ON f.id = pk.fixture_id
-               WHERE (p_settled = 'true'  AND pk.settled_at IS NOT NULL)
-                  OR (p_settled = 'false' AND pk.settled_at IS NULL)
-                  OR (p_settled IS DISTINCT FROM 'true' AND p_settled IS DISTINCT FROM 'false')
+               WHERE pk.kind = 'CONFIDENT'
+                 AND ((p_settled = 'true'  AND pk.settled_at IS NOT NULL)
+                   OR (p_settled = 'false' AND pk.settled_at IS NULL)
+                   OR (p_settled IS DISTINCT FROM 'true' AND p_settled IS DISTINCT FROM 'false'))
                ORDER BY pk.kickoff DESC
                LIMIT greatest(1, least(200, p_limit))
              ) p
@@ -445,7 +457,11 @@ CREATE POLICY kv_read ON kv FOR SELECT TO anon USING (true);
 GRANT SELECT ON kv TO anon;
 
 GRANT SELECT ON pick_summary TO anon;
-GRANT SELECT ON pick_summary_by_kind TO anon;
+-- Not granted to anon. The by-kind split carries closing-line value and the
+-- record of calls we do not publish -- both are how we judge the model, not
+-- how we present it, and the anon key is public by design. The engine reads
+-- it over the pooler with real credentials.
+REVOKE ALL ON pick_summary_by_kind FROM anon;
 
 -- The serving functions are the Worker's whole read path. EXECUTE only: they
 -- are SECURITY INVOKER, so each one still reads under the anon SELECT policies

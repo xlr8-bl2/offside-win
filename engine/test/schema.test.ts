@@ -29,7 +29,7 @@ for (const t of tables) {
 
 test('migrate() sends whole statements, function bodies included', () => {
   for (const s of splitStatements(sql)) {
-    assert.ok(/^(CREATE|ALTER|DROP|GRANT|COMMENT|INSERT|DELETE|NOTIFY)/i.test(s), `unexpected statement: ${s.slice(0, 60)}`);
+    assert.ok(/^(CREATE|ALTER|DROP|GRANT|REVOKE|COMMENT|INSERT|DELETE|NOTIFY)/i.test(s), `unexpected statement: ${s.slice(0, 60)}`);
     // A body torn at an interior semicolon arrives with an opening $tag$ and no
     // closing one, which Postgres reports as an unterminated string a long way
     // from the cause.
