@@ -689,8 +689,62 @@ function statBar(label, home, away, fmt = (v) => String(Math.round(v))) {
   </div>`;
 }
 
+/**
+ * Form, side by side.
+ *
+ * This is the panel that carries a cup tie. A Coppa Italia round of 32 has no
+ * league table and often no meetings on record, so without this the page is a
+ * verdict and three probability bars. Every figure here is already computed by
+ * engine/src/context/form.ts for the narrative — it was simply never drawn.
+ *
+ * The venue split at the bottom is the interesting one: it is the difference
+ * between "they are in poor form" and "they are in poor form away from home".
+ */
+function formPanel(form, home, away) {
+  const h = form?.home;
+  const a = form?.away;
+  if (!h && !a) return '';
+
+  const one = (d) => Number(d ?? 0).toFixed(1);
+  const two = (d) => Number(d ?? 0).toFixed(2);
+
+  const rows = [
+    ['points a game', h?.ppg, a?.ppg, two],
+    ['goals scored', h?.goals_for, a?.goals_for, one],
+    ['goals conceded', h?.goals_against, a?.goals_against, one],
+    ['clean sheets', h?.clean_sheets, a?.clean_sheets, (d) => String(Math.round(Number(d ?? 0)))],
+  ].filter(([, hv, av]) => typeof hv === 'number' || typeof av === 'number');
+
+  // "1.83 a game at home" against "0.90 a game on the road" — the travel read.
+  const splits = [
+    typeof h?.venue_ppg === 'number' && h.venue_matches >= 2
+      ? `${esc(home)} take <b>${two(h.venue_ppg)}</b> a game at home`
+      : null,
+    typeof a?.venue_ppg === 'number' && a.venue_matches >= 2
+      ? `${esc(away)} take <b>${two(a.venue_ppg)}</b> a game on the road`
+      : null,
+  ].filter(Boolean);
+
+  const runOf = (ev) => {
+    if (!ev || !ev.streak_kind || ev.streak_kind === 'none' || !ev.streak_length) return '';
+    const word = { won: 'won', unbeaten: 'unbeaten in', lost: 'lost', winless: 'winless in' }[ev.streak_kind];
+    return word ? `<span class="run">${esc(word)} ${ev.streak_length}</span>` : '';
+  };
+
+  return `
+  <div class="panel">
+    <p class="panel-head">Form · last ${Math.max(h?.matches ?? 0, a?.matches ?? 0)}</p>
+    <div class="form-top">
+      <div class="form-side">${formChips(h)}${runOf(h)}</div>
+      <div class="form-side right">${runOf(a)}${formChips(a)}</div>
+    </div>
+    ${rows.map(([label, hv, av, fmt]) => statBar(label, hv ?? 0, av ?? 0, fmt)).join('')}
+    ${splits.length ? `<p class="form-split">${splits.join(' · ')}</p>` : ''}
+  </div>`;
+}
+
 function h2hHTML(h2h, home, away) {
-  if (!h2h || !h2h.total_matches) return '<div class="empty">No previous meetings on record.</div>';
+  if (!h2h || !h2h.total_matches) return '';
   const recent = (h2h.recent_matches ?? []).slice(0, 6);
   return `
   <div class="panel">
@@ -711,7 +765,7 @@ function h2hHTML(h2h, home, away) {
 }
 
 function standingsHTML(st, home, away, homeId, awayId) {
-  if (!st || (!st.home && !st.away)) return '<div class="empty">No league table for this competition.</div>';
+  if (!st || (!st.home && !st.away)) return '';
   const row = (r, name, id) => r
     ? `<tr>
          <td class="num">${r.position}</td>
@@ -777,6 +831,7 @@ async function viewFixture(id) {
             ${f.provisional ? `<span class="tag prov" style="padding:7px 12px">line-ups not final</span>` : ''}
           </div>
         </div>
+        ${formPanel(f.form, f.home, f.away)}
         ${f.venue_id ? `<div class="panel venue" data-shot="yes">
           <p class="panel-head">The ground</p>
           <div class="venue-shot">${venueShot(f.venue_id, '')}</div>
@@ -784,15 +839,18 @@ async function viewFixture(id) {
       </div>
     </div>`;
 
+  // A tab with nothing behind it is worse than no tab: it reads as a broken page.
+  // Cup ties routinely have no table and no meetings on record, so the strip is
+  // built from what actually rendered rather than from a fixed list.
   const TABS = [
     ['overview', 'Overview', overview],
-    ['lineups', 'Line-ups', pitchHTML(f.lineups, f.home, f.away, f.home_id, f.away_id) || '<div class="empty">No team sheet published yet.</div>'],
+    ['lineups', 'Line-ups', pitchHTML(f.lineups, f.home, f.away, f.home_id, f.away_id)],
     ['h2h', 'Head to head', h2hHTML(f.h2h, f.home, f.away)],
     ['table', 'Table', standingsHTML(f.standings, f.home, f.away, f.home_id, f.away_id)],
-  ];
+  ].filter(([, , html]) => html);
 
   app.innerHTML = `
-  <div class="wrap section">
+  <div class="wrap section tight">
     <button class="back">← Back to the board</button>
 
     <div class="fx-hero" data-shot="${f.venue_id ? 'yes' : 'none'}">
@@ -818,9 +876,9 @@ async function viewFixture(id) {
       </div>
     </div>
 
-    <div class="tabs" role="tablist">
+    ${TABS.length > 1 ? `<div class="tabs" role="tablist">
       ${TABS.map(([k, label], i) => `<button class="tab${i === 0 ? ' on' : ''}" data-tab="${k}" role="tab">${esc(label)}</button>`).join('')}
-    </div>
+    </div>` : ''}
     ${TABS.map(([k, , html], i) => `<div class="tabpane" data-pane="${k}"${i === 0 ? '' : ' hidden'}>${html}</div>`).join('')}
   </div>`;
 
