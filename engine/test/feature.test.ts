@@ -15,16 +15,46 @@ test('a marquee competition leads over a more confident minor one', () => {
     fx({ id: 2, league_id: 7, league: 'Champions League', confidence: 0.55 }),
   ], NOW)!;
   assert.equal(hero.fixture_id, 2);
-  assert.equal(hero.kicker, 'Champions League night');
+  assert.equal(hero.kicker, 'CHAMPIONS LEAGUE NIGHT');
 });
 
-test('a derby is an occasion in its own right', () => {
+test('a derby that has a name is called by it', () => {
   const hero = chooseHero([
     fx({ id: 1, league_id: 1, confidence: 0.9 }),
     fx({ id: 2, league_id: 1, confidence: 0.6, derby: true, home: 'Everton', away: 'Liverpool' }),
   ], NOW)!;
   assert.equal(hero.fixture_id, 2);
-  assert.equal(hero.kicker, 'Derby day');
+  assert.equal(hero.kicker, 'THE MERSEYSIDE DERBY');
+});
+
+test('a derby the provider flags but nobody has named does not lead', () => {
+  // The two fixtures the flag actually fired on in a live sample. Under the old
+  // flat +180 this reserve tie beat a Premier League game outright.
+  const hero = chooseHero([
+    fx({ id: 1, league_id: 1, league: 'Premier League', confidence: 0.6 }),
+    fx({ id: 2, league_id: 99, league: 'U23 Reserve League', confidence: 0.9,
+         derby: true, home: 'Club NXT U23', away: 'KAA Gent Reserve U23' }),
+  ], NOW)!;
+  assert.equal(hero.fixture_id, 1, 'a reserve derby led the page');
+});
+
+test('a major cup final leads over an ordinary league game', () => {
+  const hero = chooseHero([
+    fx({ id: 1, league_id: 1, league: 'Premier League', confidence: 0.9 }),
+    fx({ id: 2, league_id: 12, league: 'FA Cup', confidence: 0.5, round_label: 'Final' }),
+  ], NOW)!;
+  assert.equal(hero.fixture_id, 2);
+  assert.equal(hero.kicker, 'THE FINAL');
+});
+
+test('a minor cup final does not', () => {
+  // A final is worth what the competition it ends is worth. Unscaled, this was
+  // the Estonian Cup final leading over Arsenal.
+  const hero = chooseHero([
+    fx({ id: 1, league_id: 1, league: 'Premier League', confidence: 0.6 }),
+    fx({ id: 2, league_id: 999, league: 'Esiliiga Cup', confidence: 0.9, round_label: 'Final' }),
+  ], NOW)!;
+  assert.equal(hero.fixture_id, 1, 'a minor final led the page');
 });
 
 test('tonight beats next week', () => {
@@ -74,7 +104,7 @@ test('but a Europa League night still leads when nothing bigger is on', () => {
     fx({ id: 2, league_id: 91, league: 'National League', kickoff: NOW + 2 * 3600, confidence: 0.9 }),
   ], NOW)!;
   assert.equal(hero.fixture_id, 1);
-  assert.equal(hero.kicker, 'Europa League night');
+  assert.equal(hero.kicker, 'EUROPA LEAGUE NIGHT');
 });
 
 test('the Champions League still leads over anything', () => {

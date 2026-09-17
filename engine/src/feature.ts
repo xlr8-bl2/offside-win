@@ -1,4 +1,5 @@
 import { leagueRank } from './slate.ts';
+import { occasionOf, COMPETITION } from './occasion.ts';
 
 /**
  * What the site leads with today.
@@ -34,23 +35,14 @@ export interface HeroPick {
 }
 
 /**
- * Competitions whose name alone is the occasion, and how much that is worth.
- *
- * The bonus has to be read against the rank gap, which is 100 a tier. A flat
- * +220 for all three put a Europa League tie above a La Liga fixture kicking off
- * in the same hour — Anderlecht v Lyon led the page over Barcelona, which is the
- * exact complaint this feature exists to answer.
- *
- * So only the Champions League gets a bonus large enough to jump tiers. Europa
- * and Conference nights are worth something and not worth more than a top-five
- * league game: they lead when nothing bigger is on, which on a Thursday is
- * usually the case, and step aside when there is.
+ * Competition weighting now lives in occasion.ts alongside the named fixtures,
+ * because they are the same judgement and drifted apart when they were two
+ * lists. Kept exported under the old name for the tests that pin the Europa
+ * League behaviour.
  */
-const MARQUEE: Record<number, { label: string; boost: number }> = {
-  7: { label: 'Champions League night', boost: 220 },
-  8: { label: 'Europa League night', boost: 60 },
-  83: { label: 'Conference League night', boost: 30 },
-};
+const MARQUEE: Record<number, { label: string; boost: number }> = Object.fromEntries(
+  Object.entries(COMPETITION).map(([id, c]) => [id, { label: c.kicker, boost: c.weight }]),
+);
 
 export interface HeroCandidate {
   id: number;
@@ -65,6 +57,8 @@ export interface HeroCandidate {
   confidence?: number;
   /** Set when the derby factor fired for this fixture. */
   derby?: boolean;
+  /** "Quarterfinals", "Final" — what names the stage of a cup run. */
+  round_label?: string | null;
   star_home?: number | null;
   star_away?: number | null;
 }
@@ -75,13 +69,24 @@ export interface HeroCandidate {
  * Prominence dominates on purpose. A 92%-confidence call in a reserve league is
  * a good pick and a terrible headline, and the whole complaint this answers is
  * that the page led with competitions nobody came for.
+ *
+ * The occasion replaces what used to be a flat +180 for the provider's derby
+ * flag. That flag fired on a Belgian under-23 reserve fixture and a Bulgarian
+ * second-tier tie, and never on El Clasico, so the bonus meant for the biggest
+ * nights of the season was going to games nobody has heard of.
  */
 export function scoreCandidate(f: HeroCandidate, now: number): number {
   const rank = leagueRank(f.league_id);
   let score = (10 - rank) * 100;
 
-  score += MARQUEE[f.league_id]?.boost ?? 0;
-  if (f.derby) score += 180;
+  score += occasionOf({
+    home: f.home,
+    away: f.away,
+    league_id: f.league_id,
+    round_label: f.round_label ?? null,
+    local_derby: f.derby,
+    rank,
+  }).weight;
 
   // Today beats later this week: a masthead is about tonight.
   const hoursOut = (f.kickoff - now) / 3600;
@@ -99,15 +104,22 @@ export function chooseHero(fixtures: HeroCandidate[], now = Math.floor(Date.now(
 
   const best = live.reduce((a, b) => (scoreCandidate(b, now) > scoreCandidate(a, now) ? b : a));
 
-  const marquee = MARQUEE[best.league_id]?.label;
-  const kicker = marquee ?? (best.derby ? 'Derby day' : best.league);
-  const reason = marquee
-    ? 'marquee competition'
-    : best.derby
-      ? 'local derby'
-      : leagueRank(best.league_id) <= 2
-        ? 'top-flight fixture'
-        : 'highest-rated fixture available';
+  const rank = leagueRank(best.league_id);
+  const occasion = occasionOf({
+    home: best.home,
+    away: best.away,
+    league_id: best.league_id,
+    round_label: best.round_label ?? null,
+    local_derby: best.derby,
+    rank,
+  });
+
+  const kicker = occasion.kicker || best.league;
+  const reason = occasion.kicker
+    ? occasion.reason
+    : rank <= 2
+      ? 'top-flight fixture'
+      : 'highest-rated fixture available';
 
   return {
     fixture_id: best.id,

@@ -418,6 +418,9 @@ export async function runSlate(): Promise<SlateReport> {
         venue_id: num(event['venue_id']) ?? null,
         confidence,
         derby: factors.some((f) => f.id === 'fixture.derby' && f.strength > 0.3),
+        // Needed to spot a final, which is the one thing that outranks a
+        // Champions League night.
+        round_label: str(event['round_label']) || null,
         star_home: bestStarter('home'),
         star_away: bestStarter('away'),
       });
