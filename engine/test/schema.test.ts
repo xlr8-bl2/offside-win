@@ -11,12 +11,36 @@ test('postgres schema declares tables', () => {
   assert.ok(tables.length >= 12, `expected the full schema, found ${tables.length} tables`);
 });
 
+// Tables the public key must never reach at all, however the policy is worded.
+//
+// A column-level REVOKE does not narrow a table-level GRANT -- Postgres treats
+// table SELECT as satisfying every column, so the revoke is silently a no-op.
+// That is why these are not "granted and then narrowed": the only way to keep a
+// vault token or a raw processor payload away from a browser is to grant
+// nothing. Readers get the payment_receipt view, which names its columns.
+//
+// Listing a table here is a decision, and the test below turns it into one that
+// cannot be undone by accident.
+const PRIVATE = new Set(['payment', 'payment_method']);
+
 // The anon key is public. RLS plus a SELECT-only grant is the only thing
 // standing between it and write access, so a table added without both is a hole
 // that no amount of careful reading reliably catches.
 for (const t of tables) {
   test(`${t} is not writable through the public anon key`, () => {
     assert.match(sql, new RegExp(`ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY`), `${t}: RLS not enabled`);
+
+    if (PRIVATE.has(t)) {
+      // Nothing at all, not even SELECT. A policy would be harmless but
+      // misleading, since without a grant it can never be consulted.
+      assert.doesNotMatch(
+        sql,
+        new RegExp(`GRANT[^;]*ON ${t} TO anon`, 'i'),
+        `${t}: is meant to be private but grants something to anon`,
+      );
+      return;
+    }
+
     assert.match(sql, new RegExp(`CREATE POLICY ${t}_read ON ${t} FOR SELECT TO anon`), `${t}: no select policy`);
     assert.match(sql, new RegExp(`GRANT SELECT ON ${t} TO anon`), `${t}: no select grant`);
     assert.doesNotMatch(
@@ -26,6 +50,18 @@ for (const t of tables) {
     );
   });
 }
+
+// The view that exists so `payment` does not have to be readable. It is not
+// RLS-aware -- it runs with its owner's rights -- so the filter inside it is
+// the whole mechanism, and losing it would expose every member's payments to
+// every other member.
+test('payment_receipt filters to the caller and exposes no raw payload', () => {
+  const view = sql.slice(sql.indexOf('CREATE OR REPLACE VIEW payment_receipt'));
+  const body = view.slice(0, view.indexOf(';'));
+  assert.match(body, /WHERE p\.user_id = auth\.uid\(\)/, 'payment_receipt is not filtered to the caller');
+  assert.doesNotMatch(body, /raw_json/, 'payment_receipt exposes the raw processor payload');
+  assert.match(sql, /GRANT SELECT ON payment_receipt TO anon/);
+});
 
 test('migrate() sends whole statements, function bodies included', () => {
   for (const s of splitStatements(sql)) {
