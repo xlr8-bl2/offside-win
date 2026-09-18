@@ -10,32 +10,15 @@
  * product and it ships in full; the machinery behind it does not.
  */
 
+/* Tokens live in tokens.css. This file must not redefine them: it loads second,
+   so every value here silently won the cascade -- which is why the corrected
+   --ink-3 and --line, committed as fixes, were never actually in effect.
+
+   --r and --r-lg predate the radius naming and are aliases rather than
+   definitions, so the call sites can move in their own commit. */
 :root {
-  --bg: #06070a;
-  --bg-2: #0a0c11;
-  --surface: #101319;
-  --surface-2: #171b23;
-  --line: #232833;
-  --line-soft: #181c24;
-
-  --ink: #f4eee2;
-  --ink-2: #b5aea1;
-  --ink-3: #79736a;
-
-  --gold: #e2b979;
-  --gold-2: #c9973f;
-  --win: #4fd39a;
-  --loss: #e8735f;
-  --warn: #e0a949;
-
-  --r: 14px;
-  --r-lg: 24px;
-  --gutter: clamp(18px, 4.5vw, 64px);
-  --maxw: 1380px;
-
-  --display: 'Archivo', system-ui, -apple-system, sans-serif;
-  --body: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --script: 'Caveat', cursive;
+  --r: var(--radius);
+  --r-lg: var(--radius-lg);
 }
 
 * { box-sizing: border-box; }
