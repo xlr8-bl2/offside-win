@@ -314,6 +314,73 @@ function cardHTML(f) {
   </article>`;
 }
 
+
+/**
+ * One fixture, one line.
+ *
+ * The board used a four-across card grid, which showed four games on a laptop
+ * screen. This shows a dozen. A reader arrives looking for their fixture, not
+ * browsing, so the scan matters more than the presentation — and the density is
+ * what makes the page feel like a board rather than a brochure.
+ *
+ * Column order is deliberate: when, who, what we think, what it pays. The eye
+ * runs down the left edge to find the game and the right edge to find the
+ * price; the reasoning sits between them, read once the fixture is found.
+ */
+function rowHTML(f) {
+  const pick = f.top_pick;
+  const d = pick && market({
+    market: pick.market, outcome: pick.outcome, line: pick.line,
+    home: f.home, away: f.away, odds: pick.odds,
+  });
+  const k = new Date(f.kickoff * 1000);
+  // 24-hour: "11:00 PM" wraps in the column, and a board is read the way a
+  // fixture list is printed.
+  const time = k.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const day = dayLabel(f.kickoff);
+
+  return `
+  <article class="row" data-id="${f.id}" tabindex="0" role="link"
+           aria-label="${esc(f.home)} versus ${esc(f.away)}">
+    <div class="row-when">
+      <span class="row-league" title="${esc(f.league ?? '')}">
+        ${crest(f.league ?? '', 'xs', f.league_id, 'league')}
+      </span>
+      <span class="row-time">${esc(time)}</span>
+      <span class="row-day">${esc(day)}</span>
+    </div>
+
+    <div class="row-teams">
+      <span class="row-side">${crest(f.home, 'sm', f.home_id)}<span>${esc(f.home)}</span></span>
+      <span class="row-side">${crest(f.away, 'sm', f.away_id)}<span>${esc(f.away)}</span></span>
+    </div>
+
+    <div class="row-call">
+      ${d
+        ? `<div class="row-sel">${esc(d.name)}</div><p class="row-wins">${esc(d.wins)}</p>`
+        : `<p class="row-none">No call — the price looks about right to us.</p>`}
+    </div>
+
+    <div class="row-price">
+      ${pick ? `
+        <span class="odds">${dec(pick.odds)}</span>
+        ${pick.bookmaker ? `<span class="odds-book">at <b>${esc(pick.bookmaker)}</b></span>` : ''}
+        <span class="odds-return">${esc(d.returns)}</span>` : ''}
+    </div>
+  </article>`;
+}
+
+/** "Today", "Tomorrow", or the weekday — nobody reads a date they can infer. */
+function dayLabel(epoch) {
+  const k = new Date(epoch * 1000);
+  const today = new Date();
+  const days = Math.round((k.setHours(0, 0, 0, 0) - today.setHours(0, 0, 0, 0)) / 86400000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Tomorrow';
+  if (days === -1) return 'Yesterday';
+  return new Date(epoch * 1000).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
 /**
  * The front row: prominence first, then variety, then confidence.
  *
@@ -520,7 +587,9 @@ function closingHTML() {
 // ------------------------------------------------------------------ board
 
 async function viewBoard() {
-  app.innerHTML = '<div class="wrap section"><div class="spinner">Loading the board…</div></div>';
+  app.innerHTML = `<div class="wrap section dense">
+    <div class="rows">${'<div class="skeleton skeleton-row"></div>'.repeat(8)}</div>
+  </div>`;
   let board;
   try { board = await loadBoard(); } catch (err) {
     app.innerHTML = `<div class="wrap section"><div class="empty">${esc(err.message)}</div></div>`;
@@ -530,7 +599,7 @@ async function viewBoard() {
   const leagues = [...new Set(fixtures.map((f) => f.league).filter(Boolean))].sort();
 
   app.innerHTML = `
-  <div class="wrap section">
+  <div class="wrap section dense">
     <div class="section-head">
       <div>
         <h2 class="display">The board</h2>
@@ -546,13 +615,16 @@ async function viewBoard() {
         </select>
       </div>
     </div>
-    <div class="cards" id="grid"></div>
+    <div class="rows" id="grid"></div>
   </div>`;
 
   const paint = () => {
     const shown = state.leagueName ? fixtures.filter((f) => f.league === state.leagueName) : fixtures;
     document.getElementById('grid').innerHTML =
-      shown.length ? shown.map(cardHTML).join('') : '<div class="empty">Nothing in this league right now.</div>';
+      shown.length
+        ? shown.map(rowHTML).join('')
+        : `<div class="empty-state"><b>Nothing in this league right now</b>
+             <span>Try a longer window, or clear the filter to see the whole board.</span></div>`;
     wireCards();
   };
   document.getElementById('hours-filter').onchange = (e) => { state.hours = Number(e.target.value); viewBoard(); };
@@ -561,7 +633,7 @@ async function viewBoard() {
 }
 
 function wireCards() {
-  for (const el of app.querySelectorAll('.card[data-id]')) {
+  for (const el of app.querySelectorAll('.card[data-id], .row[data-id]')) {
     const go = () => { location.hash = `#/fixture/${el.dataset.id}`; };
     el.onclick = go;
     el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
