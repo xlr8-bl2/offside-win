@@ -14,6 +14,7 @@
     "history": "npm -w engine run history",
     "ratings": "npm -w engine run ratings",
     "slate": "npm -w engine run slate",
+    "poster:preview": "npm -w engine run poster:preview",
     "settle": "npm -w engine run settle",
     "backtest": "npm -w engine run backtest",
     "migrate": "npm -w engine run migrate",
