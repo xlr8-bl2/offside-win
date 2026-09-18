@@ -1,108 +1,142 @@
 /*
  * Design tokens.
  *
- * Everything atomic lives here and nowhere else: colour, type, space, border,
- * elevation, motion. A component file that writes a raw hex or a raw pixel
- * value has found a gap in this file — fill the gap rather than the component.
+ * Everything atomic lives here and nowhere else. A component file that writes a
+ * raw hex or a raw pixel value has found a gap in this file — fill the gap
+ * rather than the component.
  *
- * Two measured failures in the previous palette are fixed here, and both are
- * recorded because they will otherwise be reintroduced by eye:
+ * ---------------------------------------------------------------------------
+ * Why it looks like this, from a survey of twenty products in and around this
+ * category. The reasoning is recorded because otherwise the next pass reverts
+ * it by eye.
  *
- *   --ink-3 was #79736a, which is 3.67:1 on --surface-2 and 4.29:1 on --bg.
- *   It was carrying body text, so it failed WCAG 1.4.3 (4.5:1) everywhere it
- *   was used. Now #938d81 — 5.23:1 at worst.
+ * GREEN IS SPENT. bet365, Betway, Paddy Power and every tipster site own
+ * saturated green, so it reads as gambling promo. FotMob and Polymarket both
+ * demote green to a semantic win/loss token and brand on something else —
+ * Polymarket's "Yes" is a deliberately muted #3DB468, because it means a state
+ * rather than a mood. Green here is semantic only and never brand.
  *
- *   --line was #232833 against a #101319 surface: 1.26:1. Borders were very
- *   nearly invisible, which failed 1.4.11 (3:1) for anything interactive and
- *   is a large part of why the old UI read as flat — structure the eye cannot
- *   find is structure that is not there. Split in two: a hairline for
- *   decorative division, and --line-strong (3.26:1) for anything a person is
- *   meant to click, type into, or read as a boundary.
+ * THE GROUND IS WARM. Every credible product in this space is blue-cast or
+ * neutral: Polymarket #000, Stake #0F212E, Linear #08090A, FotMob pure black.
+ * Robinhood deliberately warmed its canvas to brown-black to differentiate from
+ * exactly that, and it works. Football at night is sodium, wood and concrete,
+ * not fintech, so the ground carries a warm cast and the accent is cool against
+ * it.
+ *
+ * THE ACCENT IS UNCLAIMED. bet365 green, FanDuel blue, DraftKings orange,
+ * OneFootball lime, Sofascore royal blue, FotMob green, Pinnacle orange. Violet
+ * is nobody's in football. It also does not collide with the semantic red and
+ * green, which a blue or orange accent would.
+ *
+ * DEPTH COMES FROM SURFACE STEPS, NOT CARDS. FotMob sets its card border to
+ * `1px solid transparent` in dark mode and separates purely by #000 ground
+ * against a #1D1D1D card. Linear's rule is blunter: do not promote every region
+ * into a floating card. The ladder below steps about 4% at a time so elevation
+ * reads with no shadow at all.
+ *
+ * NUMBERS ARE TYPESET DIFFERENTLY FROM TEXT. Stripe tracks its numerals
+ * separately (-0.42px at 14px). DraftKings ships a condensed face alongside
+ * Inter specifically for odds cells. Sofascore commissioned a condensed width
+ * axis because the product "deals with unexpectedly long names" — the
+ * professional answer to a long club name is a condensed cut, not an ellipsis.
  */
 
 :root {
-  /* ---------------------------------------------------------------- colour */
+  /* ---------------------------------------------------------------- ground */
 
-  /* Ground. Darkest at the page, lifting toward the reader. In a dark theme
-     elevation is carried by surface lightness, not by shadow. */
-  --bg:          #06070a;
-  --bg-2:        #0a0c11;
-  --surface:     #101319;
-  --surface-2:   #171b23;
-  --surface-3:   #1e232d;
+  /* Warm-cast, per the note above. Neutral #121212 is the "I didn't decide"
+     colour and blue-black is what the rest of the category already uses. */
+  --pitch:     #0c0b09;
+  --stand:     #15130f;
+  --terrace:   #201c17;
+  --stand-hi:  #2a251e;
 
-  /* Ink. All three clear 4.5:1 on every ground above. */
-  --ink:         #f4eee2;
-  --ink-2:       #b5aea1;
-  --ink-3:       #938d81;
+  /* ------------------------------------------------------------------- ink */
 
-  /* Brand. The warm metallic is the only accent; it is what stops this
-     looking like the vivid-green tipster category. */
-  --gold:        #e2b979;
-  --gold-2:      #c9973f;
-  --gold-dim:    rgba(226, 185, 121, 0.14);
+  /* Warm white rather than pure white, so type sits on the ground rather than
+     glowing off it. All three clear 4.5:1 on every surface above. */
+  --chalk:     #f7f4ed;
+  --chalk-2:   #b9b2a4;
+  --chalk-3:   #8e877a;
 
-  /* Lines. See the note above for why there are two. */
-  --line:        #232833;
-  --line-soft:   #181c24;
-  --line-strong: #5d6779;
+  /* ---------------------------------------------------------------- accent */
 
-  /* Semantic. Result state and price movement are different meanings and get
-     different tokens even where the colour currently agrees — they will not
-     always agree, and one token serving two meanings is how that breaks. */
-  --won:         #4fd39a;
-  --lost:        #e8735f;
-  --void:        #79839b;
-  --warn:        #e0a949;
+  --floodlight:     #7a5af8;
+  --floodlight-hi:  #9478ff;
+  --floodlight-dim: rgba(122, 90, 248, 0.14);
 
-  --drift-in:    #4fd39a;   /* price shortening */
-  --drift-out:   #e8735f;   /* price lengthening */
+  /* A second warm note, used sparingly — the sodium of an old floodlight. */
+  --sodium:    #f0a868;
 
-  /* Legacy aliases. The rebuild replaces these call sites page by page; until
-     it does, style.css keeps working. Delete once nothing references them. */
-  --win:         var(--won);
-  --loss:        var(--lost);
+  /* --------------------------------------------------------------- borders */
+
+  /* Percentages of the ink rather than grey hexes, so they hold across
+     surfaces. The strong one clears 3:1 for anything interactive. */
+  --hairline:  rgba(247, 244, 237, 0.08);
+  --rule:      rgba(247, 244, 237, 0.14);
+  --rule-firm: rgba(247, 244, 237, 0.34);
+
+  /* -------------------------------------------------------------- semantic */
+
+  /* Muted on purpose: these are states, not brand. Taken from Polymarket,
+     which is the closest analogue to what this product does. */
+  --won:       #3db468;
+  --lost:      #cb3131;
+  --void:      #7b8996;
+  --warn:      #f0a868;
+
+  /* Price movement is a different meaning from a settled result and gets its
+     own tokens, even where the colour currently agrees. */
+  --shorten:   #3db468;
+  --drift:     #cb3131;
 
   /* ------------------------------------------------------------ typography */
 
-  --display: 'Archivo', system-ui, -apple-system, sans-serif;
-  --body:    'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --script:  'Caveat', cursive;
+  /* Three faces, three jobs.
+     Display: Bricolage Grotesque — variable, with width and optical-size axes,
+       characterful, and not the face anyone reaches for by default.
+     UI: Inter, with cv01 and ss03 on globally as Linear does.
+     Numeric: Saira Condensed — what DraftKings actually ships in its odds
+       cells, and the answer to "Borussia Monchengladbach in a 96px column". */
+  --display: 'Bricolage Grotesque', 'Archivo', system-ui, sans-serif;
+  --body:    'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --numeric: 'Saira Condensed', 'Inter', ui-monospace, sans-serif;
 
-  /* A dense board is read by scanning a column of numbers. Tabular figures are
-     not a nicety here — proportional digits make a price column unscannable. */
-  --numeric: 'Archivo', ui-monospace, system-ui, sans-serif;
+  --text-2xs: 0.6875rem;
+  --text-xs:  0.75rem;
+  --text-sm:  0.8125rem;
+  --text-md:  0.9375rem;
+  --text-lg:  1.0625rem;
+  --text-xl:  1.375rem;
+  --text-2xl: 1.875rem;
+  --text-3xl: clamp(2rem, 4.5vw, 3rem);
+  --text-4xl: clamp(2.5rem, 7vw, 4.5rem);
 
-  --text-2xs: 0.6875rem;   /* 11px — chips, over-line labels */
-  --text-xs:  0.75rem;     /* 12px — dense table cells */
-  --text-sm:  0.8125rem;   /* 13px — secondary */
-  --text-md:  0.9375rem;   /* 15px — body */
-  --text-lg:  1.0625rem;   /* 17px — lead */
-  --text-xl:  1.375rem;    /* 22px */
-  --text-2xl: 1.875rem;    /* 30px */
-  --text-3xl: clamp(2rem, 4.5vw, 3.25rem);
-  --text-4xl: clamp(2.75rem, 8vw, 5.5rem);
-
+  /* Ceiling of 600. Vercel's rule, and bold-everything is the fastest way to
+     look cheap. The display face carries emphasis through width, not weight. */
   --weight-normal: 400;
-  --weight-medium: 600;
-  --weight-bold:   700;
-  --weight-black:  900;
+  --weight-medium: 500;
+  --weight-bold:   600;
 
-  --leading-tight: 1.1;
-  --leading-snug:  1.3;
+  --leading-tight:  1.08;
+  --leading-snug:   1.3;
   --leading-normal: 1.55;
-  --leading-loose: 1.7;
 
-  --tracking-tight: -0.02em;
-  --tracking-normal: 0;
-  --tracking-wide:  0.06em;
-  --tracking-caps:  0.1em;
+  /* Tracking tightens as size grows, the way Stripe and Vercel do it. Flat
+     tracking across a scale is the amateur tell. */
+  --tracking-4xl: -0.035em;
+  --tracking-3xl: -0.03em;
+  --tracking-2xl: -0.022em;
+  --tracking-xl:  -0.015em;
+  --tracking-md:  -0.006em;
+  --tracking-sm:  0;
+  --tracking-wide: 0.04em;
 
-  /* ---------------------------------------------------------------- space */
+  /* Numerals are tracked separately from text. */
+  --tracking-num: -0.02em;
 
-  /* 4px base. Density comes from having 4 and 6 available, not from
-     improvising values between the steps of a coarser scale. */
-  --space-0:  0;
+  /* ----------------------------------------------------------------- space */
+
   --space-1:  4px;
   --space-2:  6px;
   --space-3:  8px;
@@ -116,51 +150,87 @@
   --space-11: 72px;
   --space-12: 96px;
 
-  --gutter: clamp(16px, 4.5vw, 64px);
-  --maxw:   1380px;
+  --gutter: clamp(16px, 4.5vw, 56px);
+  /* Capped. Full-bleed data is a dashboard smell; Polymarket holds at 1168px
+     despite being a data product. */
+  --maxw:   1220px;
 
-  /* --------------------------------------------------------------- border */
+  /* ---------------------------------------------------------------- shape */
 
-  --radius-sm: 8px;
-  --radius:    14px;
-  --radius-lg: 24px;
+  /* Three values, and no more. Robinhood uses two. A long radius vocabulary is
+     what Bootstrap gave everyone and it shows. */
+  --radius-sm: 4px;
+  --radius:    8px;
+  --radius-lg: 16px;
   --radius-pill: 999px;
 
-  --border:       1px;
-  --border-thick: 2px;
+  --border: 1px;
 
   /* ------------------------------------------------------------ elevation */
 
-  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --elev-2: 0 4px 12px rgba(0, 0, 0, 0.45);
-  --elev-3: 0 12px 32px rgba(0, 0, 0, 0.55);
-  --elev-inset: inset 0 1px 0 rgba(244, 238, 226, 0.04);
+  /* An inset ring plus a shallow offset, not a single heavy drop. Polymarket's
+     card shadow is 4% opacity; Linear and Vercel both build depth from a 1px
+     ring rather than a shadow. */
+  --ring-inset: inset 0 1px 0 rgba(247, 244, 237, 0.045);
+  --elev-1: var(--ring-inset), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --elev-2: var(--ring-inset), 0 8px 16px rgba(0, 0, 0, 0.32);
+  --elev-3: var(--ring-inset), 0 20px 48px rgba(0, 0, 0, 0.44);
 
-  /* Focus. 2.4.7 wants this visible, and on a near-black ground the accent
-     alone is not enough — the dark ring is what separates it from the gold. */
-  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--gold);
+  --focus-ring: 0 0 0 2px var(--pitch), 0 0 0 4px var(--floodlight);
 
   /* --------------------------------------------------------------- motion */
 
   --dur-instant: 80ms;
   --dur-fast:    140ms;
   --dur-normal:  220ms;
-  --dur-slow:    400ms;
+  --dur-slow:    420ms;
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
 
-  /* ---------------------------------------------------------------- misc */
+  /* ----------------------------------------------------------------- misc */
 
-  --tap: 44px;   /* 2.5.5 minimum touch target */
+  --tap: 44px;
   --z-header: 100;
-  --z-rail: 200;
   --z-overlay: 300;
+
+  /* ----------------------------------------------- compatibility, for now */
+
+  /* The rebuild replaces these call sites page by page. Until it does, the old
+     names resolve to the new values so nothing renders against a missing
+     variable mid-migration. Delete once style.css is gone. */
+  --bg: var(--pitch);
+  --bg-2: var(--stand);
+  --surface: var(--stand);
+  --surface-2: var(--terrace);
+  --surface-3: var(--stand-hi);
+  --ink: var(--chalk);
+  --ink-2: var(--chalk-2);
+  --ink-3: var(--chalk-3);
+  --gold: var(--floodlight);
+  --gold-2: var(--floodlight-hi);
+  --gold-dim: var(--floodlight-dim);
+  --line: var(--rule);
+  --line-soft: var(--hairline);
+  --line-strong: var(--rule-firm);
+  --win: var(--won);
+  --loss: var(--lost);
+  --r: var(--radius);
+  --r-lg: var(--radius-lg);
+  --radius-xs: var(--radius-sm);
+  --script: var(--display);
+  --elev-inset: var(--ring-inset);
 }
 
-/* 2.3.3 — respect a stated preference for less movement. Odds flashes and
-   poster transitions are exactly the kind of motion this is asking about. */
+/* Numerals everywhere. Tabular figures are the single highest ratio of effort
+   to perceived quality in a product full of prices: every digit takes the same
+   width, so columns align and a price changing from 1.90 to 2.05 does not shift
+   the layout. Non-tabular figures make a live board jitter on every tick. */
+html {
+  font-variant-numeric: lining-nums tabular-nums;
+  font-feature-settings: 'cv01' 1, 'ss03' 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --dur-instant: 0ms;

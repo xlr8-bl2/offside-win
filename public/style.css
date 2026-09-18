@@ -10,16 +10,12 @@
  * product and it ships in full; the machinery behind it does not.
  */
 
-/* Tokens live in tokens.css. This file must not redefine them: it loads second,
-   so every value here silently won the cascade -- which is why the corrected
-   --ink-3 and --line, committed as fixes, were never actually in effect.
-
-   --r and --r-lg predate the radius naming and are aliases rather than
-   definitions, so the call sites can move in their own commit. */
-:root {
-  --r: var(--radius);
-  --r-lg: var(--radius-lg);
-}
+/* Tokens live in tokens.css and are defined nowhere else. This file loads
+   second, so anything it declares silently wins the cascade -- which is how the
+   corrected --ink-3 and --line, committed as fixes, spent a commit having no
+   effect at all. The two aliases that used to sit here (--r, --r-lg) are in the
+   token file with the rest, so there is now one place to look and one place to
+   be wrong. */
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
