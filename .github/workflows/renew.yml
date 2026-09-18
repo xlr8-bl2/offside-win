@@ -1,0 +1,41 @@
+name: renew
+
+# The subscription engine's heartbeat.
+#
+# Daily rather than hourly: a membership is charged in the 24 hours before it
+# runs out, so one pass a day covers every one of them, and a job that touches
+# real cards should run as seldom as it can rather than as often as it might.
+#
+# 06:10 UTC is deliberate. Early enough that a decline leaves most of a working
+# day for the dunning retries to matter, and off the hour so it does not queue
+# behind everything else on GitHub's schedulers.
+on:
+  schedule:
+    - cron: '10 6 * * *'
+  workflow_dispatch:
+
+# Never two at once. Both passes would find the same memberships due, and
+# although the unique index on the payment reference stops the second one
+# charging, not relying on that is cheaper than relying on it.
+concurrency:
+  group: renew
+  cancel-in-progress: false
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+      - name: Charge the memberships falling due
+        env:
+          DB_BACKEND: postgres
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          COINFLOW_API_KEY: ${{ secrets.COINFLOW_API_KEY }}
+          COINFLOW_BASE_URL: ${{ vars.COINFLOW_BASE_URL || 'https://api-sandbox.coinflow.cash' }}
+          COINFLOW_WALLET: ${{ vars.COINFLOW_WALLET }}
+          COINFLOW_BLOCKCHAIN: ${{ vars.COINFLOW_BLOCKCHAIN || 'solana' }}
+        run: npm run renew
