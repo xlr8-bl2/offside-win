@@ -50,6 +50,9 @@ export interface GeminiOptions {
   timeoutMs?: number;
 }
 
+/** How many times to wait out a busy model before giving up on a call. */
+const RETRY_ON_BUSY = 2;
+
 export class QuotaExhausted extends Error {
   constructor(message: string) {
     super(message);
@@ -80,61 +83,88 @@ export function geminiWriter(opts: GeminiOptions): Writer {
   const pace = spacer(opts.ratePerMinute ?? 15);
   const timeoutMs = opts.timeoutMs ?? 30_000;
 
+  /** One request. Throws on anything the caller should know about. */
+  async function attempt(prompt: string): Promise<{ busy: true } | { busy: false; text: string }> {
+    await pace();
+
+    const res = await fetch(`${BASE}/${model}:generateContent`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-goog-api-key': opts.apiKey,
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          // Some spread, or every preview opens the same way across a slate.
+          temperature: 1.0,
+          // Generous, because on the 3.x models this budget is shared with the
+          // model's own hidden reasoning. At 400 the reasoning consumed it and
+          // what came back was a stub, which the validator correctly called
+          // too-short -- and which looked like a writing problem rather than a
+          // budget one. A paragraph needs about 200 tokens; the rest is
+          // headroom for thinking.
+          maxOutputTokens: 4096,
+        },
+        // The subject is football, and the default filters occasionally trip
+        // on ordinary match language -- "thrashing", "killed off", "sudden
+        // death". A block here costs a preview and gains nothing.
+        safetySettings: [
+          'HARM_CATEGORY_HARASSMENT',
+          'HARM_CATEGORY_HATE_SPEECH',
+          'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+          'HARM_CATEGORY_DANGEROUS_CONTENT',
+        ].map((category) => ({ category, threshold: 'BLOCK_ONLY_HIGH' })),
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    if (res.status === 429) throw new QuotaExhausted('gemini free-tier quota exhausted');
+
+    // 503 is the free tier being busy rather than anything being wrong -- their
+    // own message says spikes in demand are usually temporary. Worth waiting
+    // out, unlike every other failure, which falls back to the grammar.
+    if (res.status === 503) return { busy: true };
+
+    if (!res.ok) throw new Error(`gemini ${res.status}: ${(await res.text()).slice(0, 200)}`);
+
+    const body = await res.json() as {
+      candidates?: Array<{
+        content?: { parts?: Array<{ text?: string }> };
+        finishReason?: string;
+      }>;
+    };
+
+    const candidate = body.candidates?.[0];
+    // A safety block returns 200 with no parts, which would otherwise surface
+    // as an empty string and be rejected as too short with no explanation.
+    if (!candidate || candidate.finishReason === 'SAFETY') {
+      throw new Error(`gemini returned no usable candidate (${candidate?.finishReason ?? 'empty'})`);
+    }
+
+    const text = (candidate.content?.parts ?? []).map((part) => part.text ?? '').join('').trim();
+    // An empty body with MAX_TOKENS means the whole budget went on reasoning.
+    // Say which it was: "empty completion" sent the first investigation looking
+    // at the prompt, where there was nothing to find.
+    if (!text) {
+      throw new Error(
+        candidate.finishReason === 'MAX_TOKENS'
+          ? 'gemini spent its whole token budget before writing anything'
+          : `gemini returned an empty completion (${candidate.finishReason ?? 'no reason given'})`,
+      );
+    }
+    return { busy: false, text };
+  }
+
   return {
     name: `gemini:${model}`,
     async generate(prompt: string): Promise<string> {
-      await pace();
-
-      const res = await fetch(`${BASE}/${model}:generateContent`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-goog-api-key': opts.apiKey,
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            // Some spread, or every preview opens the same way across a slate.
-            temperature: 1.0,
-            maxOutputTokens: 400,
-          },
-          // The subject is football, and the default filters occasionally trip
-          // on ordinary match language -- "thrashing", "killed off", "sudden
-          // death". A block here costs a preview and gains nothing.
-          safetySettings: [
-            'HARM_CATEGORY_HARASSMENT',
-            'HARM_CATEGORY_HATE_SPEECH',
-            'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-            'HARM_CATEGORY_DANGEROUS_CONTENT',
-          ].map((category) => ({ category, threshold: 'BLOCK_ONLY_HIGH' })),
-        }),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-
-      if (res.status === 429) {
-        throw new QuotaExhausted('gemini free-tier quota exhausted');
+      for (let tries = 0; tries <= RETRY_ON_BUSY; tries++) {
+        const out = await attempt(prompt);
+        if (!out.busy) return out.text;
+        if (tries < RETRY_ON_BUSY) await new Promise((r) => setTimeout(r, 2000 * (tries + 1)));
       }
-      if (!res.ok) {
-        throw new Error(`gemini ${res.status}: ${(await res.text()).slice(0, 200)}`);
-      }
-
-      const body = await res.json() as {
-        candidates?: Array<{
-          content?: { parts?: Array<{ text?: string }> };
-          finishReason?: string;
-        }>;
-      };
-
-      const candidate = body.candidates?.[0];
-      // A safety block returns 200 with no parts, which would otherwise surface
-      // as an empty string and be rejected as too short with no explanation.
-      if (!candidate || candidate.finishReason === 'SAFETY') {
-        throw new Error(`gemini returned no usable candidate (${candidate?.finishReason ?? 'empty'})`);
-      }
-
-      const text = (candidate.content?.parts ?? []).map((p) => p.text ?? '').join('').trim();
-      if (!text) throw new Error('gemini returned an empty completion');
-      return text;
+      throw new Error('gemini is busy — the model did not answer after three tries');
     },
   };
 }
