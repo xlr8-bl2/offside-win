@@ -27,6 +27,7 @@
     "eval:provider": "npm -w engine run eval:provider",
     "h2h": "npm -w engine run h2h",
     "market": "npm -w engine run market",
-    "renew": "npm -w engine run renew"
+    "renew": "npm -w engine run renew",
+    "narrate:preview": "npm -w engine run narrate:preview"
   }
 }

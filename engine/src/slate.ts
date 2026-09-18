@@ -4,9 +4,12 @@ import { analyseFixture } from './context/index.ts';
 import { checkComparisonEntitlement, gatherFixture } from './context/gather.ts';
 import { RepetitionLedger, narrate, narrateConfident, narratePass } from './narrate/compose.ts';
 import { chooseHero, type HeroCandidate } from './feature.ts';
+import { pubFacts } from './narrate/facts.ts';
+import { geminiWriter } from './narrate/gemini.ts';
+import { write, type Writer } from './narrate/write.ts';
 import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
-import { buildCandidates, driversFor, select, selectConfident, setAsideFor, type CalibrationMap } from './select.ts';
+import { buildCandidates, driversFor, marketLabel, select, selectConfident, setAsideFor, type CalibrationMap } from './select.ts';
 import { dbStats, insertMany, kvGetJSON, kvSetJSON, pickConflictTarget, select as dbSelect } from './store.ts';
 import type { CalibrationRow } from './select.ts';
 import type { Candidate, Factor, MarketFamily } from './types.ts';
@@ -77,8 +80,49 @@ export function leagueRank(leagueId: number): number {
   return config.leagueRank[leagueId] ?? config.unrankedLeague;
 }
 
+/**
+ * The call, in words a person would use.
+ *
+ * marketLabel() speaks in market names because the ledger needs them to be
+ * exact. The writer needs the opposite: it is told never to mention the call,
+ * so this is only context, and context reads better without HOME and AWAY in
+ * it.
+ */
+function plainCall(c: Candidate, home: string, away: string): string {
+  return marketLabel(c)
+    .replace(/\bhome\b/gi, home)
+    .replace(/\baway\b/gi, away)
+    .replace(/\bHOME\b/g, home)
+    .replace(/\bAWAY\b/g, away);
+}
+
+/**
+ * The writer, when there is a key for one.
+ *
+ * Absent means the grammar keeps writing, which is a worse product and a
+ * working one. A slate that refused to run without an optional key would be a
+ * site that stops publishing because a free quota lapsed.
+ */
+function buildWriter(): Writer | null {
+  const apiKey = process.env['GEMINI_API_KEY'];
+  if (!apiKey) return null;
+  return geminiWriter({
+    apiKey,
+    model: process.env['GEMINI_MODEL'] ?? 'gemini-2.5-flash',
+    ratePerMinute: Number(process.env['GEMINI_RPM'] ?? 15),
+  });
+}
+
 export async function runSlate(): Promise<SlateReport> {
   const now = Math.floor(Date.now() / 1000);
+  const writer = buildWriter();
+
+  // Counted rather than assumed. A silent drift back to template prose is
+  // exactly the failure worth noticing, and it is invisible on the page --
+  // the old voice still reads like writing, just worse.
+  let narrateAttempts = 0;
+  let narrateWritten = 0;
+  const narrateRejections: Record<string, number> = {};
   const from = new Date((now - config.slate.lookbackHours * 3600) * 1000).toISOString();
   const to = new Date((now + config.slate.horizonHours * 3600) * 1000).toISOString();
 
@@ -200,6 +244,55 @@ export async function runSlate(): Promise<SlateReport> {
       // Every verdict, for the pick ledger and the calibration that depends on
       // it. Nothing here is user-facing on its own.
       const allVerdicts = [...verdicts, ...confidentVerdicts];
+
+      // The narrative, written rather than assembled.
+      //
+      // The grammar above says of itself that it is a template system, and it
+      // reads like one: one sentence per claim, joined with a space, opening
+      // with the call and its price because marketLabel() builds that lead in
+      // at generation time. Measured against the live site, fifteen of fifteen
+      // narratives named the market and the odds in their first six words --
+      // which is also why none of them can be shown to a reader who has not
+      // paid.
+      //
+      // So the grammar becomes the fact source and a model does the writing.
+      // It only ever sees pub facts, so it cannot reach for a spreadsheet
+      // number that is not in its input, and anything it writes is checked
+      // against the same vocabulary rule the free copy is filtered by.
+      //
+      // A rejection keeps the grammar's version. That path is load-bearing
+      // rather than tidy: the free tier this runs on has had its quotas cut
+      // sharply and without notice before, and the site has to keep publishing
+      // when it happens -- in the old voice, with the run saying how often.
+      if (writer) {
+        for (const v of confidentVerdicts) {
+          narrateAttempts++;
+          const result = await write({
+            home: analysis.home_team,
+            away: analysis.away_team,
+            competition: ctx.league_name ?? 'this competition',
+            call: plainCall(v.candidate, analysis.home_team, analysis.away_team),
+            facts: pubFacts({
+              home: analysis.home_team,
+              away: analysis.away_team,
+              ledger: factors.map(forStorage),
+              form: {
+                home: (factors.find((f) => f.id === 'form.home')?.evidence ?? null) as Record<string, unknown> | null,
+                away: (factors.find((f) => f.id === 'form.away')?.evidence ?? null) as Record<string, unknown> | null,
+              },
+              h2h: (ctx.h2h ?? null) as Record<string, unknown> | null,
+              lineups: ctx.lineups ? { status: ctx.lineups.status } : null,
+            }),
+          }, writer);
+
+          if (result.text) {
+            v.narrative = result.text;
+            narrateWritten++;
+          } else {
+            for (const r of result.rejections) narrateRejections[r] = (narrateRejections[r] ?? 0) + 1;
+          }
+        }
+      }
 
       // What a reader is actually shown. The split exists because the two
       // audiences want different things: the ledger wants everything the model
@@ -492,6 +585,19 @@ export async function runSlate(): Promise<SlateReport> {
 
   await kvSetJSON('narrate:ledger', ledger.snapshot());
   await kvSetJSON('slate:last_run', { at: now, ...report });
+
+  if (writer) {
+    const fellBack = narrateAttempts - narrateWritten;
+    console.log(
+      `Narratives: ${narrateWritten}/${narrateAttempts} written by ${writer.name}`
+      + (fellBack > 0
+        ? `, ${fellBack} fell back to the grammar (${Object.entries(narrateRejections)
+            .map(([k, v]) => `${k} ${v}`).join(', ')})`
+        : ''),
+    );
+  } else {
+    console.log('Narratives: no GEMINI_API_KEY, so the template grammar wrote them all.');
+  }
 
   report.requests = bsdStats.requests;
   report.d1Queries = dbStats.queries;
