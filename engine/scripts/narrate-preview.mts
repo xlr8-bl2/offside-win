@@ -41,7 +41,7 @@ async function main(): Promise<void> {
     [Math.floor(Date.now() / 1000), COUNT * 3],
   );
 
-  const writer = geminiWriter({ apiKey, model: process.env['GEMINI_MODEL'] ?? undefined });
+  const writer = geminiWriter({ apiKey, model: process.env['GEMINI_MODEL'] || undefined });
   let written = 0;
   let free = 0;
   let seen = 0;

@@ -108,7 +108,7 @@ function buildWriter(): Writer | null {
   if (!apiKey) return null;
   return geminiWriter({
     apiKey,
-    model: process.env['GEMINI_MODEL'] ?? undefined,
+    model: process.env['GEMINI_MODEL'] || undefined,
     ratePerMinute: Number(process.env['GEMINI_RPM'] ?? 15),
   });
 }
