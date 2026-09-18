@@ -16,12 +16,14 @@
     "board:stats": "node scripts/board-stats.mjs",
     "eval:provider": "tsx scripts/eval-provider.mjs",
     "h2h": "tsx scripts/head-to-head.mts",
-    "market": "tsx scripts/is-it-the-market.mts"
+    "market": "tsx scripts/is-it-the-market.mts",
+    "poster:preview": "tsx scripts/poster-preview.mts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "playwright": "^1.49.1"
   },
   "dependencies": {
     "postgres": "^3.4.5"

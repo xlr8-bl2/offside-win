@@ -1,0 +1,57 @@
+name: poster-preview
+
+# Renders matchday posters for real fixtures, from the provider's real artwork,
+# and uploads them as an artifact. A poster can only be judged by looking at it,
+# and the unit tests use synthetic flat-disc crests that prove the colour rules
+# and say nothing about how an actual badge sits on a shield.
+#
+# Triggered on push as well as by hand: a workflow that has never run on the
+# default branch cannot be dispatched, and the push trigger is the way round
+# that while this lives on a working branch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: How many fixtures from the top of the board
+        required: false
+        default: '8'
+  push:
+    branches: ['main', 'claude/**']
+    paths:
+      - 'engine/src/poster/**'
+      - 'engine/scripts/poster-preview.mts'
+      - '.github/workflows/poster-preview.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # The runner has no browser preinstalled, unlike the dev container.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Render
+        env:
+          SITE: ${{ vars.SITE_URL || 'https://offside-win.ashleymbaht.workers.dev' }}
+          POSTER_COUNT: ${{ github.event.inputs.count || '8' }}
+        run: npm run poster:preview
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: posters
+          path: poster-preview/
+          retention-days: 7
