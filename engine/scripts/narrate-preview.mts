@@ -87,6 +87,7 @@ async function main(): Promise<void> {
     } else {
       for (const r of result.rejections) rejections[r] = (rejections[r] ?? 0) + 1;
       console.log(`(no draft accepted: ${result.rejections.join(', ')})`);
+      if (result.error) console.log(`  provider said: ${result.error}`);
       console.log('the template grammar would be used instead:');
       console.log(verdict.narrative);
     }
