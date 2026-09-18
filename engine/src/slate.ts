@@ -81,6 +81,30 @@ export function leagueRank(leagueId: number): number {
 }
 
 /**
+ * A written narrative is keyed on the call, not on the fixture.
+ *
+ * This matters more than it looks. The slate runs every fifteen minutes --
+ * ninety-six times a day -- and regenerating a paragraph on every pass would
+ * mean thousands of requests a day to rewrite prose that has not changed,
+ * which no free allowance survives and which was the plan's arithmetic being
+ * quietly wrong by two orders of magnitude.
+ *
+ * So the key is the thing the writing is about: the fixture and the exact
+ * selection. Reprice the same fixture and get the same call, and the paragraph
+ * is reused. Change the call -- a different market, a different line, a
+ * different side -- and it is written again, because it is now about something
+ * else. Team news arriving hours later changes the evidence but not usually the
+ * call, and re-reading a preview because a full-back is fit is not worth a
+ * request.
+ */
+export function narrativeKey(fixtureId: number, c: Candidate): string {
+  return `narr:${fixtureId}:${c.market}:${c.outcome}:${c.line ?? ''}`;
+}
+
+/** Long enough to outlive a fixture's build-up, short enough to expire. */
+const NARRATIVE_TTL = 14 * 86_400;
+
+/**
  * The call, in words a person would use.
  *
  * marketLabel() speaks in market names because the ledger needs them to be
@@ -130,6 +154,7 @@ export async function runSlate(): Promise<SlateReport> {
   // a hundred and twenty times. Three provider errors in a row and the run
   // stops asking, says why once, and lets the grammar finish the slate.
   let consecutiveErrors = 0;
+  let narrateReused = 0;
   let writerGaveUp: string | null = null;
   const from = new Date((now - config.slate.lookbackHours * 3600) * 1000).toISOString();
   const to = new Date((now + config.slate.horizonHours * 3600) * 1000).toISOString();
@@ -274,6 +299,15 @@ export async function runSlate(): Promise<SlateReport> {
       // when it happens -- in the old voice, with the run saying how often.
       if (writer && !writerGaveUp) {
         for (const v of confidentVerdicts) {
+          // Written once per call, not once per run.
+          const key = narrativeKey(analysis.fixture_id, v.candidate);
+          const cached = await kvGetJSON<string>(key);
+          if (cached) {
+            v.narrative = cached;
+            narrateReused++;
+            continue;
+          }
+
           narrateAttempts++;
           const result = await write({
             home: analysis.home_team,
@@ -297,6 +331,7 @@ export async function runSlate(): Promise<SlateReport> {
             v.narrative = result.text;
             narrateWritten++;
             consecutiveErrors = 0;
+            await kvSetJSON(key, result.text, NARRATIVE_TTL);
           } else {
             for (const r of result.rejections) narrateRejections[r] = (narrateRejections[r] ?? 0) + 1;
             // A rejected draft is the writer working. A thrown request is the
@@ -609,13 +644,13 @@ export async function runSlate(): Promise<SlateReport> {
 
   if (writer && writerGaveUp) {
     console.log(
-      `Narratives: ${narrateWritten}/${narrateAttempts} written before ${writer.name} stopped answering `
+      `Narratives: ${narrateReused} reused, ${narrateWritten}/${narrateAttempts} written before ${writer.name} stopped answering `
       + `(${writerGaveUp}). The rest are the template grammar's.`,
     );
   } else if (writer) {
     const fellBack = narrateAttempts - narrateWritten;
     console.log(
-      `Narratives: ${narrateWritten}/${narrateAttempts} written by ${writer.name}`
+      `Narratives: ${narrateReused} reused, ${narrateWritten}/${narrateAttempts} written by ${writer.name}`
       + (fellBack > 0
         ? `, ${fellBack} fell back to the grammar (${Object.entries(narrateRejections)
             .map(([k, v]) => `${k} ${v}`).join(', ')})`
