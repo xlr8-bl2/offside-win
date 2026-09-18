@@ -4,6 +4,7 @@ import { analyseFixture } from './context/index.ts';
 import { checkComparisonEntitlement, gatherFixture } from './context/gather.ts';
 import { RepetitionLedger, narrate, narrateConfident, narratePass } from './narrate/compose.ts';
 import { chooseHero, type HeroCandidate } from './feature.ts';
+import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
 import { buildCandidates, driversFor, select, selectConfident, setAsideFor, type CalibrationMap } from './select.ts';
 import { dbStats, insertMany, kvGetJSON, kvSetJSON, pickConflictTarget, select as dbSelect } from './store.ts';
@@ -368,6 +369,11 @@ export async function runSlate(): Promise<SlateReport> {
         rank: leagueRank(analysis.league_id),
         board_json: JSON.stringify(board),
         bundle_json: JSON.stringify(bundle),
+        // The same fixture with the call taken out, written here rather than
+        // derived at request time: the Worker has 10ms and parses nothing, so
+        // the free copy has to be a column the serving function can choose.
+        board_free_json: JSON.stringify(freeBoard(board)),
+        bundle_free_json: JSON.stringify(freeBundle(bundle)),
         computed_at: analysis.computed_at,
       });
 
@@ -440,7 +446,8 @@ export async function runSlate(): Promise<SlateReport> {
       'fixture',
       [
         'id', 'league_id', 'kickoff', 'home_team', 'away_team', 'status',
-        'provisional', 'rank', 'board_json', 'bundle_json', 'computed_at',
+        'provisional', 'rank', 'board_json', 'bundle_json',
+        'board_free_json', 'bundle_free_json', 'computed_at',
       ],
       fixtureRows,
       { conflictTarget: 'id' },
