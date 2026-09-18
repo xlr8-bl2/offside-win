@@ -229,3 +229,13 @@ test('every reversal word is classified as a reversal', () => {
     assert.equal(parseWebhook({ eventType: e, data: {} }).kind, 'paid', e);
   }
 });
+
+test('checkout says so plainly when there is no processor configured yet', async () => {
+  // The real state of the site between deploying this and opening a merchant
+  // account. A 500 here would read as "the site is broken" rather than "not
+  // yet", and someone would go looking for a bug that is not there.
+  const res = await checkout(post('/api/pay/checkout', {}), { ...ENV, COINFLOW_API_KEY: '' }, 'jwt');
+  assert.equal(res.status, 503);
+  assert.match((await res.json() as any).error, /not open yet/);
+  assert.equal(sent.length, 0, 'it must not even check who is asking');
+});

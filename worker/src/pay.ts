@@ -59,6 +59,9 @@ async function rpcAsService(env: PayEnv, fn: string, args: Record<string, unknow
   try { return JSON.parse(text); } catch { return null; }
 }
 
+/** Whether there is a processor to talk to at all. */
+export const paymentsConfigured = (env: PayEnv): boolean => Boolean(env.COINFLOW_API_KEY);
+
 function coinflow(env: PayEnv): CoinflowConfig {
   if (!env.COINFLOW_API_KEY) throw new Error('payments are not configured');
   return {
@@ -98,6 +101,12 @@ export async function identify(env: PayEnv, jwt: string | null): Promise<{ id: s
  * pounds like everybody else.
  */
 export async function checkout(request: Request, env: PayEnv, jwt: string | null): Promise<Response> {
+  // There is a real window where the code is deployed and the merchant account
+  // is not. Saying so plainly beats a 500 that reads like the site is broken.
+  if (!paymentsConfigured(env)) {
+    return json({ error: 'Memberships are not open yet. Nothing has been charged.' }, 503);
+  }
+
   const user = await identify(env, jwt);
   if (!user) return json({ error: 'Sign in first.' }, 401);
 
