@@ -1,16 +1,22 @@
 /**
  * Gemini, on the free tier.
  *
- * Chosen because it costs nothing and the numbers fit with an order of
- * magnitude to spare: we write roughly 120 fixtures a day against a free
- * allowance of about 1,500 requests a day at 15 a minute. Paced at the limit
- * that is eight minutes of wall clock inside a workflow allowed two hours.
+ * Chosen because it costs nothing and the volume fits comfortably: we write
+ * roughly 120 fixtures a day, paced well inside a workflow allowed two hours.
+ *
+ * THE MODEL NAME IS NOT A CONSTANT. The first real run failed every call with
+ * a 404 -- "this model is no longer available to new users" -- because the
+ * name written here when this was designed had since been retired. Google
+ * moves them, so it is an environment variable with a current default rather
+ * than something baked in, and the error now says which name was refused.
  *
  * Two consequences of the free tier shape the code rather than just the choice:
  *
  *   Batch mode is paid-tier only, so this is paced sequential requests and not
  *   a submit-and-poll. The limiter below is the same shape as the one in
- *   bsd.ts — a slot that is released while waiting rather than held.
+ *   bsd.ts — a slot that is released while waiting rather than held. The rate
+ *   is configurable because published free limits differ by model and region
+ *   and have been revised more than once.
  *
  *   Google has cut free quotas sharply and without notice before. A 429 is
  *   therefore an expected condition, not an emergency: it returns an error,
@@ -27,10 +33,19 @@ import type { Writer } from './write.ts';
 const BASE = process.env['GEMINI_BASE']
   ?? 'https://generativelanguage.googleapis.com/v1beta/models';
 
+/**
+ * The current free Flash model.
+ *
+ * Retired names 404 rather than falling back to something that works, so when
+ * Google moves this on again the symptom is every narrative reverting to the
+ * template grammar with a 404 in the run log naming the replacement.
+ */
+export const DEFAULT_MODEL = 'gemini-3.6-flash';
+
 export interface GeminiOptions {
   apiKey: string;
   model?: string;
-  /** Requests per minute. The free tier allows 15 on Flash. */
+  /** Requests per minute. Paced conservatively; free limits vary by model. */
   ratePerMinute?: number;
   timeoutMs?: number;
 }
@@ -61,7 +76,7 @@ function spacer(perMinute: number) {
 }
 
 export function geminiWriter(opts: GeminiOptions): Writer {
-  const model = opts.model ?? 'gemini-2.5-flash';
+  const model = opts.model ?? DEFAULT_MODEL;
   const pace = spacer(opts.ratePerMinute ?? 15);
   const timeoutMs = opts.timeoutMs ?? 30_000;
 

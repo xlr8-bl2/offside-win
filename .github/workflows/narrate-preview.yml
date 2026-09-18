@@ -21,10 +21,12 @@ on:
         type: string
         default: '12'
       model:
-        description: 'Gemini model'
-        type: choice
-        options: [gemini-2.5-flash, gemini-2.5-flash-lite]
-        default: gemini-2.5-flash
+        # Free text rather than a fixed list: Google retires these names and a
+        # choice list would have to be edited in lockstep. Blank uses the
+        # current default in engine/src/narrate/gemini.ts.
+        description: 'Gemini model (blank for the default)'
+        type: string
+        default: ''
 
 jobs:
   preview:
@@ -40,6 +42,6 @@ jobs:
           DB_BACKEND: postgres
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ inputs.model || 'gemini-2.5-flash' }}
+          GEMINI_MODEL: ${{ inputs.model }}
           PREVIEW_COUNT: ${{ inputs.count || '12' }}
         run: npm run narrate:preview
