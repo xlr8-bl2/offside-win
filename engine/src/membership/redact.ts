@@ -116,8 +116,16 @@ const freeFactors = (list: unknown): unknown =>
       })
     : list;
 
-/** Everything the front end needs to render the wall rather than infer it. */
-const LOCKED = { locked: true, plan: 'monthly' } as const;
+/**
+ * What the front end needs to render the wall rather than infer it.
+ *
+ * `locked` is true only when there is something behind it. Forty-four per cent
+ * of fixtures carry no call at all, and stamping every card as locked would
+ * promise those readers something that does not exist -- misleading before the
+ * sale and worse after it, when a member opens the fixture and finds the same
+ * nothing. A fixture with no call keeps saying so, to everyone, for free.
+ */
+const lockState = (hadCall: boolean) => (hadCall ? { locked: true, plan: 'monthly' } : { locked: false });
 
 /**
  * The board card, without the call.
@@ -130,7 +138,11 @@ const LOCKED = { locked: true, plan: 'monthly' } as const;
  * than this one.
  */
 export function freeBoard(board: Obj): Obj {
-  return scrub({ ...omit(board, ['top_pick', 'confident', 'odds_1x2']), ...LOCKED }) as Obj;
+  const hadCall = Boolean(board['top_pick']);
+  return scrub({
+    ...omit(board, ['top_pick', 'confident', 'odds_1x2']),
+    ...lockState(hadCall),
+  }) as Obj;
 }
 
 /**
@@ -154,11 +166,12 @@ export function freeBundle(bundle: Obj): Obj {
     : [];
 
   const rest = omit(bundle, ['top_pick', 'confident', 'odds_1x2', 'markets', 'candidates', 'verdicts']);
+  const hadCall = Array.isArray(bundle['verdicts']) && bundle['verdicts'].length > 0;
 
   return scrub({
     ...rest,
     ledger: freeFactors(rest['ledger']),
     verdicts,
-    ...LOCKED,
+    ...lockState(hadCall),
   }) as Obj;
 }

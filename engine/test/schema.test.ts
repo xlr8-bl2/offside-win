@@ -43,11 +43,39 @@ for (const t of tables) {
 
     assert.match(sql, new RegExp(`CREATE POLICY ${t}_read ON ${t} FOR SELECT TO anon`), `${t}: no select policy`);
     assert.match(sql, new RegExp(`GRANT SELECT ON ${t} TO anon`), `${t}: no select grant`);
+
+    // A write grant with no column list is a blanket write and is never allowed.
+    // The `[^;(]*` either side is what draws the line: it cannot cross an
+    // opening paren, so `GRANT UPDATE (a, b) ON t TO anon` does not match here
+    // and is judged by the rule below instead.
     assert.doesNotMatch(
       sql,
-      new RegExp(`GRANT[^;]*\\b(INSERT|UPDATE|DELETE|ALL)\\b[^;]*ON ${t} TO anon`, 'i'),
-      `${t}: grants write access to anon`,
+      new RegExp(`GRANT\\s+[^;(]*\\b(INSERT|UPDATE|DELETE|ALL)\\b[^;(]*ON ${t} TO anon`, 'i'),
+      `${t}: grants unrestricted write access to anon`,
     );
+  });
+}
+
+// A column-scoped UPDATE is the one write a reader may make, and only when two
+// things hold: a policy that picks the row, and a column list that picks the
+// field. Either alone is a hole -- a policy without a column list lets a member
+// edit their own expiry date, and a column list without a policy lets them edit
+// everyone's.
+for (const m of sql.matchAll(/GRANT\s+UPDATE\s*\(([^)]*)\)\s*ON (\w+) TO anon/gi)) {
+  const columns = m[1]!.split(',').map((c) => c.trim());
+  const table = m[2]!;
+  test(`${table}'s column-scoped update is bounded by a policy`, () => {
+    assert.match(
+      sql,
+      new RegExp(`CREATE POLICY \\w+ ON ${table} FOR UPDATE TO anon[\\s\\S]*?WITH CHECK`),
+      `${table}: an update grant with no FOR UPDATE ... WITH CHECK policy behind it`,
+    );
+    // The specific thing that must never be writable by the person it benefits.
+    assert.ok(
+      !columns.includes('expires_at'),
+      `${table}: a reader who can write expires_at can grant themselves membership`,
+    );
+    assert.ok(!columns.includes('user_id'), `${table}: a writable user_id lets a row be reassigned`);
   });
 }
 
@@ -74,15 +102,31 @@ test('migrate() sends whole statements, function bodies included', () => {
   }
 });
 
+// Functions the webhook calls while holding a service key. They write, so the
+// public key must not be able to reach them at all. SECURITY INVOKER means that
+// even a mistaken grant would run them as anon, which has no write privilege on
+// either table -- but "it would fail anyway" is not a reason to hand out the
+// call, so the absence of a grant is asserted instead.
+const PRIVATE_FUNCTIONS = new Set(['record_payment', 'revoke_membership']);
+
 // The Worker's entire read path. SECURITY DEFINER here would run these as the
 // owner and hand the public anon key whatever the owner can see, which is the
 // one way a read-only surface becomes a data leak.
 for (const fn of [...sql.matchAll(/CREATE OR REPLACE FUNCTION (\w+)\(/g)].map((m) => m[1]!)) {
-  test(`${fn} runs as the caller and is callable by anon`, () => {
+  test(`${fn} runs as the caller${PRIVATE_FUNCTIONS.has(fn) ? ' and is not callable by anon' : ' and is callable by anon'}`, () => {
     const body = sql.slice(sql.indexOf(`CREATE OR REPLACE FUNCTION ${fn}(`));
     const decl = body.slice(0, body.indexOf('$fn$'));
     assert.doesNotMatch(decl, /SECURITY\s+DEFINER/i, `${fn}: SECURITY DEFINER bypasses RLS`);
     assert.match(decl, /SET search_path = public/, `${fn}: unpinned search_path`);
+
+    if (PRIVATE_FUNCTIONS.has(fn)) {
+      assert.doesNotMatch(
+        sql,
+        new RegExp(`GRANT EXECUTE ON FUNCTION ${fn}\\(`),
+        `${fn}: writes memberships and must not be callable with the public key`,
+      );
+      return;
+    }
     assert.match(sql, new RegExp(`GRANT EXECUTE ON FUNCTION ${fn}\\(`), `${fn}: anon cannot call it`);
   });
 }

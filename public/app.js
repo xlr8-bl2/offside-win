@@ -11,6 +11,7 @@
  */
 
 import { describe as market } from './js/lib/markets.js';
+import { authHeaders, completeSignIn, currentUser, signInWithEmail, signInWithGoogle, signOut } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
 
@@ -19,8 +20,16 @@ const esc = (s) =>
 const pct = (v, dp = 0) => (typeof v === 'number' && isFinite(v) ? `${(v * 100).toFixed(dp)}%` : '—');
 const dec = (v) => (typeof v === 'number' && isFinite(v) ? v.toFixed(2) : '—');
 
+/**
+ * Every read goes through here, which is why the token goes on here.
+ *
+ * authHeaders() returns an empty object for a signed-out reader without
+ * loading anything, so this costs nothing on the page most people see. It also
+ * never throws: a failure to attach a token produces an anonymous request,
+ * which is a page that loads rather than a page that does not.
+ */
 async function getJSON(path) {
-  const res = await fetch(path);
+  const res = await fetch(path, { headers: await authHeaders() });
   if (!res.ok) {
     let msg = 'Something went wrong loading this.';
     try { msg = (await res.json()).error ?? msg; } catch { /* body was not json */ }
@@ -119,7 +128,7 @@ const READ_LABEL = {
 
 // ------------------------------------------------------------------ state
 
-const state = { board: null, hours: 72, leagueName: '', heroVenue: [], hero: null };
+const state = { board: null, hours: 72, leagueName: '', heroVenue: [], hero: null, user: null, authError: null };
 
 async function loadBoard() {
   state.board = await getJSON(`/api/board?hours=${state.hours}`);
@@ -356,8 +365,8 @@ function rowHTML(f) {
     </div>
 
     <div class="row-call">
-      ${d
-        ? `<div class="row-sel">${esc(d.name)}</div><p class="row-wins">${esc(d.wins)}</p>`
+      ${d ? `<div class="row-sel">${esc(d.name)}</div><p class="row-wins">${esc(d.wins)}</p>`
+        : f.locked ? `<p class="row-locked">We have a call on this one.</p>`
         : `<p class="row-none">No call — the price looks about right to us.</p>`}
     </div>
 
@@ -365,7 +374,8 @@ function rowHTML(f) {
       ${pick ? `
         <span class="odds">${dec(pick.odds)}</span>
         ${pick.bookmaker ? `<span class="odds-book">at <b>${esc(pick.bookmaker)}</b></span>` : ''}
-        <span class="odds-return">${esc(d.returns)}</span>` : ''}
+        <span class="odds-return">${esc(d.returns)}</span>`
+        : f.locked ? `<span class="odds-locked" aria-hidden="true">••••</span>` : ''}
     </div>
   </article>`;
 }
@@ -656,7 +666,38 @@ function wireCards() {
  * table of what each result does, because a quarter-line handicap cannot be
  * explained in a sentence.
  */
+/**
+ * The wall.
+ *
+ * Placed where the call would have been, directly under the reasoning, because
+ * that is the moment it is worth anything: a reader who has just been argued
+ * into caring about a match is in a different position from one shown a price
+ * before they have read a word. It states what is behind it and what it costs,
+ * and it does not nag.
+ */
+function lockedHTML() {
+  return `
+  <div class="locked">
+    <div class="locked-body">
+      <b>The call is for members.</b>
+      <p>Which market, which side, the price and the bookmaker offering it.
+         The reading of the match above stays free, always.</p>
+    </div>
+    <a class="btn btn-primary" href="#/pricing">See what membership costs</a>
+  </div>`;
+}
+
 function verdictHTML(v, home, away) {
+  // A free copy keeps the narrative and drops the selection, so a verdict can
+  // arrive with everything except the thing being sold.
+  if (!v.candidate) {
+    return `
+    <div class="verdict">
+      ${v.narrative ? `<p class="narrative">${esc(v.narrative)}</p>` : ''}
+      ${lockedHTML()}
+    </div>`;
+  }
+
   const c = v.candidate;
   const d = market({
     market: c.market, outcome: c.outcome, line: c.line,
@@ -781,23 +822,41 @@ function formPanel(form, home, away) {
   if (!h && !a) return '';
 
   const one = (d) => Number(d ?? 0).toFixed(1);
-  const two = (d) => Number(d ?? 0).toFixed(2);
+  const int = (d) => String(Math.round(Number(d ?? 0)));
+
+  // "4-1-1" is how the record arrives. A supporter says "won four of six"; they
+  // do not say "1.83 points a game", which is the number this row used to show
+  // and exactly the kind the vocabulary rule exists to keep off the page.
+  const won = (ev) => {
+    const m = /^(\d+)-(\d+)-(\d+)$/.exec(String(ev?.record ?? ''));
+    return m ? Number(m[1]) : null;
+  };
 
   const rows = [
-    ['points a game', h?.ppg, a?.ppg, two],
+    ['won', won(h), won(a), int],
     ['goals scored', h?.goals_for, a?.goals_for, one],
     ['goals conceded', h?.goals_against, a?.goals_against, one],
-    ['clean sheets', h?.clean_sheets, a?.clean_sheets, (d) => String(Math.round(Number(d ?? 0)))],
+    ['clean sheets', h?.clean_sheets, a?.clean_sheets, int],
   ].filter(([, hv, av]) => typeof hv === 'number' || typeof av === 'number');
 
-  // "1.83 a game at home" against "0.90 a game on the road" — the travel read.
+  /**
+   * The travel read, said rather than scored.
+   *
+   * The interesting thing here was never the figure, it was the gap: whether a
+   * side is a different proposition away from home. So compare the two and
+   * print the comparison. "They travel badly" is what a fan would say; "0.90 a
+   * game on the road" is what a spreadsheet would.
+   */
+  const split = (ev, name, better, worse) => {
+    if (typeof ev?.venue_ppg !== 'number' || typeof ev?.ppg !== 'number' || (ev.venue_matches ?? 0) < 2) return null;
+    if (ev.venue_ppg > ev.ppg * 1.2) return `${esc(name)} ${better}`;
+    if (ev.venue_ppg < ev.ppg * 0.8) return `${esc(name)} ${worse}`;
+    return null;
+  };
+
   const splits = [
-    typeof h?.venue_ppg === 'number' && h.venue_matches >= 2
-      ? `${esc(home)} take <b>${two(h.venue_ppg)}</b> a game at home`
-      : null,
-    typeof a?.venue_ppg === 'number' && a.venue_matches >= 2
-      ? `${esc(away)} take <b>${two(a.venue_ppg)}</b> a game on the road`
-      : null,
+    split(h, home, 'are a different side at home', 'have been worse at home than on their travels'),
+    split(a, away, 'travel well', 'travel badly'),
   ].filter(Boolean);
 
   const runOf = (ev) => {
@@ -829,7 +888,13 @@ function h2hHTML(h2h, home, away) {
       <span>${esc(home)} <b>${h2h.home_wins ?? 0}</b></span>
       <span>drawn <b>${h2h.draws ?? 0}</b></span>
       <span>${esc(away)} <b>${h2h.away_wins ?? 0}</b></span>
-      ${typeof h2h.avg_total_goals === 'number' ? `<span>goals a game <b>${h2h.avg_total_goals.toFixed(2)}</b></span>` : ''}
+      ${typeof h2h.avg_total_goals === 'number'
+        // Same rule as everywhere else: a supporter says "there are always
+        // goals in this one", not "3.33 goals a game".
+        ? `<span>${h2h.avg_total_goals >= 3.1 ? 'there are usually goals in this one'
+            : h2h.avg_total_goals <= 2.1 ? 'these two are usually tight'
+            : 'nothing one-sided about the goals'}</span>`
+        : ''}
     </div>
     ${recent.length ? `<div class="h2h-list">${recent.map((m) => `
       <div class="h2h-row">
@@ -902,7 +967,13 @@ async function viewFixture(id) {
           <p class="panel-head">How we see it</p>
           <div class="bars">${bar(f.home, p.HOME)}${bar('Draw', p.DRAW)}${bar(f.away, p.AWAY)}</div>
           <div class="numbers" style="margin-top:18px">
-            <span>goals expected <b>${dec((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0))}</b></span>
+            <!-- "goals expected 3.33" was expected goals with the label filed
+                 off: a banned term, a number no supporter says out loud, and on
+                 the page a reader lands on from an advert. What the total is
+                 actually being used to say is whether the game looks open. -->
+            <span>${((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0)) >= 3.1 ? 'goals look likely'
+                   : ((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0)) <= 2.1 ? 'this one looks tight'
+                   : 'an even game on paper'}</span>
             ${f.provisional ? `<span class="tag prov" style="padding:7px 12px">line-ups not final</span>` : ''}
           </div>
         </div>
@@ -1095,6 +1166,250 @@ async function viewLeagues() {
   }
 }
 
+
+// ------------------------------------------------- membership: the pages
+
+/**
+ * A write, which is a different shape from every other request this file makes.
+ *
+ * Reads are GET and stream through the Worker untouched. These three do not:
+ * they are POSTs that need the reader's token to say who is asking, and the
+ * Worker answers them itself rather than proxying a serving function.
+ */
+async function postJSON(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(await authHeaders()) },
+    body: JSON.stringify(body ?? {}),
+  });
+  let data = null;
+  try { data = await res.json(); } catch { /* no body */ }
+  if (!res.ok) throw new Error(data?.error ?? 'Something went wrong. Nothing has been charged.');
+  return data;
+}
+
+/**
+ * Hand over to the processor.
+ *
+ * The plan is named, never priced: the amount is read from the database on the
+ * server side, so a client that asks to pay a penny is told what it actually
+ * costs. Signing in first is required because a payment with nobody attached to
+ * it cannot be turned into a membership.
+ */
+async function startCheckout(plan = 'monthly') {
+  if (!(await currentUser())) { location.hash = '#/signin'; return; }
+  const button = document.getElementById('buy');
+  if (button) { button.disabled = true; button.textContent = 'Opening checkout…'; }
+  try {
+    const { link } = await postJSON('/api/pay/checkout', { plan });
+    if (!link) throw new Error('The payment page could not be opened.');
+    location.href = link;
+  } catch (err) {
+    if (button) { button.disabled = false; button.textContent = 'Become a member'; }
+    alert(err.message);
+  }
+}
+
+/** Turn renewal on or off. Takes effect immediately, both ways. */
+async function setRenewal(on) {
+  try {
+    await postJSON('/api/pay/renewal', { auto_renew: on });
+    await viewAccount();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+/**
+ * What a membership costs.
+ *
+ * One plan, one price, one button. No decoy tier that exists only to flatter
+ * the one beside it, and no claim about returns anywhere on the page -- the
+ * settled record is public and negative, so selling coverage and explanation is
+ * the only honest pitch and it is the one that survives an ad review.
+ */
+async function viewPricing() {
+  const user = await currentUser();
+
+  app.innerHTML = `
+  <div class="wrap section">
+    <div class="section-head">
+      <div>
+        <h2 class="display">Membership</h2>
+        <p>Every match we cover, read properly. The call is the part you pay for.</p>
+      </div>
+    </div>
+
+    <div class="pricing">
+      <div class="panel plan-free">
+        <h3 class="panel-head">Free, forever</h3>
+        <ul class="ticks">
+          <li>Every fixture across 88 leagues</li>
+          <li>The full write-up on each one</li>
+          <li>Form, team news, line-ups, head-to-head</li>
+          <li>The complete settled record, wins and losses alike</li>
+        </ul>
+      </div>
+
+      <div class="panel plan-paid">
+        <h3 class="panel-head">Member</h3>
+        <p class="plan-price"><b>£9</b><span>a month</span></p>
+        <ul class="ticks">
+          <li><b>The call itself</b> — which market and which side</li>
+          <li><b>The price</b>, and the bookmaker offering it</li>
+          <li>What has to happen for it to win, in plain English</li>
+          <li>Every open call, not just the ones on the front page</li>
+        </ul>
+        <button class="btn btn-primary btn-lg" id="buy">
+          ${user ? 'Become a member' : 'Sign in to join'}
+        </button>
+        <p class="plan-note">Thirty days. Cancel whenever you like, in one tap.</p>
+      </div>
+    </div>
+
+    <div class="prose pricing-small">
+      <h2>What this is not</h2>
+      <p>It is not tipping and it is not advice to place a bet. We publish what we
+         think will happen and why, and we publish the record of how that has gone —
+         including when it has gone badly. Nothing here is a promise of profit, and
+         a high strike rate at short odds can still lose money.</p>
+      <p>18+. <a href="#/legal/responsible">Gambling can be a problem</a> — if it has
+         stopped being entertainment you can afford, that page is more use than any
+         call on this site.</p>
+    </div>
+  </div>`;
+
+  document.getElementById('buy').onclick = () => startCheckout();
+}
+
+/** Sign in. One email box and one button, because that is the whole of it. */
+async function viewSignin() {
+  if (await currentUser()) { location.hash = '#/account'; return; }
+
+  const problem = state.authError;
+  state.authError = null;
+
+  app.innerHTML = `
+  <div class="wrap section narrow">
+    <div class="section-head"><div>
+      <h2 class="display">Sign in</h2>
+      <p>No password to remember or lose. We email you a link.</p>
+    </div></div>
+
+    ${problem ? `<p class="form-error">${esc(problem)}</p>` : ''}
+
+    <div class="panel signin">
+      <button class="btn btn-ghost btn-lg btn-google" id="google">Continue with Google</button>
+      <div class="or"><span>or</span></div>
+      <form id="magic" novalidate>
+        <label for="email">Your email address</label>
+        <input id="email" name="email" type="email" autocomplete="email"
+               inputmode="email" required placeholder="you@example.com">
+        <button class="btn btn-primary btn-lg" type="submit">Email me a link</button>
+      </form>
+      <p class="signin-note" id="note"></p>
+    </div>
+
+    <p class="prose pricing-small">By signing in you agree to our
+      <a href="#/legal/terms">terms</a> and <a href="#/legal/privacy">privacy policy</a>.</p>
+  </div>`;
+
+  const note = document.getElementById('note');
+  const say = (msg, bad) => { note.textContent = msg; note.className = bad ? 'signin-note bad' : 'signin-note ok'; };
+
+  document.getElementById('google').onclick = async (e) => {
+    e.currentTarget.disabled = true;
+    try { await signInWithGoogle(); } catch (err) { say(err.message, true); e.currentTarget.disabled = false; }
+  };
+
+  document.getElementById('magic').onsubmit = async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('email').value.trim();
+    if (!email) return say('Put your email address in first.', true);
+    const button = e.currentTarget.querySelector('button');
+    button.disabled = true;
+    say('Sending…');
+    try {
+      await signInWithEmail(email);
+      say(`Check ${email}. The link signs you straight in.`);
+    } catch (err) {
+      say(err.message, true);
+      button.disabled = false;
+    }
+  };
+}
+
+/** The account: what you have, what it costs, and how to stop it. */
+async function viewAccount() {
+  const user = await currentUser();
+  if (!user) { location.hash = '#/signin'; return; }
+
+  app.innerHTML = '<div class="wrap section narrow"><div class="spinner">Loading…</div></div>';
+  let account = { membership: null, receipts: [] };
+  try { account = await getJSON('/api/account'); } catch { /* shown as no membership */ }
+
+  const m = account.membership;
+  const active = m && m.expires_at * 1000 > Date.now();
+  const when = (e) => new Date(e * 1000).toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' });
+
+  app.innerHTML = `
+  <div class="wrap section narrow">
+    <div class="section-head"><div>
+      <h2 class="display">Your account</h2>
+      <p>${esc(user.email ?? '')}</p>
+    </div></div>
+
+    <div class="panel">
+      <h3 class="panel-head">Membership</h3>
+      ${active ? `
+        <p class="acct-state on">Active until <b>${esc(when(m.expires_at))}</b>.</p>
+        <p class="acct-line">${m.auto_renew
+          ? `It renews itself on that date${m.card_last4 ? ` using your ${esc(m.card_brand ?? 'card')} ending ${esc(m.card_last4)}` : ''}.`
+          : 'It will not renew itself — access simply stops on that date.'}</p>
+        ${m.auto_renew
+          ? `<button class="btn btn-ghost" id="cancel">Stop renewing</button>`
+          : `<button class="btn btn-primary" id="resume">Renew each month</button>`}
+      ` : `
+        <p class="acct-state off">You are not a member.</p>
+        <p class="acct-line">The reading of each match is free. The call, the price and
+           the bookmaker are not.</p>
+        <a class="btn btn-primary" href="#/pricing">See what it costs</a>
+      `}
+    </div>
+
+    ${account.receipts?.length ? `
+      <div class="panel">
+        <h3 class="panel-head">Payments</h3>
+        <table class="tbl"><tbody>
+          ${account.receipts.map((r) => `
+            <tr><td>${esc(when(r.created_at))}</td>
+                <td>${esc(r.status)}</td>
+                <td class="num">${esc(money(r.amount_minor, r.currency))}</td></tr>`).join('')}
+        </tbody></table>
+      </div>` : ''}
+
+    <div class="panel">
+      <h3 class="panel-head">This browser</h3>
+      <button class="btn btn-ghost" id="out">Sign out</button>
+    </div>
+  </div>`;
+
+  document.getElementById('out').onclick = async () => { await signOut(); location.hash = '#/home'; };
+  const cancel = document.getElementById('cancel');
+  // One tap, no "are you sure", no offer to stay. Retention mazes are a dark
+  // pattern and in several places an illegal one.
+  if (cancel) cancel.onclick = () => setRenewal(false);
+  const resume = document.getElementById('resume');
+  if (resume) resume.onclick = () => setRenewal(true);
+}
+
+/** Money, from minor units, without floating point anywhere near it. */
+function money(minor, currency) {
+  const n = Number(minor ?? 0);
+  const sign = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$';
+  return `${sign}${(n / 100).toFixed(2).replace(/\.00$/, '')}`;
+}
+
 // ------------------------------------------------------------------ legal
 
 const UPDATED = 'September 2026';
@@ -1106,8 +1421,15 @@ const LEGAL = {
       <p>This policy explains what offside.win collects, why, and what you can do about it.
          It is written to be read rather than to be survived.</p>
       <h2>What we collect</h2>
-      <p><b>Nothing that identifies you, unless you give it to us.</b> There is no account to
-         create and no form to fill in, so we hold no name, email address or payment detail.</p>
+      <p><b>Nothing, until you make an account.</b> You can read every fixture, every write-up and
+         the whole results record without telling us anything at all.</p>
+      <p>If you sign in, we hold your <b>email address</b> — because that is how you sign in — and,
+         if you become a member, the <b>dates your membership runs</b> and a <b>record of each
+         payment</b>: when, how much, and whether it went through.</p>
+      <p><b>We never see your card.</b> Card details are entered on our payment processor's own
+         page and never touch this site or our database. What we are told is the brand and the last
+         four digits, so your account page can say "Visa ending 4242" and you know which card is
+         on file. That is all we could tell anyone, including ourselves.</p>
       <p>Our host records standard server logs — IP address, browser, page requested, time — which
          are used to keep the site up and to spot abuse, and are not used to build a profile of you.</p>
       <h2>Analytics</h2>
@@ -1118,17 +1440,26 @@ const LEGAL = {
       <ul>
         <li>Sell or share your data with advertisers or data brokers.</li>
         <li>Track you across other websites.</li>
-        <li>Send you email, because we do not have your address.</li>
+        <li>Send you marketing email. If you have an account you will get sign-in links and
+            notices about your membership, and nothing else.</li>
       </ul>
       <h2>Third parties</h2>
+      <p>Two companies process data on our behalf, and only what they need to do their job.
+         <b>Supabase</b> stores the accounts and runs the sign-in. <b>Coinflow</b> takes the
+         payments and holds the card details we never see. Both are bound by their own agreements
+         with us and may not use your data for anything else.</p>
+      <p>If you sign in with Google, Google is told that you signed in to this site. We are told
+         your email address and nothing more.</p>
       <p>Pages load club crests, league marks and stadium photographs from our data provider, and
          fonts from Google Fonts. Those requests reach their servers and are subject to their own
          policies. Match and odds data comes from our provider; none of your information is sent to
          them.</p>
       <h2>Your rights</h2>
       <p>Where the UK GDPR or EU GDPR applies you may ask what we hold, ask for it to be corrected
-         or deleted, and complain to your data protection authority. Since we hold no personal data
-         beyond server logs, most such requests will be answered by telling you exactly that.</p>
+         or deleted, and complain to your data protection authority. Ask and we will delete your
+         account and your email address. We have to keep the record of payments themselves for as
+         long as tax and accounting law requires, which we cannot waive — but it can be separated
+         from you.</p>
       <h2>Contact</h2>
       <p>Questions about this policy can be sent to the address on our contact page.</p>`,
   },
@@ -1140,6 +1471,9 @@ const LEGAL = {
       <p>One item of local storage records whether you accepted or declined non-essential cookies,
          so the notice is not shown on every visit. It holds a single value and nothing else. It
          cannot be switched off, because without it we cannot remember that you said no.</p>
+      <p>If you sign in, a second item holds your session — the thing that keeps you signed in
+         between visits. It is set only after you sign in, it is removed when you sign out, and
+         without it an account would not work at all.</p>
       <h2>Analytics — optional, off until you say otherwise</h2>
       <p>If you accept, an analytics cookie may be set to count visits and see which pages are
          read. If you decline, the analytics script is never loaded, so no such cookie can exist.</p>
@@ -1170,8 +1504,46 @@ const LEGAL = {
       <h2>Liability</h2>
       <p>To the fullest extent the law allows, we are not liable for any loss arising from your use
          of this site, including money lost betting.</p>
+      <h2>Membership</h2>
+      <p>Reading the site is free: every fixture, every write-up, the form, the team news and the
+         full record of results. A membership adds the call itself — which market, which side, the
+         price, and the bookmaker offering it.</p>
+      <p>A membership runs for thirty days from the day you pay. If you have turned renewal on, we
+         charge the same card again on the day it runs out, at the price shown on the membership
+         page at that time; we will tell you before any price changes. You can stop renewal at any
+         time from your account page, in one tap, and keep the access you have already paid for
+         until it runs out.</p>
+      <p>Because this is digital content delivered immediately, you are asked at checkout to agree
+         that it starts straight away. Doing so ends the 14-day right to cancel that would otherwise
+         apply under UK consumer law. If you would rather keep that right, do not agree, and your
+         access will begin after the 14 days have passed.</p>
       <h2>Changes</h2>
       <p>These terms may change. The date below shows when they were last revised.</p>`,
+  },
+  refunds: {
+    title: 'Refunds',
+    body: `
+      <p>Short, because it should be.</p>
+      <h2>If it did not work</h2>
+      <p>If the site was down, or your membership did not start after you paid, tell us and we will
+         put it right — either by extending your membership by the time you lost, or by refunding
+         you in full. No argument and no form.</p>
+      <h2>If you changed your mind</h2>
+      <p>Tell us within 14 days of your first payment and you can have it back, provided you agreed
+         at checkout to wait rather than to start immediately. If you asked to start immediately,
+         that right ends when your access begins — which is what agreeing to it means, and why we
+         ask rather than assume.</p>
+      <h2>If you simply want to stop</h2>
+      <p>Turn renewal off on your account page. You keep what you have paid for until it runs out
+         and are not charged again. We do not refund part of a month already under way, and we do
+         not make you ask a person to leave.</p>
+      <h2>What we will not refund</h2>
+      <p><b>Losing bets.</b> Nothing here is advice to stake money and no call is a promise. Our
+         record is published in full, wins and losses alike, so that is knowable before you pay
+         rather than after.</p>
+      <h2>How to ask</h2>
+      <p>Write to the address on our contact page from the email address on the account. We answer
+         every refund request, including the ones we turn down.</p>`,
   },
   responsible: {
     title: 'Responsible gambling',
@@ -1272,11 +1644,30 @@ async function route() {
     if (name === 'board') return await viewBoard();
     if (name === 'leagues') return await viewLeagues();
     if (name === 'results') return await viewResults();
+    if (name === 'pricing') return await viewPricing();
+    if (name === 'signin') return await viewSignin();
+    if (name === 'account') return await viewAccount();
     if (name === 'legal' && parts[1]) return viewLegal(parts[1]);
     return await viewHome();
   } catch (err) {
     app.innerHTML = `<div class="wrap section"><div class="empty">${esc(err.message ?? 'Something went wrong.')}</div></div>`;
   }
+}
+
+/**
+ * Point the header link at the right place.
+ *
+ * Runs after the first paint rather than blocking it: the link reads "Sign in"
+ * until we know otherwise, which is right for almost everyone and wrong for a
+ * few hundred milliseconds for the rest.
+ */
+async function headerAuth() {
+  const link = document.getElementById('account-link');
+  if (!link) return;
+  const user = await currentUser();
+  state.user = user;
+  link.textContent = user ? 'Account' : 'Sign in';
+  link.href = user ? '#/account' : '#/signin';
 }
 
 async function health() {
@@ -1297,6 +1688,26 @@ document.getElementById('burger').onclick = (e) => {
 };
 
 window.addEventListener('hashchange', route);
-route();
-health();
-cookieNotice();
+
+/**
+ * Boot.
+ *
+ * The sign-in has to be finished before the first render, not alongside it: a
+ * view that reads the session while the code is still being exchanged would
+ * paint the signed-out page and then not correct itself. Everything after it is
+ * fire-and-forget.
+ */
+(async () => {
+  try {
+    await completeSignIn();
+  } catch (err) {
+    // A stale or reused magic link. Say so once, on the sign-in page, rather
+    // than leaving someone looking at a home page wondering what happened.
+    state.authError = err.message ?? 'That sign-in link did not work.';
+    location.hash = '#/signin';
+  }
+  await route();
+  health();
+  headerAuth();
+  cookieNotice();
+})();

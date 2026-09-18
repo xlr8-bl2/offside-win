@@ -176,3 +176,23 @@ test('freeProse rejects the empty and the absent rather than passing them on', (
   assert.equal(freeProse(null), null);
   assert.equal(freeProse(42), null);
 });
+
+/* ------------------------------------------------- the wall only where there is one */
+
+test('a fixture with no call is not advertised as locked', () => {
+  // Forty-four per cent of the board has no call on it. Marking those locked
+  // would sell a reader something that does not exist, and they would find out
+  // after paying.
+  const noCall = { ...BOARD, top_pick: undefined, confident: [] };
+  delete (noCall as any).top_pick;
+  assert.equal(freeBoard(noCall as any)['locked'], false);
+
+  const bundleNoCall = { ...BUNDLE, verdicts: [] };
+  assert.equal(freeBundle(bundleNoCall)['locked'], false);
+});
+
+test('a fixture with a call is locked and names the plan that opens it', () => {
+  assert.equal(freeBoard(BOARD)['locked'], true);
+  assert.equal(freeBoard(BOARD)['plan'], 'monthly');
+  assert.equal(freeBundle(BUNDLE)['locked'], true);
+});

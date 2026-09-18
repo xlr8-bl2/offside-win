@@ -1,0 +1,176 @@
+/**
+ * Signing in.
+ *
+ * Supabase Auth, talked to directly from the browser. The Worker is not in the
+ * path at all — it has 10ms of CPU and no business verifying tokens — so this
+ * module's whole job is to obtain a JWT and hand it to `getJSON`, which puts it
+ * in a header that the Worker forwards to Postgres unexamined.
+ *
+ * Three decisions worth knowing about, because each of them is load-bearing.
+ *
+ * PKCE, NOT THE IMPLICIT FLOW. The implicit flow returns the session in the URL
+ * fragment, as `#access_token=…`. The router does `location.hash.slice(2)` and
+ * would read that as a route named `ccess_token=…`, fail to match anything and
+ * silently render the home page, having thrown the session away. PKCE returns
+ * `?code=…` in the query string instead, which the hash router never looks at.
+ *
+ * THE SDK IS NOT LOADED FOR PEOPLE WHO ARE NOT SIGNED IN. Almost everyone
+ * arriving here is signed out, and making them download an auth library to be
+ * told so would be a tax on the page that matters most. Supabase persists its
+ * session in localStorage under a predictable key, so the presence of a session
+ * can be decided locally, in microseconds, without loading anything. The import
+ * happens only when there is a session to restore or a sign-in to perform.
+ *
+ * NOTHING HERE DECIDES WHAT A READER MAY SEE. A tampered token buys nothing:
+ * the Worker forwards it, Postgres rejects it, and the reply is the free copy.
+ * Treat everything below as a convenience for the person using the site rather
+ * than as a control.
+ */
+
+const CONFIG_URL = '/api/config';
+const SDK = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+let clientPromise = null;
+let cachedConfig = null;
+
+async function config() {
+  if (!cachedConfig) {
+    const res = await fetch(CONFIG_URL);
+    if (!res.ok) throw new Error('Could not reach the sign-in service.');
+    cachedConfig = await res.json();
+  }
+  return cachedConfig;
+}
+
+/**
+ * Is there a session in this browser at all?
+ *
+ * Supabase stores it under `sb-<project-ref>-auth-token`. Reading the key
+ * rather than the value is deliberate — we only need to know whether loading
+ * the SDK is worth it, and the token itself is the SDK's business.
+ *
+ * Wrapped because localStorage throws outright in some privacy modes rather
+ * than returning null, and a signed-out reader hitting an exception here would
+ * take the whole page down.
+ */
+export function hasStoredSession() {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) return true;
+    }
+  } catch { /* private mode: treat as signed out */ }
+  return false;
+}
+
+/** The Supabase client, imported on first genuine need and then reused. */
+export async function client() {
+  if (!clientPromise) {
+    clientPromise = (async () => {
+      const cfg = await config();
+      const { createClient } = await import(SDK);
+      return createClient(cfg.supabaseUrl, cfg.anonKey, {
+        auth: {
+          flowType: 'pkce',
+          persistSession: true,
+          autoRefreshToken: true,
+          // We run the code exchange ourselves, before the router, so that a
+          // half-finished sign-in cannot race a view into rendering.
+          detectSessionInUrl: false,
+        },
+      });
+    })();
+  }
+  return clientPromise;
+}
+
+/**
+ * The current session, or null.
+ *
+ * Returns null without loading anything when no session is stored, which is the
+ * common case and the reason this is not simply `getSession()`.
+ */
+export async function session() {
+  if (!hasStoredSession()) return null;
+  try {
+    const { data } = await (await client()).auth.getSession();
+    return data.session ?? null;
+  } catch {
+    // A failed refresh, a cleared project, a network blip. Signed out is the
+    // honest answer and the safe one.
+    return null;
+  }
+}
+
+/** Convenience for the views: who is signed in, in the two fields they use. */
+export async function currentUser() {
+  const s = await session();
+  return s ? { id: s.user.id, email: s.user.email } : null;
+}
+
+/**
+ * The Authorization header, when there is one.
+ *
+ * `getJSON` spreads this into every request. It returns an empty object rather
+ * than throwing so that an auth failure can never stop the board loading — the
+ * worst case is a request that looks anonymous, which is exactly what it is.
+ */
+export async function authHeaders() {
+  const s = await session();
+  return s?.access_token ? { authorization: `Bearer ${s.access_token}` } : {};
+}
+
+/** Where a sign-in should land. Absolute, and without any existing query. */
+function redirectTo() {
+  return `${location.origin}${location.pathname}`;
+}
+
+export async function signInWithEmail(email) {
+  const { error } = await (await client()).auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: redirectTo() },
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function signInWithGoogle() {
+  const { error } = await (await client()).auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: redirectTo() },
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function signOut() {
+  if (!hasStoredSession()) return;
+  try { await (await client()).auth.signOut(); } catch { /* already gone */ }
+}
+
+/**
+ * Finish a sign-in that is arriving back from a magic link or from Google.
+ *
+ * Called once, before the router runs. The `?code=` is removed from the address
+ * bar afterwards whatever the outcome: a code is single-use, so leaving it
+ * there means a refresh trying to redeem it again and failing, which would look
+ * to a reader like being signed out for no reason.
+ *
+ * Returns true when a session was established, so the caller can re-render.
+ */
+export async function completeSignIn() {
+  const url = new URL(location.href);
+  const code = url.searchParams.get('code');
+  const failed = url.searchParams.get('error_description') ?? url.searchParams.get('error');
+  if (!code && !failed) return false;
+
+  url.searchParams.delete('code');
+  url.searchParams.delete('error');
+  url.searchParams.delete('error_description');
+  url.searchParams.delete('state');
+  history.replaceState(null, '', url.toString());
+
+  if (failed) throw new Error(failed);
+
+  const { error } = await (await client()).auth.exchangeCodeForSession(code);
+  if (error) throw new Error(error.message);
+  return true;
+}

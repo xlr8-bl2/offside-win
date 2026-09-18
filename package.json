@@ -18,7 +18,7 @@
     "settle": "npm -w engine run settle",
     "backtest": "npm -w engine run backtest",
     "migrate": "npm -w engine run migrate",
-    "test": "npm -w engine test",
+    "test": "npm -w engine test && npm -w worker test",
     "typecheck": "npm -w engine run typecheck && npm -w worker run typecheck",
     "dev": "npm -w worker run dev",
     "deploy": "npm -w worker run deploy",
