@@ -196,3 +196,22 @@ test('a fixture with a call is locked and names the plan that opens it', () => {
   assert.equal(freeBoard(BOARD)['plan'], 'monthly');
   assert.equal(freeBundle(BUNDLE)['locked'], true);
 });
+
+/* ------------------------------------- the two gates have to agree */
+
+test('what the writer accepts is what a free reader may read', () => {
+  // The free tier depends on this agreement. The writer's validator decides
+  // whether a narrative is published at all; freeProse decides whether it may
+  // be read without paying. If the first is looser than the second, every
+  // narrative gets published and then silently withheld, and the free tier is
+  // empty for reasons nothing reports.
+  const good = 'KFUM Oslo are not the side their league position suggests, and away from home '
+    + 'they are a different proposition entirely. They have lost four of their last six and a '
+    + 'manager four games into the job has not fixed it. Sarpsborg are hardly flying either, but '
+    + 'at home against this they do not need to be.';
+  assert.ok(freeProse(good), 'a well-written narrative was withheld from free readers');
+
+  // And the shape the template grammar actually produces, measured live.
+  const template = 'Over 1.5 goals at 1.13. Expected goals total 3.23 against a line of 1.5.';
+  assert.equal(freeProse(template), null, 'a narrative naming the call reached a free reader');
+});
