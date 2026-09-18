@@ -298,3 +298,157 @@
 .section.dense .section-head { margin-bottom: var(--space-6); }
 .section.dense .display { font-size: var(--text-2xl); }
 .section.dense .section-head p { margin-top: var(--space-2); font-size: var(--text-sm); }
+
+/* ------------------------------------------------------------- the wall */
+
+/*
+ * A locked call is an offer, not an error.
+ *
+ * It sits directly under the reasoning on a fixture page, which is the only
+ * place it is worth anything — a reader who has just been argued into caring
+ * about a match is in a different position from one shown a price up front. So
+ * it uses the accent and a raised surface rather than the muted treatment an
+ * empty state gets, and it says what is behind it rather than that something is
+ * missing.
+ */
+.locked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  margin-top: var(--space-5);
+  padding: var(--space-5) var(--space-6);
+  background: var(--surface-2);
+  border: var(--border) solid var(--gold-dim);
+  border-radius: var(--radius);
+}
+.locked-body { min-width: 0; flex: 1 1 260px; }
+.locked-body b {
+  display: block;
+  font-family: var(--display);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-lg);
+  letter-spacing: var(--tracking-xl);
+  color: var(--ink);
+}
+.locked-body p {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--ink-2);
+}
+
+/*
+ * On a phone the two halves stack.
+ *
+ * Side by side they do not simply look cramped, they push the page sideways:
+ * the button does not wrap, so its min-content width becomes a floor that the
+ * verdict, the panel and finally the document all have to honour. Three pixels
+ * of horizontal scroll on every fixture with a call on it, traced back to one
+ * `white-space: nowrap`. Stacking removes the floor rather than hiding it.
+ */
+@media (max-width: 560px) {
+  .locked { flex-direction: column; align-items: stretch; }
+  .locked .btn { width: 100%; white-space: normal; }
+}
+
+/* On a board row there is no space for an argument, so it is one line. The
+   dots stand where the price would be, so the column still reads as a column. */
+.row-locked { font-size: var(--text-sm); color: var(--ink-2); }
+.odds-locked {
+  display: block;
+  font-family: var(--numeric);
+  font-size: var(--text-xl);
+  letter-spacing: 0.1em;
+  line-height: 1;
+  color: var(--gold);
+  opacity: 0.55;
+}
+
+/* ---------------------------------------------------------------- pricing */
+
+.narrow { max-width: 640px; margin-inline: auto; }
+
+.pricing {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-5);
+  align-items: start;
+}
+/* The paid card is raised rather than shouted at: one accent border, no badge,
+   no "most popular" on a page with one plan on it. */
+.plan-paid { border-color: var(--gold-dim); background: var(--surface-2); }
+.plan-price {
+  margin: 0 0 var(--space-5);
+  font-family: var(--numeric);
+  line-height: 1;
+}
+.plan-price b {
+  font-size: var(--text-4xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-4xl);
+  color: var(--ink);
+}
+.plan-price span { margin-left: var(--space-3); font-size: var(--text-md); color: var(--ink-3); }
+.plan-note { margin: var(--space-4) 0 0; font-size: var(--text-xs); color: var(--ink-3); }
+
+.ticks { list-style: none; margin: 0 0 var(--space-6); padding: 0; }
+.ticks li {
+  position: relative;
+  padding-left: var(--space-6);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--ink-2);
+}
+.ticks li b { color: var(--ink); font-weight: var(--weight-medium); }
+.ticks li::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0.42em;
+  width: 9px; height: 5px;
+  border-left: 2px solid var(--gold);
+  border-bottom: 2px solid var(--gold);
+  transform: rotate(-45deg);
+}
+
+.pricing-small { margin-top: var(--space-10); font-size: var(--text-sm); }
+
+/* ----------------------------------------------------------------- sign in */
+
+.signin { display: flex; flex-direction: column; gap: var(--space-5); }
+.signin form { display: flex; flex-direction: column; gap: var(--space-3); }
+.signin label {
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.signin input {
+  background: var(--bg);
+  color: var(--ink);
+  border: var(--border) solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+  font: inherit;
+  font-size: var(--text-md);
+  min-height: var(--tap);
+}
+.signin input:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.or { display: flex; align-items: center; gap: var(--space-4); color: var(--ink-3); font-size: var(--text-xs); }
+.or::before, .or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+
+.signin-note { margin: 0; font-size: var(--text-sm); min-height: 1.4em; }
+.signin-note.ok { color: var(--ink-2); }
+.signin-note.bad, .form-error { color: var(--lost); }
+.form-error { margin: 0 0 var(--space-5); font-size: var(--text-sm); }
+
+/* ---------------------------------------------------------------- account */
+
+.acct-state { margin: 0 0 var(--space-3); font-size: var(--text-md); }
+.acct-state.on b { color: var(--ink); }
+.acct-state.off { color: var(--ink-2); }
+.acct-line { margin: 0 0 var(--space-5); font-size: var(--text-sm); color: var(--ink-3); line-height: var(--leading-normal); }
+.wrap.section.narrow .panel + .panel { margin-top: var(--space-5); }

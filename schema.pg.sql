@@ -431,6 +431,131 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS
   );
 $fn$;
 
+-- ------------------------------------------------------------ the writes
+--
+-- Two functions the webhook calls, and the only things in this file that are
+-- not reads. They are private: no grant to anon, so the public key cannot reach
+-- them however it asks. The Worker calls them holding a service key, which
+-- bypasses RLS -- that is what makes them work and also why they are written to
+-- do exactly one thing each.
+--
+-- Both are one round trip on purpose. The processor expects a 200 inside five
+-- seconds and retries up to sixteen times over eighteen hours if it does not
+-- get one, so a read-then-write from the Worker would be two chances to be slow
+-- and two chances to race a retry.
+
+-- Record a payment and extend the membership it paid for.
+--
+-- Idempotent by construction. The insert is guarded by the unique index on
+-- (provider, provider_ref), and if it does nothing then this delivery has been
+-- seen before and the membership must not be extended a second time. With
+-- sixteen retries in play that is the normal case, not the exotic one.
+CREATE OR REPLACE FUNCTION record_payment(
+  p_provider text, p_ref text, p_user uuid, p_plan text,
+  p_amount bigint, p_currency text, p_status text, p_raw text,
+  p_origin_ref text DEFAULT NULL, p_brand text DEFAULT NULL, p_last4 text DEFAULT NULL
+) RETURNS json LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = public AS $fn$
+DECLARE
+  v_now  bigint := floor(extract(epoch FROM now()))::bigint;
+  v_days integer;
+  v_new  bigint;
+  v_rows integer;
+BEGIN
+  INSERT INTO payment (provider, provider_ref, user_id, plan_id, amount_minor, currency, status, raw_json, created_at)
+  VALUES (p_provider, p_ref, p_user, p_plan, p_amount, p_currency, p_status, p_raw, v_now)
+  ON CONFLICT (provider, provider_ref) DO NOTHING;
+
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows = 0 THEN
+    RETURN json_build_object('applied', false, 'reason', 'already recorded');
+  END IF;
+
+  SELECT days INTO v_days FROM plan WHERE id = p_plan;
+  IF v_days IS NULL THEN
+    RETURN json_build_object('applied', false, 'reason', 'unknown plan');
+  END IF;
+
+  -- Renewing early adds to whatever is left rather than discarding it, which is
+  -- the difference between a renewal and a punishment for being early.
+  INSERT INTO membership (user_id, plan_id, expires_at, created_at, updated_at, card_brand, card_last4)
+  VALUES (p_user, p_plan, v_now + v_days * 86400, v_now, v_now, p_brand, p_last4)
+  ON CONFLICT (user_id) DO UPDATE SET
+    plan_id      = excluded.plan_id,
+    expires_at   = greatest(membership.expires_at, v_now) + v_days * 86400,
+    cancelled_at = NULL,
+    dunning_from = NULL,
+    attempts     = 0,
+    card_brand   = coalesce(excluded.card_brand, membership.card_brand),
+    card_last4   = coalesce(excluded.card_last4, membership.card_last4),
+    updated_at   = v_now
+  RETURNING expires_at INTO v_new;
+
+  -- The credential reference, captured at the first payment because it is the
+  -- only moment it exists. Nothing charges it until the renewal job does.
+  IF p_origin_ref IS NOT NULL THEN
+    INSERT INTO payment_method (user_id, provider, vault_token, origin_ref, brand, last4, consent_at, consent_terms, created_at, updated_at)
+    VALUES (p_user, p_provider, '', p_origin_ref, p_brand, p_last4, v_now, 'v1', v_now, v_now)
+    ON CONFLICT (user_id) DO UPDATE SET
+      origin_ref = excluded.origin_ref,
+      brand      = coalesce(excluded.brand, payment_method.brand),
+      last4      = coalesce(excluded.last4, payment_method.last4),
+      updated_at = v_now;
+  END IF;
+
+  RETURN json_build_object('applied', true, 'expires_at', v_new);
+END;
+$fn$;
+
+-- End a membership that was charged back or refunded.
+--
+-- Without this the product is free to anyone willing to dispute nine pounds.
+-- Access stops immediately rather than at the end of the period: the money has
+-- gone back, so the thing it bought goes with it.
+CREATE OR REPLACE FUNCTION revoke_membership(p_provider text, p_ref text, p_status text)
+RETURNS json LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = public AS $fn$
+DECLARE
+  v_now  bigint := floor(extract(epoch FROM now()))::bigint;
+  v_user uuid;
+BEGIN
+  UPDATE payment SET status = p_status
+  WHERE provider = p_provider AND provider_ref = p_ref
+  RETURNING user_id INTO v_user;
+
+  IF v_user IS NULL THEN
+    RETURN json_build_object('revoked', false, 'reason', 'no such payment');
+  END IF;
+
+  UPDATE membership
+  SET expires_at = least(expires_at, v_now), auto_renew = 0, cancelled_at = v_now, updated_at = v_now
+  WHERE user_id = v_user;
+
+  RETURN json_build_object('revoked', true);
+END;
+$fn$;
+
+-- Everything the account page shows, in one call.
+--
+-- Reads `membership` under its own policy and `payment_receipt`, which filters
+-- to the caller inside the view. An anonymous caller gets nulls and an empty
+-- list rather than an error -- the page redirects to sign-in on its own.
+CREATE OR REPLACE FUNCTION get_account()
+RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+  SELECT json_build_object(
+           'membership', (
+             SELECT to_json(m) FROM (
+               SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4
+               FROM membership WHERE user_id = auth.uid()
+             ) m
+           ),
+           'receipts', coalesce((
+             SELECT json_agg(r) FROM (
+               SELECT created_at, plan_id, amount_minor, currency, status
+               FROM payment_receipt LIMIT 24
+             ) r
+           ), '[]'::json)
+         );
+$fn$;
+
 CREATE OR REPLACE FUNCTION get_board(p_from bigint, p_to bigint, p_league bigint DEFAULT NULL)
 RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
   WITH m AS MATERIALIZED (SELECT has_membership() AS ok)
@@ -641,6 +766,28 @@ DROP POLICY IF EXISTS membership_read ON membership;
 CREATE POLICY membership_read ON membership FOR SELECT TO anon USING (user_id = auth.uid());
 GRANT SELECT ON membership TO anon;
 
+-- The one write a reader is allowed to make: turning their own renewal on or
+-- off. Two separate mechanisms have to agree before it happens, and it is worth
+-- being precise about which does what, because the obvious alternative -- a
+-- service key in the Worker plus JWT verification to decide whose row to touch
+-- -- is more code, more CPU and a far larger blast radius for the same result.
+--
+--   The policy picks the row. USING stops the update reaching anyone else's
+--   membership; WITH CHECK stops it being reassigned to someone else on the way
+--   out.
+--
+--   The grant picks the columns. Naming them is the whole point: `expires_at`
+--   is absent, so a member can stop their renewal and cannot extend their own
+--   access by a single second.
+--
+-- Verified against a live Postgres rather than reasoned about: a member flips
+-- their own flag, is refused on expires_at, updates zero rows when aiming at
+-- somebody else's, and cannot insert or delete at all.
+DROP POLICY IF EXISTS membership_self_update ON membership;
+CREATE POLICY membership_self_update ON membership FOR UPDATE TO anon
+  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+GRANT UPDATE (auto_renew, cancelled_at, updated_at) ON membership TO anon;
+
 -- These two are private and get no grant of any kind. RLS is still enabled so
 -- that a grant added later in a hurry cannot quietly open them, and
 -- engine/test/schema.test.ts asserts the absence rather than trusting it.
@@ -666,6 +813,7 @@ REVOKE ALL ON pick_summary_by_kind FROM anon;
 -- above and can reach nothing a direct select could not.
 GRANT EXECUTE ON FUNCTION try_json(text) TO anon;
 GRANT EXECUTE ON FUNCTION has_membership() TO anon;
+GRANT EXECUTE ON FUNCTION get_account() TO anon;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint) TO anon;
 GRANT EXECUTE ON FUNCTION get_fixture(bigint) TO anon;
 GRANT EXECUTE ON FUNCTION get_picks(integer, text) TO anon;
