@@ -123,6 +123,14 @@ export async function runSlate(): Promise<SlateReport> {
   let narrateAttempts = 0;
   let narrateWritten = 0;
   const narrateRejections: Record<string, number> = {};
+
+  // A bad key, a wrong model name or a spent quota fails every call in exactly
+  // the same way, and the limiter paces them four seconds apart -- so without
+  // this, a misconfigured run spends eight minutes discovering the same thing
+  // a hundred and twenty times. Three provider errors in a row and the run
+  // stops asking, says why once, and lets the grammar finish the slate.
+  let consecutiveErrors = 0;
+  let writerGaveUp: string | null = null;
   const from = new Date((now - config.slate.lookbackHours * 3600) * 1000).toISOString();
   const to = new Date((now + config.slate.horizonHours * 3600) * 1000).toISOString();
 
@@ -264,7 +272,7 @@ export async function runSlate(): Promise<SlateReport> {
       // rather than tidy: the free tier this runs on has had its quotas cut
       // sharply and without notice before, and the site has to keep publishing
       // when it happens -- in the old voice, with the run saying how often.
-      if (writer) {
+      if (writer && !writerGaveUp) {
         for (const v of confidentVerdicts) {
           narrateAttempts++;
           const result = await write({
@@ -288,8 +296,21 @@ export async function runSlate(): Promise<SlateReport> {
           if (result.text) {
             v.narrative = result.text;
             narrateWritten++;
+            consecutiveErrors = 0;
           } else {
             for (const r of result.rejections) narrateRejections[r] = (narrateRejections[r] ?? 0) + 1;
+            // A rejected draft is the writer working. A thrown request is the
+            // writer not being reachable, and only the second kind repeats.
+            if (result.error) {
+              consecutiveErrors++;
+              if (consecutiveErrors >= 3) {
+                writerGaveUp = result.error;
+                console.warn(`Narratives: giving up on ${writer.name} for this run — ${result.error}`);
+                break;
+              }
+            } else {
+              consecutiveErrors = 0;
+            }
           }
         }
       }
@@ -586,7 +607,12 @@ export async function runSlate(): Promise<SlateReport> {
   await kvSetJSON('narrate:ledger', ledger.snapshot());
   await kvSetJSON('slate:last_run', { at: now, ...report });
 
-  if (writer) {
+  if (writer && writerGaveUp) {
+    console.log(
+      `Narratives: ${narrateWritten}/${narrateAttempts} written before ${writer.name} stopped answering `
+      + `(${writerGaveUp}). The rest are the template grammar's.`,
+    );
+  } else if (writer) {
     const fellBack = narrateAttempts - narrateWritten;
     console.log(
       `Narratives: ${narrateWritten}/${narrateAttempts} written by ${writer.name}`
