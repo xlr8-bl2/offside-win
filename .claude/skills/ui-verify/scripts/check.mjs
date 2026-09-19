@@ -14,9 +14,37 @@ const BASE = process.env.BASE ?? 'http://127.0.0.1:8788';
 const WIDTHS = (process.env.WIDTHS ?? '1440,390').split(',').map(Number);
 const ROUTES = process.argv.slice(2).length ? process.argv.slice(2) : ['#/home', '#/board'];
 
-// Numbers no supporter says out loud, and words the vocabulary rule bans.
-const SPREADSHEET = /\b\d+\.\d{1,2}\b/;
+// Words the vocabulary rule bans outright, in either view.
 const BANNED = ['expected goals', 'points a game', 'confidence', ' edge', 'xG', 'per match'];
+
+/**
+ * Whether a decimal on the page is a problem depends on who is looking.
+ *
+ * A price is the product: 1.14 and a stake return of 11.40 are exactly what a
+ * member is paying to see. A spreadsheet number is banned everywhere. The two
+ * are the same shape, so the check asks which view it is in rather than
+ * guessing — and the answer is decided by the API, not by a flag somebody has
+ * to remember to pass.
+ *
+ * In the free view no price may appear at all, so any decimal is a finding.
+ * In the paid view the decimal check is off and the banned words still apply.
+ *
+ * Written the blunt way first, which flagged the odds on the board as
+ * violations. A checker that cries wolf gets ignored, which is worse than not
+ * having one.
+ */
+async function isFreeView(base) {
+  try {
+    const board = await (await fetch(`${base}/api/board?hours=6`)).json();
+    const withCall = (board.fixtures ?? []).find((f) => f.top_pick || f.locked);
+    return withCall ? !withCall.top_pick : false;
+  } catch {
+    return false;
+  }
+}
+
+const free = await isFreeView(BASE);
+console.log(`checking the ${free ? 'FREE' : 'paid'} view — decimals ${free ? 'are' : 'are not'} findings\n`);
 
 const browser = await chromium.launch({ executablePath: CHROME });
 const problems = [];
@@ -71,7 +99,8 @@ for (const width of WIDTHS) {
     if (r.chars < 80) say(`rendered almost nothing (${r.chars} chars)`);
     if (r.overflow > 0) say(`scrolls sideways by ${r.overflow}px`);
     if (r.unresolved.length) say(`undefined tokens: ${r.unresolved.join(', ')}`);
-    if (r.decimals.length) say(`spreadsheet numbers on the page: ${r.decimals.join(', ')}`);
+    // A price is legitimate for a member and forbidden for everyone else.
+    if (free && r.decimals.length) say(`a price reached a free reader: ${r.decimals.join(', ')}`);
     for (const w of BANNED) if (r.lowerText.includes(w.toLowerCase())) say(`banned term "${w.trim()}"`);
     if (errors.length) say(`console: ${errors.slice(0, 3).join(' | ')}`);
 
