@@ -12,7 +12,7 @@ a commit before.
    writing code. A page designed by accumulation looks like one.
 
 2. **Build it against the token layer.** `public/tokens.css` is the only file
-   that may define a token; `components.css` and `style.css` consume them and
+   that may define a token; `base.css` and `components.css` consume them and
    must contain no raw hex and no raw pixel value. Read `offside-ui` for the
    component rules — three row states not two, empty states that say the
    emptiness is deliberate, nothing that refuses to wrap beside flexible

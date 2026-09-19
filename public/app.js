@@ -186,56 +186,72 @@ function venueShot(venueIds, className, eager = false) {
     onload="window.__shotCheck(this)" onerror="window.__shotMissing(this)">`;
 }
 
+/**
+ * The masthead.
+ *
+ * Block-based rather than photograph-behind-a-scrim. Every product in this
+ * category runs a full-bleed stadium shot under a heavy gradient with the
+ * headline sitting on top of it, which is the house style, makes the type
+ * unreadable whenever the photograph is bright, and was what this site did.
+ * Here the picture is a bounded plate beside the type: the headline sits on
+ * the ground where it is legible, and the photograph does the job a photograph
+ * is good at, which is telling a reader in half a second what this is.
+ *
+ * With a fixture chosen the masthead is about tonight's game. Without one — an
+ * empty board, a failed slate — it falls back to the standing headline rather
+ * than to an empty stage.
+ */
 function heroHTML(hero = null, venueIds = []) {
   const queue = hero?.venue_id ? [hero.venue_id, ...venueIds] : [].concat(venueIds).filter(Boolean);
-  const kicker = hero?.kicker ?? '88 leagues · every day';
+  const kicker = hero?.kicker || 'Every day, across 88 leagues';
 
-  // With a fixture chosen, the masthead is about tonight's game. Without one —
-  // an empty board, a failed slate — it falls back to the standing headline
-  // rather than to an empty stage.
-  // Long club names have to be allowed to shrink. "RSC Anderlecht v Olympique
-  // Lyonnais" at the size "Arsenal v Everton" wants filled the whole viewport and
-  // pushed the buttons off the bottom of it.
+  // Long club names get the width axis rather than a smaller size. "RSC
+  // Anderlecht" at wdth 75 still reads as the headline; at 60% of the size it
+  // reads as a subtitle, which is not what a masthead is for.
   const longest = hero ? Math.max(hero.home.length, hero.away.length) : 0;
-  const size = longest > 20 ? '3.1vw' : longest > 14 ? '4vw' : '5.2vw';
+  const width = longest > 19 ? ' longer' : longest > 13 ? ' long' : '';
 
-  const body = hero
-    ? `<h1 class="display hero-fx" style="--fx: clamp(1.9rem, ${size}, 4.6rem)">
+  const copy = hero
+    ? `<p class="kicker">${esc(kicker)}</p>
+       <h1 class="display xl hero-fx${width}" style="--fx-len:${Math.max(longest, 7)}">
          <span>${esc(hero.home)}</span>
          <em>vs</em>
          <span>${esc(hero.away)}</span>
        </h1>
-       <p class="lede">${esc(hero.league)} · ${esc(kickoffLabel(hero.kickoff))}. Our call, and the reasons behind it.</p>
-       <div class="hero-cta">
-         <a class="btn btn-primary btn-lg" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">Read the analysis
-           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+       <p class="lede">Our call on it, the argument for it, and the thing that argues against it.</p>
+       <div class="btn-row hero-cta">
+         <a class="btn btn-primary btn-lg" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">Read the analysis</a>
          <a class="btn btn-ghost btn-lg" href="#/board">All of today's picks</a>
        </div>`
-    : `<h1 class="display">The picks for the <em>biggest</em> games.</h1>
+    : `<p class="kicker">${esc(kicker)}</p>
+       <h1 class="display xl">The picks for the <em>biggest</em> games.</h1>
        <p class="lede">Every call comes with the reason behind it. And the reason not to like it.</p>
-       <div class="hero-cta">
-         <a class="btn btn-primary btn-lg" href="#/board">Today's picks
-           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+       <div class="btn-row hero-cta">
+         <a class="btn btn-primary btn-lg" href="#/board">Today's picks</a>
          <a class="btn btn-ghost btn-lg" href="#/results">See the results</a>
        </div>`;
 
   return `
   <section class="hero" data-shot="${queue.length ? 'yes' : 'none'}">
-    <div class="hero-media">${venueShot(queue, '', true)}</div>
-    <div class="hero-inner">
-      <p class="kicker">${esc(kicker)}</p>
-      ${body}
-      <p class="script hero-script">Same games.<br>Better picks.</p>
-      ${hero
-        ? `<div class="hero-badges">
-             ${crest(hero.home, 'xl', hero.home_id)}
-             <span class="hero-vs">V</span>
-             ${crest(hero.away, 'xl', hero.away_id)}
-           </div>`
-        : ''}
+    <div class="wrap hero-inner">
+      <div class="hero-copy">${copy}</div>
+      <div class="hero-plate">
+        <div class="hero-media">${venueShot(queue, '', true)}</div>
+        ${hero
+          ? `<div class="hero-meta">
+               ${crest(hero.home, 'md', hero.home_id)}
+               <span class="hero-vs">v</span>
+               ${crest(hero.away, 'md', hero.away_id)}
+               <span class="hero-meta-text">
+                 <b>${esc(hero.league)}</b>
+                 <span>${esc(kickoffLabel(hero.kickoff))}</span>
+               </span>
+             </div>`
+          : ''}
+      </div>
     </div>
   </section>
-  <div class="trust"><div class="trust-inner">
+  <div class="trust"><div class="wrap trust-inner">
     ${[
       ['88 leagues', 'Europe, the Americas, Asia'],
       ['Updated every 15 minutes', 'Prices and team news'],
@@ -319,7 +335,7 @@ function cardHTML(f) {
            return `<span class="also-call">${esc(d.name)} <b>${dec(c.odds)}</b></span>`;
          }).join('')}</div>`
       : ''}
-    <span class="card-go">Read the analysis →</span>
+    <span class="card-go">Read the analysis</span>
   </article>`;
 }
 
@@ -422,17 +438,34 @@ function spread(fixtures, limit) {
   return out;
 }
 
+/**
+ * The argument for the product, with a real paragraph of the writing beside it.
+ *
+ * A claim about the analysis is worth less than a sample of it, so the right
+ * column is a live narrative pulled off a fixture on today's board — not a
+ * testimonial, not a made-up quote. The ground the game is being played at sits
+ * above the heading as a bounded plate rather than washing under the type.
+ */
 function bandHTML(sample) {
-  if (!sample) return '';
-  const { fixture, verdict } = sample;
+  const fixture = sample?.fixture ?? null;
+  const quote = sample
+    ? `<div class="reason">
+         <div class="qmeta">
+           ${crest(fixture.home, 'sm', fixture.home_id)}
+           <b>${esc(fixture.home)} v ${esc(fixture.away)}</b>
+           <a class="qlink" href="#/fixture/${encodeURIComponent(fixture.id)}">Read it in full</a>
+         </div>
+         ${esc(sample.verdict.narrative)}
+       </div>`
+    : '';
+
   return `
-  <section class="band" data-shot="${fixture.venue_id ? 'yes' : 'none'}">
-    <div class="band-media">${venueShot(fixture.venue_id, '')}</div>
-    <div class="band-inner">
+  <section class="band" data-shot="${fixture?.venue_id ? 'yes' : 'none'}">
+    <div class="wrap band-inner${quote ? '' : ' solo'}">
       <div>
-        <p class="eyebrow">Why ours</p>
-        <h2 class="display">Anyone can pick<br>a favourite.</h2>
-        <p class="lede" style="margin-top:20px">
+        ${fixture?.venue_id ? `<div class="band-shot">${venueShot(fixture.venue_id, '')}</div>` : ''}
+        <h2 class="display">Anyone can pick a favourite.</h2>
+        <p class="lede band-lede">
           The hard part is saying why — and saying what the pick has going against it.
           That is on every call here.
         </p>
@@ -442,18 +475,24 @@ function bandHTML(sample) {
           <li><span class="n">03</span><div><b>What it actually pays</b><span>A big strike rate at short odds is not a win. The return is always on the card.</span></div></li>
         </ul>
       </div>
-      <div class="reason">
-        <div class="qmeta">
-          ${crest(fixture.home, 'sm', fixture.home_id)}
-          <b style="color:var(--ink);font-weight:700">${esc(fixture.home)} v ${esc(fixture.away)}</b>
-          <span class="qodds">${dec(verdict.candidate?.odds ?? verdict.odds)}</span>
-        </div>
-        ${esc(verdict.narrative)}
-      </div>
+      ${quote}
     </div>
   </section>`;
 }
 
+/**
+ * How the last dozen calls went, along the top of the front door.
+ *
+ * It used to carry each pick's price next to the tick or the cross, which put
+ * a column of odds on the landing page. That contradicts the positioning the
+ * whole product rests on: the pages traffic arrives on carry no odds at all,
+ * which is what makes them reviewable as advertising in the first place. The
+ * price is on the results page and on the board, where a reader has gone
+ * looking for it.
+ *
+ * What is left is the part that matters anyway — the fixture, and whether the
+ * call landed. Losses included, in the order they happened.
+ */
 function stripHTML(picks) {
   const done = picks.filter((x) => x.result && x.result !== 'VOID').slice(0, 12);
   if (!done.length) return '';
@@ -462,17 +501,43 @@ function stripHTML(picks) {
     <span class="rail-label">Recent results</span>
     ${done.map((x) => {
       const won = x.result === 'WON' || x.result === 'HALF_WON';
-      return `<span class="res">${crest(x.home_team ?? '', 'sm')}<span>${esc(x.home_team ?? '')} v ${esc(x.away_team ?? '')}</span>
-        <span class="score">${dec(x.odds)}</span><span class="mark ${won ? 'w' : 'l'}">${won ? '✓' : '✕'}</span></span>`;
+      return `<span class="res">${crest(x.home_team ?? '', 'sm')}
+        <span class="res-tie">${esc(x.home_team ?? '')} v ${esc(x.away_team ?? '')}</span>
+        <span class="res-mark ${won ? 'w' : 'l'}">${won ? 'Won' : 'Lost'}</span></span>`;
     }).join('')}
   </div></div>`;
 }
 
+/**
+ * A paragraph of the real writing for the front door — but only if it is
+ * writing worth showing.
+ *
+ * This used to take the first narrative over 150 characters, which is how
+ * sentences like "the model reads this as a 2.99-goal match" and "83% on our
+ * numbers" reached the landing page. That page is the one advertising review
+ * looks at and the one a stranger arrives on, so a paragraph that talks about
+ * the machinery instead of the football is selling against the product.
+ *
+ * The filter is the mechanical tell from the vocabulary rule, and deliberately
+ * not a second copy of the banned-word list: a decimal with one or two places
+ * is almost always a spreadsheet number. `engine/src/vocabulary.ts` stays the
+ * single definition, and a list duplicated here would drift from it inside a
+ * month.
+ *
+ * Today that rejects every template-written narrative there is, so the section
+ * renders without a quote — which is the honest outcome. It opens by itself
+ * when the writer starts producing prose that reads like a person wrote it;
+ * the same principle as the paywall's own prose gate, and nothing to switch on.
+ */
+const SPREADSHEET = /\b\d+\.\d{1,2}\b|\b\d{1,3}\s?%/;
+
 async function sampleNarrative(candidates) {
-  for (const f of candidates.slice(0, 5)) {
+  for (const f of candidates.slice(0, 6)) {
     try {
       const full = await getJSON(`/api/fixture/${f.id}`);
-      const v = (full.verdicts ?? []).find((x) => x.narrative && x.narrative.length > 150);
+      const v = (full.verdicts ?? []).find(
+        (x) => x.narrative && x.narrative.length > 150 && !SPREADSHEET.test(x.narrative),
+      );
       if (v) return { fixture: full, verdict: v };
     } catch { /* next */ }
   }
@@ -586,12 +651,26 @@ function closingHTML() {
   return `
   <section class="closing"><div class="wrap closing-in">
     <div>
-      <p class="script" style="margin:0 0 4px">Your next win</p>
+      <p>Your next win</p>
       <h2 class="display">is one pick away.</h2>
     </div>
-    <a class="btn btn-primary btn-lg" href="#/board">See today's board
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+    <a class="btn btn-primary btn-lg" href="#/board">See today's board</a>
   </div></section>`;
+}
+
+/**
+ * A back link.
+ *
+ * It used to be the character `←` typed into the label, which is the same
+ * mistake as `→` on a call to action: a glyph doing an icon's job, at whatever
+ * size and weight the text around it happens to be, with a screen reader
+ * announcing "left arrow back to the board".
+ */
+function backHTML(label) {
+  return `<button class="back" type="button">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+    ${esc(label)}
+  </button>`;
 }
 
 // ------------------------------------------------------------------ board
@@ -613,7 +692,7 @@ async function viewBoard() {
     <div class="section-head">
       <div>
         <h2 class="display">The board</h2>
-        <p>${fixtures.length} games · ${fixtures.filter((f) => f.top_pick).length} with a call.</p>
+        <p>${fixtures.length} games on, ${fixtures.filter((f) => f.top_pick).length} of them with a call.</p>
       </div>
       <div class="filters">
         <select id="hours-filter" aria-label="Time window">
@@ -683,7 +762,7 @@ function lockedHTML() {
       <p>Which market, which side, the price and the bookmaker offering it.
          The reading of the match above stays free, always.</p>
     </div>
-    <a class="btn btn-primary" href="#/pricing">See what membership costs</a>
+    <a class="btn btn-accent" href="#/pricing">See what membership costs</a>
   </div>`;
 }
 
@@ -774,7 +853,7 @@ function pitchHTML(lineups, home, away, homeId, awayId) {
   const out = (lineups.unavailable ?? []).filter((u) => u.name);
   return `
   <div class="panel">
-    <p class="panel-head">Team sheet · ${esc(lineups.status === 'confirmed' ? 'confirmed' : 'predicted')}</p>
+    <p class="panel-head">Team sheet <span>${esc(lineups.status === 'confirmed' ? 'confirmed' : 'predicted')}</span></p>
     <div class="pitch">
       ${half(lineups.home, home, homeId, false)}
       <div class="pitch-mid"></div>
@@ -867,13 +946,13 @@ function formPanel(form, home, away) {
 
   return `
   <div class="panel">
-    <p class="panel-head">Form · last ${Math.max(h?.matches ?? 0, a?.matches ?? 0)}</p>
+    <p class="panel-head">Form <span>last ${Math.max(h?.matches ?? 0, a?.matches ?? 0)}</span></p>
     <div class="form-top">
       <div class="form-side">${formChips(h)}${runOf(h)}</div>
       <div class="form-side right">${runOf(a)}${formChips(a)}</div>
     </div>
     ${rows.map(([label, hv, av, fmt]) => statBar(label, hv ?? 0, av ?? 0, fmt)).join('')}
-    ${splits.length ? `<p class="form-split">${splits.join(' · ')}</p>` : ''}
+    ${splits.length ? `<p class="form-split">${splits.join('. ')}.</p>` : ''}
   </div>`;
 }
 
@@ -882,9 +961,9 @@ function h2hHTML(h2h, home, away) {
   const recent = (h2h.recent_matches ?? []).slice(0, 6);
   return `
   <div class="panel">
-    <p class="panel-head">Head to head · ${h2h.total_matches} meetings</p>
-    ${statBar(`${home} wins · draws · ${away} wins`, h2h.home_wins ?? 0, h2h.away_wins ?? 0)}
-    <div class="numbers" style="margin-top:14px">
+    <p class="panel-head">Head to head <span>${h2h.total_matches} meetings</span></p>
+    ${statBar('wins', h2h.home_wins ?? 0, h2h.away_wins ?? 0)}
+    <div class="numbers">
       <span>${esc(home)} <b>${h2h.home_wins ?? 0}</b></span>
       <span>drawn <b>${h2h.draws ?? 0}</b></span>
       <span>${esc(away)} <b>${h2h.away_wins ?? 0}</b></span>
@@ -917,7 +996,7 @@ function standingsHTML(st, home, away, homeId, awayId) {
     : '';
   return `
   <div class="panel">
-    <p class="panel-head">In the table${st.size ? ` · ${st.size} teams` : ''}</p>
+    <p class="panel-head">In the table${st.size ? ` <span>${st.size} teams</span>` : ''}</p>
     <div class="scroll-x"><table class="tbl">
       <thead><tr><th>#</th><th>Team</th><th class="num">P</th><th class="num">GD</th><th class="num">Pts</th></tr></thead>
       <tbody>${row(st.home, home, homeId)}${row(st.away, away, awayId)}</tbody>
@@ -929,7 +1008,7 @@ async function viewFixture(id) {
   app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
   let f;
   try { f = await getJSON(`/api/fixture/${id}`); } catch (err) {
-    app.innerHTML = `<div class="wrap section"><button class="back">← Back</button><div class="empty">${esc(err.message)}</div></div>`;
+    app.innerHTML = `<div class="wrap section">${backHTML('Back')}<div class="empty">${esc(err.message)}</div></div>`;
     app.querySelector('.back').onclick = () => { location.hash = '#/board'; };
     return;
   }
@@ -942,10 +1021,14 @@ async function viewFixture(id) {
     .map((x) => ({ label: READ_LABEL[x.id], note: x.note }))
     .filter((x, i, arr) => arr.findIndex((y) => y.note === x.note) === i);
 
+  // The provider hands back round labels already joined with a middle dot
+  // ("Regular season · Matchday 4"), which is the meta-string tell arriving
+  // from outside. Split it back into its parts and let the one join rule below
+  // decide how they are set.
   const meta = [
     kickoffLabel(f.kickoff),
-    f.round_label || f.league,
-    f.neutral ? 'Neutral ground' : null,
+    ...String(f.round_label || f.league || '').split(/\s*·\s*/).filter(Boolean),
+    f.neutral ? 'neutral ground' : null,
   ].filter(Boolean);
 
   const overview = `
@@ -966,7 +1049,7 @@ async function viewFixture(id) {
         <div class="panel">
           <p class="panel-head">How we see it</p>
           <div class="bars">${bar(f.home, p.HOME)}${bar('Draw', p.DRAW)}${bar(f.away, p.AWAY)}</div>
-          <div class="numbers" style="margin-top:18px">
+          <div class="numbers">
             <!-- "goals expected 3.33" was expected goals with the label filed
                  off: a banned term, a number no supporter says out loud, and on
                  the page a reader lands on from an advert. What the total is
@@ -974,7 +1057,7 @@ async function viewFixture(id) {
             <span>${((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0)) >= 3.1 ? 'goals look likely'
                    : ((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0)) <= 2.1 ? 'this one looks tight'
                    : 'an even game on paper'}</span>
-            ${f.provisional ? `<span class="tag prov" style="padding:7px 12px">line-ups not final</span>` : ''}
+            ${f.provisional ? `<span class="tag prov">line-ups not final</span>` : ''}
           </div>
         </div>
         ${formPanel(f.form, f.home, f.away)}
@@ -997,7 +1080,7 @@ async function viewFixture(id) {
 
   app.innerHTML = `
   <div class="wrap section tight">
-    <button class="back">← Back to the board</button>
+    ${backHTML('Back to the board')}
 
     <div class="fx-hero" data-shot="${f.venue_id ? 'yes' : 'none'}">
       <div class="fx-hero-media">${venueShot(f.venue_id, '')}</div>
@@ -1011,7 +1094,7 @@ async function viewFixture(id) {
           </div>
           <div class="fx-mid">
             <div class="fx-when">${esc(kickoffLabel(f.kickoff))}</div>
-            <div class="fx-league">${meta.slice(1).map(esc).join(' · ')}</div>
+            <div class="fx-league">${meta.slice(1).map(esc).join(', ')}</div>
           </div>
           <div class="fx-side">
             ${crest(f.away, 'xl', f.away_id)}
@@ -1152,7 +1235,7 @@ async function viewLeagues() {
     <div class="cards">
       ${rows.map((e) => `
         <article class="card" data-league="${esc(e.name)}" tabindex="0">
-          <div class="card-top"><span class="card-league">${crest(e.name, 'md', e.id, 'league')}<span style="font-size:0.95rem;color:var(--ink);font-weight:600">${esc(e.name)}</span></span></div>
+          <div class="card-top"><span class="card-league">${crest(e.name, 'md', e.id, 'league')}<span>${esc(e.name)}</span></span></div>
           <div class="also">
             <span class="also-call">${e.n} <b>games</b></span>
             <span class="also-call">${e.picks} <b>calls</b></span>
@@ -1260,7 +1343,7 @@ async function viewPricing() {
           <li>What has to happen for it to win, in plain English</li>
           <li>Every open call, not just the ones on the front page</li>
         </ul>
-        <button class="btn btn-primary btn-lg" id="buy">
+        <button class="btn btn-accent btn-lg" id="buy">
           ${user ? 'Become a member' : 'Sign in to join'}
         </button>
         <p class="plan-note">Thirty days. Cancel whenever you like, in one tap.</p>
@@ -1367,13 +1450,13 @@ async function viewAccount() {
           ? `It renews itself on that date${m.card_last4 ? ` using your ${esc(m.card_brand ?? 'card')} ending ${esc(m.card_last4)}` : ''}.`
           : 'It will not renew itself — access simply stops on that date.'}</p>
         ${m.auto_renew
-          ? `<button class="btn btn-ghost" id="cancel">Stop renewing</button>`
+          ? `<button class="btn btn-quiet" id="cancel">Stop renewing</button>`
           : `<button class="btn btn-primary" id="resume">Renew each month</button>`}
       ` : `
         <p class="acct-state off">You are not a member.</p>
         <p class="acct-line">The reading of each match is free. The call, the price and
            the bookmaker are not.</p>
-        <a class="btn btn-primary" href="#/pricing">See what it costs</a>
+        <a class="btn btn-accent" href="#/pricing">See what it costs</a>
       `}
     </div>
 

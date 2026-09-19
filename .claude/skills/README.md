@@ -56,8 +56,8 @@ Domains: `style`, `color`, `chart`, `landing`, `product`, `ux`, `typography`,
 ## Written for this project
 
 These hold what this codebase has learned the hard way. A generic skill cannot
-know that `style.css` loads after `tokens.css`, and that is the bug that made a
-contrast fix ship without changing a rendered pixel.
+know that the page layer loads after `tokens.css`, and that is the bug that
+made a contrast fix ship without changing a rendered pixel.
 
 | Skill | What it holds |
 |---|---|

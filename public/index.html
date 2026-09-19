@@ -6,6 +6,7 @@
 <title>offside.win — the picks for the biggest games</title>
 <meta name="description" content="Football picks across 88 leagues. Every call comes with the reason behind it — and the reason not to like it.">
 <meta name="theme-color" content="#0c0b09">
+<meta name="color-scheme" content="dark">
 
 <!-- A shared link previewed as a blank card until now: no og:image, no card type. -->
 <meta property="og:type" content="website">
@@ -19,16 +20,36 @@
 <meta name="twitter:title" content="offside.win — the picks for the biggest games">
 <meta name="twitter:description" content="Football analysis across 88 leagues. Every call comes with the reason behind it — and the reason not to like it.">
 <meta name="twitter:image" content="https://offside.win/og.png">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://sports.bzzoiro.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..600&family=Inter:wght@400;500;600&family=Saira+Condensed:wght@500;600;700&display=swap">
+<!--
+  Two faces, not three.
+
+  Bricolage Grotesque carries the display voice AND the condensed cut, because
+  it has a width axis (75-100) and the site uses it: a price column and a long
+  club name both want a narrower cut of the same face, not a fourth typeface.
+  Saira Condensed used to be that third face and is gone — one fewer request,
+  one fewer thing to keep in tune.
+-->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..600&family=Inter:wght@400;500;600&display=swap">
+
+<!--
+  Three layers, in this order and no other. tokens.css defines every value;
+  base.css owns the shell; components.css owns what sits inside it. Neither of
+  the last two declares a token, because whichever loads last would silently
+  win the cascade.
+-->
 <link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/base.css">
 <link rel="stylesheet" href="/components.css">
-<link rel="stylesheet" href="/style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%2306070a'/><path d='M22 72 L44 28 M40 72 L62 28 M58 72 L80 28' stroke='%23f2ead9' stroke-width='11' stroke-linecap='round'/></svg>">
+
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230c0b09'/><path d='M22 72 L44 28 M40 72 L62 28 M58 72 L80 28' stroke='%239478ff' stroke-width='11' stroke-linecap='round'/></svg>">
 </head>
 <body>
+
+<a class="visually-hidden" href="#app">Skip to the board</a>
 
 <header class="top" id="top">
   <div class="top-inner">
@@ -36,9 +57,9 @@
       <svg class="brand-mark" viewBox="0 0 100 100" aria-hidden="true">
         <path d="M22 72 L44 28 M40 72 L62 28 M58 72 L80 28" stroke="currentColor" stroke-width="11" stroke-linecap="round" fill="none"/>
       </svg>
-      <span class="brand-text">OFFSIDE<i>.WIN</i></span>
+      <span class="brand-text">offside<i>.win</i></span>
     </a>
-    <nav class="nav" id="nav">
+    <nav class="nav" id="nav" aria-label="Main">
       <a href="#/home" data-route="home">Home</a>
       <a href="#/board" data-route="board">Picks</a>
       <a href="#/leagues" data-route="leagues">Leagues</a>
@@ -49,7 +70,7 @@
       <span class="live" id="live"><i></i>Live</span>
       <a class="btn btn-ghost btn-sm" id="account-link" href="#/signin">Sign in</a>
       <a class="btn btn-primary btn-sm" href="#/board">Today's picks</a>
-      <button class="burger" id="burger" aria-label="Menu" aria-expanded="false">
+      <button class="burger" id="burger" aria-label="Menu" aria-expanded="false" aria-controls="nav">
         <span></span><span></span><span></span>
       </button>
     </div>
@@ -61,11 +82,10 @@
 <footer class="foot">
   <div class="foot-top">
     <div class="foot-cta">
-      <p class="script" style="margin:0 0 6px">Same games.</p>
+      <p>Same games.</p>
       <h2 class="display">Better picks.</h2>
     </div>
-    <a class="btn btn-primary btn-lg" href="#/board">See today's board
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+    <a class="btn btn-primary btn-lg" href="#/board">See today's board</a>
   </div>
   <div class="foot-inner">
     <div class="foot-cols">
@@ -108,7 +128,7 @@
       <svg class="brand-mark" viewBox="0 0 100 100" aria-hidden="true">
         <path d="M22 72 L44 28 M40 72 L62 28 M58 72 L80 28" stroke="currentColor" stroke-width="11" stroke-linecap="round" fill="none"/>
       </svg>
-      <span class="brand-text">OFFSIDE<i>.WIN</i></span>
+      <span class="brand-text">offside<i>.win</i></span>
     </div>
     <div class="foot-stats" id="foot-stats"></div>
     <p class="foot-note">

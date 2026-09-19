@@ -12,7 +12,7 @@ fine.
 ## Why this exists
 
 **A commit claimed to fix two measured contrast failures and changed nothing.**
-`style.css` loads after `tokens.css` and had its own `:root` with the old
+The page layer loads after `tokens.css` and had its own `:root` with the old
 values. Same specificity, later wins. The fix was real and the cascade ate it.
 
 **`.odds` rendered at inherited weight for a whole commit.** The type scale
@@ -73,15 +73,25 @@ When something is wrong, find out whether you caused it before you start
 fixing. Serve the committed version beside the working one:
 
 ```bash
-mkdir -p /tmp/old && for f in app.js style.css components.css tokens.css index.html; do
-  git show HEAD:public/$f > /tmp/old/$f
-done
+rm -rf /tmp/old && mkdir -p /tmp/old
+git archive HEAD public | tar -x -C /tmp/old --strip-components=1
 ROOT=/tmp/old PORT=8790 node .claude/skills/ui-verify/scripts/serve.mjs &
 ```
 
 That is how the 3px overflow was pinned on the new locked component rather than
 on the data: the committed version measured 0px, the working one 3px, and the
 difference only appeared when `.locked` rendered.
+
+**Take the whole tree, not a list of files.** Copying five named files leaves
+out `public/js/lib/`, `app.js` fails its imports, and the old build reports
+"rendered almost nothing (8 chars)" — which looks like a finding about the old
+code and is really a finding about the copy.
+
+**Some findings are not deterministic.** The front door samples a live
+narrative, so a banned term can appear on one run and not the next depending on
+which fixtures are on the board. A clean run on `#/home` is weaker evidence than
+a clean run on a static page; when something shows up there once, fix the
+selection rule rather than re-running until it passes.
 
 ## Things worth knowing before you conclude anything
 
