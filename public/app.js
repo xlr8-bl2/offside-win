@@ -776,26 +776,37 @@ async function viewBoard(params = new URLSearchParams()) {
  * before they have read a word. It states what is behind it and what it costs,
  * and it does not nag.
  */
-function lockedHTML() {
+function lockedHTML(fixture = null) {
+  const n = Number(fixture?.locked_calls) || 0;
+  const tie = fixture?.home && fixture?.away
+    ? `${fixture.home} v ${fixture.away}`
+    : 'this match';
+  // Name the match and say how many calls are on it. A wall that states what
+  // it is holding is a different proposition from one that states only that it
+  // is shut, and the count gives nothing away: no market, no side, no price.
+  const head = n > 1
+    ? `${n} calls on ${tie}.`
+    : `Our call on ${tie}.`;
+
   return `
   <div class="locked">
     <div class="locked-body">
-      <b>The call is for members.</b>
-      <p>Which market, which side, the price and the bookmaker offering it.
+      <b>${esc(head)}</b>
+      <p>Which market, which side, the price and the book offering it.
          The reading of the match above stays free, always.</p>
     </div>
     <a class="btn btn-accent" href="#/pricing">See what membership costs</a>
   </div>`;
 }
 
-function verdictHTML(v, home, away) {
+function verdictHTML(v, home, away, fixture = null) {
   // A free copy keeps the narrative and drops the selection, so a verdict can
   // arrive with everything except the thing being sold.
   if (!v.candidate) {
     return `
     <div class="verdict">
       ${v.narrative ? `<p class="narrative">${esc(v.narrative)}</p>` : ''}
-      ${lockedHTML()}
+      ${lockedHTML(fixture)}
     </div>`;
   }
 
@@ -1082,7 +1093,7 @@ async function viewFixture(id) {
         <div class="panel">
           <p class="panel-head">${verdicts.length ? 'The call' : 'No call'}</p>
           ${verdicts.length
-            ? verdicts.map((v) => verdictHTML(v, f.home, f.away)).join('')
+            ? verdicts.map((v) => verdictHTML(v, f.home, f.away, f)).join('')
             : `<p class="narrative">${esc(f.pass ?? 'Nothing here is worth a call. The price looks about right.')}</p>`}
         </div>
         ${reads.length ? `<div class="panel">

@@ -125,7 +125,8 @@ const freeFactors = (list: unknown): unknown =>
  * sale and worse after it, when a member opens the fixture and finds the same
  * nothing. A fixture with no call keeps saying so, to everyone, for free.
  */
-const lockState = (hadCall: boolean) => (hadCall ? { locked: true, plan: 'monthly' } : { locked: false });
+const lockState = (calls: number) =>
+  (calls > 0 ? { locked: true, plan: 'monthly', locked_calls: calls } : { locked: false });
 
 /**
  * The board card, without the call.
@@ -138,10 +139,14 @@ const lockState = (hadCall: boolean) => (hadCall ? { locked: true, plan: 'monthl
  * than this one.
  */
 export function freeBoard(board: Obj): Obj {
-  const hadCall = Boolean(board['top_pick']);
+  // How many, never which. A count is the shape of what is behind the wall and
+  // gives a reader nothing to act on -- see the note on `locked_calls` above
+  // freeBundle.
+  const confident = Array.isArray(board['confident']) ? board['confident'].length : 0;
+  const calls = board['top_pick'] ? Math.max(1, confident) : 0;
   return scrub({
     ...omit(board, ['top_pick', 'confident', 'odds_1x2']),
-    ...lockState(hadCall),
+    ...lockState(calls),
   }) as Obj;
 }
 
@@ -152,6 +157,13 @@ export function freeBoard(board: Obj): Obj {
  * is the whole reason someone is on the page, `drivers` is the evidence behind
  * it, and only `candidate` -- the selection, the line, the price and the book --
  * comes off. A reader gets the argument in full and pays for the answer.
+ *
+ * `locked_calls` is how many calls this fixture has, and it is deliberate.
+ * Freemium has no countdown, so pressure cannot be manufactured -- only desire
+ * can. "Three calls on this match" is the shape of what is behind the wall and
+ * is worth nothing to act on: it names no market, no side, no price and no
+ * book. A wall that says what it is holding converts better than one that says
+ * only that it is shut, and this is the honest version of that.
  */
 export function freeBundle(bundle: Obj): Obj {
   const verdicts = Array.isArray(bundle['verdicts'])
@@ -166,12 +178,12 @@ export function freeBundle(bundle: Obj): Obj {
     : [];
 
   const rest = omit(bundle, ['top_pick', 'confident', 'odds_1x2', 'markets', 'candidates', 'verdicts']);
-  const hadCall = Array.isArray(bundle['verdicts']) && bundle['verdicts'].length > 0;
+  const calls = Array.isArray(bundle['verdicts']) ? bundle['verdicts'].length : 0;
 
   return scrub({
     ...rest,
     ledger: freeFactors(rest['ledger']),
     verdicts,
-    ...lockState(hadCall),
+    ...lockState(calls),
   }) as Obj;
 }
