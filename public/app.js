@@ -185,7 +185,7 @@ const READ_LABEL = {
 
 const state = {
   board: null, hours: 72, leagueName: '', heroVenue: [], hero: null,
-  user: null, authError: null,
+  user: null, authError: null, tick: null,
   /*
    * The board opens on the games we have a call on.
    *
@@ -298,7 +298,70 @@ function venueShot(venueIds, className, eager = false) {
  * The fixture is two rows, crest then name, rather than "A vs B" across one
  * line. Stacked, the crests can be big enough to recognise.
  */
-function heroHTML(hero = null, venueIds = []) {
+/**
+ * The match centre that sits on the photograph.
+ *
+ * The masthead was a tie, a line and two buttons on top of a picture, and the
+ * right two thirds of it were empty. Everything here is already in the fixture
+ * bundle and none of it is behind the wall: where the two sides sit in the
+ * table, how they have been going, and what has happened the other 128 times
+ * they have met. No price, because the front door carries none.
+ *
+ * The countdown is the only thing on this site that moves. A board of football
+ * about to kick off should feel like it is about to kick off.
+ */
+function ordinal(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '';
+  const s = ['th', 'st', 'nd', 'rd'];
+  const m = v % 100;
+  return v + (s[(m - 20) % 10] ?? s[m] ?? s[0]);
+}
+
+function matchCentreHTML(hero, d) {
+  if (!d) return '';
+  const st = d.standings ?? {};
+  const h2h = d.h2h ?? {};
+
+  const side = (name, id, table, form) => `
+    <div class="mc-side">
+      ${crest(name, 'sm', id)}
+      <span class="mc-name">${esc(name)}</span>
+      ${table?.position ? `<span class="mc-pos">${esc(ordinal(table.position))}</span>` : ''}
+      ${formChips(form)}
+    </div>`;
+
+  const meetings = Number(h2h.total_matches) || 0;
+  return `
+  <aside class="matchcentre">
+    <div class="mc-block mc-clock">
+      <span class="mc-label">Kicks off in</span>
+      <span class="mc-count" data-countdown="${Number(hero.kickoff) || 0}">—</span>
+    </div>
+
+    ${(st.home?.position || st.away?.position) ? `
+      <div class="mc-block">
+        <span class="mc-label">In the table</span>
+        ${side(hero.home, hero.home_id, st.home, d.form?.home)}
+        ${side(hero.away, hero.away_id, st.away, d.form?.away)}
+      </div>` : ''}
+
+    ${meetings ? `
+      <div class="mc-block">
+        <span class="mc-label">${meetings} meetings</span>
+        ${formBarHTML(
+          Number(h2h.home_wins) || 0,
+          Number(h2h.draws) || 0,
+          Number(h2h.away_wins) || 0,
+          [`${hero.home}`, 'drawn', `${hero.away}`],
+          '',
+          'neutral',
+        )}
+      </div>` : ''}
+  </aside>`;
+}
+
+function heroHTML(hero = null, venueIds = [], detail = null) {
   const queue = hero?.venue_id ? [hero.venue_id, ...venueIds] : [].concat(venueIds).filter(Boolean);
 
   if (!hero) {
@@ -343,6 +406,7 @@ function heroHTML(hero = null, venueIds = []) {
           <a class="btn btn-ghost" href="#/board">All of today's picks</a>
         </div>
       </div>
+      ${matchCentreHTML(hero, detail)}
     </div>
   </section>`;
 }
@@ -438,12 +502,12 @@ function sideHTML(fixtures) {
  * Counts do not compete with a rate the way a second rate does, and the scope
  * line says what is being counted, so the bar can keep its detail.
  */
-function formBarHTML(w, d, l, labels = ['won', 'drawn', 'lost'], scope = '') {
+function formBarHTML(w, d, l, labels = ['won', 'drawn', 'lost'], scope = '', tone = '') {
   const total = w + d + l;
   if (!total) return '';
   const pc = (n) => (n / total) * 100;
   return `
-  <div class="formbar">
+  <div class="formbar${tone ? ` ${tone}` : ''}">
     <div class="formbar-track">
       ${w ? `<i class="w" style="width:${pc(w)}%"></i>` : ''}
       ${d ? `<i class="d" style="width:${pc(d)}%"></i>` : ''}
@@ -592,6 +656,12 @@ async function viewHome() {
       loadBoard(),
       getJSON('/api/hero').catch(() => null),
     ]);
+    // The hero endpoint carries the fixture id and little else. The bundle
+    // behind it has the table, the form and the head-to-head, none of which is
+    // behind the wall, and all of which the masthead was leaving on the floor.
+    state.heroDetail = state.hero?.fixture_id
+      ? await getJSON(`/api/fixture/${state.hero.fixture_id}`).catch(() => null)
+      : null;
   } catch (err) {
     app.innerHTML = heroHTML(null, []) + `<div class="wrap section"><div class="empty">${esc(err.message)}</div></div>`;
     return;
@@ -612,7 +682,7 @@ async function viewHome() {
   state.heroVenue = [...top, ...fixtures].map((f) => f.venue_id).filter(Boolean);
 
   app.innerHTML =
-    heroHTML(state.hero, state.heroVenue) +
+    heroHTML(state.hero, state.heroVenue, state.heroDetail) +
     nextRailHTML(fixtures.filter((f) => f.id !== state.hero?.fixture_id)) +
     `<div class="wrap section dense">
        <div class="with-side">
@@ -631,6 +701,8 @@ async function viewHome() {
          ${sideHTML(top)}
        </div>
      </div>`;
+
+  tickCountdowns();
 }
 
 /**
@@ -641,6 +713,35 @@ async function viewHome() {
  * size and weight the text around it happens to be, with a screen reader
  * announcing "left arrow back to the board".
  */
+/**
+ * The countdown, ticking.
+ *
+ * One interval for the page rather than one per element, cleared by the router
+ * before it renders anything else — a timer left running after a route change
+ * writes into a node that is no longer in the document, and the leak only shows
+ * up after a reader has moved around for a while.
+ */
+function tickCountdowns() {
+  clearInterval(state.tick);
+  const paint = () => {
+    const nodes = app.querySelectorAll('[data-countdown]');
+    if (!nodes.length) { clearInterval(state.tick); return; }
+    for (const el of nodes) {
+      const left = Number(el.dataset.countdown) * 1000 - Date.now();
+      if (left <= 0) { el.textContent = 'Under way'; el.classList.add('live'); continue; }
+      const s = Math.floor(left / 1000);
+      const d = Math.floor(s / 86400);
+      const h = Math.floor((s % 86400) / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      el.textContent = d > 0
+        ? `${d}d ${String(h).padStart(2, '0')}h`
+        : `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+    }
+  };
+  paint();
+  state.tick = setInterval(paint, 1000);
+}
+
 function backHTML(label) {
   return `<button class="back" type="button">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
@@ -1824,6 +1925,7 @@ function cookieNotice() {
 async function route() {
   const { parts, params } = parseHash();
   const name = parts[0] || 'home';
+  clearInterval(state.tick);
   for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.route === name);
   document.getElementById('nav').classList.remove('open');
   document.getElementById('burger').setAttribute('aria-expanded', 'false');

@@ -237,11 +237,16 @@
 }
 
 .hero-inner {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  min-height: clamp(400px, 52vw, 560px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  align-items: end;
+  gap: var(--space-9);
+  min-height: clamp(460px, 56vw, 620px);
   padding-block: var(--space-9);
+}
+.hero-copy { align-self: end; }
+@media (max-width: 1040px) {
+  .hero-inner { grid-template-columns: minmax(0, 1fr); }
 }
 .hero-copy { max-width: 46ch; }
 .hero .kicker { text-shadow: 0 1px 12px rgba(10, 10, 12, 0.9); }
@@ -301,6 +306,80 @@
   }
   .hero-cta .btn-primary { flex: 1 1 auto; }
 }
+
+/* ========================================================== match centre */
+
+/*
+ * The panel on the photograph.
+ *
+ * Glass rather than a solid block: it has to sit ON the picture, not cover it,
+ * or the photograph may as well not be there. The backdrop blur is what makes
+ * small type legible over a stadium without a scrim heavy enough to kill the
+ * image.
+ */
+.matchcentre {
+  align-self: end;
+  border: var(--border) solid var(--rule);
+  border-radius: var(--radius);
+  background: rgba(10, 10, 12, 0.62);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  overflow: hidden;
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .matchcentre { background: rgba(10, 10, 12, 0.92); }
+}
+
+.mc-block { padding: var(--space-5); border-top: var(--border) solid var(--hairline); }
+.mc-block:first-child { border-top: 0; }
+.mc-label {
+  display: block;
+  margin-bottom: var(--space-4);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-black);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--chalk-3);
+}
+
+/* The one moving thing on the site. */
+.mc-clock { text-align: left; }
+.mc-count {
+  display: block;
+  font-family: var(--display);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-black);
+  font-size: var(--text-4xl);
+  line-height: 0.92;
+  color: var(--chalk);
+}
+.mc-count.live { color: var(--lost); font-size: var(--text-2xl); }
+
+.mc-side {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+}
+.mc-side .chips { grid-column: 1 / -1; margin-top: 2px; }
+.mc-name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mc-pos {
+  font-family: var(--display);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-black);
+  font-size: var(--text-lg);
+  color: var(--floodlight-hi);
+}
+.matchcentre .formbar { max-width: none; margin-bottom: 0; }
+.matchcentre .formbar-keys { font-size: 10px; gap: var(--space-2); }
+.matchcentre .formbar-keys b { font-size: var(--text-md); }
 
 /* ====================================================== the next-match rail */
 
@@ -540,6 +619,21 @@
 .formbar-keys .w b { color: var(--won); }
 .formbar-keys .d b { color: var(--void); }
 .formbar-keys .l b { color: var(--lost); }
+
+/*
+ * A head-to-head is a tally, not a verdict.
+ *
+ * The semantic palette says green is won and red is lost, so running a
+ * meetings record through it painted one club's wins as a good outcome and the
+ * other's as a bad one. Two sides of a rivalry get two neutral tones and the
+ * draws sit between them.
+ */
+.formbar.neutral .formbar-track i.w { background: var(--floodlight); }
+.formbar.neutral .formbar-track i.d { background: var(--chalk-3); }
+.formbar.neutral .formbar-track i.l { background: var(--chalk); }
+.formbar.neutral .formbar-keys .w b { color: var(--floodlight-hi); }
+.formbar.neutral .formbar-keys .d b { color: var(--chalk-3); }
+.formbar.neutral .formbar-keys .l b { color: var(--chalk); }
 
 /* ========================================================== result rows */
 
