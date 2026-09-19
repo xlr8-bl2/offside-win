@@ -610,7 +610,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 }
 .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .stack { display: flex; flex-direction: column; }
-.rows { display: flex; flex-direction: column; gap: var(--space-2); }
+.rows { display: flex; flex-direction: column; }
 .visually-hidden {
   position: absolute; width: 1px; height: 1px;
   margin: -1px; padding: 0; overflow: hidden;

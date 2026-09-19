@@ -33,59 +33,72 @@
 :root {
   /* ---------------------------------------------------------------- ground */
 
-  /* Warm-cast, and that is the whole differentiator. Robinhood deliberately
-     warmed its canvas to brown-black to get away from fintech blue-black and
-     it worked. Football at night is sodium, wood and concrete. */
-  --pitch:     #0c0b09;
-  --stand:     #15130f;
-  --terrace:   #201c17;
-  --stand-hi:  #2a251e;
+  /*
+   * NEUTRAL, AND WITH REAL STEPS BETWEEN THE LEVELS.
+   *
+   * The old ground was warm-cast near-black -- #0c0b09 page, #15130f surface,
+   * #201c17 raised -- chosen to differentiate from a category that is all
+   * blue-blacks. Two things were wrong with it, and both were visible the
+   * moment the page was looked at rather than reasoned about.
+   *
+   * The steps were about four per cent apart, which is invisible. A row, the
+   * page under it and the panel around it were the same colour, so nothing had
+   * an edge and everything read as one grey field. Every book with a usable
+   * board puts a clear step between page and row: Stake runs #0F212E against
+   * #213743, and you can see which is which from across a room.
+   *
+   * And warm greys on a warm black is how you get mud. The brown cast that was
+   * meant to read as sodium and concrete just desaturated everything on top of
+   * it. The differentiation is the violet, which is doing that job on its own.
+   */
+  --pitch:     #0a0a0c;
+  --stand:     #16171b;
+  --terrace:   #202329;
+  --stand-hi:  #2c3038;
 
   /* ------------------------------------------------------------------- ink */
 
-  /* Warm white rather than pure white, so type sits on the ground instead of
-     glowing off it. All three clear 4.5:1 on every surface above — the data's
-     accessibility floor for body text, and non-negotiable. */
-  --chalk:     #f7f4ed;
-  --chalk-2:   #b9b2a4;
-  --chalk-3:   #8e877a;
+  /* Brighter, and cool to match the ground. The old warm whites sat down into
+     it; these come off it. All three clear 4.5:1 on every surface above. */
+  --chalk:     #f4f6fa;
+  --chalk-2:   #c3c8d2;
+  --chalk-3:   #8d94a3;
 
   /* ---------------------------------------------------------------- accent */
 
-  /* Violet is unclaimed in football — bet365 green, FanDuel blue, DraftKings
-     orange, OneFootball lime, Sofascore royal blue, FotMob green. It is cool
-     against a warm ground and collides with neither semantic colour.
-     Deliberately not the data's neon (#39FF14, #BF00FF): those read as the
-     generated-page default the moment they sit on a dark ground. */
+  /* Violet is still unclaimed in football -- bet365 green, FanDuel blue,
+     DraftKings orange, OneFootball lime, Sofascore royal blue. It is now the
+     only thing carrying the identity, so it is used as a fill rather than a
+     tint wherever something is meant to be pressed. */
   --floodlight:     #7a5af8;
-  --floodlight-hi:  #9478ff;
-  --floodlight-dim: rgba(122, 90, 248, 0.14);
+  --floodlight-hi:  #9e86ff;
+  --floodlight-dim: rgba(122, 90, 248, 0.16);
 
-  /* A second warm note, used sparingly — the sodium of an old floodlight. */
-  --sodium:    #f0a868;
+  /* A second note, for anything imminent rather than live. */
+  --sodium:    #f5a524;
 
   /* --------------------------------------------------------------- borders */
 
   /* Percentages of the ink rather than grey hexes, so they hold across every
      surface. The firm one clears 3:1 for anything interactive. */
-  --hairline:  rgba(247, 244, 237, 0.08);
-  --rule:      rgba(247, 244, 237, 0.14);
-  --rule-firm: rgba(247, 244, 237, 0.34);
+  --hairline:  rgba(244, 246, 250, 0.09);
+  --rule:      rgba(244, 246, 250, 0.16);
+  --rule-firm: rgba(244, 246, 250, 0.32);
 
   /* -------------------------------------------------------------- semantic */
 
   /* Muted on purpose: these are states, not brand. Saturated green is spent —
      bet365, Betway, Paddy Power and every tipster site own it, so it reads as
      gambling promo. It means won here and nothing else. */
-  --won:       #3db468;
-  --lost:      #cb3131;
-  --void:      #7b8996;
-  --warn:      #f0a868;
+  --won:       #2fbf71;
+  --lost:      #f0435a;
+  --void:      #7b8596;
+  --warn:      #f5a524;
 
   /* Price movement is a different meaning from a settled result and gets its
      own tokens, even where the colour currently agrees. */
-  --shorten:   #3db468;
-  --drift:     #cb3131;
+  --shorten:   #2fbf71;
+  --drift:     #f0435a;
 
   /* ------------------------------------------------------------ typography */
 
