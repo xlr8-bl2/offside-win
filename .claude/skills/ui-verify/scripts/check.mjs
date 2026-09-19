@@ -14,6 +14,9 @@ const BASE = process.env.BASE ?? 'http://127.0.0.1:8788';
 const WIDTHS = (process.env.WIDTHS ?? '1440,390').split(',').map(Number);
 const ROUTES = process.argv.slice(2).length ? process.argv.slice(2) : ['#/home', '#/board'];
 
+// Routes whose decimals are settled history rather than the thing being sold.
+const PUBLIC_PRICES = /^#\/results/;
+
 // Words the vocabulary rule bans outright, in either view.
 const BANNED = ['expected goals', 'points a game', 'confidence', ' edge', 'xG', 'per match'];
 
@@ -99,8 +102,15 @@ for (const width of WIDTHS) {
     if (r.chars < 80) say(`rendered almost nothing (${r.chars} chars)`);
     if (r.overflow > 0) say(`scrolls sideways by ${r.overflow}px`);
     if (r.unresolved.length) say(`undefined tokens: ${r.unresolved.join(', ')}`);
-    // A price is legitimate for a member and forbidden for everyone else.
-    if (free && r.decimals.length) say(`a price reached a free reader: ${r.decimals.join(', ')}`);
+    // A price is legitimate for a member and forbidden for everyone else --
+    // except on the settled record, which is public and unfiltered forever,
+    // losses included, because that page being believable is the whole
+    // marketing strategy. A price there is history, not the product. Without
+    // this the checker reports the results page as a paywall leak on every
+    // run, and a checker that cries wolf gets ignored.
+    if (free && !PUBLIC_PRICES.test(route) && r.decimals.length) {
+      say(`a price reached a free reader: ${r.decimals.join(', ')}`);
+    }
     for (const w of BANNED) if (r.lowerText.includes(w.toLowerCase())) say(`banned term "${w.trim()}"`);
     if (errors.length) say(`console: ${errors.slice(0, 3).join(' | ')}`);
 

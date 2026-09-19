@@ -15,7 +15,7 @@ test('a marquee competition leads over a more confident minor one', () => {
     fx({ id: 2, league_id: 7, league: 'Champions League', confidence: 0.55 }),
   ], NOW)!;
   assert.equal(hero.fixture_id, 2);
-  assert.equal(hero.kicker, 'CHAMPIONS LEAGUE NIGHT');
+  assert.equal(hero.kicker, 'Champions League night');
 });
 
 test('a derby that has a name is called by it', () => {
@@ -24,7 +24,7 @@ test('a derby that has a name is called by it', () => {
     fx({ id: 2, league_id: 1, confidence: 0.6, derby: true, home: 'Everton', away: 'Liverpool' }),
   ], NOW)!;
   assert.equal(hero.fixture_id, 2);
-  assert.equal(hero.kicker, 'THE MERSEYSIDE DERBY');
+  assert.equal(hero.kicker, 'The Merseyside derby');
 });
 
 test('a derby the provider flags but nobody has named does not lead', () => {
@@ -44,7 +44,7 @@ test('a major cup final leads over an ordinary league game', () => {
     fx({ id: 2, league_id: 12, league: 'FA Cup', confidence: 0.5, round_label: 'Final' }),
   ], NOW)!;
   assert.equal(hero.fixture_id, 2);
-  assert.equal(hero.kicker, 'THE FINAL');
+  assert.equal(hero.kicker, 'The final');
 });
 
 test('a minor cup final does not', () => {
@@ -104,7 +104,7 @@ test('but a Europa League night still leads when nothing bigger is on', () => {
     fx({ id: 2, league_id: 91, league: 'National League', kickoff: NOW + 2 * 3600, confidence: 0.9 }),
   ], NOW)!;
   assert.equal(hero.fixture_id, 1);
-  assert.equal(hero.kicker, 'EUROPA LEAGUE NIGHT');
+  assert.equal(hero.kicker, 'Europa League night');
 });
 
 test('the Champions League still leads over anything', () => {

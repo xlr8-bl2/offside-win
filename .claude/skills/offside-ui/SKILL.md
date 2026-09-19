@@ -13,10 +13,10 @@ ways it has already gone wrong.
 
 **`public/tokens.css` is the only file that may define a design token.**
 
-`style.css` and `components.css` load after it. A token redefined in either
+`base.css` and `components.css` load after it. A token redefined in either
 silently wins the cascade, which is how a commit that claimed to fix two
 measured contrast failures shipped without changing a single rendered colour:
-`style.css` had its own `:root` block with the old values, same specificity,
+the page layer had its own `:root` block with the old values, same specificity,
 later in the document. The fix was real; the cascade ate it.
 
 A corollary, from the same week: **a `var()` that resolves to nothing
@@ -46,13 +46,24 @@ reasoning is written down because otherwise the next pass reverts it by eye.
 saturated green, so it reads as gambling promo. It is semantic here and
 nothing else.
 
-**Three faces, three jobs.** `Bricolage Grotesque` for display (variable, with
-width and optical-size axes, and not the face anyone reaches for by default),
-`Inter` for UI with `cv01`/`ss03` on, `Saira Condensed` for prices, scores and
-long club names. The last one is not decoration: Sofascore commissioned a
-condensed width axis specifically because the product "deals with unexpectedly
-long names", and the professional answer to Borussia Mönchengladbach in a 96px
-column is a condensed cut, not an ellipsis.
+**Two faces, and a width axis.** `Bricolage Grotesque` for display and for
+anything condensed — it is variable, with width (75–100) and optical-size axes,
+and it is not the face anyone reaches for by default. `Inter` for UI with
+`cv01`/`ss03` on.
+
+There used to be a third, `Saira Condensed`, for prices and long club names.
+Bricolage already contains that cut: `wdth 75` is its own condensed, so the
+third family was buying nothing the first did not already have. The condensed
+cut itself is not decoration — Sofascore commissioned a condensed width axis
+specifically because the product "deals with unexpectedly long names", and the
+professional answer to Borussia Mönchengladbach in a 96px column is a condensed
+cut, not an ellipsis. Apply it with `font-variation-settings: 'wdth'` and the
+`--wide` / `--condensed` / `--tight` tokens, never with a second `font-family`.
+
+A corollary that cost a debugging session: `font-variation-settings` is a
+low-level property. Setting only `'wdth'` leaves `font-weight` in charge of the
+weight axis, which is what you want. Setting `'wght'` there takes `font-weight`
+out of the cascade entirely, which is not.
 
 **Weight ceiling 600.** Bold-everything is the fastest way to look cheap. The
 display face carries emphasis through width.
@@ -104,6 +115,16 @@ Do not reintroduce them:
 - meta strings joined with middle dots (`A · B · C`)
 - tinted near-black standing in for black
 - `→` appended to link and button text
+- a gradient fill on a pill button
+- identical rounded cards that lift and grow a soft grey shadow on hover
+
+Two of these come back in through the data rather than through the CSS, so they
+need watching rather than fixing once. The occasion kickers were stored in
+caps (`THE MANCHESTER DERBY`) and are now title case in `engine/src/occasion.ts`
+— but a row written by an earlier slate keeps the old value until the slate runs
+again. And the provider hands back round labels already joined with a middle dot
+(`Regular season · Matchday 4`), which `viewFixture` splits apart before it
+sets them.
 
 ## Copy is part of the design
 
@@ -120,10 +141,15 @@ string.
 ## Where things are
 
 - `public/tokens.css` — every value, and the reasoning in comments
-- `public/components.css` — written against the tokens, no raw hex, no raw px
-- `public/style.css` — older page-level CSS, still being migrated; **no `:root`**
+- `public/base.css` — reset, type scale, page frame, header, footer, buttons,
+  forms. The shell a reader sees on every route. **No `:root`.**
+- `public/components.css` — every component and page block. **No `:root`.**
 - `public/app.js` — one file, hash router at the bottom, views as `viewX()`
 - `public/js/lib/` — extracted modules (`markets.js`, `auth.js`)
+
+`style.css` is gone. It was the pre-rebuild page layer, it carried the old
+blue-black palette as raw `rgba(6,7,10,…)` in a dozen places, and it set every
+heading at weight 800 in uppercase. Nothing references it.
 
 No framework and no build step. That constraint has served this project well —
 the whole front end is three CSS files and some ES modules served as-is.
