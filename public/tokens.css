@@ -128,6 +128,28 @@
   --body:    Geist, 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   /*
+   * THE THIRD FACE IS THE BRAND.
+   *
+   * Caveat, a marker hand, and it is the one thing on this site that could not
+   * belong to anybody else. The product's whole premise is a pundit talking
+   * over a game -- the brief was "pundits who actually know ball" -- and the
+   * visual form of that is the telestrator: somebody drawing on the screen.
+   * Monday Night Football, a marker circling a full-back who has stepped up.
+   *
+   * So the handwriting is not decoration. It is the annotation layer: the
+   * aside, the signature, the thing a person scribbled next to the data. Which
+   * is exactly why it is rationed. It goes on the brand's own voice -- the
+   * sign-off, the lead-in, the take -- and never on a number, a price, a
+   * scoreline or a control. The moment it labels data it stops being a voice
+   * and becomes a font choice.
+   *
+   * It was in this codebase once, as `--script`, and got flattened into an
+   * alias for the display face during a rebuild. Nobody noticed it had gone
+   * except the person who missed it.
+   */
+  --hand: Caveat, 'Bradley Hand', 'Segoe Script', cursive;
+
+  /*
    * No width axis on the display face, so these are kept only because the
    * component layer still names them and an unresolved var() invalidates the
    * whole declaration. They resolve to 100 and do nothing.

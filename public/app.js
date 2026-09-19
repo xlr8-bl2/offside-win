@@ -320,7 +320,10 @@ function heroHTML(hero = null, venueIds = []) {
   }
 
   const when = kickoffLabel(hero.kickoff);
-  const bits = [hero.league, unshout(hero.kicker)].filter(Boolean);
+  // The occasion is the pundit's aside — "the Madrid derby", "Champions League
+  // night" — so it goes in the handwriting above the tie, not buried in a
+  // sentence under it. The league stays in the blurb, where it is a fact.
+  const aside = unshout(hero.kicker) || hero.league || '';
 
   return `
   <section class="hero" data-shot="${queue.length ? 'yes' : 'none'}">
@@ -328,11 +331,12 @@ function heroHTML(hero = null, venueIds = []) {
     <div class="wrap hero-inner">
       <div class="hero-copy">
         <span class="timechip${isSoon(hero.kickoff) ? ' soon' : ''}">${esc(when)}</span>
+        ${aside ? `<p class="kicker">${esc(aside)}</p>` : ''}
         <div class="fx-stack">
           <span class="fx-line">${crest(hero.home, 'md', hero.home_id)}<span class="name">${esc(hero.home)}</span></span>
           <span class="fx-line">${crest(hero.away, 'md', hero.away_id)}<span class="name">${esc(hero.away)}</span></span>
         </div>
-        <p class="hero-blurb">${esc(bits.join('. '))}${bits.length ? '. ' : ''}Our call on it, the
+        <p class="hero-blurb">${esc(hero.league ?? '')}${hero.league ? '. ' : ''}Our call on it, the
            argument for it, and the thing that argues against it.</p>
         <div class="hero-cta">
           <a class="btn btn-primary" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">Read the analysis</a>
@@ -382,6 +386,7 @@ function nextRailHTML(fixtures) {
 function promoHTML(user) {
   return `
   <section class="promo">
+    <p class="hand promo-aside">nobody else prints the losses</p>
     <h2>Every call, every competition.</h2>
     <p>The analysis is free and stays free. Membership is the call itself — which market,
        which side, the price and the book offering it.</p>
@@ -421,11 +426,22 @@ function sideHTML(fixtures) {
   </aside>`;
 }
 
-/** Won, drawn, lost as one bar with the share written under it. */
-function formBarHTML(w, d, l, labels = ['won', 'drawn', 'lost']) {
+/**
+ * Won, drawn, lost as one bar — in counts, with its scope stated.
+ *
+ * The keys used to be percentages, which put "77% won" six lines under a
+ * headline reading "a 83% strike rate". Both were true and they had different
+ * denominators: the headline covers the whole settled record, the bar covers
+ * only the picks this page fetched. Two rates that close together read as the
+ * page contradicting itself, which is exactly what it was accused of.
+ *
+ * Counts do not compete with a rate the way a second rate does, and the scope
+ * line says what is being counted, so the bar can keep its detail.
+ */
+function formBarHTML(w, d, l, labels = ['won', 'drawn', 'lost'], scope = '') {
   const total = w + d + l;
   if (!total) return '';
-  const pc = (n) => Math.round((n / total) * 100);
+  const pc = (n) => (n / total) * 100;
   return `
   <div class="formbar">
     <div class="formbar-track">
@@ -434,10 +450,11 @@ function formBarHTML(w, d, l, labels = ['won', 'drawn', 'lost']) {
       ${l ? `<i class="l" style="width:${pc(l)}%"></i>` : ''}
     </div>
     <div class="formbar-keys">
-      <span class="w"><b>${pc(w)}%</b> ${esc(labels[0])}</span>
-      ${d ? `<span class="d"><b>${pc(d)}%</b> ${esc(labels[1])}</span>` : ''}
-      <span class="l"><b>${pc(l)}%</b> ${esc(labels[2])}</span>
+      <span class="w"><b>${w}</b> ${esc(labels[0])}</span>
+      ${d ? `<span class="d"><b>${d}</b> ${esc(labels[1])}</span>` : ''}
+      <span class="l"><b>${l}</b> ${esc(labels[2])}</span>
     </div>
+    ${scope ? `<p class="formbar-scope">${esc(scope)}</p>` : ''}
   </div>`;
 }
 
@@ -606,7 +623,8 @@ async function viewHome() {
                <div><h2 class="display">How the last ${settled.length} went</h2></div>
                <a class="btn btn-ghost btn-sm" href="#/results">The full record</a>
              </div>
-             ${formBarHTML(won, settled.length - won - lost, lost, ['won', 'void', 'lost'])}
+             ${formBarHTML(won, settled.length - won - lost, lost, ['won', 'void', 'lost'],
+               `The last ${settled.length} to finish.`)}
              ${playedHTML(settled.slice(0, 8))}
            </div>
          </div>
@@ -1245,7 +1263,7 @@ async function viewResults() {
   const rate = n > 0 ? Math.round((wins / n) * 100) : null;
   const headline = n === 0
     ? 'Nothing has finished yet. The first results land as today\'s games do.'
-    : `${wins} of the last ${n} picks won. That is a ${rate}% strike rate.`;
+    : `${wins} of the last ${n} picks won. That is ${[8, 11, 18].includes(rate) || (rate >= 80 && rate < 90) ? 'an' : 'a'} ${rate}% strike rate.`;
 
   const won = settled.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
   const lost = settled.filter((x) => x.result === 'LOST' || x.result === 'HALF_LOST').length;
@@ -1269,7 +1287,8 @@ async function viewResults() {
         : ''}
     </div>
 
-    ${formBarHTML(won, voided, lost, ['won', 'stake back', 'lost'])}
+    ${formBarHTML(won, voided, lost, ['won', 'stake back', 'lost'],
+      `The ${settled.length + voided} most recent, in order. The rate above covers all ${n}.`)}
 
     <div class="with-side">
       <div>
