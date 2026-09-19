@@ -133,20 +133,26 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
  * the section beneath it.
  */
 .kicker {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  margin: 0 0 var(--space-5);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  color: var(--chalk-2);
+  display: block;
+  margin: 0 0 var(--space-3);
+  font-family: var(--hand);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--floodlight-hi);
 }
-.kicker::before {
-  content: '';
-  width: var(--space-8);
-  height: var(--border);
-  flex: none;
-  background: var(--floodlight);
+
+/*
+ * The annotation voice.
+ *
+ * Rationed on purpose: the brand's own asides and sign-offs, never a number,
+ * a price, a scoreline or a control. A marker hand labelling data stops being
+ * a voice and becomes a font choice.
+ */
+.hand {
+  font-family: var(--hand);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.25;
 }
 
 .lede {
@@ -234,30 +240,34 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 
 .brand { display: inline-flex; align-items: center; gap: var(--space-3); flex: none; }
 /*
- * The mark: an assistant referee's flag, raised.
+ * The mark: a circle drawn round something, by hand.
  *
- * What it replaces was three diagonal strokes -- "///" -- which is a texture,
- * not a mark, and said nothing. A raised flag is the gesture that MEANS
- * offside; every football supporter reads it without being told, and nobody
- * else in this category uses one. They are all balls, shields and swooshes.
+ * Two marks preceded it. Three diagonal strokes said nothing. A raised
+ * linesman's flag said "offside" but read as an icon rather than a logo, and
+ * was odd at the sizes a logo has to live at.
  *
- * It was drawn against the sizes it actually has to survive rather than at
- * poster scale: it still reads as a flag at 16px in a browser tab. An earlier
- * attempt put the offside line through a circle and came out as "Ø" -- the
- * symbol for none -- which is a poor thing for a product that sells picks to
- * say about itself.
+ * This is the telestrator gesture — a pundit ringing a player on the screen —
+ * and it is also, literally, the "o" of offside: the wordmark beside it reads
+ * "ffside.win" and the ring completes it. So the mark is not decoration next
+ * to the name, it is part of the name, which is the difference between a logo
+ * and a badge.
  *
- * No badge or chip around it. The flag has its own silhouette and a circle
- * would only crop the thing that makes it recognisable.
+ * Drawn rather than geometric, with the stroke overshooting where it crosses
+ * back over itself, because that overshoot is the entire tell that a hand did
+ * it. A clean circle here would be a loading spinner.
  */
 .brand-mark {
-  width: 28px;
-  height: 28px;
-  color: var(--chalk);
+  width: 30px;
+  height: 30px;
+  margin-right: -3px;
+  fill: none;
+  stroke: var(--floodlight);
+  stroke-width: 9;
+  stroke-linecap: round;
   overflow: visible;
 }
-.brand-mark .flag { fill: var(--floodlight); }
-.foot-brand .brand-mark { color: var(--chalk-2); }
+.foot-brand .brand-mark { stroke: var(--floodlight); }
+
 .brand-text {
   font-family: var(--display);
   font-weight: var(--weight-bold);
@@ -529,12 +539,11 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .foot-cta { min-width: 0; }
 .foot-cta .display { font-size: var(--text-3xl); }
 .foot-cta p {
-  margin: 0 0 var(--space-2);
+  margin: 0 0 var(--space-1);
   color: var(--floodlight-hi);
-  font-family: var(--display);
-  font-size: var(--text-xl);
-  font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-xl);
+  font-family: var(--hand);
+  font-size: var(--text-2xl);
+  font-weight: 600;
 }
 
 .foot-inner {

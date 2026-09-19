@@ -244,6 +244,7 @@
   padding-block: var(--space-9);
 }
 .hero-copy { max-width: 46ch; }
+.hero .kicker { text-shadow: 0 1px 12px rgba(10, 10, 12, 0.9); }
 
 /* The kick-off, as a chip. First thing the reference states, and the first
    thing anybody wants: is this on tonight. */
@@ -402,6 +403,11 @@
     transparent 2px 26px
   );
 }
+.promo-aside {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-2xl);
+  color: rgba(255, 255, 255, 0.88);
+}
 .promo h2 {
   margin: 0;
   font-family: var(--display);
@@ -521,7 +527,16 @@
   font-size: var(--text-2xs);
   color: var(--chalk-3);
 }
-.formbar-keys b { font-variant-numeric: tabular-nums; font-weight: var(--weight-bold); }
+.formbar-keys b {
+  font-family: var(--display);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-black);
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+/* What the bar is counting. Without it the bar and the headline above look
+   like two answers to the same question. */
+.formbar-scope { margin: var(--space-3) 0 0; font-size: var(--text-2xs); color: var(--chalk-3); }
 .formbar-keys .w b { color: var(--won); }
 .formbar-keys .d b { color: var(--void); }
 .formbar-keys .l b { color: var(--lost); }
@@ -1336,11 +1351,10 @@
   padding-block: clamp(var(--space-9), 6vw, var(--space-11));
 }
 .closing-in p {
-  margin: 0 0 var(--space-2);
-  font-family: var(--display);
-  font-size: var(--text-xl);
-  font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-xl);
+  margin: 0 0 var(--space-1);
+  font-family: var(--hand);
+  font-size: var(--text-2xl);
+  font-weight: 600;
   color: var(--floodlight-hi);
 }
 
@@ -1680,10 +1694,9 @@
 .locked-body { min-width: 0; flex: 1 1 260px; }
 .locked-body b {
   display: block;
-  font-family: var(--display);
-  font-weight: var(--weight-bold);
-  font-size: var(--text-lg);
-  letter-spacing: var(--tracking-xl);
+  font-family: var(--hand);
+  font-weight: 700;
+  font-size: var(--text-2xl);
   color: var(--chalk);
 }
 .locked-body p {
