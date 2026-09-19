@@ -892,11 +892,10 @@
 .row-time {
   white-space: nowrap;
   font-family: var(--display);
-  font-variation-settings: 'wdth' var(--condensed);
   font-variant-numeric: tabular-nums;
-  font-weight: var(--weight-bold);
-  font-size: var(--text-lg);
-  letter-spacing: var(--tracking-num);
+  font-weight: var(--weight-black);
+  font-size: var(--text-xl);
+  letter-spacing: 0;
   line-height: 1;
 }
 .row-day {
@@ -921,9 +920,9 @@
 .row-sel {
   font-family: var(--display);
   font-weight: var(--weight-bold);
-  font-size: var(--text-md);
-  letter-spacing: var(--tracking-md);
-  line-height: var(--leading-snug);
+  font-size: var(--text-lg);
+  letter-spacing: 0.01em;
+  line-height: 1.2;
 }
 .row-wins {
   margin: 3px 0 0;
@@ -980,8 +979,8 @@
   font-variation-settings: 'wdth' var(--condensed);
   font-variant-numeric: tabular-nums;
   font-weight: var(--weight-black);
-  font-size: var(--text-xl);
-  letter-spacing: var(--tracking-num);
+  font-size: var(--text-2xl);
+  letter-spacing: 0;
   line-height: 1;
   color: var(--floodlight-hi);
   transition: color var(--dur-fast) var(--ease-out);

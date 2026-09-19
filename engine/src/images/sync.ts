@@ -118,6 +118,9 @@ export async function syncTeamShots(now = new Date()): Promise<SyncReport> {
         if (!m) continue;
         report.manifests++;
         list = m.assetlist;
+        // Where the photographs actually are. A sweep that saw 436 assets one
+        // run and 3 the next needs this to tell a quiet day from a lost call.
+        if (list.length) console.log(`  ${slug} ${day.toISOString().slice(0, 10)}: ${list.length} assets`);
       } catch (err) {
         // One competition failing is not the sweep failing. A key problem will
         // show up on every league and be obvious in the count; a single 500

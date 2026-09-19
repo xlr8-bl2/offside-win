@@ -28,6 +28,21 @@ const UP = process.env.UPSTREAM ?? 'https://offside-win.ashleymbaht.workers.dev'
  * The images were fine the entire time; Chromium just could not fetch them.
  */
 const IMG = process.env.IMG_UPSTREAM ?? 'https://sports.bzzoiro.com';
+
+/*
+ * Google Fonts, proxied for the same reason as everything else.
+ *
+ * Chromium cannot complete TLS to fonts.googleapis.com from this sandbox, so
+ * every screenshot this project has ever taken rendered in a system fallback.
+ * Three typefaces were chosen and shipped without anyone seeing one of them
+ * render -- picked from a name and a description. Node can reach Google, so it
+ * fetches the stylesheet, rewrites the font file URLs to point back here, and
+ * serves the woff2 itself.
+ *
+ * The browser user-agent matters: without it Google serves ttf instead of
+ * woff2, which works but is four times the bytes.
+ */
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
 const PORT = Number(process.env.PORT ?? 8788);
 const TYPES = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
@@ -41,6 +56,30 @@ if (process.env.FREE) {
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
+
+  // Same-origin web fonts, so the type can actually be looked at.
+  if (url.pathname === '/gfonts/css') {
+    try {
+      const r = await fetch('https://fonts.googleapis.com/css2?' + url.searchParams.toString(), {
+        headers: { 'user-agent': UA },
+      });
+      const css = (await r.text()).replaceAll('https://fonts.gstatic.com/', '/gfonts/file/');
+      res.writeHead(r.status, { 'content-type': 'text/css' });
+      res.end(css);
+    } catch (e) { res.writeHead(502); res.end(String(e)); }
+    return;
+  }
+  if (url.pathname.startsWith('/gfonts/file/')) {
+    try {
+      const r = await fetch('https://fonts.gstatic.com/' + url.pathname.slice('/gfonts/file/'.length));
+      res.writeHead(r.status, {
+        'content-type': r.headers.get('content-type') ?? 'font/woff2',
+        'cache-control': 'public, max-age=86400',
+      });
+      res.end(Buffer.from(await r.arrayBuffer()));
+    } catch (e) { res.writeHead(502); res.end(String(e)); }
+    return;
+  }
 
   // Same-origin images, so the browser can actually load them here.
   if (url.pathname.startsWith('/img/')) {
@@ -90,6 +129,9 @@ http.createServer(async (req, res) => {
     // Point the app at this server's own image proxy rather than the host it
     // cannot reach. One substitution, and only in what is served locally.
     if (extname(path) === '.js') buf = Buffer.from(String(buf).replaceAll(IMG + '/img', '/img'));
+    if (extname(path) === '.html') {
+      buf = Buffer.from(String(buf).replaceAll('https://fonts.googleapis.com/css2?', '/gfonts/css?'));
+    }
     res.writeHead(200, { 'content-type': TYPES[extname(path)] ?? 'application/octet-stream' });
     res.end(buf);
   } catch {

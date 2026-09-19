@@ -42,8 +42,12 @@ export const config = {
     level: (process.env.SPORTRADAR_IMAGES_LEVEL ?? 't') as 't' | 'p',
     /** Days back to sweep for action shots. A week covers a midweek round. */
     days: num('SPORTRADAR_IMAGE_DAYS', 7),
-    /** Trial keys are one request a second. 1100ms leaves room for clock skew. */
-    minGapMs: num('SPORTRADAR_MIN_GAP_MS', 1100),
+    /*
+     * 1100ms was still drawing 429s, so the trial ceiling is tighter than one
+     * request a second or it counts a burst window. 2000ms with the retry
+     * behind it; a sweep has forty-five minutes and does not need to hurry.
+     */
+    minGapMs: num('SPORTRADAR_MIN_GAP_MS', 2000),
     retries: num('SPORTRADAR_RETRIES', 3),
     /** Dump what the manifests actually contain, for a run that matches none. */
     debug: process.env.SPORTRADAR_DEBUG === '1',
