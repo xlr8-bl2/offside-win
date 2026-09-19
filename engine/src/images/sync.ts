@@ -30,7 +30,7 @@ import {
   creditOf,
   describe,
   fetchImage,
-  teamsIn,
+  clubCandidates,
 } from './sportradar.ts';
 import { ensureBucket, put } from './store.ts';
 
@@ -133,9 +133,11 @@ export async function syncTeamShots(now = new Date()): Promise<SyncReport> {
         const link = bestLink(asset.links);
         if (!link) continue;
 
+        // Longest leading group first, and stop at the first one we know.
         let hit = false;
-        for (const name of teamsIn(asset)) {
-          if (byName.has(name)) hit = true;
+        for (const name of clubCandidates(asset)) {
+          if (!byName.has(name)) continue;
+          hit = true;
           const ids = byName.get(name);
           if (!ids) continue;
           if (ids.length > 1) { report.skipped++; continue; }
@@ -161,6 +163,7 @@ export async function syncTeamShots(now = new Date()): Promise<SyncReport> {
             );
             done.add(teamId);
             report.stored++;
+            break;
           } catch (err) {
             report.failed++;
             console.warn(`  team ${teamId}: ${(err as Error).message}`);
@@ -169,7 +172,10 @@ export async function syncTeamShots(now = new Date()): Promise<SyncReport> {
         // Names Getty used that we have no team for. Capped, because a sweep
         // that matches nothing would otherwise print four hundred lines and
         // bury the one fact worth having: what they call the clubs.
-        if (!hit) for (const n of teamsIn(asset)) unmatched.set(n, (unmatched.get(n) ?? 0) + 1);
+        if (!hit) {
+          const guess = clubCandidates(asset)[0];
+          if (guess) unmatched.set(guess, (unmatched.get(guess) ?? 0) + 1);
+        }
       }
     }
   }

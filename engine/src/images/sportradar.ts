@@ -225,21 +225,35 @@ export function bestLink(links: AssetLink[], minWidth = 1000): AssetLink | null 
 }
 
 /**
- * The clubs an asset is tagged with, normalised for matching against ours.
+ * The club an asset is of — which is in the TITLE, not in the refs.
  *
- * The first live run matched zero of 436 assets, so nothing here assumes what
- * `type` a club ref carries. Every named ref is offered as a candidate and the
- * caller decides which ones are teams it knows — a ref that is a player or a
- * competition simply will not be in our team table, so it costs a lookup and
- * nothing else. Guessing the discriminator was what produced zero matches.
+ * Two live runs matched zero of five hundred assets between them before anyone
+ * looked at the payload. The `refs` array holds PLAYERS and nothing else:
+ *
+ *   title="SV Elversberg - Single Player Action 2026/27 for Bundesliga"
+ *   refs=[profile:Futkeu, Noel]
+ *
+ *   title="Heart of Midlothian Training & Press Conference"
+ *   refs=[profile:Guendouz, Sabri]
+ *
+ * Getty's convention is that the title OPENS with the club, so the match is on
+ * leading word-groups of the title: take the first six words, then the first
+ * five, and so on, and the longest one that is a team we know wins. Longest
+ * first matters — "Heart of Midlothian" has to beat a bare "Heart", and a club
+ * whose name is one common word must not win against a longer one that starts
+ * with it.
+ *
+ * Only leading groups are tried. The club is at the front or it is not the
+ * subject of the photograph, and searching the whole string would match the
+ * competition at the end of every Bundesliga title.
  */
-export function teamsIn(asset: Asset): string[] {
-  return [...new Set(
-    (asset.refs ?? [])
-      .map((r) => r.name)
-      .filter((n): n is string => typeof n === 'string' && n.trim().length > 1)
-      .map((n) => normalise(n)),
-  )];
+export function clubCandidates(asset: Asset): string[] {
+  const title = normalise(String(asset.title ?? '').split(/\s+[-–—]\s+/)[0] ?? '');
+  if (!title) return [];
+  const words = title.split(' ').filter(Boolean);
+  const out: string[] = [];
+  for (let n = Math.min(6, words.length); n >= 1; n--) out.push(words.slice(0, n).join(' '));
+  return out;
 }
 
 /** Everything about one asset, for working out why a sweep matched nothing. */

@@ -183,7 +183,20 @@ const READ_LABEL = {
 
 // ------------------------------------------------------------------ state
 
-const state = { board: null, hours: 72, leagueName: '', heroVenue: [], hero: null, user: null, authError: null };
+const state = {
+  board: null, hours: 72, leagueName: '', heroVenue: [], hero: null,
+  user: null, authError: null,
+  /*
+   * The board opens on the games we have a call on.
+   *
+   * Forty-four per cent of it has no call, and by kick-off order that meant the
+   * first four rows of the product all read "No call — the price looks about
+   * right to us." That is an honest sentence and a terrible opening: a reader
+   * arriving on the picks page should land on picks. Everything is one tap
+   * away and the count is stated, so nothing is hidden by it.
+   */
+  show: 'calls',
+};
 
 /**
  * The hash, split into a path and a query.
@@ -209,6 +222,7 @@ function boardHash(hours = state.hours, league = state.leagueName) {
   const q = new URLSearchParams();
   if (Number(hours) !== 72) q.set('hours', String(hours));
   if (league) q.set('league', league);
+  if (state.show === 'all') q.set('show', 'all');
   const s = q.toString();
   return s ? `#/board?${s}` : '#/board';
 }
@@ -630,6 +644,7 @@ async function viewBoard(params = new URLSearchParams()) {
   if ([24, 48, 72, 120, 240].includes(hours)) state.hours = hours;
   else if (params.has('hours')) state.hours = 72;
   if (params.has('league')) state.leagueName = params.get('league');
+  if (params.has('show')) state.show = params.get('show') === 'all' ? 'all' : 'calls';
 
   app.innerHTML = `<div class="wrap section dense">
     <div class="rows">${'<div class="skeleton skeleton-row"></div>'.repeat(8)}</div>
@@ -662,10 +677,14 @@ async function viewBoard(params = new URLSearchParams()) {
     <div class="section-head">
       <div>
         <h2 class="display">The board</h2>
-        <p>${fixtures.length} games on, ${fixtures.filter((f) => f.top_pick).length} of them with a call.${
+        <p>${fixtures.filter((f) => f.top_pick || f.locked).length} calls across ${fixtures.length} games.${
           furthest ? ` The last of them kicks off ${esc(dayLabel(furthest).toLowerCase())}.` : ''}</p>
       </div>
       <div class="filters">
+        <div class="seg" role="group" aria-label="What to show">
+          <button type="button" data-show="calls"${state.show === 'calls' ? ' class="on"' : ''}>With a call</button>
+          <button type="button" data-show="all"${state.show === 'all' ? ' class="on"' : ''}>Everything</button>
+        </div>
         <select id="hours-filter" aria-label="Time window">
           ${[24, 48, 72, 120, 240].map((h) => `<option value="${h}"${h === state.hours ? ' selected' : ''}>Next ${h}h</option>`).join('')}
         </select>
@@ -681,13 +700,24 @@ async function viewBoard(params = new URLSearchParams()) {
   </div>`;
 
   const paint = () => {
-    const shown = state.leagueName ? fixtures.filter((f) => f.league === state.leagueName) : fixtures;
+    let shown = state.leagueName ? fixtures.filter((f) => f.league === state.leagueName) : fixtures;
+    if (state.show === 'calls') shown = shown.filter((f) => f.top_pick || f.locked);
     document.getElementById('grid').innerHTML =
       shown.length
         ? shown.map(rowHTML).join('')
-        : `<div class="empty-state"><b>Nothing in this league right now</b>
-             <span>Try a longer window, or clear the filter to see the whole board.</span></div>`;
+        : `<div class="empty-state"><b>No calls here right now</b>
+             <span>We would rather say nothing than pad the board. Switch to
+             Everything to see the games we are passing on.</span></div>`;
   };
+
+  for (const b of app.querySelectorAll('.seg button')) {
+    b.onclick = () => {
+      state.show = b.dataset.show;
+      history.replaceState(null, '', boardHash());
+      for (const o of app.querySelectorAll('.seg button')) o.classList.toggle('on', o === b);
+      paint();
+    };
+  }
   // A longer window needs the board fetched again, so it goes through the
   // router. A league is a filter over what is already here, so it repaints in
   // place and only rewrites the address -- replaceState does not fire
