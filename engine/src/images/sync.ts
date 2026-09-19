@@ -92,24 +92,38 @@ function takenAt(asset: Asset): number | null {
 /**
  * The competitions with at least one team still wanting a photograph.
  *
- * Reads the upcoming board rather than the whole team table: a photograph is
- * only worth having for a side somebody is about to see on a fixture page.
+ * Two plain queries rather than one clever one. The first attempt joined
+ * `fixture` to `team` on ids — but `fixture` stores team NAMES, not ids, so it
+ * failed on `column f.home_team_id does not exist` before reaching the API.
+ * Joining on names instead would work and would be a fragile join to put on
+ * the hot path; the league is enough to decide what to sweep.
  */
 async function wantedSlugs(done: Set<number>): Promise<string[]> {
-  const rows = await select<{ league: string; home_team_id: number; away_team_id: number }>(
-    `SELECT l.name AS league, f.home_team_id, f.away_team_id
+  const now = Math.floor(Date.now() / 1000);
+  const onTheBoard = await select<{ league_id: number; league: string }>(
+    `SELECT DISTINCT f.league_id, l.name AS league
        FROM fixture f JOIN league l ON l.id = f.league_id
       WHERE f.kickoff BETWEEN $1 AND $2`,
-    [Math.floor(Date.now() / 1000) - 3 * 86_400, Math.floor(Date.now() / 1000) + 10 * 86_400],
+    [now - 3 * 86_400, now + 10 * 86_400],
   );
-  const slugs = new Set<string>();
-  for (const r of rows) {
-    const slug = leagueSlug(r.league);
-    if (!slug) continue;
-    if (!done.has(Number(r.home_team_id)) || !done.has(Number(r.away_team_id))) slugs.add(slug);
+
+  const teams = await select<{ id: number; league_id: number | null }>(
+    'SELECT id, league_id FROM team WHERE league_id IS NOT NULL',
+  );
+  const wanting = new Set<number>();
+  for (const t of teams) {
+    if (!done.has(Number(t.id))) wanting.add(Number(t.league_id));
   }
-  // Nothing on the board maps to a covered competition: fall back to the full
-  // list rather than silently doing nothing on a quiet midweek.
+
+  const slugs = new Set<string>();
+  for (const row of onTheBoard) {
+    const slug = leagueSlug(row.league);
+    if (!slug) continue;
+    // A league we have no teams recorded for is swept rather than skipped —
+    // "nothing wanted" and "nothing known" must not look the same.
+    const known = teams.some((t) => Number(t.league_id) === Number(row.league_id));
+    if (!known || wanting.has(Number(row.league_id))) slugs.add(slug);
+  }
   return slugs.size ? [...slugs] : coveredSlugs();
 }
 
