@@ -1117,6 +1117,34 @@
 
 .section.dense .section-head .display { font-size: var(--text-2xl); letter-spacing: var(--tracking-2xl); }
 
+/*
+ * A two-state switch, squared, sharing one trough.
+ *
+ * Not two pills and not a dropdown: this is the most-used control on the board
+ * and it should read as a thing with a current position, which a select does
+ * not at a glance.
+ */
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  background: var(--terrace);
+  border: var(--border) solid var(--rule);
+  border-radius: var(--radius-sm);
+}
+.seg button {
+  min-height: 34px;
+  padding: 0 var(--space-5);
+  border-radius: 3px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--chalk-3);
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.seg button:hover { color: var(--chalk); }
+.seg button.on { background: var(--chalk); color: var(--pitch); font-weight: var(--weight-bold); }
+
 /* ========================================================= feature band */
 
 /*
