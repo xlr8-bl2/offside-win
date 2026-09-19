@@ -234,19 +234,30 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 
 .brand { display: inline-flex; align-items: center; gap: var(--space-3); flex: none; }
 /*
- * A round badge rather than a bare glyph. The reference opens with the club
- * crest in a circle, which is the single element that says "football" before
- * anything has loaded.
+ * The mark: an assistant referee's flag, raised.
+ *
+ * What it replaces was three diagonal strokes -- "///" -- which is a texture,
+ * not a mark, and said nothing. A raised flag is the gesture that MEANS
+ * offside; every football supporter reads it without being told, and nobody
+ * else in this category uses one. They are all balls, shields and swooshes.
+ *
+ * It was drawn against the sizes it actually has to survive rather than at
+ * poster scale: it still reads as a flag at 16px in a browser tab. An earlier
+ * attempt put the offside line through a circle and came out as "Ø" -- the
+ * symbol for none -- which is a poor thing for a product that sells picks to
+ * say about itself.
+ *
+ * No badge or chip around it. The flag has its own silhouette and a circle
+ * would only crop the thing that makes it recognisable.
  */
 .brand-mark {
-  width: 34px;
-  height: 34px;
-  padding: 7px;
-  border-radius: 50%;
-  background: rgba(247, 244, 237, 0.06);
-  border: var(--border) solid var(--hairline);
+  width: 28px;
+  height: 28px;
   color: var(--chalk);
+  overflow: visible;
 }
+.brand-mark .flag { fill: var(--floodlight); }
+.foot-brand .brand-mark { color: var(--chalk-2); }
 .brand-text {
   font-family: var(--display);
   font-weight: var(--weight-bold);
