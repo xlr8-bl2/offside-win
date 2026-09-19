@@ -48,7 +48,17 @@ export const config = {
      * behind it; a sweep has forty-five minutes and does not need to hurry.
      */
     minGapMs: num('SPORTRADAR_MIN_GAP_MS', 2000),
-    retries: num('SPORTRADAR_RETRIES', 3),
+    /*
+     * A hard ceiling on calls per run, and a breaker on top of it.
+     *
+     * A trial key's budget is the scarce resource, and one bad run spent close
+     * to four hundred requests being refused over and over. `budget` caps what
+     * a single run can cost; `tripAfter` consecutive refusals stops it dead,
+     * because a key that has turned away the last fifteen calls will turn away
+     * the next ninety.
+     */
+    budget: num('SPORTRADAR_BUDGET', 120),
+    tripAfter: num('SPORTRADAR_TRIP_AFTER', 8),
     /** Dump what the manifests actually contain, for a run that matches none. */
     debug: process.env.SPORTRADAR_DEBUG === '1',
   },
