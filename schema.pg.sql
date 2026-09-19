@@ -36,6 +36,29 @@ CREATE TABLE IF NOT EXISTS team (
   updated_at  bigint NOT NULL
 );
 
+-- A photograph of a team, re-hosted.
+--
+-- One row per team, holding the best action shot we have found for them. The
+-- URL points at our own storage rather than at Sportradar: every request to
+-- their image API needs the key in a header, and a browser cannot be given the
+-- key on a site whose source is public.
+--
+-- `credit` is NOT NULL on purpose. Agency photography travels with its
+-- copyright line and a page that drops it is the kind of thing that ends a
+-- licence. A row with no credit is a row we must not publish, so the column
+-- makes that unrepresentable rather than a rule somebody has to remember.
+CREATE TABLE IF NOT EXISTS team_shot (
+  team_id     bigint PRIMARY KEY,
+  url         text NOT NULL,
+  credit      text NOT NULL,
+  title       text,
+  asset_id    text,
+  width       integer,
+  height      integer,
+  taken_at    bigint,
+  updated_at  bigint NOT NULL
+);
+
 -- ---------------------------------------------------------------- history
 
 CREATE TABLE IF NOT EXISTS match (
@@ -690,6 +713,11 @@ ALTER TABLE league ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS league_read ON league;
 CREATE POLICY league_read ON league FOR SELECT TO anon USING (true);
 GRANT SELECT ON league TO anon;
+
+ALTER TABLE team_shot ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS team_shot_read ON team_shot;
+CREATE POLICY team_shot_read ON team_shot FOR SELECT TO anon USING (true);
+GRANT SELECT ON team_shot TO anon;
 
 ALTER TABLE team ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS team_read ON team;
