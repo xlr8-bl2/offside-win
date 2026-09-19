@@ -21,12 +21,15 @@ than one-per-skill wrappers:
 member and forbidden for everyone else, so it asks the API whether the board
 is redacted and only treats decimals as findings in the free view. The blunt
 version flagged the odds on the board as violations, and a checker that cries
-wolf gets ignored. Nothing to install and nothing to configure — they are here, so
-they are available, and they travel with the project rather than depending on
-what happens to be set up on a given machine.
+wolf gets ignored.
+
+Nothing to install and nothing to configure. They are here, so they are
+available, and they travel with the project rather than depending on what
+happens to be set up on a given machine.
 
 To use them somewhere else, copy a directory into that project's
-`.claude/skills/`, or into `~/.claude/skills/` to have it everywhere.
+`.claude/skills/` (or `.claude/commands/` for the commands), or into
+`~/.claude/` to have them everywhere.
 
 ## Vendored from GitHub
 
