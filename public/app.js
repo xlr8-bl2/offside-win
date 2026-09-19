@@ -130,6 +130,34 @@ const READ_LABEL = {
 
 const state = { board: null, hours: 72, leagueName: '', heroVenue: [], hero: null, user: null, authError: null };
 
+/**
+ * The hash, split into a path and a query.
+ *
+ * `location.hash.slice(2).split('/')` was fine while every route was a bare
+ * path, and wrong the moment one carried state: `#/board?league=La%20Liga`
+ * came back as a single part named `board?league=La%20Liga`, so the router
+ * fell through to home. Splitting the query off first is the whole fix.
+ */
+function parseHash() {
+  const raw = (location.hash || '#/home').slice(1);
+  const cut = raw.indexOf('?');
+  const path = cut === -1 ? raw : raw.slice(0, cut);
+  const query = cut === -1 ? '' : raw.slice(cut + 1);
+  return {
+    parts: path.replace(/^\//, '').split('/').filter(Boolean),
+    params: new URLSearchParams(query),
+  };
+}
+
+/** The board's own address, so a filtered board can be sent to someone. */
+function boardHash(hours = state.hours, league = state.leagueName) {
+  const q = new URLSearchParams();
+  if (Number(hours) !== 72) q.set('hours', String(hours));
+  if (league) q.set('league', league);
+  const s = q.toString();
+  return s ? `#/board?${s}` : '#/board';
+}
+
 async function loadBoard() {
   state.board = await getJSON(`/api/board?hours=${state.hours}`);
   return state.board;
@@ -313,7 +341,7 @@ function cardHTML(f) {
   // top_pick is the first confident call, so the rest start at one.
   const extra = (f.confident ?? []).slice(pick ? 1 : 0).slice(0, 2);
   return `
-  <article class="card" data-id="${f.id}" tabindex="0" role="link" aria-label="${esc(f.home)} versus ${esc(f.away)}">
+  <a class="card" href="#/fixture/${encodeURIComponent(f.id)}" aria-label="${esc(f.home)} versus ${esc(f.away)}">
     <div class="card-top">
       <span class="card-league">${crest(f.league ?? '', 'sm', f.league_id, 'league')}<span>${esc(f.league ?? '')}</span></span>
       <span class="card-kick${isSoon(f.kickoff) ? ' soon' : ''}">${esc(kickoffLabel(f.kickoff))}</span>
@@ -336,7 +364,7 @@ function cardHTML(f) {
          }).join('')}</div>`
       : ''}
     <span class="card-go">Read the analysis</span>
-  </article>`;
+  </a>`;
 }
 
 
@@ -365,8 +393,8 @@ function rowHTML(f) {
   const day = dayLabel(f.kickoff);
 
   return `
-  <article class="row" data-id="${f.id}" tabindex="0" role="link"
-           aria-label="${esc(f.home)} versus ${esc(f.away)}">
+  <a class="row" href="#/fixture/${encodeURIComponent(f.id)}"
+     aria-label="${esc(f.home)} versus ${esc(f.away)}">
     <div class="row-when">
       <span class="row-league" title="${esc(f.league ?? '')}">
         ${crest(f.league ?? '', 'xs', f.league_id, 'league')}
@@ -393,7 +421,7 @@ function rowHTML(f) {
         <span class="odds-return">${esc(d.returns)}</span>`
         : f.locked ? `<span class="odds-locked" aria-hidden="true">••••</span>` : ''}
     </div>
-  </article>`;
+  </a>`;
 }
 
 /** "Today", "Tomorrow", or the weekday — nobody reads a date they can infer. */
@@ -587,8 +615,6 @@ async function viewHome() {
     statsHTML(fixtures, recent) +
     leaguesHTML(fixtures) +
     closingHTML();
-
-  wireCards();
 }
 
 /**
@@ -638,7 +664,7 @@ function leaguesHTML(fixtures) {
     </div>
     <div class="lgrid">
       ${rows.map((e) => `
-        <a class="lcard" href="#/board" data-league="${esc(e.name)}">
+        <a class="lcard" href="${esc(boardHash(state.hours, e.name))}">
           ${crest(e.name, 'lg', e.id, 'league')}
           <b>${esc(e.name)}</b>
           <span>${e.n} ${e.n === 1 ? 'game' : 'games'}</span>
@@ -675,7 +701,16 @@ function backHTML(label) {
 
 // ------------------------------------------------------------------ board
 
-async function viewBoard() {
+async function viewBoard(params = new URLSearchParams()) {
+  // The filters live in the URL, so a filtered board survives a reload and can
+  // be sent to someone. They used to live only in `state`, which meant the one
+  // thing a reader would want to share -- "the La Liga card for the next two
+  // days" -- was the one thing they could not.
+  const hours = Number(params.get('hours'));
+  if ([24, 48, 72, 120, 240].includes(hours)) state.hours = hours;
+  else if (params.has('hours')) state.hours = 72;
+  if (params.has('league')) state.leagueName = params.get('league');
+
   app.innerHTML = `<div class="wrap section dense">
     <div class="rows">${'<div class="skeleton skeleton-row"></div>'.repeat(8)}</div>
   </div>`;
@@ -687,12 +722,28 @@ async function viewBoard() {
   const fixtures = board.fixtures ?? [];
   const leagues = [...new Set(fixtures.map((f) => f.league).filter(Boolean))].sort();
 
+  /*
+   * How far the board actually reaches, which is not the same as the window
+   * asked for.
+   *
+   * `get_board` takes the first 300 rows and counts them afterwards, so on a
+   * busy weekend "next 240 hours" and "next 48 hours" return the same three
+   * hundred games and the API's own `count` says 300 either way. The filter
+   * then looks broken, because from the reader's side it is. Naming the last
+   * kick-off says what they are really looking at, and it reads correctly on a
+   * quiet Tuesday when the window is the thing doing the limiting.
+   */
+  const kickoffs = fixtures.map((f) => f.kickoff).filter(Boolean);
+  const furthest = kickoffs.length ? Math.max(...kickoffs) : null;
+  const capped = furthest !== null && furthest < Date.now() / 1000 + (state.hours - 6) * 3600;
+
   app.innerHTML = `
   <div class="wrap section dense">
     <div class="section-head">
       <div>
         <h2 class="display">The board</h2>
-        <p>${fixtures.length} games on, ${fixtures.filter((f) => f.top_pick).length} of them with a call.</p>
+        <p>${fixtures.length} games on, ${fixtures.filter((f) => f.top_pick).length} of them with a call.${
+          furthest ? ` The last of them kicks off ${esc(dayLabel(furthest).toLowerCase())}.` : ''}</p>
       </div>
       <div class="filters">
         <select id="hours-filter" aria-label="Time window">
@@ -705,6 +756,8 @@ async function viewBoard() {
       </div>
     </div>
     <div class="rows" id="grid"></div>
+    ${capped ? `<p class="board-foot">That is everything the board carries today.
+      A longer window will not add to it until more fixtures are published.</p>` : ''}
   </div>`;
 
   const paint = () => {
@@ -714,19 +767,20 @@ async function viewBoard() {
         ? shown.map(rowHTML).join('')
         : `<div class="empty-state"><b>Nothing in this league right now</b>
              <span>Try a longer window, or clear the filter to see the whole board.</span></div>`;
-    wireCards();
   };
-  document.getElementById('hours-filter').onchange = (e) => { state.hours = Number(e.target.value); viewBoard(); };
-  document.getElementById('league-filter').onchange = (e) => { state.leagueName = e.target.value; paint(); };
+  // A longer window needs the board fetched again, so it goes through the
+  // router. A league is a filter over what is already here, so it repaints in
+  // place and only rewrites the address -- replaceState does not fire
+  // hashchange, which is what keeps that from turning into a second render.
+  document.getElementById('hours-filter').onchange = (e) => {
+    location.hash = boardHash(Number(e.target.value), state.leagueName);
+  };
+  document.getElementById('league-filter').onchange = (e) => {
+    state.leagueName = e.target.value;
+    history.replaceState(null, '', boardHash());
+    paint();
+  };
   paint();
-}
-
-function wireCards() {
-  for (const el of app.querySelectorAll('.card[data-id], .row[data-id]')) {
-    const go = () => { location.hash = `#/fixture/${el.dataset.id}`; };
-    el.onclick = go;
-    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
-  }
 }
 
 // ---------------------------------------------------------------- fixture
@@ -1234,19 +1288,15 @@ async function viewLeagues() {
     </div></div>
     <div class="cards">
       ${rows.map((e) => `
-        <article class="card" data-league="${esc(e.name)}" tabindex="0">
+        <a class="card" href="${esc(boardHash(state.hours, e.name))}">
           <div class="card-top"><span class="card-league">${crest(e.name, 'md', e.id, 'league')}<span>${esc(e.name)}</span></span></div>
           <div class="also">
             <span class="also-call">${e.n} <b>games</b></span>
             <span class="also-call">${e.picks} <b>calls</b></span>
           </div>
-        </article>`).join('')}
+        </a>`).join('')}
     </div>
   </div>`;
-
-  for (const el of app.querySelectorAll('[data-league]')) {
-    el.onclick = () => { state.leagueName = el.dataset.league; location.hash = '#/board'; };
-  }
 }
 
 
@@ -1716,7 +1766,7 @@ function cookieNotice() {
 // ---------------------------------------------------------------- routing
 
 async function route() {
-  const parts = (location.hash || '#/home').slice(2).split('/');
+  const { parts, params } = parseHash();
   const name = parts[0] || 'home';
   for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.route === name);
   document.getElementById('nav').classList.remove('open');
@@ -1724,7 +1774,7 @@ async function route() {
   window.scrollTo(0, 0);
   try {
     if (name === 'fixture' && parts[1]) return await viewFixture(parts[1]);
-    if (name === 'board') return await viewBoard();
+    if (name === 'board') return await viewBoard(params);
     if (name === 'leagues') return await viewLeagues();
     if (name === 'results') return await viewResults();
     if (name === 'pricing') return await viewPricing();
