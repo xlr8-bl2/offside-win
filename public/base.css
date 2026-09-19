@@ -270,12 +270,12 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   gap: 2px;
   flex: 0 0 auto;
   padding: 3px;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius);
   background: rgba(247, 244, 237, 0.05);
 }
 .nav a {
   padding: var(--space-2) var(--space-5);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   color: var(--chalk-2);

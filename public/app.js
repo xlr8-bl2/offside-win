@@ -49,6 +49,48 @@ function kickoffLabel(epoch) {
 }
 const isSoon = (epoch) => epoch && epoch * 1000 - Date.now() < 6 * 3600e3;
 
+/**
+ * What state a match is actually in.
+ *
+ * The board runs from six hours ago so that today's games stay on it, which
+ * means a third of it has already kicked off and a chunk of it has finished —
+ * and every one of them was rendered as though it were still to come, with a
+ * kick-off time and nothing else. A hundred and seventy-seven matches on a
+ * three-hundred-match board were lying about their state.
+ *
+ * The provider's status is authoritative where it has one. Where it says
+ * `notstarted` about a game that kicked off ninety minutes ago — which happens,
+ * because the feed lags — the clock is trusted over the flag, but only far
+ * enough to stop claiming the match is upcoming.
+ */
+const LIVE_STATES = new Set(['1st_half', '2nd_half', 'extra_time', 'penalties', 'live']);
+
+function matchState(f) {
+  const status = String(f?.status ?? '').toLowerCase();
+  if (status === 'finished' || status === 'ended' || status === 'aet' || status === 'ap') {
+    return { kind: 'ft', label: 'Full time', short: 'FT' };
+  }
+  if (status === 'halftime' || status === 'ht') {
+    return { kind: 'live', label: 'Half time', short: 'HT' };
+  }
+  if (LIVE_STATES.has(status)) return { kind: 'live', label: 'Live', short: 'LIVE' };
+  if (status === 'postponed' || status === 'cancelled' || status === 'canceled') {
+    return { kind: 'off', label: 'Postponed', short: 'OFF' };
+  }
+  const started = f?.kickoff && f.kickoff * 1000 < Date.now();
+  // Feed says not started, clock says otherwise. Say "under way" rather than
+  // inventing a half we cannot see.
+  if (started) return { kind: 'live', label: 'Under way', short: 'LIVE' };
+  return { kind: 'upcoming', label: '', short: '' };
+}
+
+/** The red dot and the word, for anything that is happening now. */
+function liveBadge(state) {
+  if (state.kind === 'upcoming') return '';
+  const cls = state.kind === 'live' ? 'live-badge' : 'live-badge done';
+  return `<span class="${cls}">${state.kind === 'live' ? '<i></i>' : ''}${esc(state.short)}</span>`;
+}
+
 const MINOR = new Set(['the', 'of', 'a', 'an', 'and', 'in', 'on', 'at', 'de', 'del', 'da', 'do']);
 
 function unshout(text) {
@@ -306,13 +348,14 @@ function nextRailHTML(fixtures) {
       ${soon.map((f) => {
         const k = new Date(f.kickoff * 1000);
         const time = k.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const st = matchState(f);
         const mark = (f.top_pick || f.locked) ? '<span class="pill call">call</span>' : '';
         return `
         <a class="nextcard" href="#/fixture/${encodeURIComponent(f.id)}">
           <span class="nextcard-side">${crest(f.home, 'sm', f.home_id)}<span>${esc(f.home)}</span>${mark}</span>
           <span class="nextcard-side">${crest(f.away, 'sm', f.away_id)}<span>${esc(f.away)}</span></span>
           <span class="nextcard-foot">
-            <span>${esc(dayLabel(f.kickoff))}</span>
+            <span>${st.kind === 'upcoming' ? esc(dayLabel(f.kickoff)) : liveBadge(st)}</span>
             <time>${clock}${esc(time)}</time>
           </span>
         </a>`;
@@ -435,17 +478,19 @@ function rowHTML(f) {
   // 24-hour: "11:00 PM" wraps in the column, and a board is read the way a
   // fixture list is printed.
   const time = k.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const state = matchState(f);
   const day = dayLabel(f.kickoff);
 
   return `
-  <a class="row" href="#/fixture/${encodeURIComponent(f.id)}"
+  <a class="row ${state.kind}" href="#/fixture/${encodeURIComponent(f.id)}"
      aria-label="${esc(f.home)} versus ${esc(f.away)}">
     <div class="row-when">
       <span class="row-league" title="${esc(f.league ?? '')}">
         ${crest(f.league ?? '', 'xs', f.league_id, 'league')}
       </span>
-      <span class="row-time">${esc(time)}</span>
-      <span class="row-day">${esc(day)}</span>
+      ${state.kind === 'upcoming'
+        ? `<span class="row-time">${esc(time)}</span><span class="row-day">${esc(day)}</span>`
+        : `<span class="row-time">${liveBadge(state)}</span><span class="row-day">${esc(time)}</span>`}
     </div>
 
     <div class="row-teams">
@@ -461,10 +506,10 @@ function rowHTML(f) {
 
     <div class="row-price">
       ${pick ? `
-        <span class="odds">${dec(pick.odds)}</span>
-        ${pick.bookmaker ? `<span class="odds-book">at <b>${esc(pick.bookmaker)}</b></span>` : ''}
-        <span class="odds-return">${esc(d.returns)}</span>`
-        : f.locked ? `<span class="odds-locked" aria-hidden="true">••••</span>` : ''}
+        <span class="odds-tile"><span class="odds">${dec(pick.odds)}</span></span>
+        ${pick.bookmaker ? `<span class="odds-book">${esc(pick.bookmaker)}</span>` : ''}`
+        : f.locked ? `<span class="odds-tile locked"><span class="odds-locked" aria-hidden="true">••</span></span>
+                      <span class="odds-book">members</span>` : ''}
     </div>
   </a>`;
 }

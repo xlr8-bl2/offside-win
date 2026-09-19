@@ -28,6 +28,7 @@ import {
   bestLink,
   coveredSlugs,
   creditOf,
+  describe,
   fetchImage,
   teamsIn,
 } from './sportradar.ts';
@@ -97,6 +98,7 @@ export async function syncTeamShots(now = new Date()): Promise<SyncReport> {
 
   await ensureBucket();
   const byName = await teamsByName();
+  const unmatched = new Map<string, number>();
   const done = await fresh();
   const slugs = coveredSlugs();
   report.leagues = slugs.length;
@@ -127,10 +129,13 @@ export async function syncTeamShots(now = new Date()): Promise<SyncReport> {
 
       for (const asset of list) {
         report.assets++;
+        if (config.images.debug && report.assets <= 5) console.log(`  DEBUG ${describe(asset)}`);
         const link = bestLink(asset.links);
         if (!link) continue;
 
+        let hit = false;
         for (const name of teamsIn(asset)) {
+          if (byName.has(name)) hit = true;
           const ids = byName.get(name);
           if (!ids) continue;
           if (ids.length > 1) { report.skipped++; continue; }
@@ -161,8 +166,20 @@ export async function syncTeamShots(now = new Date()): Promise<SyncReport> {
             console.warn(`  team ${teamId}: ${(err as Error).message}`);
           }
         }
+        // Names Getty used that we have no team for. Capped, because a sweep
+        // that matches nothing would otherwise print four hundred lines and
+        // bury the one fact worth having: what they call the clubs.
+        if (!hit) for (const n of teamsIn(asset)) unmatched.set(n, (unmatched.get(n) ?? 0) + 1);
       }
     }
+  }
+
+  // The diagnostic that matters when the numbers look wrong. A sweep that sees
+  // four hundred assets and matches none of them is a naming problem, and this
+  // is the line that says so instead of leaving it to be guessed at.
+  if (unmatched.size) {
+    const top = [...unmatched.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40);
+    console.log(`  no team of ours for ${unmatched.size} names; commonest: ${top.map(([n, c]) => `${n} (${c})`).join(', ')}`);
   }
   return report;
 }

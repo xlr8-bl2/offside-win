@@ -110,11 +110,13 @@
 .tag {
   display: inline-flex;
   align-items: center;
-  padding: 4px var(--space-4);
+  padding: 3px var(--space-3);
   border: var(--border) solid transparent;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   font-size: var(--text-2xs);
-  font-weight: var(--weight-bold);
+  font-weight: var(--weight-black);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 .tag.won  { background: rgba(61, 180, 104, 0.16); color: var(--won); }
@@ -344,14 +346,15 @@
   flex: none;
   min-width: 20px;
   padding: 1px var(--space-2);
-  border-radius: var(--radius-sm);
-  background: rgba(247, 244, 237, 0.06);
+  border-radius: 2px;
   font-size: var(--text-2xs);
-  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-black);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   text-align: center;
-  color: var(--chalk-2);
+  color: var(--chalk-3);
 }
-.nextcard-side .pill.call { background: var(--floodlight-dim); color: var(--floodlight-hi); font-weight: var(--weight-bold); }
+.nextcard-side .pill.call { background: var(--floodlight); color: #fff; }
 .nextcard-foot {
   display: flex;
   align-items: center;
@@ -672,8 +675,8 @@
   gap: var(--space-3);
   flex: none;
   padding: var(--space-2) var(--space-4) var(--space-2) var(--space-2);
-  border: var(--border) solid var(--hairline);
-  border-radius: var(--radius-pill);
+  border: var(--border) solid var(--rule);
+  border-radius: var(--radius-sm);
   background: var(--stand);
   font-size: var(--text-sm);
   color: var(--chalk-2);
@@ -837,8 +840,9 @@
 .also { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .also-call {
   padding: var(--space-2) var(--space-4);
-  border: var(--border) solid var(--hairline);
-  border-radius: var(--radius-pill);
+  border: var(--border) solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--terrace);
   font-size: var(--text-xs);
   color: var(--chalk-2);
   white-space: nowrap;
@@ -942,29 +946,106 @@
  * widths and the decimal points stop lining up — and a board that refreshes
  * every fifteen minutes jitters on every tick.
  */
+/*
+ * The price is a surface, not a caption.
+ *
+ * This is the single change that makes the page read as a betting product
+ * rather than as an article about football. Every book in the world puts its
+ * price in a bordered box that looks like it can be pressed -- bet365, Stake,
+ * FanDuel, all of them -- because the price is the thing the page is FOR, and a
+ * number set in coloured text beside a paragraph is a footnote.
+ *
+ * It is not a link and does not pretend to be one: the whole row is the link.
+ * What the box buys is weight on the page.
+ */
+.odds-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 76px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--terrace);
+  border: var(--border) solid var(--rule-firm);
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.row:hover .odds-tile,
+.card:hover .odds-tile { background: var(--floodlight); border-color: var(--floodlight); }
+.row:hover .odds-tile .odds,
+.card:hover .odds-tile .odds { color: #fff; }
+
 .odds {
   display: block;
   font-family: var(--display);
   font-variation-settings: 'wdth' var(--condensed);
   font-variant-numeric: tabular-nums;
-  font-weight: var(--weight-bold);
+  font-weight: var(--weight-black);
   font-size: var(--text-xl);
   letter-spacing: var(--tracking-num);
   line-height: 1;
   color: var(--floodlight-hi);
+  transition: color var(--dur-fast) var(--ease-out);
 }
-.odds-book { display: block; margin-top: 5px; font-size: var(--text-2xs); color: var(--chalk-3); white-space: nowrap; }
-.odds-book b { color: var(--chalk-2); font-weight: var(--weight-medium); }
-.odds-return { display: block; margin-top: 2px; font-size: var(--text-2xs); color: var(--chalk-3); font-variant-numeric: tabular-nums; }
+.odds-book {
+  display: block;
+  margin-top: 5px;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--chalk-3);
+  white-space: nowrap;
+}
+.odds-tile.locked { border-style: dashed; border-color: var(--floodlight-dim); background: transparent; }
 .odds-locked {
   display: block;
   font-family: var(--display);
+  font-weight: var(--weight-black);
   font-size: var(--text-xl);
-  letter-spacing: 0.1em;
+  letter-spacing: 0.14em;
   line-height: 1;
   color: var(--floodlight);
-  opacity: 0.55;
 }
+
+/* ---------------------------------------------------------- live state */
+
+/*
+ * A match that is happening now says so, in red, with a dot that pulses.
+ *
+ * The board runs from six hours ago so today's games stay on it, and every one
+ * of those was rendered with a kick-off time as though it had not happened yet.
+ * On a three-hundred-match board that was a hundred and seventy-seven matches
+ * lying about their state.
+ */
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--body);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-black);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lost);
+  white-space: nowrap;
+}
+.live-badge i {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: ping 1.8s var(--ease-in-out) infinite;
+}
+.live-badge.done { color: var(--chalk-3); }
+@keyframes ping {
+  0%   { box-shadow: 0 0 0 0 rgba(203, 49, 49, 0.55); }
+  70%  { box-shadow: 0 0 0 6px rgba(203, 49, 49, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(203, 49, 49, 0); }
+}
+
+/* A game in progress earns a marked edge; a finished one recedes. */
+.row.live { border-left: 2px solid var(--lost); }
+.row.ft { opacity: 0.62; }
+.row.ft:hover { opacity: 1; }
 
 @media (max-width: 760px) {
   .row {
@@ -1016,7 +1097,7 @@
   background-color: var(--terrace);
   color: var(--chalk);
   border: var(--border) solid var(--rule-firm);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   cursor: pointer;
@@ -1137,8 +1218,8 @@
   flex: none;
   padding: var(--space-2) var(--space-5) var(--space-2) var(--space-2);
   background: var(--stand);
-  border: var(--border) solid var(--hairline);
-  border-radius: var(--radius-pill);
+  border: var(--border) solid var(--rule);
+  border-radius: var(--radius-sm);
   font-size: var(--text-xs);
   color: var(--chalk-2);
   white-space: nowrap;
@@ -1263,10 +1344,11 @@
 .numbers { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-5); }
 .numbers span {
   padding: var(--space-2) var(--space-4);
-  border: var(--border) solid var(--hairline);
-  border-radius: var(--radius-pill);
+  border: var(--border) solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--terrace);
   font-size: var(--text-xs);
-  color: var(--chalk-3);
+  color: var(--chalk-2);
 }
 .numbers b { color: var(--chalk); font-weight: var(--weight-medium); font-variant-numeric: tabular-nums; }
 

@@ -73,5 +73,6 @@ jobs:
           # the trial converts; pointing a trial key at the production path
           # returns 403 rather than anything that explains itself.
           SPORTRADAR_IMAGES_LEVEL: ${{ vars.SPORTRADAR_IMAGES_LEVEL || 't' }}
-          SPORTRADAR_IMAGE_DAYS: ${{ inputs.days || '7' }}
+          SPORTRADAR_IMAGE_DAYS: ${{ inputs.days || '3' }}
+          SPORTRADAR_DEBUG: '1'
         run: npm run images

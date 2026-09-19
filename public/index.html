@@ -25,22 +25,16 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://sports.bzzoiro.com">
 <!--
-  Two faces, not three.
+  Archivo for impact, Inter for the UI.
 
-  Bricolage Grotesque carries the display voice AND the condensed cut, because
-  it has a width axis (75-100) and the site uses it: a price column and a long
-  club name both want a narrower cut of the same face, not a fourth typeface.
-  Saira Condensed used to be that third face and is gone — one fewer request,
-  one fewer thing to keep in tune.
+  Archivo carries a width axis (62-125) and weight to 900, so one family gives
+  the condensed scoreboard cut AND the loud headline without a second request.
+  Bricolage Grotesque, which this replaces, is an editorial display face, and
+  "reads as editorial rather than as a betting product" was the complaint this
+  redesign exists to answer.
 -->
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..600&family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=Inter:wght@400;500;600;700&display=swap">
 
-<!--
-  Three layers, in this order and no other. tokens.css defines every value;
-  base.css owns the shell; components.css owns what sits inside it. Neither of
-  the last two declares a token, because whichever loads last would silently
-  win the cascade.
--->
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/base.css">
 <link rel="stylesheet" href="/components.css">
