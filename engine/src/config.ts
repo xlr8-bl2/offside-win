@@ -42,6 +42,11 @@ export const config = {
     level: (process.env.SPORTRADAR_IMAGES_LEVEL ?? 't') as 't' | 'p',
     /** Days back to sweep for action shots. A week covers a midweek round. */
     days: num('SPORTRADAR_IMAGE_DAYS', 7),
+    /** Trial keys are one request a second. 1100ms leaves room for clock skew. */
+    minGapMs: num('SPORTRADAR_MIN_GAP_MS', 1100),
+    retries: num('SPORTRADAR_RETRIES', 3),
+    /** Dump what the manifests actually contain, for a run that matches none. */
+    debug: process.env.SPORTRADAR_DEBUG === '1',
   },
 
   /** Supabase Storage, which is where re-hosted photography lands. */

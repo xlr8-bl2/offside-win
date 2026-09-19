@@ -90,39 +90,44 @@
   /* ------------------------------------------------------------ typography */
 
   /*
-   * TWO FACES, NOT THREE.
+   * ARCHIVO FOR IMPACT, INTER FOR THE UI.
    *
-   * The previous system ran Bricolage Grotesque for display, Inter for UI and
-   * Saira Condensed for prices and long club names. The design data's sports
-   * pairing is Barlow plus Barlow Condensed — and the useful part of that is
-   * not Barlow, which is a face you would reach for on any project. It is the
-   * shape of the answer: one superfamily carrying both the display voice and
-   * the condensed cut, rather than three unrelated faces.
+   * Bricolage Grotesque is gone, and its being gone is a fix rather than a
+   * preference. It is an editorial display face -- quirky, wide, drawn for
+   * magazine covers -- and "this reads as editorial rather than as a betting
+   * product" was the single most repeated complaint about this site. The face
+   * was one of the reasons why.
    *
-   * Bricolage Grotesque has a width axis. At wdth 75 it is its own condensed,
-   * so the third face was buying nothing that the first did not already
-   * contain. Sofascore commissioned a condensed width axis for exactly this
-   * reason — the professional answer to Borussia Mönchengladbach in a 96px
-   * column is a condensed cut, not an ellipsis.
+   * Archivo is a grotesque built for news and signage with a real width axis
+   * (62-125) and a weight axis to 900. At wdth 80 / wght 700 it is tight,
+   * square-shouldered and fast -- the register of a scoreboard. It also solves
+   * the long-club-name problem the old width axis was there for, and its
+   * tabular figures are properly drawn, which matters on a page that is mostly
+   * numbers.
+   *
+   * The bundled font data proposes Barlow Condensed for sports. Barlow is a
+   * fine face and the wrong answer here for the same reason as ever: it is what
+   * everybody reaches for, and a separate condensed sibling is a second family
+   * where one variable one does the job.
    */
-  --display: 'Bricolage Grotesque', system-ui, sans-serif;
-  --body:    'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --display: Archivo, 'Archivo Expanded', system-ui, sans-serif;
+  --body:    Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
 
-  /* Condensed is a width, not a family. Apply alongside --display. */
-  --wide:      100;
-  --condensed: 80;
-  --tight:     75;
+  /* Widths. The scoreboard register is narrow; wide is for a single headline. */
+  --wide:      112;
+  --condensed: 84;
+  --tight:     72;
 
   /*
-   * Small, and that is the point.
-   *
-   * The previous scale topped out at 120px and treated the front door as a
-   * poster. The reference this is built to has no display typography anywhere:
-   * its section headings are about 18px, its matchup is about 34px, and
-   * everything else is 12-14px. A club site is a dense information surface and
-   * the photography carries the drama, not the type. Every step below came down
-   * and the top two came off entirely.
+   * A weight ceiling of 600 was right for an editorial page and is wrong here.
+   * A scoreboard shouts. 800 is reserved for numbers and the one headline per
+   * screen that is allowed to be loud.
    */
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-bold:   700;
+  --weight-black:  800;
+
   --text-2xs: 0.6875rem;
   --text-xs:  0.75rem;
   --text-sm:  0.8125rem;
@@ -134,12 +139,6 @@
   --text-4xl: clamp(1.75rem, 3vw, 2.375rem);
   /* The matchup on a masthead, and nothing else on the site. */
   --text-hero: clamp(1.625rem, 2.9vw, 2.25rem);
-
-  /* Ceiling of 600. Bold-everything is the fastest way to look cheap, and the
-     display face carries emphasis through width instead. */
-  --weight-normal: 400;
-  --weight-medium: 500;
-  --weight-bold:   600;
 
   --leading-tight:  1.02;
   --leading-snug:   1.3;
@@ -205,9 +204,16 @@
    * status chips, and gives every actual button an 8px corner. That one change
    * does more to make a page look like a product than any amount of colour.
    */
-  --radius-sm: 6px;
-  --radius:    10px;
-  --radius-lg: 14px;
+  --radius-sm: 4px;
+  --radius:    8px;
+  --radius-lg: 12px;
+  /*
+   * `--radius-pill` is for things that are actually round -- a crest, a status
+   * dot, a progress track. It is NOT for labels. Every tag, chip, badge and
+   * navigation item on this site was a 999px lozenge, which is the shape a
+   * marketing page uses for a feature list, and thirteen of them on one screen
+   * is what "generically styled" looks like. Labels are square now.
+   */
   --radius-pill: 999px;
 
   --border: 1px;

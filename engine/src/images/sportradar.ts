@@ -127,12 +127,42 @@ class ImagesError extends Error {
   }
 }
 
+/**
+ * One request at a time, with a floor on the gap between them.
+ *
+ * A trial key is one request a second. Firing twenty leagues times seven days
+ * at it as fast as Node can open sockets got 74 rejections out of 98 calls on
+ * the first live run — the key was fine, the manners were not. Serialising and
+ * spacing the calls turns a burst that mostly fails into a sweep that mostly
+ * works, and the job has forty minutes to do it in.
+ */
+let chain: Promise<unknown> = Promise.resolve();
+let last = 0;
+
+function throttle<T>(fn: () => Promise<T>): Promise<T> {
+  const run = chain.then(async () => {
+    const wait = config.images.minGapMs - (Date.now() - last);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    last = Date.now();
+    return fn();
+  });
+  // Keep the chain alive even when a link rejects, or one failure stops the
+  // sweep dead for every league behind it.
+  chain = run.catch(() => undefined);
+  return run as Promise<T>;
+}
+
 async function get(url: string): Promise<Response> {
   if (!config.images.key) throw new Error('SPORTRADAR_GETTY_KEY is not set.');
-  const res = await fetch(url, {
-    headers: { 'x-api-key': config.images.key, accept: 'application/json' },
-  });
-  return res;
+  for (let attempt = 0; ; attempt++) {
+    const res = await throttle(() => fetch(url, {
+      headers: { 'x-api-key': config.images.key, accept: 'application/json' },
+    }));
+    // 429 on a trial key is a pace problem, not a permission one. Back off and
+    // come back rather than dropping the league.
+    if (res.status !== 429 || attempt >= config.images.retries) return res;
+    await new Promise((r) => setTimeout(r, 1500 * 2 ** attempt));
+  }
 }
 
 /**
@@ -194,11 +224,28 @@ export function bestLink(links: AssetLink[], minWidth = 1000): AssetLink | null 
   return landscape[0] ?? null;
 }
 
-/** The clubs an asset is tagged with, normalised for matching against ours. */
+/**
+ * The clubs an asset is tagged with, normalised for matching against ours.
+ *
+ * The first live run matched zero of 436 assets, so nothing here assumes what
+ * `type` a club ref carries. Every named ref is offered as a candidate and the
+ * caller decides which ones are teams it knows — a ref that is a player or a
+ * competition simply will not be in our team table, so it costs a lookup and
+ * nothing else. Guessing the discriminator was what produced zero matches.
+ */
 export function teamsIn(asset: Asset): string[] {
-  return (asset.refs ?? [])
-    .filter((r) => r.type === 'organization' && r.name)
-    .map((r) => normalise(r.name as string));
+  return [...new Set(
+    (asset.refs ?? [])
+      .map((r) => r.name)
+      .filter((n): n is string => typeof n === 'string' && n.trim().length > 1)
+      .map((n) => normalise(n)),
+  )];
+}
+
+/** Everything about one asset, for working out why a sweep matched nothing. */
+export function describe(asset: Asset): string {
+  const refs = (asset.refs ?? []).map((r) => `${r.type ?? '?'}:${r.name ?? '?'}`).join(' | ');
+  return `${asset.id} title=${JSON.stringify(asset.title ?? '')} refs=[${refs}]`;
 }
 
 /**
