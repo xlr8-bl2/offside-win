@@ -26,10 +26,12 @@ import {
   type Asset,
   assetUrl,
   bestLink,
+  budgetReport,
   coveredSlugs,
   creditOf,
   describe,
   fetchImage,
+  leagueSlug,
   clubCandidates,
 } from './sportradar.ts';
 import { ensureBucket, put } from './store.ts';
@@ -87,6 +89,30 @@ function takenAt(asset: Asset): number | null {
   return Number.isFinite(t) ? Math.floor(t / 1000) : null;
 }
 
+/**
+ * The competitions with at least one team still wanting a photograph.
+ *
+ * Reads the upcoming board rather than the whole team table: a photograph is
+ * only worth having for a side somebody is about to see on a fixture page.
+ */
+async function wantedSlugs(done: Set<number>): Promise<string[]> {
+  const rows = await select<{ league: string; home_team_id: number; away_team_id: number }>(
+    `SELECT l.name AS league, f.home_team_id, f.away_team_id
+       FROM fixture f JOIN league l ON l.id = f.league_id
+      WHERE f.kickoff BETWEEN $1 AND $2`,
+    [Math.floor(Date.now() / 1000) - 3 * 86_400, Math.floor(Date.now() / 1000) + 10 * 86_400],
+  );
+  const slugs = new Set<string>();
+  for (const r of rows) {
+    const slug = leagueSlug(r.league);
+    if (!slug) continue;
+    if (!done.has(Number(r.home_team_id)) || !done.has(Number(r.away_team_id))) slugs.add(slug);
+  }
+  // Nothing on the board maps to a covered competition: fall back to the full
+  // list rather than silently doing nothing on a quiet midweek.
+  return slugs.size ? [...slugs] : coveredSlugs();
+}
+
 export async function syncTeamShots(now = new Date()): Promise<SyncReport> {
   const report: SyncReport = {
     leagues: 0, manifests: 0, assets: 0, matched: 0, stored: 0, skipped: 0, failed: 0,
@@ -100,8 +126,27 @@ export async function syncTeamShots(now = new Date()): Promise<SyncReport> {
   const byName = await teamsByName();
   const unmatched = new Map<string, number>();
   const done = await fresh();
-  const slugs = coveredSlugs();
+
+  /*
+   * Only ask for what is actually wanted.
+   *
+   * The sweep used to walk every covered competition for every day in the
+   * window -- fifteen leagues by seven days, a hundred and five calls -- whether
+   * or not a single team in them needed a photograph. On a trial key whose
+   * budget is the scarce thing, that is most of a month's requests spent on
+   * competitions we already have.
+   *
+   * What we want is a photograph for the teams on the board that have not got
+   * a fresh one. So: find those teams, find which competitions they play in,
+   * and sweep only those. On the second night it is a handful of calls.
+   */
+  const slugs = await wantedSlugs(done);
   report.leagues = slugs.length;
+  if (!slugs.length) {
+    console.log('Every team on the board has a recent photograph. Nothing to fetch.');
+    return report;
+  }
+  console.log(`Sweeping ${slugs.length} competitions: ${slugs.join(', ')}`);
 
   // Newest day first, so the first photograph a team gets is its most recent.
   const days = Array.from({ length: config.images.days }, (_, i) => {
@@ -110,8 +155,12 @@ export async function syncTeamShots(now = new Date()): Promise<SyncReport> {
     return d;
   });
 
+  outer:
   for (const day of days) {
     for (const slug of slugs) {
+      // The breaker has opened or the budget is gone: stop the run rather than
+      // spend another twenty minutes being told no.
+      if (budgetReport().open || budgetReport().spent >= config.images.budget) break outer;
       let list: Asset[];
       try {
         const m = await actionShotsByDate(slug, day);
@@ -186,6 +235,15 @@ export async function syncTeamShots(now = new Date()): Promise<SyncReport> {
   // The diagnostic that matters when the numbers look wrong. A sweep that sees
   // four hundred assets and matches none of them is a naming problem, and this
   // is the line that says so instead of leaving it to be guessed at.
+  const budget = budgetReport();
+  if (budget.open) {
+    console.log(
+      `  STOPPED: the key refused ${config.images.tripAfter} calls in a row. `
+      + 'The message above carries the provider\'s own reason and plan quota.',
+    );
+  }
+  console.log(`  ${budget.spent} provider requests spent this run (ceiling ${config.images.budget}).`);
+
   if (unmatched.size) {
     const top = [...unmatched.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40);
     console.log(`  no team of ours for ${unmatched.size} names; commonest: ${top.map(([n, c]) => `${n} (${c})`).join(', ')}`);

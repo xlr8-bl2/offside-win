@@ -121,10 +121,45 @@ function root(slug: string, provider: string): string {
   return `${BASE}/soccer-images-${config.images.level}3/${provider}/${slug}`;
 }
 
-class ImagesError extends Error {
+export class ImagesError extends Error {
   constructor(readonly status: number, readonly url: string, body: string) {
-    super(`Sportradar images ${status} for ${url}: ${body.slice(0, 200)}`);
+    super(`Sportradar images ${status} for ${url}: ${body.slice(0, 300)}`);
   }
+}
+
+/**
+ * A breaker, because a refused key must not be ground against for an hour.
+ *
+ * The fifth live run made ninety-eight calls, every one of them refused, and
+ * took twenty-two minutes to do it. Worse, each refusal was retried three
+ * times, so ninety-eight rejections actually cost close to four hundred
+ * requests against a trial key whose budget is the scarce thing here. A sweep
+ * that is being turned away should stop, not persevere.
+ *
+ * Counted consecutively rather than in total: one 429 in the middle of an
+ * otherwise healthy sweep is a blip, fifteen in a row is an answer.
+ */
+let consecutiveRefusals = 0;
+let open = false;
+let spent = 0;
+
+export function budgetReport(): { spent: number; open: boolean } {
+  return { spent, open };
+}
+
+export function resetBudget(): void {
+  consecutiveRefusals = 0;
+  open = false;
+  spent = 0;
+}
+
+/** Sportradar states the plan's quota on every response. Worth reading. */
+function quotaHeaders(res: Response): string {
+  const keys = [
+    'x-plan-quota-allotted', 'x-plan-quota-current', 'x-plan-quota-expires',
+    'x-plan-qps-allotted', 'x-plan-qps-current', 'retry-after',
+  ];
+  return keys.map((k) => `${k}=${res.headers.get(k) ?? '-'}`).join(' ');
 }
 
 /**
@@ -154,15 +189,31 @@ function throttle<T>(fn: () => Promise<T>): Promise<T> {
 
 async function get(url: string): Promise<Response> {
   if (!config.images.key) throw new Error('SPORTRADAR_GETTY_KEY is not set.');
-  for (let attempt = 0; ; attempt++) {
-    const res = await throttle(() => fetch(url, {
-      headers: { 'x-api-key': config.images.key, accept: 'application/json' },
-    }));
-    // 429 on a trial key is a pace problem, not a permission one. Back off and
-    // come back rather than dropping the league.
-    if (res.status !== 429 || attempt >= config.images.retries) return res;
-    await new Promise((r) => setTimeout(r, 1500 * 2 ** attempt));
+  if (open) {
+    throw new ImagesError(429, url, 'not sent: the key refused every recent call');
   }
+  if (spent >= config.images.budget) {
+    throw new ImagesError(0, url, `not sent: this run's budget of ${config.images.budget} requests is spent`);
+  }
+
+  const res = await throttle(() => fetch(url, {
+    headers: { 'x-api-key': config.images.key, accept: 'application/json' },
+  }));
+  spent++;
+
+  if (res.status === 429) {
+    consecutiveRefusals++;
+    // Read the body and the plan headers rather than assuming what 429 means.
+    // The code assumed "too fast" and hardcoded that into the error, which is
+    // why five runs went by without anyone knowing whether the key was being
+    // paced or was simply out of requests.
+    const body = await res.text().catch(() => '');
+    if (consecutiveRefusals >= config.images.tripAfter) open = true;
+    throw new ImagesError(429, url, `${body.trim() || '(empty body)'} | ${quotaHeaders(res)}`);
+  }
+
+  consecutiveRefusals = 0;
+  return res;
 }
 
 /**
@@ -179,7 +230,6 @@ async function manifest(url: string): Promise<Manifest | null> {
   if (res.status === 403) {
     throw new ImagesError(403, url, 'key rejected — check the trial covers soccer images');
   }
-  if (res.status === 429) throw new ImagesError(429, url, 'rate limited');
   if (!res.ok) throw new ImagesError(res.status, url, await res.text());
   const body = (await res.json()) as Manifest;
   return { ...body, assetlist: body.assetlist ?? [] };
