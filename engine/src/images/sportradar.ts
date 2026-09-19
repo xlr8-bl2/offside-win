@@ -190,7 +190,7 @@ function throttle<T>(fn: () => Promise<T>): Promise<T> {
 async function get(url: string): Promise<Response> {
   if (!config.images.key) throw new Error('SPORTRADAR_GETTY_KEY is not set.');
   if (open) {
-    throw new ImagesError(429, url, 'not sent: the key refused every recent call');
+    throw new ImagesError(429, url, 'not sent: the key is out of quota or refusing every call');
   }
   if (spent >= config.images.budget) {
     throw new ImagesError(0, url, `not sent: this run's budget of ${config.images.budget} requests is spent`);
@@ -202,14 +202,30 @@ async function get(url: string): Promise<Response> {
   spent++;
 
   if (res.status === 429) {
-    consecutiveRefusals++;
-    // Read the body and the plan headers rather than assuming what 429 means.
-    // The code assumed "too fast" and hardcoded that into the error, which is
-    // why five runs went by without anyone knowing whether the key was being
-    // paced or was simply out of requests.
-    const body = await res.text().catch(() => '');
-    if (consecutiveRefusals >= config.images.tripAfter) open = true;
-    throw new ImagesError(429, url, `${body.trim() || '(empty body)'} | ${quotaHeaders(res)}`);
+    /*
+     * Sportradar says 429 for two unrelated things, and they want opposite
+     * responses:
+     *
+     *   {"message":"Too Many Requests"}  the per-second limit. Transient.
+     *                                    Waiting a moment fixes it.
+     *   {"message":"Limit Exceeded"}     the plan's request quota is gone.
+     *                                    Waiting does nothing; only the
+     *                                    billing period turning over helps.
+     *
+     * Five runs treated both as pacing, retried each one three times, and so
+     * spent roughly four hundred requests of a finished quota discovering that
+     * the quota was finished. Reading the body is the whole difference.
+     */
+    const body = (await res.text().catch(() => '')).trim();
+    const exhausted = /limit exceeded/i.test(body);
+
+    if (exhausted) {
+      open = true;
+    } else {
+      consecutiveRefusals++;
+      if (consecutiveRefusals >= config.images.tripAfter) open = true;
+    }
+    throw new ImagesError(429, url, `${body || '(empty body)'} | ${quotaHeaders(res)}`);
   }
 
   consecutiveRefusals = 0;

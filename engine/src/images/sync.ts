@@ -252,8 +252,10 @@ export async function syncTeamShots(now = new Date()): Promise<SyncReport> {
   const budget = budgetReport();
   if (budget.open) {
     console.log(
-      `  STOPPED: the key refused ${config.images.tripAfter} calls in a row. `
-      + 'The message above carries the provider\'s own reason and plan quota.',
+      '  STOPPED. If the messages above say "Limit Exceeded", the key\'s request '
+      + 'quota is spent and only the billing period turning over will help — '
+      + 'waiting or slowing down will not. If they say "Too Many Requests", '
+      + 'raise SPORTRADAR_MIN_GAP_MS instead.',
     );
   }
   console.log(`  ${budget.spent} provider requests spent this run (ceiling ${config.images.budget}).`);
