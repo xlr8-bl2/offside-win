@@ -90,39 +90,40 @@
   /* ------------------------------------------------------------ typography */
 
   /*
-   * ARCHIVO FOR IMPACT, INTER FOR THE UI.
+   * BIG SHOULDERS DISPLAY FOR THE SCOREBOARD, GEIST FOR THE UI.
    *
-   * Bricolage Grotesque is gone, and its being gone is a fix rather than a
-   * preference. It is an editorial display face -- quirky, wide, drawn for
-   * magazine covers -- and "this reads as editorial rather than as a betting
-   * product" was the single most repeated complaint about this site. The face
-   * was one of the reasons why.
+   * Two wrong answers preceded this one and both were wrong the same way.
+   * Bricolage Grotesque is an editorial display face, drawn for magazine
+   * covers, and it is a reason this site read as editorial. Archivo is a
+   * competent workhorse grotesque with no opinion at all -- the safe pick, and
+   * on a product that is meant to feel like a Saturday afternoon, safe is the
+   * failure mode.
    *
-   * Archivo is a grotesque built for news and signage with a real width axis
-   * (62-125) and a weight axis to 900. At wdth 80 / wght 700 it is tight,
-   * square-shouldered and fast -- the register of a scoreboard. It also solves
-   * the long-club-name problem the old width axis was there for, and its
-   * tabular figures are properly drawn, which matters on a page that is mostly
-   * numbers.
+   * Big Shoulders Display was drawn by Patric King for Chicago's public design
+   * initiative and is made for signage: extremely tall, extremely narrow,
+   * squared terminals, no warmth in it whatsoever. It is the register of a
+   * stadium board and a tunnel sign, its numerals are unmistakable at speed,
+   * and a column of odds set in it looks like a price board rather than a
+   * table. It carries weight 400-800 and no width axis, which it does not need
+   * because narrow is what it already is.
    *
-   * The bundled font data proposes Barlow Condensed for sports. Barlow is a
-   * fine face and the wrong answer here for the same reason as ever: it is what
-   * everybody reaches for, and a separate condensed sibling is a second family
-   * where one variable one does the job.
+   * Geist takes the UI. Inter is the most-defaulted typeface on the web and
+   * using it is a decision nobody made; Geist is cleaner in the small sizes
+   * this interface mostly lives at and its tabular figures are properly drawn.
    */
-  --display: Archivo, 'Archivo Expanded', system-ui, sans-serif;
-  --body:    Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
-
-  /* Widths. The scoreboard register is narrow; wide is for a single headline. */
-  --wide:      112;
-  --condensed: 84;
-  --tight:     72;
+  --display: 'Big Shoulders Display', 'Arial Narrow', system-ui, sans-serif;
+  --body:    Geist, 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   /*
-   * A weight ceiling of 600 was right for an editorial page and is wrong here.
-   * A scoreboard shouts. 800 is reserved for numbers and the one headline per
-   * screen that is allowed to be loud.
+   * No width axis on the display face, so these are kept only because the
+   * component layer still names them and an unresolved var() invalidates the
+   * whole declaration. They resolve to 100 and do nothing.
    */
+  --wide:      100;
+  --condensed: 100;
+  --tight:     100;
+
+  /* A scoreboard shouts. 800 is for numbers and one headline per screen. */
   --weight-normal: 400;
   --weight-medium: 500;
   --weight-bold:   700;
@@ -133,12 +134,19 @@
   --text-sm:  0.8125rem;
   --text-md:  0.875rem;
   --text-lg:  1rem;
-  --text-xl:  1.25rem;
-  --text-2xl: 1.5rem;
-  --text-3xl: clamp(1.5rem, 2.4vw, 2rem);
-  --text-4xl: clamp(1.75rem, 3vw, 2.375rem);
+  /*
+   * From --text-xl up, these sizes are set in the display face, and the display
+   * face is Big Shoulders: a signage type so narrow that at a given pixel size
+   * it reads roughly a third smaller than a normal grotesque. Seen rendered for
+   * the first time at the old numbers, every heading on the site looked timid.
+   * These are the same scale pushed up to match it optically.
+   */
+  --text-xl:  1.625rem;
+  --text-2xl: 2rem;
+  --text-3xl: clamp(2rem, 3.2vw, 2.75rem);
+  --text-4xl: clamp(2.5rem, 4.2vw, 3.5rem);
   /* The matchup on a masthead, and nothing else on the site. */
-  --text-hero: clamp(1.625rem, 2.9vw, 2.25rem);
+  --text-hero: clamp(2.25rem, 4.4vw, 3.75rem);
 
   --leading-tight:  1.02;
   --leading-snug:   1.3;
@@ -146,11 +154,11 @@
 
   /* Tracking tightens as size grows. Flat tracking across a scale is the
      amateur tell. */
-  --tracking-hero: -0.045em;
-  --tracking-4xl: -0.035em;
-  --tracking-3xl: -0.03em;
-  --tracking-2xl: -0.022em;
-  --tracking-xl:  -0.015em;
+  --tracking-hero: -0.005em;
+  --tracking-4xl: -0.005em;
+  --tracking-3xl: 0;
+  --tracking-2xl: 0;
+  --tracking-xl:  0.005em;
   --tracking-md:  -0.006em;
   --tracking-sm:  0;
   --tracking-wide: 0.04em;
