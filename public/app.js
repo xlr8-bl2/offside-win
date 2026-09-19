@@ -496,12 +496,9 @@ function rowHTML(f) {
   const day = dayLabel(f.kickoff);
 
   return `
-  <a class="row ${state.kind}" href="#/fixture/${encodeURIComponent(f.id)}"
+  <a class="row is-${state.kind}" href="#/fixture/${encodeURIComponent(f.id)}"
      aria-label="${esc(f.home)} versus ${esc(f.away)}">
     <div class="row-when">
-      <span class="row-league" title="${esc(f.league ?? '')}">
-        ${crest(f.league ?? '', 'xs', f.league_id, 'league')}
-      </span>
       ${state.kind === 'upcoming'
         ? `<span class="row-time">${esc(time)}</span><span class="row-day">${esc(day)}</span>`
         : `<span class="row-time">${liveBadge(state)}</span><span class="row-day">${esc(time)}</span>`}
@@ -699,12 +696,33 @@ async function viewBoard(params = new URLSearchParams()) {
       A longer window will not add to it until more fixtures are published.</p>` : ''}
   </div>`;
 
+  /*
+   * Grouped by competition, which is how every board a reader has ever used is
+   * laid out. Ungrouped, three hundred fixtures across forty-four leagues is a
+   * list with no landmarks in it — and it meant every row had to carry its own
+   * competition badge to say where it was.
+   */
   const paint = () => {
     let shown = state.leagueName ? fixtures.filter((f) => f.league === state.leagueName) : fixtures;
     if (state.show === 'calls') shown = shown.filter((f) => f.top_pick || f.locked);
+
+    const groups = new Map();
+    for (const f of shown) {
+      const key = f.league ?? 'Other';
+      if (!groups.has(key)) groups.set(key, { id: f.league_id, list: [] });
+      groups.get(key).list.push(f);
+    }
+
     document.getElementById('grid').innerHTML =
       shown.length
-        ? shown.map(rowHTML).join('')
+        ? [...groups.entries()].map(([name, g]) => `
+            <section class="league-block">
+              <h3 class="league-head">
+                ${crest(name, 'xs', g.id, 'league')}${esc(name)}
+                <span class="count">${g.list.length}</span>
+              </h3>
+              ${g.list.map(rowHTML).join('')}
+            </section>`).join('')
         : `<div class="empty-state"><b>No calls here right now</b>
              <span>We would rather say nothing than pad the board. Switch to
              Everything to see the games we are passing on.</span></div>`;
