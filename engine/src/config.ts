@@ -30,6 +30,28 @@ export const config = {
   },
 
   /**
+   * Sportradar's Images API, for the football photography.
+   *
+   * `level` is `t` on a trial key and `p` on a production one, and it is part
+   * of the URL rather than a header, so pointing a trial key at the production
+   * path returns 403 rather than anything helpful. It defaults to trial because
+   * that is what a new key is.
+   */
+  images: {
+    key: process.env.SPORTRADAR_GETTY_KEY ?? '',
+    level: (process.env.SPORTRADAR_IMAGES_LEVEL ?? 't') as 't' | 'p',
+    /** Days back to sweep for action shots. A week covers a midweek round. */
+    days: num('SPORTRADAR_IMAGE_DAYS', 7),
+  },
+
+  /** Supabase Storage, which is where re-hosted photography lands. */
+  storage: {
+    url: (process.env.SUPABASE_URL ?? '').replace(/\/+$/, ''),
+    key: process.env.SUPABASE_SERVICE_KEY ?? '',
+    bucket: process.env.SUPABASE_IMAGE_BUCKET ?? 'shots',
+  },
+
+  /**
    * Which database the engine writes to. Postgres, since it reproduced the
    * board and the backtest (0.6200 against D1's 0.6209 over the same 34,210
    * matches) and the Worker now reads through it. D1 remains reachable with

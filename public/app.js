@@ -42,12 +42,25 @@ function kickoffLabel(epoch) {
   if (!epoch) return '';
   const d = new Date(epoch * 1000);
   const now = new Date();
-  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
   if (d.toDateString() === now.toDateString()) return `Today ${time}`;
   if (new Date(now.getTime() + 864e5).toDateString() === d.toDateString()) return `Tomorrow ${time}`;
   return `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} ${time}`;
 }
 const isSoon = (epoch) => epoch && epoch * 1000 - Date.now() < 6 * 3600e3;
+
+const MINOR = new Set(['the', 'of', 'a', 'an', 'and', 'in', 'on', 'at', 'de', 'del', 'da', 'do']);
+
+function unshout(text) {
+  const t = String(text ?? '').trim();
+  if (!t || t !== t.toUpperCase() || !/[A-Z]{4}/.test(t)) return t;
+  // Title case rather than sentence case: these are names. Flattening
+  // "THE MADRID DERBY" to "The madrid derby" trades one wrong reading for
+  // another, and a proper noun in lower case looks like a typo.
+  return t.toLowerCase().replace(/[^\s-]+/g, (w, i) => (
+    i > 0 && MINOR.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)
+  ));
+}
 
 // ---------------------------------------------------------- team identity
 
@@ -217,156 +230,188 @@ function venueShot(venueIds, className, eager = false) {
 /**
  * The masthead.
  *
- * Block-based rather than photograph-behind-a-scrim. Every product in this
- * category runs a full-bleed stadium shot under a heavy gradient with the
- * headline sitting on top of it, which is the house style, makes the type
- * unreadable whenever the photograph is bright, and was what this site did.
- * Here the picture is a bounded plate beside the type: the headline sits on
- * the ground where it is legible, and the photograph does the job a photograph
- * is good at, which is telling a reader in half a second what this is.
+ * One photograph, edge to edge, with the fixture in the bottom-left of it.
  *
- * With a fixture chosen the masthead is about tonight's game. Without one — an
- * empty board, a failed slate — it falls back to the standing headline rather
- * than to an empty stage.
+ * The version before this put the picture in a bounded plate beside the type,
+ * to keep the type off a bright photograph. That solved the problem by giving
+ * up the thing photography is for. The answer is a scrim shaped to the layout
+ * -- heaviest where the words are, clear where the subject is -- which is what
+ * every club site and every broadcaster does, and it is the single change that
+ * makes a page look like football rather than like a fixture list.
+ *
+ * The fixture is two rows, crest then name, rather than "A vs B" across one
+ * line. Stacked, the crests can be big enough to recognise.
  */
 function heroHTML(hero = null, venueIds = []) {
   const queue = hero?.venue_id ? [hero.venue_id, ...venueIds] : [].concat(venueIds).filter(Boolean);
-  const kicker = hero?.kicker || 'Every day, across 88 leagues';
 
-  // Long club names get the width axis rather than a smaller size. "RSC
-  // Anderlecht" at wdth 75 still reads as the headline; at 60% of the size it
-  // reads as a subtitle, which is not what a masthead is for.
-  const longest = hero ? Math.max(hero.home.length, hero.away.length) : 0;
-  const width = longest > 19 ? ' longer' : longest > 13 ? ' long' : '';
+  if (!hero) {
+    return `
+    <section class="hero" data-shot="${queue.length ? 'yes' : 'none'}">
+      <div class="hero-media">${venueShot(queue, '', true)}</div>
+      <div class="wrap hero-inner">
+        <div class="hero-copy">
+          <h1 class="display">The picks for the biggest games.</h1>
+          <p class="hero-blurb">Every call comes with the reason behind it. And the reason
+             not to like it. Eighty-eight competitions, updated through the day.</p>
+          <div class="hero-cta">
+            <a class="btn btn-primary" href="#/board">Today's picks</a>
+            <a class="btn btn-ghost" href="#/results">See the results</a>
+          </div>
+        </div>
+      </div>
+    </section>`;
+  }
 
-  const copy = hero
-    ? `<p class="kicker">${esc(kicker)}</p>
-       <h1 class="display xl hero-fx${width}" style="--fx-len:${Math.max(longest, 7)}">
-         <span>${esc(hero.home)}</span>
-         <em>vs</em>
-         <span>${esc(hero.away)}</span>
-       </h1>
-       <p class="lede">Our call on it, the argument for it, and the thing that argues against it.</p>
-       <div class="btn-row hero-cta">
-         <a class="btn btn-primary btn-lg" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">Read the analysis</a>
-         <a class="btn btn-ghost btn-lg" href="#/board">All of today's picks</a>
-       </div>`
-    : `<p class="kicker">${esc(kicker)}</p>
-       <h1 class="display xl">The picks for the <em>biggest</em> games.</h1>
-       <p class="lede">Every call comes with the reason behind it. And the reason not to like it.</p>
-       <div class="btn-row hero-cta">
-         <a class="btn btn-primary btn-lg" href="#/board">Today's picks</a>
-         <a class="btn btn-ghost btn-lg" href="#/results">See the results</a>
-       </div>`;
+  const when = kickoffLabel(hero.kickoff);
+  const bits = [hero.league, unshout(hero.kicker)].filter(Boolean);
 
   return `
   <section class="hero" data-shot="${queue.length ? 'yes' : 'none'}">
+    <div class="hero-media">${venueShot(queue, '', true)}</div>
     <div class="wrap hero-inner">
-      <div class="hero-copy">${copy}</div>
-      <div class="hero-plate">
-        <div class="hero-media">${venueShot(queue, '', true)}</div>
-        ${hero
-          ? `<div class="hero-meta">
-               ${crest(hero.home, 'md', hero.home_id)}
-               <span class="hero-vs">v</span>
-               ${crest(hero.away, 'md', hero.away_id)}
-               <span class="hero-meta-text">
-                 <b>${esc(hero.league)}</b>
-                 <span>${esc(kickoffLabel(hero.kickoff))}</span>
-               </span>
-             </div>`
-          : ''}
+      <div class="hero-copy">
+        <span class="timechip${isSoon(hero.kickoff) ? ' soon' : ''}">${esc(when)}</span>
+        <div class="fx-stack">
+          <span class="fx-line">${crest(hero.home, 'md', hero.home_id)}<span class="name">${esc(hero.home)}</span></span>
+          <span class="fx-line">${crest(hero.away, 'md', hero.away_id)}<span class="name">${esc(hero.away)}</span></span>
+        </div>
+        <p class="hero-blurb">${esc(bits.join('. '))}${bits.length ? '. ' : ''}Our call on it, the
+           argument for it, and the thing that argues against it.</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">Read the analysis</a>
+          <a class="btn btn-ghost" href="#/board">All of today's picks</a>
+        </div>
       </div>
     </div>
-  </section>
-  <div class="trust"><div class="wrap trust-inner">
-    ${[
-      ['88 leagues', 'Europe, the Americas, Asia'],
-      ['Updated every 15 minutes', 'Prices and team news'],
-      ['Every pick explained', 'Including what argues against it'],
-      ['Full results published', 'Won and lost, nothing hidden'],
-    ].map(([t, sub]) => `<div class="trust-item"><b>${esc(t)}</b><span>${esc(sub)}</span></div>`).join('')}
-  </div></div>`;
+  </section>`;
 }
-
-function railHTML(fixtures) {
-  const byLeague = new Map();
-  for (const f of fixtures) {
-    const k = f.league_id ?? f.league;
-    const e = byLeague.get(k) ?? { name: f.league ?? '', id: f.league_id, n: 0, rank: f.rank ?? 6 };
-    e.n++;
-    e.rank = Math.min(e.rank, f.rank ?? 6);
-    byLeague.set(k, e);
-  }
-  // By prominence, not by fixture count — otherwise the rail opens on whichever
-  // minor division happens to have the fullest card that day.
-  const top = [...byLeague.values()]
-    .sort((a, b) => (a.rank ?? 6) - (b.rank ?? 6) || b.n - a.n)
-    .slice(0, 16);
-  if (!top.length) return '';
-  return `
-  <div class="rail"><div class="rail-inner">
-    <span class="rail-label">On today</span>
-    ${top.map((l) => `<a class="rail-item" href="#/board">${crest(l.name, 'sm', l.id, 'league')}<b>${esc(l.name)}</b><span class="count">${l.n}</span></a>`).join('')}
-  </div></div>`;
-}
-
 
 /**
- * A pick, and the only four things a reader gets: what it is, what has to
- * happen, the price, and who is offering it.
+ * What is on after the headline fixture.
  *
- * No class tag, no percentage, no meter. Those were our filing system and our
- * scoring leaking onto the page; see engine/src/vocabulary.ts.
+ * Six compact cards, each the board row stripped to two clubs and a kick-off.
+ * A call is marked on the club it is about rather than spelled out, because at
+ * this size there is room for a mark and not for a sentence.
  */
-function pickHTML(pick, f) {
-  const d = market({
-    market: pick.market, outcome: pick.outcome, line: pick.line,
-    home: f.home, away: f.away, odds: pick.odds,
-  });
+function nextRailHTML(fixtures) {
+  const soon = fixtures.slice(0, 8);
+  if (!soon.length) return '';
+  const clock = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
   return `
-  <div class="card-pick">
-    <span class="sel">${esc(d.name)}</span>
-    <p class="wins">${esc(d.wins)}</p>
-    <div class="pick-meta">
-      <span class="price">${dec(pick.odds)}</span>
-      ${pick.bookmaker ? `<span class="book">at ${esc(pick.bookmaker)}</span>` : ''}
-      <span class="ret">${esc(d.returns)}</span>
+  <div class="wrap section dense">
+    <div class="section-head"><div><h2 class="display">Next up</h2></div>
+      <a class="btn btn-ghost btn-sm" href="#/board">The full board</a></div>
+    <div class="next-rail">
+      ${soon.map((f) => {
+        const k = new Date(f.kickoff * 1000);
+        const time = k.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const mark = (f.top_pick || f.locked) ? '<span class="pill call">call</span>' : '';
+        return `
+        <a class="nextcard" href="#/fixture/${encodeURIComponent(f.id)}">
+          <span class="nextcard-side">${crest(f.home, 'sm', f.home_id)}<span>${esc(f.home)}</span>${mark}</span>
+          <span class="nextcard-side">${crest(f.away, 'sm', f.away_id)}<span>${esc(f.away)}</span></span>
+          <span class="nextcard-foot">
+            <span>${esc(dayLabel(f.kickoff))}</span>
+            <time>${clock}${esc(time)}</time>
+          </span>
+        </a>`;
+      }).join('')}
     </div>
   </div>`;
 }
 
-function cardHTML(f) {
-  const pick = f.top_pick;
-  // top_pick is the first confident call, so the rest start at one.
-  const extra = (f.confident ?? []).slice(pick ? 1 : 0).slice(0, 2);
+/** The one block of solid colour on the site, and it sells the membership. */
+function promoHTML(user) {
   return `
-  <a class="card" href="#/fixture/${encodeURIComponent(f.id)}" aria-label="${esc(f.home)} versus ${esc(f.away)}">
-    <div class="card-top">
-      <span class="card-league">${crest(f.league ?? '', 'sm', f.league_id, 'league')}<span>${esc(f.league ?? '')}</span></span>
-      <span class="card-kick${isSoon(f.kickoff) ? ' soon' : ''}">${esc(kickoffLabel(f.kickoff))}</span>
-    </div>
-
-    <div class="vs">
-      <div class="vs-side">${crest(f.home, 'lg', f.home_id)}<span>${esc(f.home)}</span></div>
-      <span class="vs-mark">vs</span>
-      <div class="vs-side">${crest(f.away, 'lg', f.away_id)}<span>${esc(f.away)}</span></div>
-    </div>
-
-    ${pick ? pickHTML(pick, f) : `<div class="card-pick none">
-           <b>No call here</b>
-           <span>The price looks about right to us. We would rather say nothing than pad the board.</span>
-         </div>`}
-    ${extra.length
-      ? `<div class="also">${extra.map((c) => {
-           const d = market({ market: c.market, outcome: c.outcome, line: c.line, home: f.home, away: f.away, odds: c.odds });
-           return `<span class="also-call">${esc(d.name)} <b>${dec(c.odds)}</b></span>`;
-         }).join('')}</div>`
-      : ''}
-    <span class="card-go">Read the analysis</span>
-  </a>`;
+  <section class="promo">
+    <h2>Every call, every competition.</h2>
+    <p>The analysis is free and stays free. Membership is the call itself — which market,
+       which side, the price and the book offering it.</p>
+    <a class="btn btn-light" href="#/pricing">${user ? 'See what membership costs' : 'Become a member'}</a>
+  </section>`;
 }
 
+/**
+ * The right-hand rail: the calls that are live now.
+ *
+ * The reference runs its newsroom down this side of every page and the layout
+ * depends on it being there. We have no newsroom, so this carries the thing a
+ * reader came for instead — which is a better use of the column anyway.
+ */
+function sideHTML(fixtures) {
+  const withCall = fixtures.filter((f) => f.top_pick).slice(0, 10);
+  if (!withCall.length) return '';
+  return `
+  <aside>
+    <h2 class="side-head">Live calls <a href="#/board">All</a></h2>
+    <div class="side-list">
+      ${withCall.map((f) => {
+        const d = market({
+          market: f.top_pick.market, outcome: f.top_pick.outcome, line: f.top_pick.line,
+          home: f.home, away: f.away, odds: f.top_pick.odds,
+        });
+        return `
+        <a class="side-item" href="#/fixture/${encodeURIComponent(f.id)}">
+          <span class="side-thumb">${crest(f.home, 'sm', f.home_id)}${crest(f.away, 'sm', f.away_id)}</span>
+          <span class="side-body">
+            <span class="side-sel">${esc(d.name)}</span>
+            <span class="side-meta">${esc(kickoffLabel(f.kickoff))}<b>${dec(f.top_pick.odds)}</b></span>
+          </span>
+        </a>`;
+      }).join('')}
+    </div>
+  </aside>`;
+}
+
+/** Won, drawn, lost as one bar with the share written under it. */
+function formBarHTML(w, d, l, labels = ['won', 'drawn', 'lost']) {
+  const total = w + d + l;
+  if (!total) return '';
+  const pc = (n) => Math.round((n / total) * 100);
+  return `
+  <div class="formbar">
+    <div class="formbar-track">
+      ${w ? `<i class="w" style="width:${pc(w)}%"></i>` : ''}
+      ${d ? `<i class="d" style="width:${pc(d)}%"></i>` : ''}
+      ${l ? `<i class="l" style="width:${pc(l)}%"></i>` : ''}
+    </div>
+    <div class="formbar-keys">
+      <span class="w"><b>${pc(w)}%</b> ${esc(labels[0])}</span>
+      ${d ? `<span class="d"><b>${pc(d)}%</b> ${esc(labels[1])}</span>` : ''}
+      <span class="l"><b>${pc(l)}%</b> ${esc(labels[2])}</span>
+    </div>
+  </div>`;
+}
+
+/**
+ * Settled picks as rows.
+ *
+ * The competition and the kick-off sit on their own muted line above the two
+ * clubs, which is what keeps the row itself down to a tie and one number. The
+ * price shows only where it is history a reader has gone looking for — never on
+ * the front door, which carries no odds at all.
+ */
+function playedHTML(picks, { showOdds = false } = {}) {
+  if (!picks.length) return '';
+  return `
+  <div class="played">
+    ${picks.map((x) => {
+      const won = x.result === 'WON' || x.result === 'HALF_WON';
+      const lost = x.result === 'LOST' || x.result === 'HALF_LOST';
+      const badge = showOdds ? dec(x.odds) : won ? 'Won' : lost ? 'Lost' : 'Void';
+      return `
+      <a class="played-row" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
+        <div class="played-meta"><span>${esc(kickoffLabel(x.kickoff))}</span></div>
+        <div class="played-tie">
+          <span class="played-side">${crest(x.home_team ?? '', 'sm')}<span>${esc(x.home_team ?? '')}</span></span>
+          <span class="played-score ${won ? 'w' : lost ? 'l' : ''}">${esc(badge)}</span>
+          <span class="played-side away">${crest(x.away_team ?? '', 'sm')}<span>${esc(x.away_team ?? '')}</span></span>
+        </div>
+      </a>`;
+    }).join('')}
+  </div>`;
+}
 
 /**
  * One fixture, one line.
@@ -466,112 +511,6 @@ function spread(fixtures, limit) {
   return out;
 }
 
-/**
- * The argument for the product, with a real paragraph of the writing beside it.
- *
- * A claim about the analysis is worth less than a sample of it, so the right
- * column is a live narrative pulled off a fixture on today's board — not a
- * testimonial, not a made-up quote. The ground the game is being played at sits
- * above the heading as a bounded plate rather than washing under the type.
- */
-function bandHTML(sample) {
-  const fixture = sample?.fixture ?? null;
-  const quote = sample
-    ? `<div class="reason">
-         <div class="qmeta">
-           ${crest(fixture.home, 'sm', fixture.home_id)}
-           <b>${esc(fixture.home)} v ${esc(fixture.away)}</b>
-           <a class="qlink" href="#/fixture/${encodeURIComponent(fixture.id)}">Read it in full</a>
-         </div>
-         ${esc(sample.verdict.narrative)}
-       </div>`
-    : '';
-
-  return `
-  <section class="band" data-shot="${fixture?.venue_id ? 'yes' : 'none'}">
-    <div class="wrap band-inner${quote ? '' : ' solo'}">
-      <div>
-        ${fixture?.venue_id ? `<div class="band-shot">${venueShot(fixture.venue_id, '')}</div>` : ''}
-        <h2 class="display">Anyone can pick a favourite.</h2>
-        <p class="lede band-lede">
-          The hard part is saying why — and saying what the pick has going against it.
-          That is on every call here.
-        </p>
-        <ul class="points">
-          <li><span class="n">01</span><div><b>The case, in plain English</b><span>Form, team news, rest, what the game is worth. Written out, not hidden behind a number.</span></div></li>
-          <li><span class="n">02</span><div><b>The catch, out loud</b><span>When something argues against the pick, we print it. Nobody else does.</span></div></li>
-          <li><span class="n">03</span><div><b>What it actually pays</b><span>A big strike rate at short odds is not a win. The return is always on the card.</span></div></li>
-        </ul>
-      </div>
-      ${quote}
-    </div>
-  </section>`;
-}
-
-/**
- * How the last dozen calls went, along the top of the front door.
- *
- * It used to carry each pick's price next to the tick or the cross, which put
- * a column of odds on the landing page. That contradicts the positioning the
- * whole product rests on: the pages traffic arrives on carry no odds at all,
- * which is what makes them reviewable as advertising in the first place. The
- * price is on the results page and on the board, where a reader has gone
- * looking for it.
- *
- * What is left is the part that matters anyway — the fixture, and whether the
- * call landed. Losses included, in the order they happened.
- */
-function stripHTML(picks) {
-  const done = picks.filter((x) => x.result && x.result !== 'VOID').slice(0, 12);
-  if (!done.length) return '';
-  return `
-  <div class="strip"><div class="strip-inner">
-    <span class="rail-label">Recent results</span>
-    ${done.map((x) => {
-      const won = x.result === 'WON' || x.result === 'HALF_WON';
-      return `<span class="res">${crest(x.home_team ?? '', 'sm')}
-        <span class="res-tie">${esc(x.home_team ?? '')} v ${esc(x.away_team ?? '')}</span>
-        <span class="res-mark ${won ? 'w' : 'l'}">${won ? 'Won' : 'Lost'}</span></span>`;
-    }).join('')}
-  </div></div>`;
-}
-
-/**
- * A paragraph of the real writing for the front door — but only if it is
- * writing worth showing.
- *
- * This used to take the first narrative over 150 characters, which is how
- * sentences like "the model reads this as a 2.99-goal match" and "83% on our
- * numbers" reached the landing page. That page is the one advertising review
- * looks at and the one a stranger arrives on, so a paragraph that talks about
- * the machinery instead of the football is selling against the product.
- *
- * The filter is the mechanical tell from the vocabulary rule, and deliberately
- * not a second copy of the banned-word list: a decimal with one or two places
- * is almost always a spreadsheet number. `engine/src/vocabulary.ts` stays the
- * single definition, and a list duplicated here would drift from it inside a
- * month.
- *
- * Today that rejects every template-written narrative there is, so the section
- * renders without a quote — which is the honest outcome. It opens by itself
- * when the writer starts producing prose that reads like a person wrote it;
- * the same principle as the paywall's own prose gate, and nothing to switch on.
- */
-const SPREADSHEET = /\b\d+\.\d{1,2}\b|\b\d{1,3}\s?%/;
-
-async function sampleNarrative(candidates) {
-  for (const f of candidates.slice(0, 6)) {
-    try {
-      const full = await getJSON(`/api/fixture/${f.id}`);
-      const v = (full.verdicts ?? []).find(
-        (x) => x.narrative && x.narrative.length > 150 && !SPREADSHEET.test(x.narrative),
-      );
-      if (v) return { fixture: full, verdict: v };
-    } catch { /* next */ }
-  }
-  return null;
-}
-
 async function viewHome() {
   app.innerHTML = heroHTML(state.hero, state.heroVenue) + '<div class="spinner">Loading the board…</div>';
   let board;
@@ -589,7 +528,10 @@ async function viewHome() {
   const top = spread(withPicks, 8);
 
   let recent = [];
-  try { recent = (await getJSON('/api/picks?limit=40&settled=true')).picks ?? []; } catch { /* strip is optional */ }
+  try { recent = (await getJSON('/api/picks?limit=40&settled=true')).picks ?? []; } catch { /* optional */ }
+  const settled = recent.filter((x) => x.result && x.result !== 'VOID');
+  const won = settled.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
+  const lost = settled.filter((x) => x.result === 'LOST' || x.result === 'HALF_LOST').length;
 
   // Grounds hosting today's games, strongest call first. The browser works down
   // the list until one has a photograph, so the masthead is always a real
@@ -598,90 +540,23 @@ async function viewHome() {
 
   app.innerHTML =
     heroHTML(state.hero, state.heroVenue) +
-    railHTML(fixtures) +
-    `<div class="wrap section">
-       <div class="section-head">
-         <div>
-           <h2 class="display">Today's top picks</h2>
-           <p>${withPicks.length} calls across ${new Set(fixtures.map((f) => f.league)).size} leagues.</p>
+    nextRailHTML(fixtures.filter((f) => f.id !== state.hero?.fixture_id)) +
+    `<div class="wrap section dense">
+       <div class="with-side">
+         <div class="stack" style="gap:var(--space-9)">
+           ${promoHTML(state.user)}
+           <div>
+             <div class="section-head">
+               <div><h2 class="display">How the last ${settled.length} went</h2></div>
+               <a class="btn btn-ghost btn-sm" href="#/results">The full record</a>
+             </div>
+             ${formBarHTML(won, settled.length - won - lost, lost, ['won', 'void', 'lost'])}
+             ${playedHTML(settled.slice(0, 8))}
+           </div>
          </div>
-         <a class="btn btn-ghost" href="#/board">All ${fixtures.length} games</a>
+         ${sideHTML(top)}
        </div>
-       ${top.length ? `<div class="cards">${top.map(cardHTML).join('')}</div>`
-                    : `<div class="empty">Nothing worth calling right now. Check back shortly.</div>`}
-     </div>` +
-    stripHTML(recent) +
-    bandHTML(await sampleNarrative(top)) +
-    statsHTML(fixtures, recent) +
-    leaguesHTML(fixtures) +
-    closingHTML();
-}
-
-/**
- * Four figures, all of them true.
- *
- * The reference designs lead on "500K+ active users" and "78% average prediction
- * accuracy". We have neither, and inventing them on a page that will eventually
- * take money is not a shortcut worth taking. These are read from the board and
- * the ledger, and they say enough.
- */
-function statsHTML(fixtures, recent) {
-  const calls = fixtures.filter((f) => f.top_pick).length;
-  const settled = recent.filter((x) => x.result && x.result !== 'VOID').length;
-  const items = [
-    ['88', 'Leagues covered'],
-    [String(fixtures.length), 'Games on the board'],
-    [String(calls), 'Calls live right now'],
-    [settled ? String(settled) : 'All', settled ? 'Results settled' : 'Picks published'],
-  ];
-  return `
-  <section class="statband"><div class="wrap">
-    <div class="statgrid">
-      ${items.map(([b, l]) => `<div class="statcell"><b>${esc(b)}</b><span>${esc(l)}</span></div>`).join('')}
-    </div>
-  </div></section>`;
-}
-
-function leaguesHTML(fixtures) {
-  const byLeague = new Map();
-  for (const f of fixtures) {
-    const k = f.league_id ?? f.league;
-    const e = byLeague.get(k) ?? { name: f.league ?? '', id: f.league_id, n: 0, rank: f.rank ?? 6 };
-    e.n++;
-    e.rank = Math.min(e.rank, f.rank ?? 6);
-    byLeague.set(k, e);
-  }
-  const rows = [...byLeague.values()]
-    .sort((a, b) => (a.rank ?? 6) - (b.rank ?? 6) || b.n - a.n)
-    .slice(0, 12);
-  if (!rows.length) return '';
-  return `
-  <div class="wrap section">
-    <div class="section-head">
-      <div><h2 class="display">Every league that matters</h2>
-      <p>From the Champions League down. ${rows.length} in play right now, 88 covered.</p></div>
-      <a class="btn btn-ghost" href="#/leagues">All leagues</a>
-    </div>
-    <div class="lgrid">
-      ${rows.map((e) => `
-        <a class="lcard" href="${esc(boardHash(state.hours, e.name))}">
-          ${crest(e.name, 'lg', e.id, 'league')}
-          <b>${esc(e.name)}</b>
-          <span>${e.n} ${e.n === 1 ? 'game' : 'games'}</span>
-        </a>`).join('')}
-    </div>
-  </div>`;
-}
-
-function closingHTML() {
-  return `
-  <section class="closing"><div class="wrap closing-in">
-    <div>
-      <p>Your next win</p>
-      <h2 class="display">is one pick away.</h2>
-    </div>
-    <a class="btn btn-primary btn-lg" href="#/board">See today's board</a>
-  </div></section>`;
+     </div>`;
 }
 
 /**
@@ -870,6 +745,29 @@ function verdictHTML(v, home, away) {
  * Faces come from /img/player/{id}/ and are small headshots, which is exactly
  * the size this needs — the same art would fall apart blown up in a masthead.
  */
+const POSITION = { G: 'Goalkeeper', D: 'Defender', M: 'Midfielder', F: 'Forward' };
+
+function squadHTML(lineups, home, away) {
+  const side = (label, s) => {
+    const players = (s?.players ?? []).filter((x) => x?.name);
+    if (!players.length) return '';
+    return `
+    <div class="panel">
+      <p class="panel-head">${esc(label)}${s.formation ? ` <span>${esc(s.formation)}</span>` : ''}</p>
+      <div class="squad">
+        ${players.map((x) => `
+          <div class="squad-row">
+            <span class="name">${esc(x.name)}</span>
+            <span class="pos">${esc(POSITION[x.position] ?? x.position ?? '')}</span>
+            <span class="no">${x.starting === false ? 'sub' : ''}</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  };
+  const both = side(home, lineups?.home) + side(away, lineups?.away);
+  return both ? `<div class="grid-2">${both}</div>` : '';
+}
+
 function pitchHTML(lineups, home, away, homeId, awayId) {
   if (!lineups?.home?.players?.length || !lineups?.away?.players?.length) return '';
 
@@ -1127,37 +1025,38 @@ async function viewFixture(id) {
   // built from what actually rendered rather than from a fixed list.
   const TABS = [
     ['overview', 'Overview', overview],
-    ['lineups', 'Line-ups', pitchHTML(f.lineups, f.home, f.away, f.home_id, f.away_id)],
+    ['lineups', 'Line-ups',
+      pitchHTML(f.lineups, f.home, f.away, f.home_id, f.away_id)
+      + squadHTML(f.lineups, f.home, f.away)],
     ['h2h', 'Head to head', h2hHTML(f.h2h, f.home, f.away)],
     ['table', 'Table', standingsHTML(f.standings, f.home, f.away, f.home_id, f.away_id)],
   ].filter(([, , html]) => html);
 
   app.innerHTML = `
-  <div class="wrap section tight">
-    ${backHTML('Back to the board')}
-
-    <div class="fx-hero" data-shot="${f.venue_id ? 'yes' : 'none'}">
-      <div class="fx-hero-media">${venueShot(f.venue_id, '')}</div>
-      <div class="fx-hero-in">
-        <p class="kicker">${esc(f.league ?? '')}</p>
-        <div class="fx-teams">
-          <div class="fx-side">
-            ${crest(f.home, 'xl', f.home_id)}
+  <section class="hero fx-top" data-shot="${f.venue_id ? 'yes' : 'none'}">
+    <div class="hero-media">${venueShot(f.venue_id, '', true)}</div>
+    <div class="wrap hero-inner">
+      ${backHTML('Back to the board')}
+      <div class="hero-copy">
+        <span class="timechip${isSoon(f.kickoff) ? ' soon' : ''}">${esc(kickoffLabel(f.kickoff))}</span>
+        <div class="fx-stack">
+          <span class="fx-line">
+            ${crest(f.home, 'md', f.home_id)}
             <span class="name">${esc(f.home)}</span>
             ${formChips(f.form?.home)}
-          </div>
-          <div class="fx-mid">
-            <div class="fx-when">${esc(kickoffLabel(f.kickoff))}</div>
-            <div class="fx-league">${meta.slice(1).map(esc).join(', ')}</div>
-          </div>
-          <div class="fx-side">
-            ${crest(f.away, 'xl', f.away_id)}
+          </span>
+          <span class="fx-line">
+            ${crest(f.away, 'md', f.away_id)}
             <span class="name">${esc(f.away)}</span>
             ${formChips(f.form?.away)}
-          </div>
+          </span>
         </div>
+        <p class="hero-blurb">${esc([f.league, ...meta.slice(1)].filter(Boolean).join(', '))}</p>
       </div>
     </div>
+  </section>
+
+  <div class="wrap section dense">
 
     ${TABS.length > 1 ? `<div class="tabs" role="tablist">
       ${TABS.map(([k, label], i) => `<button class="tab${i === 0 ? ' on' : ''}" data-tab="${k}" role="tab">${esc(label)}</button>`).join('')}
@@ -1214,6 +1113,10 @@ async function viewResults() {
     ? 'Nothing has finished yet. The first results land as today\'s games do.'
     : `Of the last ${n} picks, ${wins} won.`;
 
+  const won = settled.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
+  const lost = settled.filter((x) => x.result === 'LOST' || x.result === 'HALF_LOST').length;
+  const voided = picks.filter((x) => x.result === 'VOID' || x.result === 'PUSH').length;
+
   app.innerHTML = `
   <div class="wrap section">
     <div class="section-head"><div>
@@ -1229,38 +1132,35 @@ async function viewResults() {
         : ''}
     </div>
 
-    ${picks.length ? `<div class="scroll-x"><table class="tbl">
-      <thead><tr><th>Game</th><th>Call</th><th class="num">Odds</th><th class="num">Result</th></tr></thead>
-      <tbody>${picks.map((x) => {
-        const d = market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team, odds: x.odds });
-        return `
-        <tr>
-          <td>${x.home_team ? `${esc(x.home_team)} v ${esc(x.away_team)}` : '—'}</td>
-          <td>${esc(d.name)}</td>
-          <td class="num">${dec(x.odds)}</td>
-          <td class="num">${resultTag(x.result)}</td>
-        </tr>`;
-      }).join('')}</tbody></table></div>`
-      : `<div class="empty">Nothing published yet.</div>`}
+    ${formBarHTML(won, voided, lost, ['won', 'stake back', 'lost'])}
 
-    ${settled.length === 0 && picks.length > 0
-      ? `<p class="foot-note" style="margin-top:20px">${picks.length} are still to play.</p>` : ''}
+    <div class="with-side">
+      <div>
+        <h2 class="side-head">Settled</h2>
+        ${settled.length ? playedHTML(settled.slice(0, 40), { showOdds: true })
+          : `<div class="empty-state"><b>Nothing has finished yet</b>
+               <span>The first results land as today's games do.</span></div>`}
+      </div>
+      <aside>
+        <h2 class="side-head">Still to play</h2>
+        ${(() => {
+          const open = picks.filter((x) => !x.result).slice(0, 12);
+          if (!open.length) return `<p class="acct-line">Nothing open right now.</p>`;
+          return `<div class="side-list">${open.map((x) => {
+            const d = market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team, odds: x.odds });
+            return `
+            <a class="side-item" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
+              <span class="side-thumb">${crest(x.home_team ?? '', 'sm')}${crest(x.away_team ?? '', 'sm')}</span>
+              <span class="side-body">
+                <span class="side-sel">${esc(d.name)}</span>
+                <span class="side-meta">${esc(kickoffLabel(x.kickoff))}<b>${dec(x.odds)}</b></span>
+              </span>
+            </a>`;
+          }).join('')}</div>`;
+        })()}
+      </aside>
+    </div>
   </div>`;
-}
-
-/** Won, lost, or the stake came back — said the way it happened. */
-function resultTag(result) {
-  if (!result) return '<span class="pending">To play</span>';
-  const map = {
-    WON: ['won', 'Won'],
-    HALF_WON: ['won', 'Won half'],
-    LOST: ['lost', 'Lost'],
-    HALF_LOST: ['lost', 'Lost half'],
-    PUSH: ['void', 'Stake back'],
-    VOID: ['void', 'Void'],
-  };
-  const [cls, label] = map[result] ?? ['void', result[0] + result.slice(1).toLowerCase()];
-  return `<span class="tag ${cls}">${esc(label)}</span>`;
 }
 
 // ---------------------------------------------------------------- leagues

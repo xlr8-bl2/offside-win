@@ -11,12 +11,23 @@
  *                                  # redaction, so you see what a signed-out
  *                                  # reader sees before the slate has run
  */
+import { Buffer } from 'node:buffer';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
 const ROOT = process.env.ROOT ?? '/home/user/offside-win/public';
 const UP = process.env.UPSTREAM ?? 'https://offside-win.ashleymbaht.workers.dev';
+/*
+ * The provider's image host, proxied for the same reason the API is.
+ *
+ * Leaving it unproxied was not a neutral omission. Every crest, every league
+ * badge and every stadium photograph failed TLS in the browser, so the checker
+ * and every screenshot showed a site with no photography and coloured initials
+ * where the club badges go -- and a whole redesign got judged against that.
+ * The images were fine the entire time; Chromium just could not fetch them.
+ */
+const IMG = process.env.IMG_UPSTREAM ?? 'https://sports.bzzoiro.com';
 const PORT = Number(process.env.PORT ?? 8788);
 const TYPES = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
@@ -30,6 +41,23 @@ if (process.env.FREE) {
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
+
+  // Same-origin images, so the browser can actually load them here.
+  if (url.pathname.startsWith('/img/')) {
+    try {
+      const r = await fetch(IMG + url.pathname + url.search, { redirect: 'follow' });
+      const buf = Buffer.from(await r.arrayBuffer());
+      res.writeHead(r.status, {
+        'content-type': r.headers.get('content-type') ?? 'application/octet-stream',
+        'cache-control': 'public, max-age=3600',
+      });
+      res.end(buf);
+    } catch (e) {
+      res.writeHead(502);
+      res.end(String(e));
+    }
+    return;
+  }
 
   if (url.pathname.startsWith('/api/')) {
     try {
@@ -58,7 +86,10 @@ http.createServer(async (req, res) => {
   const rel = url.pathname === '/' ? '/index.html' : url.pathname;
   const path = join(ROOT, normalize(rel).replace(/^(\.\.[/\\])+/, ''));
   try {
-    const buf = await readFile(path);
+    let buf = await readFile(path);
+    // Point the app at this server's own image proxy rather than the host it
+    // cannot reach. One substitution, and only in what is served locally.
+    if (extname(path) === '.js') buf = Buffer.from(String(buf).replaceAll(IMG + '/img', '/img'));
     res.writeHead(200, { 'content-type': TYPES[extname(path)] ?? 'application/octet-stream' });
     res.end(buf);
   } catch {

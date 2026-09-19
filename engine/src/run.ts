@@ -5,6 +5,7 @@ import { config, requireEnv } from './config.ts';
 import { backfillHistory } from './history.ts';
 import { probe } from './probe.ts';
 import { fitAllLeagues } from './ratings/fit.ts';
+import { syncTeamShots } from './images/sync.ts';
 import { coinflowCharger, renewDue } from './membership/renew.ts';
 import { runSettle } from './settle.ts';
 import { pruneBoard, runSlate } from './slate.ts';
@@ -20,6 +21,7 @@ import { closeDb, dbStats, migrate, schemaFile, select } from './store.ts';
  *   slate     — reprice the next few days and publish the board
  *   settle    — grade finished picks and refresh calibration
  *   renew     — charge the memberships falling due today
+ *   images    — find a photograph for each team and re-host it
  *   backtest  — walk-forward evaluation
  *
  * Every entry point applies the schema first and the slate cold-starts itself,
@@ -63,6 +65,27 @@ const commands: Record<string, () => Promise<unknown>> = {
       + `${report.declined} declined, ${report.abandoned} given up on, ${report.skipped} skipped.`,
     );
     return report;
+  },
+
+  /**
+   * Football photography, which the odds provider does not sell.
+   *
+   * It gives crests, league badges and stadium architecture. What it has no
+   * equivalent of is a player mid-celebration, and that is the whole difference
+   * between a page that looks like a fixture list and a page that looks like
+   * football. Needs SPORTRADAR_GETTY_KEY; without it this is a no-op that says
+   * so rather than a failure.
+   */
+  async images() {
+    requireEnv({ provider: false });
+    await ensureSchema();
+    const r = await syncTeamShots();
+    console.log(
+      `Photography: swept ${r.leagues} competitions, ${r.manifests} manifests, `
+      + `${r.assets} assets seen, ${r.matched} matched to our teams, `
+      + `${r.stored} stored, ${r.skipped} ambiguous, ${r.failed} failed.`,
+    );
+    return r;
   },
 
   async history() {
