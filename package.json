@@ -28,6 +28,7 @@
     "h2h": "npm -w engine run h2h",
     "market": "npm -w engine run market",
     "renew": "npm -w engine run renew",
-    "narrate:preview": "npm -w engine run narrate:preview"
+    "narrate:preview": "npm -w engine run narrate:preview",
+    "images": "npm -w engine run images"
   }
 }
