@@ -33,7 +33,11 @@ on:
       days:
         description: 'How many days back to sweep for action shots'
         required: false
-        default: '7'
+        default: '4'
+      budget:
+        description: 'Maximum provider requests this run may spend'
+        required: false
+        default: '40'
 
 concurrency:
   group: images
@@ -73,6 +77,11 @@ jobs:
           # the trial converts; pointing a trial key at the production path
           # returns 403 rather than anything that explains itself.
           SPORTRADAR_IMAGES_LEVEL: ${{ vars.SPORTRADAR_IMAGES_LEVEL || 't' }}
-          SPORTRADAR_IMAGE_DAYS: ${{ inputs.days || '7' }}
+          SPORTRADAR_IMAGE_DAYS: ${{ inputs.days || '4' }}
+          # A trial plan is roughly a thousand requests a MONTH, and an image
+          # download spends one just as a manifest does. A nightly run that can
+          # cost 120 would spend the month's allowance in nine days, so the
+          # scheduled budget is small and a seeding run is asked for by hand.
+          SPORTRADAR_BUDGET: ${{ inputs.budget || '40' }}
           SPORTRADAR_DEBUG: '1'
         run: npm run images
