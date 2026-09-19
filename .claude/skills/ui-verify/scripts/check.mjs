@@ -1,0 +1,93 @@
+/**
+ * Drive the real pages in a real browser and report what is actually wrong.
+ *
+ * Every check here exists because it caught something that reading the diff
+ * did not. Add to it rather than writing a one-off each time.
+ *
+ *   node check.mjs '#/board' '#/fixture/213698'
+ *   WIDTHS=1440,390,320 node check.mjs '#/pricing'
+ */
+import { chromium } from 'playwright';
+
+const CHROME = process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const BASE = process.env.BASE ?? 'http://127.0.0.1:8788';
+const WIDTHS = (process.env.WIDTHS ?? '1440,390').split(',').map(Number);
+const ROUTES = process.argv.slice(2).length ? process.argv.slice(2) : ['#/home', '#/board'];
+
+// Numbers no supporter says out loud, and words the vocabulary rule bans.
+const SPREADSHEET = /\b\d+\.\d{1,2}\b/;
+const BANNED = ['expected goals', 'points a game', 'confidence', ' edge', 'xG', 'per match'];
+
+const browser = await chromium.launch({ executablePath: CHROME });
+const problems = [];
+
+for (const width of WIDTHS) {
+  const page = await browser.newPage({ viewport: { width, height: 900 } });
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => {
+    // The sandbox proxy re-terminates TLS, so external hosts always fail here.
+    // That is the environment, not the page.
+    if (m.type() === 'error' && !/ERR_CERT|Failed to load resource/.test(m.text())) errors.push(m.text());
+  });
+
+  for (const route of ROUTES) {
+    errors.length = 0;
+    await page.goto(`${BASE}/${route}`, { waitUntil: 'load' });
+    // Long enough for the board to arrive. A short wait reads as "rendered
+    // nothing" and sends you looking for a bug that is not there.
+    await page.waitForTimeout(2500);
+
+    const r = await page.evaluate(() => {
+      const app = document.getElementById('app');
+      const text = app?.textContent ?? '';
+      const cs = getComputedStyle(document.documentElement);
+
+      // A var() that resolves to nothing invalidates the whole declaration
+      // silently. This is the check that would have caught .odds rendering at
+      // inherited weight.
+      const unresolved = [];
+      for (const sheet of [...document.styleSheets]) {
+        let rules;
+        try { rules = [...sheet.cssRules]; } catch { continue; }
+        for (const rule of rules) {
+          const css = rule.cssText ?? '';
+          for (const m of css.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/g)) {
+            if (!cs.getPropertyValue(m[1]).trim()) unresolved.push(m[1]);
+          }
+        }
+      }
+
+      return {
+        chars: text.trim().length,
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        unresolved: [...new Set(unresolved)],
+        decimals: [...new Set(text.match(/\b\d+\.\d{1,2}\b/g) ?? [])].slice(0, 5),
+        lowerText: text.toLowerCase(),
+      };
+    });
+
+    const say = (msg) => problems.push(`${width}px ${route}: ${msg}`);
+    if (r.chars < 80) say(`rendered almost nothing (${r.chars} chars)`);
+    if (r.overflow > 0) say(`scrolls sideways by ${r.overflow}px`);
+    if (r.unresolved.length) say(`undefined tokens: ${r.unresolved.join(', ')}`);
+    if (r.decimals.length) say(`spreadsheet numbers on the page: ${r.decimals.join(', ')}`);
+    for (const w of BANNED) if (r.lowerText.includes(w.toLowerCase())) say(`banned term "${w.trim()}"`);
+    if (errors.length) say(`console: ${errors.slice(0, 3).join(' | ')}`);
+
+    if (width === WIDTHS[0]) {
+      console.log(`  ${route.padEnd(24)} ${String(r.chars).padStart(6)} chars  overflow ${r.overflow}px`);
+    }
+  }
+  await page.close();
+}
+
+await browser.close();
+console.log('');
+if (problems.length) {
+  console.log('PROBLEMS:');
+  for (const p of problems) console.log('  ' + p);
+  process.exitCode = 1;
+} else {
+  console.log('clean at ' + WIDTHS.join('px, ') + 'px');
+}
