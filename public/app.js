@@ -1178,8 +1178,22 @@ function bar(label, v) {
 
 async function viewResults() {
   app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
-  let data;
-  try { data = await getJSON('/api/picks?limit=150'); } catch (err) {
+  /*
+   * Two requests, because one cannot answer both halves of this page.
+   *
+   * It used to ask for the newest 150 picks and split them locally. On a busy
+   * Saturday the newest 150 are all of today's, none of which have finished,
+   * so the page printed "95 of the last 111 picks won" from the summary and
+   * then "Nothing has finished yet" directly underneath it. The API can filter
+   * by settled; asking it to is the whole fix.
+   */
+  let data, open;
+  try {
+    [data, open] = await Promise.all([
+      getJSON('/api/picks?limit=60&settled=true'),
+      getJSON('/api/picks?limit=20&settled=false').catch(() => ({ picks: [] })),
+    ]);
+  } catch (err) {
     app.innerHTML = `<div class="wrap section"><div class="empty">${esc(err.message)}</div></div>`;
     return;
   }
@@ -1187,6 +1201,7 @@ async function viewResults() {
   const summary = data.summary ?? {};
   const picks = data.picks ?? [];
   const settled = picks.filter((x) => x.result && x.result !== 'VOID');
+  const openPicks = open?.picks ?? [];
 
   // A tenner a pick, because "-6.99 units" is a sentence in a language the
   // reader does not speak. The sign is not softened: if it is down, it says
@@ -1255,9 +1270,9 @@ async function viewResults() {
       <aside>
         <h2 class="side-head">Still to play</h2>
         ${(() => {
-          const open = picks.filter((x) => !x.result).slice(0, 12);
-          if (!open.length) return `<p class="acct-line">Nothing open right now.</p>`;
-          return `<div class="side-list">${open.map((x) => {
+          const upcoming = openPicks.slice(0, 12);
+          if (!upcoming.length) return `<p class="acct-line">Nothing open right now.</p>`;
+          return `<div class="side-list">${upcoming.map((x) => {
             const d = market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team, odds: x.odds });
             return `
             <a class="side-item" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
