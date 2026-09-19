@@ -55,8 +55,16 @@ button:focus-visible,
 summary:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  border-radius: var(--radius-sm);
 }
+/*
+ * The focus ring wants a radius to sit against, but only on things that have
+ * none of their own. Setting it on every `a:focus-visible` rounded the board
+ * row to 4px the moment it took focus, because the row's own rule sets the
+ * ring and not the radius, so this one still won that property.
+ */
+a:not([class]):focus-visible,
+button:not([class]):focus-visible,
+summary:focus-visible { border-radius: var(--radius-sm); }
 
 button, input, select, textarea { font: inherit; color: inherit; }
 button { background: none; border: 0; padding: 0; cursor: pointer; }
