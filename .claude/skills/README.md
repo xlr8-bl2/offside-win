@@ -1,7 +1,27 @@
-# Skills
+# Skills and commands
 
 Claude Code picks these up automatically when it runs anywhere inside this
-repository. Nothing to install and nothing to configure — they are here, so
+repository.
+
+## Calling them
+
+Skills trigger on their own when a task matches. To drive one deliberately,
+use a slash command — they live in `.claude/commands/` and are verbs rather
+than one-per-skill wrappers:
+
+| Command | Does |
+|---|---|
+| `/design <what>` | Decide tokens, layout and a direction **before** writing UI. Queries the design data, applies the generated-design-tells lens, works inside the existing identity. |
+| `/design-check [routes]` | Render the real pages and measure them — undefined tokens, horizontal scroll, console errors, leaked prices. |
+| `/ui-search <query>` | Raw query into the 192 palettes, 74 font pairings and 119 UX rules. |
+| `/voice <text or file>` | Audit and rewrite user-facing copy against the vocabulary rule, checked in code rather than by eye. |
+| `/page <what it is for>` | Build a new page end to end: plan, build on the tokens, route it, write the copy, render it. |
+
+`/design-check` knows which view it is looking at. A price is the product for a
+member and forbidden for everyone else, so it asks the API whether the board
+is redacted and only treats decimals as findings in the free view. The blunt
+version flagged the odds on the board as violations, and a checker that cries
+wolf gets ignored. Nothing to install and nothing to configure — they are here, so
 they are available, and they travel with the project rather than depending on
 what happens to be set up on a given machine.
 
