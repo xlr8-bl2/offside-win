@@ -1154,9 +1154,24 @@ async function viewResults() {
     : profit < 0 ? `you would be ${money(profit)} down`
     : 'you would be exactly even';
 
+  /*
+   * The strike rate, said out loud.
+   *
+   * It is not the banned kind of percentage. What the vocabulary rule bans is a
+   * confidence score -- our own number, dressed up as a reason -- and a bare
+   * percentage standing in for an argument. This is a count of what happened,
+   * which is the one number on this site that is not an opinion.
+   *
+   * It never appears on its own, though, and that is the important half. A high
+   * strike rate at short prices loses money, which is exactly what our record
+   * does, so the rate and the money are printed in the same breath. Publishing
+   * "86% of our picks won" and stopping there would be the single most
+   * misleading true sentence available to us.
+   */
+  const rate = n > 0 ? Math.round((wins / n) * 100) : null;
   const headline = n === 0
     ? 'Nothing has finished yet. The first results land as today\'s games do.'
-    : `Of the last ${n} picks, ${wins} won.`;
+    : `${wins} of the last ${n} picks won. That is a ${rate}% strike rate.`;
 
   const won = settled.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
   const lost = settled.filter((x) => x.result === 'LOST' || x.result === 'HALF_LOST').length;
@@ -1171,7 +1186,10 @@ async function viewResults() {
 
     <div class="record">
       <p class="record-line">${esc(headline)}</p>
-      ${profit === null ? '' : `<p class="record-sub">Backing every one of them with £${STAKE}, ${esc(verdict)}.</p>`}
+      ${profit === null ? '' : `<p class="record-sub">And backing every one of them with £${STAKE}, ${esc(verdict)}.${
+        profit < 0 && rate !== null && rate >= 60
+          ? ' Winning most of them is not the same as making money, and the prices are why.'
+          : ''}</p>`}
       ${n > 0 && n < 100
         ? `<p class="record-note">That is ${n} results. It is not enough to tell a good run from a good model, and we will say so until it is.</p>`
         : ''}
@@ -1739,13 +1757,39 @@ async function route() {
  * until we know otherwise, which is right for almost everyone and wrong for a
  * few hundred milliseconds for the rest.
  */
+/**
+ * Say what the reader has, in the header, always.
+ *
+ * Three states and they are visibly different: signed out, signed in on the
+ * free tier, and a member. The version before this showed "Sign in" or
+ * "Account" and nothing else, so a free reader had no way of knowing there was
+ * a tier above them until a call was withheld. Meeting the gate for the first
+ * time at the moment you are refused something is the worst way to meet it, and
+ * it is the complaint this answers.
+ */
 async function headerAuth() {
   const link = document.getElementById('account-link');
+  const tag = document.getElementById('plan-tag');
+  const upgrade = document.getElementById('upgrade-link');
   if (!link) return;
+
   const user = await currentUser();
   state.user = user;
+  const member = Boolean(state.board?.member);
+
   link.textContent = user ? 'Account' : 'Sign in';
   link.href = user ? '#/account' : '#/signin';
+
+  if (tag) {
+    tag.hidden = !user;
+    tag.textContent = member ? 'Member' : 'Free';
+    tag.className = member ? 'plan-tag on' : 'plan-tag';
+    tag.href = member ? '#/account' : '#/pricing';
+  }
+  if (upgrade) {
+    upgrade.hidden = member;
+    upgrade.textContent = user ? 'Upgrade' : 'Get the calls';
+  }
 }
 
 async function health() {

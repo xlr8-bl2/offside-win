@@ -287,6 +287,29 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 
 .top-right { display: flex; align-items: center; gap: var(--tap-gap); flex: none; }
 
+/*
+ * What tier the reader is on, stated rather than implied.
+ *
+ * Squared and quiet on the free tier, accent-filled on a membership. It is a
+ * link both ways: free goes to what it costs, member goes to the account, so
+ * the tag is never a dead end.
+ */
+.plan-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px var(--space-3);
+  border: var(--border) solid var(--rule-firm);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-black);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--chalk-2);
+  white-space: nowrap;
+}
+.plan-tag:hover { color: var(--chalk); border-color: var(--chalk-3); }
+.plan-tag.on { background: var(--floodlight); border-color: var(--floodlight); color: #fff; }
+
 .live {
   display: inline-flex;
   align-items: center;

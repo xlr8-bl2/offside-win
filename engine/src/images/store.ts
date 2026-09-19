@@ -46,9 +46,25 @@ export async function ensureBucket(): Promise<void> {
       allowed_mime_types: ['image/jpeg', 'image/png', 'image/webp'],
     }),
   });
-  // 409 is "already there", which is the answer on every run after the first.
-  if (res.ok || res.status === 409) return;
-  throw new Error(`could not create bucket: ${res.status} ${await res.text()}`);
+  if (res.ok) return;
+
+  /*
+   * "Already there" is the answer on every run after the first, and Supabase
+   * does not say it with a 409. It returns 400 with a `Duplicate` error in the
+   * body, so checking the status alone failed the second run of this job and
+   * every run after it. Rather than collect status codes by trial, ask whether
+   * the bucket exists and only fail when it genuinely does not.
+   */
+  const body = await res.text();
+  const head = await fetch(`${url}/storage/v1/bucket/${config.storage.bucket}`, {
+    headers: { authorization: `Bearer ${key}`, apikey: key },
+  });
+  if (head.ok) return;
+
+  throw new Error(
+    `could not create bucket "${config.storage.bucket}": ${res.status} ${body} `
+    + `(and it does not already exist: ${head.status})`,
+  );
 }
 
 /** Upload, overwriting whatever was at that path. Returns the public URL. */

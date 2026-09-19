@@ -58,12 +58,23 @@
       <a href="#/board" data-route="board">Picks</a>
       <a href="#/leagues" data-route="leagues">Leagues</a>
       <a href="#/results" data-route="results">Results</a>
-      <a href="#/pricing" data-route="pricing">Membership</a>
     </nav>
+    <!--
+      The plan state, in the header, on every page.
+
+      What was here before was "Sign in" and "Today's picks", which told a
+      reader nothing about what they had or what it cost. The complaint this
+      answers is exact: the app seems free when it is not. A product with a
+      gate in it has to show the gate, or the first time anyone meets it is the
+      moment they are refused something — which is the worst possible moment.
+
+      Filled in by headerAuth(): signed out, free, or member.
+    -->
     <div class="top-right">
       <span class="live" id="live"><i></i>Live</span>
+      <a class="plan-tag" id="plan-tag" href="#/pricing" hidden></a>
       <a class="btn btn-ghost btn-sm" id="account-link" href="#/signin">Sign in</a>
-      <a class="btn btn-primary btn-sm" href="#/board">Today's picks</a>
+      <a class="btn btn-primary btn-sm" id="upgrade-link" href="#/pricing">Get the calls</a>
       <button class="burger" id="burger" aria-label="Menu" aria-expanded="false" aria-controls="nav">
         <span></span><span></span><span></span>
       </button>
