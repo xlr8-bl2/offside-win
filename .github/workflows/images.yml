@@ -1,0 +1,61 @@
+name: images
+
+# The football photography.
+#
+# Nightly, and deliberately not more often. A photograph of a side is refreshed
+# when it is more than ten days old, so a daily pass keeps every team current
+# within a round of fixtures — and the Sportradar key has a request budget that
+# re-downloading four hundred images an hour would burn through by lunchtime.
+#
+# 04:40 UTC: after the last European kick-offs have been photographed and filed,
+# and before the morning slate needs the pictures.
+on:
+  schedule:
+    - cron: '40 4 * * *'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'How many days back to sweep for action shots'
+        required: false
+        default: '7'
+
+concurrency:
+  group: images
+  cancel-in-progress: false
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+
+      # Fail loudly and early rather than reporting "0 stored" and looking like
+      # a quiet day. A missing key is the single most likely reason for a run
+      # that does nothing, and it should not look the same as one.
+      - name: Check the key is present
+        env:
+          SPORTRADAR_GETTY_KEY: ${{ secrets.SPORTRADAR_GETTY_KEY }}
+        run: |
+          if [ -z "$SPORTRADAR_GETTY_KEY" ]; then
+            echo "SPORTRADAR_GETTY_KEY is not set as a repository secret."
+            exit 1
+          fi
+          echo "Key present (${#SPORTRADAR_GETTY_KEY} characters)."
+
+      - name: Fetch and re-host the photography
+        env:
+          DB_BACKEND: postgres
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SPORTRADAR_GETTY_KEY: ${{ secrets.SPORTRADAR_GETTY_KEY }}
+          # Trial keys live on the `t` path. Set the repo variable to `p` when
+          # the trial converts; pointing a trial key at the production path
+          # returns 403 rather than anything that explains itself.
+          SPORTRADAR_IMAGES_LEVEL: ${{ vars.SPORTRADAR_IMAGES_LEVEL || 't' }}
+          SPORTRADAR_IMAGE_DAYS: ${{ inputs.days || '7' }}
+        run: npm run images
