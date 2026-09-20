@@ -9,7 +9,7 @@ import { geminiWriter } from './narrate/gemini.ts';
 import { write, type Writer } from './narrate/write.ts';
 import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
-import { buildCandidates, driversFor, marketLabel, select, selectConfident, setAsideFor, type CalibrationMap } from './select.ts';
+import { buildCandidates, driversFor, floorForRank, isLean, marketLabel, select, selectConfident, setAsideFor, type CalibrationMap } from './select.ts';
 import { dbStats, insertMany, kvGetJSON, kvSetJSON, pickConflictTarget, select as dbSelect } from './store.ts';
 import type { CalibrationRow } from './select.ts';
 import type { Candidate, Factor, MarketFamily } from './types.ts';
@@ -255,7 +255,11 @@ export async function runSlate(): Promise<SlateReport> {
       const confidentVerdicts = (() => {
         if (!prediction) return [];
         const theirCands = buildCandidates(providerMarkets(prediction), analysis.book, calibration);
-        return selectConfident(theirCands).map((candidate) => {
+        // A game people came to the site for is answered even when it is close.
+        // Champions League and the big five drop to the marquee floor; the call
+        // then carries `lean` and the page frames it as a read on a tight game
+        // rather than a strong call.
+        return selectConfident(theirCands, floorForRank(leagueRank(analysis.league_id))).map((candidate) => {
           const drivers = driversFor(candidate, factors);
           return {
             kind: 'CONFIDENT' as const,
@@ -360,10 +364,30 @@ export async function runSlate(): Promise<SlateReport> {
         ? narratePass(selection.passReason, analysis.home_team, analysis.away_team, analysis.fixture_id)
         : null;
 
-      // The provider carries the running score on the event itself, so a match
-      // that has kicked off has one and a match that has not does not.
-      const homeGoals = num(event['home_score']);
-      const awayGoals = num(event['away_score']);
+      /*
+       * The score, but only once it is the final one.
+       *
+       * The provider carries a *running* score on the event, so a match on the
+       * hour mark reports 0-0 and means "nothing yet", not "it finished
+       * goalless". Writing that to the fixture published a live scoreline as a
+       * result: the board showed a game marked full time at the score it held
+       * when the slate last ran, and the results page printed "0-0" beside a
+       * call on fewer than 3.5 goals and marked it missed -- the settle job
+       * having graded the same pick against the real final score.
+       *
+       * So a score is only recorded once the provider says the match is over.
+       * Until then the column stays null and the page says nothing, which is
+       * the honest state for a game still being played.
+       */
+      const finished = /finish|ended|\bft\b|after|aet|\bap\b/i.test(String(event['status'] ?? ''));
+      const homeGoals = finished ? num(event['home_score']) : undefined;
+      const awayGoals = finished ? num(event['away_score']) : undefined;
+      // The running score is still worth showing -- a board that says LIVE and
+      // nothing else is a board that has not caught up. It travels on the card
+      // under its own name so no page can mistake it for a result.
+      const liveScore = !finished && num(event['home_score']) !== undefined && num(event['away_score']) !== undefined
+        ? [num(event['home_score'])!, num(event['away_score'])!]
+        : null;
 
       // The board card: small, because the board loads all of them at once.
       const board = {
@@ -396,6 +420,7 @@ export async function runSlate(): Promise<SlateReport> {
         // hours back, and a row that says FT without a scoreline is the least
         // useful thing a results-carrying board can print.
         score: homeGoals === undefined || awayGoals === undefined ? null : [homeGoals, awayGoals],
+        live_score: liveScore,
         lambda: [Number(analysis.lambda_home.toFixed(2)), Number(analysis.lambda_away.toFixed(2))],
         odds_1x2: Object.fromEntries(
           (analysis.book.find((b) => b.market === '1x2')?.fair ?? new Map()).entries(),
@@ -418,6 +443,9 @@ export async function runSlate(): Promise<SlateReport> {
                 bookmaker: v.candidate.bookmaker ?? null,
                 prices: v.candidate.prices ?? [],
                 prob: Number(v.candidate.model_prob.toFixed(3)),
+                // Cleared the marquee floor but not the normal one. The page
+                // says so rather than presenting a close game as a strong call.
+                lean: isLean(v.candidate),
               }
             : null)(publishedVerdicts[0]),
         pass: passNarrative,
@@ -431,6 +459,7 @@ export async function runSlate(): Promise<SlateReport> {
           odds: v.candidate.odds,
           bookmaker: v.candidate.bookmaker ?? null,
           prices: v.candidate.prices ?? [],
+          lean: isLean(v.candidate),
           // Whether anything in our context argues against it. This is the
           // differentiator, so it belongs where a reader sees it first.
           caveat: v.drivers.some((d) => d.claims.some((c) => c.polarity < 0)),
@@ -508,6 +537,7 @@ export async function runSlate(): Promise<SlateReport> {
         // old page read like a debug view.
         verdicts: publishedVerdicts.map((v) => ({
           candidate: candidateForStorage(v.candidate),
+          lean: isLean(v.candidate),
           narrative: v.narrative,
           drivers: v.drivers.map(forStorage),
           set_aside: v.set_aside.map(forStorage),
@@ -525,6 +555,9 @@ export async function runSlate(): Promise<SlateReport> {
         away_team: analysis.away_team,
         status: analysis.status,
         provisional: analysis.provisional ? 1 : 0,
+        // Columns rather than fields inside the blob, because everything that
+        // reads backwards -- the results record, the recap -- is built from
+        // `pick` joined to `fixture` and cannot see inside board_json.
         home_goals: homeGoals ?? null,
         away_goals: awayGoals ?? null,
         home_team_id: analysis.home_team_id,
@@ -559,10 +592,6 @@ export async function runSlate(): Promise<SlateReport> {
           kelly: v.candidate.kelly,
           confidence: v.candidate.confidence,
           provisional: analysis.provisional ? 1 : 0,
-        home_goals: homeGoals ?? null,
-        away_goals: awayGoals ?? null,
-        home_team_id: analysis.home_team_id,
-        away_team_id: analysis.away_team_id,
           narrative: v.narrative,
           evidence_json: JSON.stringify({
             drivers: v.drivers.map(forStorage),

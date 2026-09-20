@@ -150,13 +150,25 @@ function crest(name, size = 'md', id = null, type = 'team') {
  * like `style.opponent_adjustment` is a note to ourselves, not a heading for a
  * reader, and a page that leaks them reads like a debug view.
  */
+/*
+ * What a factor is called when a reader sees it.
+ *
+ * An id that is not in here never reaches the page. That is the point of the
+ * map: the ledger carries everything the engine weighed, including several
+ * things that exist only so the engine can weigh them, and the page is not a
+ * dump of the ledger.
+ *
+ * `availability.rotation_risk` used to be in here as "Selection" and printed
+ * "Lineup is predicted rather than confirmed, at 65% confidence" -- three
+ * pieces of private vocabulary in one sentence, about a fact the page already
+ * states as "line-ups not final". Gone.
+ */
 const READ_LABEL = {
   'availability.home.absences': 'Team news',
   'availability.away.absences': 'Team news',
   'availability.home.full_strength': 'Squad',
   'availability.away.full_strength': 'Squad',
   'availability.lineup_confirmed': 'Line-ups',
-  'availability.rotation_risk': 'Selection',
   'stakes.season': "What's at stake",
   'stakes.table': "What's at stake",
   'fixture.derby': 'Derby',
@@ -596,14 +608,37 @@ function rowHTML(f) {
    */
   const score = Array.isArray(f.score) && f.score.length === 2 ? f.score : null;
   const played = state.kind === 'ft' && score;
+  // A match in progress shows its running score and no mark. `live_score` is a
+  // separate field from `score` on purpose: one is what it is at this minute,
+  // the other is how it finished, and printing the first as the second is how
+  // a goalless first half became a result.
+  const running = !played && Array.isArray(f.live_score) && f.live_score.length === 2 ? f.live_score : null;
+  const shown = score ?? running;
   const landed = played && pick
     ? didItLand({ market: pick.market, outcome: pick.outcome, line: pick.line,
                   homeGoals: score[0], awayGoals: score[1] })
     : null;
   const MARK = { won: 'Landed', lost: 'Missed', back: 'Refunded', part: 'Half back' };
 
+  /*
+   * A game we passed on is one line, not four.
+   *
+   * It used to render the full card with "No call -- the price looks about
+   * right to us." underneath, which is an honest sentence that costs the same
+   * vertical space as an actual call and says it two hundred times down one
+   * board. The pass is still on the board, still reachable, and the reasoning
+   * is still on the fixture page. It just stops being the tallest thing on a
+   * page about picks.
+   */
+  const pass = !pick && !f.locked && !played;
+  // A locked row is the same shape as a pass: two lines, with the offer in the
+  // column the price would be in. The sentence it used to carry -- "We have a
+  // call on this one." -- was three lines of card spent saying nothing a lock
+  // does not already say, on the rows a reader is least able to act on.
+  const terse = pass || (f.locked && !played);
+
   return `
-  <a class="row is-${state.kind}${played ? ' is-played' : ''}" href="#/fixture/${encodeURIComponent(f.id)}"
+  <a class="row is-${state.kind}${played ? ' is-played' : ''}${terse ? ' is-terse' : ''}" href="#/fixture/${encodeURIComponent(f.id)}"
      aria-label="${esc(f.home)} versus ${esc(f.away)}">
     <div class="row-when">
       ${state.kind === 'upcoming'
@@ -613,21 +648,20 @@ function rowHTML(f) {
 
     <div class="row-teams">
       <span class="row-side">${crest(f.home, 'sm', f.home_id)}<span>${esc(f.home)}</span>${
-        score ? `<b class="row-goals${score[0] > score[1] ? ' won' : ''}">${esc(score[0])}</b>` : ''}</span>
+        shown ? `<b class="row-goals${shown[0] > shown[1] ? ' won' : ''}">${esc(shown[0])}</b>` : ''}</span>
       <span class="row-side">${crest(f.away, 'sm', f.away_id)}<span>${esc(f.away)}</span>${
-        score ? `<b class="row-goals${score[1] > score[0] ? ' won' : ''}">${esc(score[1])}</b>` : ''}</span>
+        shown ? `<b class="row-goals${shown[1] > shown[0] ? ' won' : ''}">${esc(shown[1])}</b>` : ''}</span>
     </div>
 
-    <div class="row-call">
-      ${d ? `<div class="row-sel">${esc(d.name)}</div><p class="row-wins">${
+    ${d ? `<div class="row-call">
+      <div class="row-sel">${esc(d.name)}</div>
+      <p class="row-wins">${
         played
           ? esc(recap({ market: pick.market, outcome: pick.outcome, line: pick.line,
                         result: landed === 'won' ? 'WON' : landed === 'lost' ? 'LOST' : 'VOID',
                         homeGoals: score[0], awayGoals: score[1], home: f.home, away: f.away }) ?? d.wins)
-          : esc(d.wins)}</p>`
-        : f.locked ? `<p class="row-locked">We have a call on this one.</p>`
-        : `<p class="row-none">No call — the price looks about right to us.</p>`}
-    </div>
+          : esc(d.wins)}</p>
+    </div>` : ''}
 
     <div class="row-price">
       ${played
@@ -637,9 +671,11 @@ function rowHTML(f) {
             : `<span class="mark none">Full time</span>`)
         : pick && p ? `
         <span class="odds-tile${p.local ? '' : ' away'}"><span class="odds">${dec(p.odds)}</span></span>
-        <span class="odds-book">${p.local ? esc(p.book) : `no ${esc(country())} book`}</span>`
-        : f.locked ? `<span class="odds-tile locked"><span class="odds-locked" aria-hidden="true">••</span></span>
-                      <span class="odds-book">members</span>` : ''}
+        <span class="odds-book">${pick.lean ? 'lean · ' : ''}${p.local ? esc(p.book) : `no ${esc(country())} book`}</span>`
+        : f.locked ? `<span class="row-locked-mark">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>
+                        Members</span>`
+        : `<span class="row-pass">Passed</span>`}
     </div>
   </a>`;
 }
@@ -1274,6 +1310,58 @@ function standingsHTML(st, home, away, homeId, awayId) {
   </div>`;
 }
 
+
+/*
+ * Which of the things we weighed a reader actually sees.
+ *
+ * The panel used to print the whole ledger, filtered by a regular expression
+ * over the prose. That is backwards twice over. It let through every factor
+ * that looked and found nothing -- "the reverse fixture finished 3-2, too
+ * close to carry a revenge motive", "safely mid-table, with 31 games
+ * remaining", "the manager has 25 matches in charge" -- which is a page of
+ * sentences that change nobody's mind, in front of the one or two that do. And
+ * it decided on wording, so every rephrasing silently changed what shipped.
+ *
+ * The ledger already knows the answer. A factor carries `moves`, the rates it
+ * actually shifted, and `strength`, how hard it argued. A factor that moved
+ * nothing and argued weakly did not contribute to the call, whatever its
+ * sentence reads like.
+ *
+ * Better still, when there is a call the engine has already ranked the factors
+ * that drove it -- `verdict.drivers`, most dispositive first. That is the real
+ * answer to "why this call", so it leads, and everything else folds away.
+ */
+function readsFor(f, verdicts) {
+  const named = (x) =>
+    x && x.state === 'COMPUTED' && READ_LABEL[x.id] && x.note
+      ? { id: x.id, label: READ_LABEL[x.id], note: x.note, strength: x.strength ?? 0, moves: (x.moves ?? []).length }
+      : null;
+
+  const dedupe = (list) => {
+    const seen = new Set();
+    return list.filter((r) => {
+      if (!r || seen.has(r.note)) return false;
+      seen.add(r.note);
+      return true;
+    });
+  };
+
+  // The call's own drivers, in the engine's order. Free copy has no verdicts,
+  // so this is empty there and the ledger has to answer on its own.
+  const drivers = dedupe((verdicts[0]?.drivers ?? []).map(named)).slice(0, 4);
+
+  const ledger = dedupe((f.ledger ?? []).map(named));
+  const driverIds = new Set(drivers.map((r) => r.id));
+  const others = ledger.filter((r) => !driverIds.has(r.id));
+
+  // Did it change anything, or argue hard enough to be worth a reader's time?
+  const carried = (r) => r.moves > 0 || r.strength >= 0.45;
+
+  const reads = drivers.length ? drivers : others.filter(carried).slice(0, 5);
+  const shown = new Set(reads.map((r) => r.id));
+  return { reads, rest: others.filter((r) => !shown.has(r.id)) };
+}
+
 async function viewFixture(id) {
   app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
   let f;
@@ -1285,11 +1373,7 @@ async function viewFixture(id) {
 
   const p = f.odds_1x2 ?? {};
   const verdicts = f.verdicts ?? [];
-  const NOTHING = /^(not a|no |neither side holds a clear|conditions are unremarkable|the sharp book and the wider market agree|the line has barely moved|scoring about what their chances are worth)/i;
-  const reads = (f.ledger ?? [])
-    .filter((x) => x.state === 'COMPUTED' && READ_LABEL[x.id] && x.note && !NOTHING.test(x.note))
-    .map((x) => ({ label: READ_LABEL[x.id], note: x.note }))
-    .filter((x, i, arr) => arr.findIndex((y) => y.note === x.note) === i);
+  const { reads, rest } = readsFor(f, verdicts);
 
   // The provider hands back round labels already joined with a middle dot
   // ("Regular season · Matchday 4"), which is the meta-string tell arriving
@@ -1311,8 +1395,13 @@ async function viewFixture(id) {
             : `<p class="narrative">${esc(f.pass ?? 'Nothing here is worth a call. The price looks about right.')}</p>`}
         </div>
         ${reads.length ? `<div class="panel">
-          <p class="panel-head">What we looked at</p>
+          <p class="panel-head">${verdicts.length ? 'What made the call' : 'What stood out'}</p>
           <div class="reads">${reads.map((r) => `<div class="read"><b>${esc(r.label)}</b><p>${esc(r.note)}</p></div>`).join('')}</div>
+          ${rest.length ? `
+            <details class="more-reads">
+              <summary>${rest.length} other thing${rest.length === 1 ? '' : 's'} we checked</summary>
+              <div class="reads">${rest.map((r) => `<div class="read"><b>${esc(r.label)}</b><p>${esc(r.note)}</p></div>`).join('')}</div>
+            </details>` : ''}
         </div>` : ''}
       </div>
       <div>
@@ -1468,33 +1557,56 @@ async function viewResults() {
   const lost = settled.filter((x) => x.result === 'LOST' || x.result === 'HALF_LOST').length;
   const voided = picks.filter((x) => x.result === 'VOID' || x.result === 'PUSH').length;
 
+  /*
+   * The masthead, rebuilt.
+   *
+   * What was here put "Results" at subheading size and then set the record
+   * underneath it in the largest type on the site -- two lines of display face
+   * on a phone, pushing the actual results below the fold, with the page's own
+   * title reading as a caption to it. The hierarchy was upside down and the
+   * biggest element was the one that reflowed worst.
+   *
+   * The numbers are a strip instead. Four figures, each with what it is, which
+   * is how anybody reads a record and is legible at any width because it is a
+   * grid rather than a sentence. The sentence stays, at sentence size, because
+   * it says the thing the numbers cannot: that winning most of them is not the
+   * same as making money.
+   */
+  const stat = (v, label, tone = '') =>
+    `<div class="stat${tone ? ` ${tone}` : ''}"><b>${esc(v)}</b><span>${esc(label)}</span></div>`;
+
   app.innerHTML = `
   <div class="wrap section">
-    <div class="section-head"><div>
-      <h2 class="display">Results</h2>
-      <p>Every pick we have published, marked against the real result. Nothing removed, nothing hidden.</p>
-    </div></div>
-
-    <div class="record">
-      <p class="record-line">${esc(headline)}</p>
-      ${profit === null ? '' : `<p class="record-sub">And backing every one of them with £${STAKE}, ${esc(verdict)}.${
-        profit < 0 && rate !== null && rate >= 60
-          ? ' Winning most of them is not the same as making money, and the prices are why.'
-          : ''}</p>`}
-      ${n > 0 && n < 100
-        ? `<p class="record-note">That is ${n} results. It is not enough to tell a good run from a good model, and we will say so until it is.</p>`
-        : ''}
+    <div class="page-head">
+      <h1 class="display xl">Results</h1>
+      <p class="page-sub">Every pick we have published, marked against the real result.
+        Nothing removed, nothing hidden.</p>
     </div>
 
-    ${formBarHTML(won, voided, lost, ['won', 'stake back', 'lost'],
-      `The ${settled.length + voided} most recent, in order. The rate above covers all ${n}.`)}
+    ${n === 0 ? `<p class="record-sub">${esc(headline)}</p>` : `
+      <div class="record-strip">
+        ${stat(wins, 'won', 'won')}
+        ${stat(n - wins, 'did not', 'lost')}
+        ${stat(`${rate}%`, 'strike rate')}
+        ${profit === null ? '' : stat(`${profit < 0 ? '−' : '+'}${money(profit)}`,
+          `at £${STAKE} a pick`, profit < 0 ? 'lost' : 'won')}
+      </div>
+      ${formBarHTML(won, voided, lost, ['won', 'stake back', 'lost'],
+        `The ${settled.length + voided} most recent, in order. The rate above covers all ${n}.`)}
+      <p class="record-sub">${profit !== null && profit < 0 && rate !== null && rate >= 60
+        ? 'Winning most of them is not the same as making money, and the prices are why.'
+        : esc(headline)}</p>
+      ${n > 0 && n < 100
+        ? `<p class="record-note">That is ${n} results. It is not enough to tell a good run
+             from a good model, and we will say so until it is.</p>`
+        : ''}`}
 
     <div class="with-side">
       <div>
         <h2 class="side-head">How it went</h2>
-        ${picks.length ? recapHTML(picks)
+        <div id="recap">${picks.length ? ''
           : `<div class="empty-state"><b>Nothing has finished yet</b>
-               <span>The first results land as today's games do.</span></div>`}
+               <span>The first results land as today's games do.</span></div>`}</div>
       </div>
       <aside>
         <h2 class="side-head">Still to play</h2>
@@ -1516,6 +1628,80 @@ async function viewResults() {
       </aside>
     </div>
   </div>`;
+
+  /*
+   * The recap, a matchday at a time.
+   *
+   * A hundred and twenty settled picks is twenty screens of scrolling, and a
+   * record nobody reaches the bottom of is a record nobody reads. Paging it by
+   * day matches how the thing is actually remembered -- you look up a Saturday,
+   * not pick number 84 -- and it means the page below the fold is finite.
+   *
+   * The page lives in the address, so a particular matchday can be sent to
+   * somebody, and the back button walks through them.
+   */
+  if (picks.length) {
+    /*
+     * Paged by pick rather than by matchday, which was the first attempt and
+     * the wrong unit: a Saturday carries a hundred and seven of these and a
+     * Sunday thirteen, so a page per day is one screen followed by twenty.
+     * Twenty picks is a page whatever the fixture list looks like, and the day
+     * headings still fall where the days do inside it.
+     */
+    const ordered = [...picks].sort((a, b) => b.kickoff - a.kickoff);
+    const PER = 20;
+    const pages = Math.max(1, Math.ceil(ordered.length / PER));
+
+    const paint = (page) => {
+      const p = Math.min(Math.max(1, page), pages);
+      const host = document.getElementById('recap');
+      if (!host) return;
+      host.innerHTML =
+        groupByDay(ordered.slice((p - 1) * PER, p * PER)).map(dayHTML).join('') +
+        pagerHTML(p, pages, 'Results pages');
+      for (const b of host.querySelectorAll('[data-page]')) {
+        b.onclick = (e) => {
+          e.preventDefault();
+          const next = Number(b.dataset.page);
+          history.replaceState(null, '', `#/results?p=${next}`);
+          paint(next);
+          document.getElementById('recap')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        };
+      }
+    };
+    paint(Number(parseHash().params.get('p')) || 1);
+  }
+}
+
+/**
+ * A pager.
+ *
+ * Numbered rather than "load more", because a number is a place you can go
+ * back to and a button is not. Long runs collapse around the current page so
+ * the control never wraps: 1 … 4 5 6 … 20.
+ */
+function pagerHTML(page, pages, label = 'Pages') {
+  if (pages <= 1) return '';
+  const want = new Set([1, pages, page, page - 1, page + 1]);
+  if (page <= 3) { want.add(2); want.add(3); }
+  if (page >= pages - 2) { want.add(pages - 1); want.add(pages - 2); }
+  const nums = [...want].filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b);
+
+  const out = [];
+  let prev = 0;
+  for (const n of nums) {
+    if (n - prev > 1) out.push('<span class="pager-gap">…</span>');
+    out.push(`<button type="button" class="pager-num${n === page ? ' on' : ''}" data-page="${n}"
+      ${n === page ? 'aria-current="page"' : ''}>${n}</button>`);
+    prev = n;
+  }
+
+  return `
+  <nav class="pager" aria-label="${esc(label)}">
+    <button type="button" class="pager-step" data-page="${page - 1}" ${page === 1 ? 'disabled' : ''}>Newer</button>
+    <div class="pager-nums">${out.join('')}</div>
+    <button type="button" class="pager-step" data-page="${page + 1}" ${page === pages ? 'disabled' : ''}>Older</button>
+  </nav>`;
 }
 
 
@@ -1549,9 +1735,8 @@ function dayVerdict(won, total) {
   return 'A bad one.';
 }
 
-function recapHTML(picks) {
-  // Newest day first, and within a day the earliest kick-off first, which is
-  // the order the afternoon actually happened in.
+/** Newest matchday first; within one, the order the afternoon happened in. */
+function groupByDay(picks) {
   const days = new Map();
   for (const x of picks) {
     const key = new Date(x.kickoff * 1000).toDateString();
@@ -1560,27 +1745,26 @@ function recapHTML(picks) {
     g.list.push(x);
     days.set(key, g);
   }
-
   return [...days.values()]
     .sort((a, b) => b.at - a.at)
-    .map((g) => {
-      const list = [...g.list].sort((a, b) => a.kickoff - b.kickoff);
-      const won = list.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
-      const graded = list.filter((x) => x.result !== 'VOID' && x.result !== 'PUSH').length;
-      const d = new Date(g.at * 1000);
-      const label = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+    .map((g) => ({ at: g.at, list: [...g.list].sort((a, b) => a.kickoff - b.kickoff) }));
+}
 
-      return `
-      <section class="recap-day">
-        <div class="recap-head">
-          <h3>${esc(unshout(label))}</h3>
-          <span class="recap-tally">${won} of ${graded} landed</span>
-        </div>
-        ${graded ? `<p class="hand recap-say">${esc(dayVerdict(won, graded))}</p>` : ''}
-        ${list.map(recapCardHTML).join('')}
-      </section>`;
-    })
-    .join('');
+function dayHTML(g) {
+  const won = g.list.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
+  const graded = g.list.filter((x) => x.result !== 'VOID' && x.result !== 'PUSH').length;
+  const label = new Date(g.at * 1000)
+    .toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  return `
+  <section class="recap-day">
+    <div class="recap-head">
+      <h3>${esc(unshout(label))}</h3>
+      <span class="recap-tally">${won} of ${graded} landed</span>
+    </div>
+    ${graded ? `<p class="hand recap-say">${esc(dayVerdict(won, graded))}</p>` : ''}
+    ${g.list.map(recapCardHTML).join('')}
+  </section>`;
 }
 
 const RESULT_TONE = {
