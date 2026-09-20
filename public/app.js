@@ -1028,7 +1028,9 @@ function pitchHTML(lineups, home, away, homeId, awayId) {
   const out = (lineups.unavailable ?? []).filter((u) => u.name);
   return `
   <div class="panel">
-    <p class="panel-head">Team sheet <span>${esc(lineups.status === 'confirmed' ? 'confirmed' : 'predicted')}</span></p>
+    <p class="panel-head">Team sheet ${lineups.status === 'confirmed'
+      ? '<span class="tag ok">confirmed</span>'
+      : '<span class="tag prov">predicted</span>'}</p>
     <div class="pitch">
       ${half(lineups.home, home, homeId, false)}
       <div class="pitch-mid"></div>

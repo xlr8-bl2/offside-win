@@ -122,7 +122,14 @@
 .tag.won  { background: rgba(61, 180, 104, 0.16); color: var(--won); }
 .tag.lost { background: rgba(203, 49, 49, 0.16); color: var(--lost); }
 .tag.void { background: rgba(123, 137, 150, 0.16); color: var(--void); }
-.tag.prov { background: transparent; color: var(--warn); border-color: rgba(240, 168, 104, 0.34); }
+/*
+ * A predicted eleven is a guess, and it is drawn with the same photographs and
+ * the same confidence as a confirmed one. The only thing separating them was
+ * the word "predicted" set in muted grey, which is not enough weight to stop a
+ * reader treating twenty-two named players as fact.
+ */
+.tag.prov { background: rgba(245, 165, 36, 0.16); color: var(--warn); }
+.tag.ok { background: rgba(47, 191, 113, 0.16); color: var(--won); }
 .pending { color: var(--chalk-3); }
 
 /* ================================================================ surfaces */
@@ -1619,9 +1626,23 @@
 
 /* ----------------------------------------------------------- the pitch */
 
+/*
+ * Two halves of a pitch, side by side.
+ *
+ * The tracks were `minmax(0, 1fr)`, which explicitly permits a column to
+ * shrink BELOW its content. On a phone they resolved to 140px while each half
+ * kept its 240px min-width, so both halves spilled out of their tracks and
+ * overlapped by nearly a hundred pixels — two team sheets drawn on top of each
+ * other, names over names. The same `minmax(0, …)` also defeated the
+ * `overflow-x: auto` underneath it: the grid shrank to the container instead
+ * of staying as wide as its content and letting the container scroll.
+ *
+ * The floor is now the width five players actually need, so the grid is at
+ * least as wide as a pitch and scrolls when it has to.
+ */
 .pitch {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 2px minmax(0, 1fr);
+  grid-template-columns: minmax(330px, 1fr) 2px minmax(330px, 1fr);
   padding: var(--space-5) var(--space-4);
   overflow-x: auto;
   border: var(--border) solid var(--hairline);
@@ -1631,7 +1652,7 @@
     linear-gradient(160deg, #10241a, #0a1712);
 }
 .pitch-mid { background: var(--hairline); }
-.pitch-half { display: grid; gap: var(--space-5); align-content: start; min-width: 240px; }
+.pitch-half { display: grid; gap: var(--space-5); align-content: start; min-width: 0; }
 .pitch-half.flip { direction: rtl; }
 .pitch-half.flip > * { direction: ltr; }
 .pitch-head {
@@ -1663,6 +1684,28 @@
 }
 .outlist { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-5); }
 .outlist b { margin-right: var(--space-1); font-size: var(--text-xs); color: var(--chalk-3); font-weight: var(--weight-medium); }
+
+/*
+ * On a phone the two sides stack.
+ *
+ * Side by side on a 390px screen means a horizontal scroll to see the second
+ * team, which is not how anyone reads a team sheet on a phone. Stacked, each
+ * half gets the full width and the mirroring goes with it — the flip exists so
+ * the two sides face each other across a halfway line, and stacked there is no
+ * halfway line to face across.
+ */
+@media (max-width: 760px) {
+  .pitch {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-x: visible;
+    gap: var(--space-5);
+  }
+  .pitch-mid { display: none; }
+  .pitch-half + .pitch-half { padding-top: var(--space-5); border-top: var(--border) solid var(--hairline); }
+  .pitch-half.flip { direction: ltr; }
+  .pp { width: 58px; }
+  .pp-name { max-width: 58px; }
+}
 
 /* ------------------------------------------------------------- the venue */
 
