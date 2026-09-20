@@ -282,6 +282,44 @@ export function countryIsGuess() {
 
 const key = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
+/*
+ * How a book spells its own name.
+ *
+ * The feed is inconsistent about this -- "Bet365" and "William Hill" arrive
+ * correctly cased and "betfair" does not, so a page that prints what it is
+ * given says "We put it up at 1.29 with betfair" next to "Best price at
+ * William Hill". These are brands, and a brand rendered in the wrong case
+ * reads as a typo on the one line of the page that is asking a reader to go
+ * and open an account somewhere.
+ *
+ * Keyed on the same normalised form the matching uses, so slug or display
+ * name both find it. Anything not listed is printed exactly as it arrives --
+ * the feed is right far more often than it is wrong, and inventing a house
+ * style for a brand is its own kind of wrong.
+ */
+const BOOK_NAMES = {
+  // The feed sends these lower-cased or abbreviated. Everything it already
+  // renders reasonably -- Bet365, Bwin, William Hill -- is left alone: those
+  // are the brand's business, not ours, and re-casing them would be imposing a
+  // house style on somebody else's name.
+  betfair: 'Betfair',
+  betfairexchange: 'Betfair Exchange',
+  sbo: 'SBOBET',
+  sbobet: 'SBOBET',
+  paddypower: 'Paddy Power',
+  skybet: 'Sky Bet',
+  boylesports: 'BoyleSports',
+  leovegas: 'LeoVegas',
+  talksportbet: 'talkSPORT BET',
+  quinnbet: 'QuinnBet',
+  williamhill: 'William Hill',
+};
+
+/** The book's own spelling, or the feed's if we do not have an opinion. */
+export function bookName(name, slug = null) {
+  return BOOK_NAMES[key(slug)] ?? BOOK_NAMES[key(name)] ?? String(name ?? '');
+}
+
 /** Matching is on slug AND display name — the provider fills in either. */
 function matches(price, wanted) {
   const a = key(price.slug);
@@ -307,9 +345,9 @@ export function localPrice(prices, code = country()) {
 
   if (here.length) {
     const top = here.reduce((a, b) => (b.odds > a.odds ? b : a));
-    return { odds: top.odds, book: top.book, slug: top.slug, local: true, count: here.length };
+    return { odds: top.odds, book: bookName(top.book, top.slug), slug: top.slug, local: true, count: here.length };
   }
 
   const top = list.reduce((a, b) => (b.odds > a.odds ? b : a));
-  return { odds: top.odds, book: top.book, slug: top.slug, local: false, count: 0 };
+  return { odds: top.odds, book: bookName(top.book, top.slug), slug: top.slug, local: false, count: 0 };
 }
