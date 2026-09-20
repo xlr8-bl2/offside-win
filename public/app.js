@@ -11,7 +11,7 @@
  */
 
 import { describe as market, didItLand, recap } from './js/lib/markets.js';
-import { COUNTRY_NAMES, cash, country, localPrice, purse } from './js/lib/books.js';
+import { COUNTRY_NAMES, bookName, cash, country, localPrice, purse } from './js/lib/books.js';
 import { cleanProse } from './js/lib/vocabulary.js';
 import { authHeaders, completeSignIn, currentUser, signInWithEmail, signInWithGoogle, signOut } from './js/lib/auth.js';
 
@@ -1297,7 +1297,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
     ${played ? `<p class="aside">Written before kick-off, and left as it was.</p>` : ''}
     <div class="verdict-meta">
       ${played
-        ? `<span>We put it up at ${dec(c.odds)}${c.bookmaker ? ` with ${esc(c.bookmaker)}` : ''}.</span>`
+        ? `<span>We put it up at ${dec(c.odds)}${c.bookmaker ? ` with ${esc(bookName(c.bookmaker))}` : ''}.</span>`
         : `${p ? (p.local
             ? `<span>Best price at <b>${esc(p.book)}</b> in ${esc(COUNTRY_NAMES[country()] ?? 'your country')}</span>`
             : `<span class="warnish">No book in ${esc(COUNTRY_NAMES[country()] ?? 'your country')} is quoting this. ` +
@@ -1309,7 +1309,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
         <summary>${p.count} book${p.count === 1 ? '' : 's'} where you are</summary>
         <table class="tbl settle-tbl"><tbody>
           ${(c.prices ?? []).filter((q) => localPrice([q]).local).sort((a, b) => b.odds - a.odds)
-            .map((q) => `<tr><td>${esc(q.book)}</td><td class="num">${dec(q.odds)}</td></tr>`).join('')}
+            .map((q) => `<tr><td>${esc(bookName(q.book, q.slug))}</td><td class="num">${dec(q.odds)}</td></tr>`).join('')}
         </tbody></table>
       </details>` : ''}
     ${d.outcomes?.length ? `
@@ -2541,7 +2541,22 @@ async function viewPricing() {
         <button class="btn btn-accent btn-lg" id="buy">
           ${user ? 'Become a member' : 'Sign in to join'}
         </button>
-        <p class="plan-note">Thirty days. Cancel whenever you like, in one tap.</p>
+        <!--
+          What actually happens when the button is pressed, in the place a
+          reader looks before pressing it.
+
+          The page used to say only "thirty days, cancel whenever you like",
+          which leaves the one question anybody has about a monthly price
+          unanswered: does it come out again next month. It does not --
+          membership.auto_renew defaults to 0 and record_payment never sets
+          it, so a membership bought here is thirty days and then it stops.
+          Saying so is not a concession; a subscription nobody remembers
+          agreeing to is the thing people hate.
+        -->
+        <p class="plan-note"><b>One payment. Thirty days.</b> It does not renew by itself — you can
+          turn renewal on from your account if you want it to, and off again in one tap.</p>
+        <p class="plan-note">Changed your mind? Fourteen days, full refund, whatever you have
+          read. <a href="#/legal/refunds">How refunds work</a>.</p>
       </div>
     </div>
 
@@ -2606,9 +2621,37 @@ async function viewSignin() {
   const note = document.getElementById('note');
   const say = (msg, bad) => { note.textContent = msg; note.className = bad ? 'signin-note bad' : 'signin-note ok'; };
 
+  /*
+   * The auth library's own words, translated.
+   *
+   * A reader who mistyped their email got "AuthApiError: Unable to validate
+   * email address: invalid format", and one who asked twice in a minute got
+   * "For security purposes, you can only request this after 47 seconds." Both
+   * are accurate and neither is addressed to a person. The cases we can name
+   * are named; anything we cannot is a sentence that at least says what to do
+   * next, with the original kept off the page.
+   */
+  const humanise = (err) => {
+    const raw = String(err?.message ?? '');
+    if (/rate ?limit|only request this after|too many/i.test(raw)) {
+      return 'That is one too many requests in a row. Give it a minute and try again.';
+    }
+    if (/invalid format|unable to validate email/i.test(raw)) {
+      return 'That does not look like an email address. Check it and try again.';
+    }
+    if (/signups? not allowed|disabled/i.test(raw)) {
+      return 'We cannot open new accounts by email at the moment. Try Google instead.';
+    }
+    if (/failed to fetch|network/i.test(raw) || navigator.onLine === false) {
+      return 'Your device cannot reach us at the moment. Check your connection and try again.';
+    }
+    if (/popup|window|closed/i.test(raw)) return 'The Google window closed before it finished. Try again.';
+    return 'That did not work. Try again, or use the other button.';
+  };
+
   document.getElementById('google').onclick = async (e) => {
     e.currentTarget.disabled = true;
-    try { await signInWithGoogle(); } catch (err) { say(err.message, true); e.currentTarget.disabled = false; }
+    try { await signInWithGoogle(); } catch (err) { say(humanise(err), true); e.currentTarget.disabled = false; }
   };
 
   document.getElementById('magic').onsubmit = async (e) => {
@@ -2622,7 +2665,7 @@ async function viewSignin() {
       await signInWithEmail(email);
       say(`Check ${email}. The link signs you straight in.`);
     } catch (err) {
-      say(err.message, true);
+      say(humanise(err), true);
       button.disabled = false;
     }
   };
@@ -2712,6 +2755,12 @@ function money(minor, currency) {
 
 const UPDATED = 'September 2026';
 
+/*
+ * The address on the contact page. It is referenced from the privacy policy and
+ * the refunds policy as well, so it is a constant rather than three strings.
+ */
+const SUPPORT_EMAIL = 'support@offside.win';
+
 const LEGAL = {
   privacy: {
     title: 'Privacy policy',
@@ -2759,7 +2808,8 @@ const LEGAL = {
          long as tax and accounting law requires, which we cannot waive — but it can be separated
          from you.</p>
       <h2>Contact</h2>
-      <p>Questions about this policy can be sent to the address on our contact page.</p>`,
+      <p>Questions about this policy go to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>,
+         or see the <a href="#/legal/contact">contact page</a>.</p>`,
   },
   cookies: {
     title: 'Cookie policy',
@@ -2806,15 +2856,16 @@ const LEGAL = {
       <p>Reading the site is free: every fixture, every write-up, the form, the team news and the
          full record of results. A membership adds the call itself — which market, which side, the
          price, and the bookmaker offering it.</p>
-      <p>A membership runs for thirty days from the day you pay. If you have turned renewal on, we
-         charge the same card again on the day it runs out, at the price shown on the membership
-         page at that time; we will tell you before any price changes. You can stop renewal at any
-         time from your account page, in one tap, and keep the access you have already paid for
-         until it runs out.</p>
-      <p>Because this is digital content delivered immediately, you are asked at checkout to agree
-         that it starts straight away. Doing so ends the 14-day right to cancel that would otherwise
-         apply under UK consumer law. If you would rather keep that right, do not agree, and your
-         access will begin after the 14 days have passed.</p>
+      <p>A membership runs for thirty days from the day you pay. <b>It does not renew by
+         itself.</b> If you want it to, you can turn renewal on from your account page, and off
+         again the same way; while it is on we charge the same card on the day the membership runs
+         out, at the price shown on the membership page at that time, and we will tell you before
+         any price changes. Turning renewal off keeps the access you have already paid for until it
+         runs out.</p>
+      <p>This is digital content and your access starts the moment you pay. UK consumer law lets a
+         seller ask you to give up the 14-day right to cancel in exchange for that. <b>We do not
+         ask.</b> You keep the 14 days in full — see the refunds page — and there is nothing to
+         agree to at checkout beyond the payment itself.</p>
       <h2>Changes</h2>
       <p>These terms may change. The date below shows when they were last revised.</p>`,
   },
@@ -2827,21 +2878,52 @@ const LEGAL = {
          put it right — either by extending your membership by the time you lost, or by refunding
          you in full. No argument and no form.</p>
       <h2>If you changed your mind</h2>
-      <p>Tell us within 14 days of your first payment and you can have it back, provided you agreed
-         at checkout to wait rather than to start immediately. If you asked to start immediately,
-         that right ends when your access begins — which is what agreeing to it means, and why we
-         ask rather than assume.</p>
+      <p>Tell us within 14 days of your first payment and you can have it back in full, whatever
+         you have read in the meantime. We could ask you to sign that right away at checkout, the
+         way most sellers of digital content do, in exchange for access starting immediately. We do
+         not. Your access starts immediately anyway and the 14 days stand.</p>
       <h2>If you simply want to stop</h2>
-      <p>Turn renewal off on your account page. You keep what you have paid for until it runs out
-         and are not charged again. We do not refund part of a month already under way, and we do
-         not make you ask a person to leave.</p>
+      <p>Nothing to do: a membership is thirty days and then it stops. If you turned renewal on,
+         turn it off on your account page — you keep what you have paid for until it runs out and
+         are not charged again. We do not refund part of a month already under way, and we do not
+         make you ask a person to leave.</p>
       <h2>What we will not refund</h2>
       <p><b>Losing bets.</b> Nothing here is advice to stake money and no call is a promise. Our
          record is published in full, wins and losses alike, so that is knowable before you pay
          rather than after.</p>
       <h2>How to ask</h2>
-      <p>Write to the address on our contact page from the email address on the account. We answer
-         every refund request, including the ones we turn down.</p>`,
+      <p>Write to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> from the email address on
+         the account. We answer every refund request, including the ones we turn down.</p>`,
+  },
+  /*
+   * A way to reach a person.
+   *
+   * The privacy and refunds pages both told readers to write to "the address
+   * on our contact page", and there was no contact page -- on a site that
+   * takes money, from strangers, under a refund policy that asks them to write
+   * in. Both of those sentences now point somewhere.
+   *
+   * SUPPORT_EMAIL is the one thing on this page that has to be real. Change it
+   * in one place if the mailbox moves.
+   */
+  contact: {
+    title: 'Contact',
+    body: `
+      <p>One address, read by a person.</p>
+      <h2>Anything at all</h2>
+      <p><a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a></p>
+      <p>Refunds, a membership that did not start, a scoreline we have got wrong, a question about
+         what we hold on you, or a complaint. Write from the email address on your account where
+         the question is about your account — it saves us asking you to prove it is you.</p>
+      <h2>What to expect</h2>
+      <p>We answer every email, including the ones where the answer is no. Refund requests are
+         answered within two working days; everything else as soon as we can.</p>
+      <h2>What we cannot help with</h2>
+      <p>We are not a bookmaker and we hold no betting account. If a bet has been settled in a way
+         you disagree with, that is between you and the book that took it — the rules that decided
+         it are theirs, not ours. If gambling has stopped being something you can afford, the
+         <a href="#/legal/responsible">responsible gambling page</a> lists people who can help, and
+         they are better placed than we are.</p>`,
   },
   responsible: {
     title: 'Responsible gambling',
@@ -3164,8 +3246,24 @@ renderRegion();
   } catch (err) {
     // A stale or reused magic link. Say so once, on the sign-in page, rather
     // than leaving someone looking at a home page wondering what happened.
-    state.authError = err.message ?? 'That sign-in link did not work.';
-    location.hash = '#/signin';
+    /*
+     * A stale or reused link, in words. Supabase says "invalid request: both
+     * auth code and code verifier should be non-empty", which is about its
+     * internals and not about anything the reader did or can fix.
+     */
+    state.authError = /expired|invalid|verifier|code/i.test(String(err?.message ?? ''))
+      ? 'That sign-in link has already been used, or it has expired. Ask for a new one below.'
+      : 'That sign-in link did not work. Ask for a new one below.';
+    /*
+     * replaceState, not `location.hash`.
+     *
+     * Assigning the hash fires hashchange, which routes -- and then the
+     * explicit route() below routes a second time. viewSignin clears
+     * state.authError as it reads it, so the first render consumed the message
+     * and the second drew the page without it: a reader whose link had expired
+     * was sent to the sign-in page and told nothing at all.
+     */
+    history.replaceState(null, '', `${location.pathname}${location.search}#/signin`);
   }
   /*
    * Pick up where they left off.
