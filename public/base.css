@@ -226,17 +226,29 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   .top { background: var(--pitch); }
 }
 
+/*
+ * Three tracks, so the rail is centred on the page rather than on whatever is
+ * left over.
+ *
+ * It was a flex row with `margin-inline: auto` on the rail, which centres it
+ * between the mark and the controls -- and those are not the same width, so
+ * the rail sat seventy-four pixels left of the middle of the page at 1440.
+ * Equal outer tracks put it dead centre and hold it there as the controls
+ * change width, which they do: the plan tag appears on sign-in and the
+ * primary button disappears on a small screen.
+ */
 .top-inner {
   max-width: var(--maxw);
   margin-inline: auto;
   min-height: var(--header-h);
   padding: var(--space-2) var(--gutter);
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: var(--space-5);
 }
-/* The rail sits centred between the mark and the controls. */
-.top-inner .nav { margin-inline: auto; }
+.top-inner .brand { justify-self: start; }
+.top-inner .top-right { justify-self: end; }
 
 .brand { display: inline-flex; align-items: center; gap: var(--space-3); flex: none; }
 /*
@@ -388,6 +400,16 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
     box-shadow: var(--elev-3);
   }
   .nav:not(.open) { display: none; }
+  /*
+   * With the rail behind the burger there is no element between the mark and
+   * the controls, so the `margin-inline: auto` that centres the rail on a
+   * laptop goes with it -- and the whole header collapsed to the left edge
+   * with a third of the bar empty beside it. The controls take the free space
+   * instead, which is where they sit at every other width anyway.
+   */
+  /* Two tracks with the rail gone, so the controls still end up on the right
+     edge rather than hard against the mark. */
+  .top-inner { grid-template-columns: minmax(0, 1fr) auto; }
   .nav a { padding: var(--space-4); font-size: var(--text-lg); }
   .nav a.on::after { display: none; }
   .nav a.on { color: var(--floodlight-hi); }
