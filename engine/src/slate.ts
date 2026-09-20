@@ -360,6 +360,11 @@ export async function runSlate(): Promise<SlateReport> {
         ? narratePass(selection.passReason, analysis.home_team, analysis.away_team, analysis.fixture_id)
         : null;
 
+      // The provider carries the running score on the event itself, so a match
+      // that has kicked off has one and a match that has not does not.
+      const homeGoals = num(event['home_score']);
+      const awayGoals = num(event['away_score']);
+
       // The board card: small, because the board loads all of them at once.
       const board = {
         id: analysis.fixture_id,
@@ -387,6 +392,10 @@ export async function runSlate(): Promise<SlateReport> {
         provisional: analysis.provisional,
         lineup_status: analysis.lineup_status,
         confidence: Number(confidence.toFixed(3)),
+        // What actually happened, where it already has. The board reaches six
+        // hours back, and a row that says FT without a scoreline is the least
+        // useful thing a results-carrying board can print.
+        score: homeGoals === undefined || awayGoals === undefined ? null : [homeGoals, awayGoals],
         lambda: [Number(analysis.lambda_home.toFixed(2)), Number(analysis.lambda_away.toFixed(2))],
         odds_1x2: Object.fromEntries(
           (analysis.book.find((b) => b.market === '1x2')?.fair ?? new Map()).entries(),
@@ -516,6 +525,10 @@ export async function runSlate(): Promise<SlateReport> {
         away_team: analysis.away_team,
         status: analysis.status,
         provisional: analysis.provisional ? 1 : 0,
+        home_goals: homeGoals ?? null,
+        away_goals: awayGoals ?? null,
+        home_team_id: analysis.home_team_id,
+        away_team_id: analysis.away_team_id,
         // Also a column, not just a field inside board_json, because the board
         // has to sort on it and SQL cannot see inside the blob.
         rank: leagueRank(analysis.league_id),
@@ -546,6 +559,10 @@ export async function runSlate(): Promise<SlateReport> {
           kelly: v.candidate.kelly,
           confidence: v.candidate.confidence,
           provisional: analysis.provisional ? 1 : 0,
+        home_goals: homeGoals ?? null,
+        away_goals: awayGoals ?? null,
+        home_team_id: analysis.home_team_id,
+        away_team_id: analysis.away_team_id,
           narrative: v.narrative,
           evidence_json: JSON.stringify({
             drivers: v.drivers.map(forStorage),
@@ -598,7 +615,8 @@ export async function runSlate(): Promise<SlateReport> {
       'fixture',
       [
         'id', 'league_id', 'kickoff', 'home_team', 'away_team', 'status',
-        'provisional', 'rank', 'board_json', 'bundle_json',
+        'provisional', 'home_goals', 'away_goals', 'home_team_id', 'away_team_id',
+        'rank', 'board_json', 'bundle_json',
         'board_free_json', 'bundle_free_json', 'computed_at',
       ],
       fixtureRows,

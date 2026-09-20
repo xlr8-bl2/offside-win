@@ -66,6 +66,18 @@ test('a whole line says the stake comes back', () => {
   assert.match(d.wins, /your stake comes back/i);
 });
 
+test('the away side of a handicap is the mirror of the home one', () => {
+  // `line` is the home handicap and belongs to the market: one -0.75 covers
+  // both quotes. Printed against the away name it was saying "Elche -0.75"
+  // when Elche were the side being given three quarters of a goal.
+  const away = mkt({ market: 'asian_handicap', outcome: 'AWAY', line: -0.75, home: 'Osasuna', away: 'Elche', odds: 2.35 });
+  assert.equal(away.name, 'Elche +0.75');
+  assert.match(away.plain, /three-quarter-goal start/);
+  // And the home side of the same market still reads the other way round.
+  const home = mkt({ market: 'asian_handicap', outcome: 'HOME', line: -0.75, home: 'Osasuna', away: 'Elche', odds: 2.35 });
+  assert.equal(home.name, 'Osasuna -0.75');
+});
+
 test('draw no bet explains the refund rather than naming itself', () => {
   const d = mkt({ market: 'draw_no_bet', outcome: 'HOME', home: 'Genoa', away: 'Sudtirol', odds: 1.5 });
   assert.equal(d.name, 'Genoa to win');

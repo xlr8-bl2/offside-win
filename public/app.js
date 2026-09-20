@@ -10,8 +10,9 @@
  * reasoning is the product and it ships in full; the machinery does not.
  */
 
-import { describe as market } from './js/lib/markets.js';
+import { describe as market, didItLand, recap } from './js/lib/markets.js';
 import { COUNTRY_NAMES, country, countryIsGuess, countryOptions, localPrice, setCountry } from './js/lib/books.js';
+import { cleanProse } from './js/lib/vocabulary.js';
 import { authHeaders, completeSignIn, currentUser, signInWithEmail, signInWithGoogle, signOut } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
@@ -543,9 +544,9 @@ function playedHTML(picks, { showOdds = false } = {}) {
       <a class="played-row" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
         <div class="played-meta"><span>${esc(kickoffLabel(x.kickoff))}</span></div>
         <div class="played-tie">
-          <span class="played-side">${crest(x.home_team ?? '', 'sm')}<span>${esc(x.home_team ?? '')}</span></span>
+          <span class="played-side">${crest(x.home_team ?? '', 'sm', x.home_team_id)}<span>${esc(x.home_team ?? '')}</span></span>
           <span class="played-score ${won ? 'w' : lost ? 'l' : ''}">${esc(badge)}</span>
-          <span class="played-side away">${crest(x.away_team ?? '', 'sm')}<span>${esc(x.away_team ?? '')}</span></span>
+          <span class="played-side away">${crest(x.away_team ?? '', 'sm', x.away_team_id)}<span>${esc(x.away_team ?? '')}</span></span>
         </div>
       </a>`;
     }).join('')}
@@ -580,8 +581,29 @@ function rowHTML(f) {
   const state = matchState(f);
   const day = dayLabel(f.kickoff);
 
+  /*
+   * A played match has to read as played.
+   *
+   * The board reaches six hours back, so on any evening a third of it is
+   * matches that are over. They were drawn identically to the ones still to
+   * come: a kick-off time, a call, and a price presented as if it could still
+   * be taken. The only thing separating them was a small FT.
+   *
+   * Three things change instead. The score goes where the crest and the name
+   * are, the way a fixture list prints it. The price column becomes the mark —
+   * whether the call landed. And the row gets its own surface, so the eye sorts
+   * the board into over and not-over before reading a word of it.
+   */
+  const score = Array.isArray(f.score) && f.score.length === 2 ? f.score : null;
+  const played = state.kind === 'ft' && score;
+  const landed = played && pick
+    ? didItLand({ market: pick.market, outcome: pick.outcome, line: pick.line,
+                  homeGoals: score[0], awayGoals: score[1] })
+    : null;
+  const MARK = { won: 'Landed', lost: 'Missed', back: 'Refunded', part: 'Half back' };
+
   return `
-  <a class="row is-${state.kind}" href="#/fixture/${encodeURIComponent(f.id)}"
+  <a class="row is-${state.kind}${played ? ' is-played' : ''}" href="#/fixture/${encodeURIComponent(f.id)}"
      aria-label="${esc(f.home)} versus ${esc(f.away)}">
     <div class="row-when">
       ${state.kind === 'upcoming'
@@ -590,18 +612,30 @@ function rowHTML(f) {
     </div>
 
     <div class="row-teams">
-      <span class="row-side">${crest(f.home, 'sm', f.home_id)}<span>${esc(f.home)}</span></span>
-      <span class="row-side">${crest(f.away, 'sm', f.away_id)}<span>${esc(f.away)}</span></span>
+      <span class="row-side">${crest(f.home, 'sm', f.home_id)}<span>${esc(f.home)}</span>${
+        score ? `<b class="row-goals${score[0] > score[1] ? ' won' : ''}">${esc(score[0])}</b>` : ''}</span>
+      <span class="row-side">${crest(f.away, 'sm', f.away_id)}<span>${esc(f.away)}</span>${
+        score ? `<b class="row-goals${score[1] > score[0] ? ' won' : ''}">${esc(score[1])}</b>` : ''}</span>
     </div>
 
     <div class="row-call">
-      ${d ? `<div class="row-sel">${esc(d.name)}</div><p class="row-wins">${esc(d.wins)}</p>`
+      ${d ? `<div class="row-sel">${esc(d.name)}</div><p class="row-wins">${
+        played
+          ? esc(recap({ market: pick.market, outcome: pick.outcome, line: pick.line,
+                        result: landed === 'won' ? 'WON' : landed === 'lost' ? 'LOST' : 'VOID',
+                        homeGoals: score[0], awayGoals: score[1], home: f.home, away: f.away }) ?? d.wins)
+          : esc(d.wins)}</p>`
         : f.locked ? `<p class="row-locked">We have a call on this one.</p>`
         : `<p class="row-none">No call — the price looks about right to us.</p>`}
     </div>
 
     <div class="row-price">
-      ${pick && p ? `
+      ${played
+        ? (landed
+            ? `<span class="mark ${esc(landed)}">${esc(MARK[landed])}</span>${
+                pick ? `<span class="odds-book">at ${dec(p ? p.odds : pick.odds)}</span>` : ''}`
+            : `<span class="mark none">Full time</span>`)
+        : pick && p ? `
         <span class="odds-tile${p.local ? '' : ' away'}"><span class="odds">${dec(p.odds)}</span></span>
         <span class="odds-book">${p.local ? esc(p.book) : `no ${esc(country())} book`}</span>`
         : f.locked ? `<span class="odds-tile locked"><span class="odds-locked" aria-hidden="true">••</span></span>
@@ -1381,7 +1415,7 @@ async function viewResults() {
   let data, open;
   try {
     [data, open] = await Promise.all([
-      getJSON('/api/picks?limit=60&settled=true'),
+      getJSON('/api/picks?limit=120&settled=true'),
       getJSON('/api/picks?limit=20&settled=false').catch(() => ({ picks: [] })),
     ]);
   } catch (err) {
@@ -1391,7 +1425,10 @@ async function viewResults() {
 
   const summary = data.summary ?? {};
   const picks = data.picks ?? [];
-  const settled = picks.filter((x) => x.result && x.result !== 'VOID');
+  // A refund is neither won nor lost, so it belongs in the middle band and
+  // nowhere else. Counting PUSH here as well as in `voided` is what made the
+  // bar say "the 126 most recent" over 120 picks.
+  const settled = picks.filter((x) => x.result && x.result !== 'VOID' && x.result !== 'PUSH');
   const openPicks = open?.picks ?? [];
 
   // A tenner a pick, because "-6.99 units" is a sentence in a language the
@@ -1454,8 +1491,8 @@ async function viewResults() {
 
     <div class="with-side">
       <div>
-        <h2 class="side-head">Settled</h2>
-        ${settled.length ? playedHTML(settled.slice(0, 40), { showOdds: true })
+        <h2 class="side-head">How it went</h2>
+        ${picks.length ? recapHTML(picks)
           : `<div class="empty-state"><b>Nothing has finished yet</b>
                <span>The first results land as today's games do.</span></div>`}
       </div>
@@ -1468,7 +1505,7 @@ async function viewResults() {
             const d = market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team, odds: x.odds });
             return `
             <a class="side-item" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
-              <span class="side-thumb">${crest(x.home_team ?? '', 'sm')}${crest(x.away_team ?? '', 'sm')}</span>
+              <span class="side-thumb">${crest(x.home_team ?? '', 'sm', x.home_team_id)}${crest(x.away_team ?? '', 'sm', x.away_team_id)}</span>
               <span class="side-body">
                 <span class="side-sel">${esc(d.name)}</span>
                 <span class="side-meta">${esc(kickoffLabel(x.kickoff))}<b>${dec(x.odds)}</b></span>
@@ -1479,6 +1516,131 @@ async function viewResults() {
       </aside>
     </div>
   </div>`;
+}
+
+
+/**
+ * Every settled call, matchday by matchday.
+ *
+ * This is the page the record was missing. What was here before was a list of
+ * ties with a mark beside each one -- true, and unreadable, and it asked the
+ * reader to take our word for the grade because the scoreline that decided it
+ * was nowhere on the page.
+ *
+ * So each one now carries three things in order: what happened, what we said
+ * would happen, and the reason we gave at the time. The third is the one that
+ * matters on a loss. Anybody can publish their record; publishing the argument
+ * that turned out to be wrong, next to the result that proved it wrong, is the
+ * part nobody does, and it is the only version of this page worth reading.
+ *
+ * Grouped by day because that is how a football weekend is remembered -- not
+ * as a running total, but as a Saturday that went well or a Sunday that did
+ * not. Each day is tallied and given a line, and the line is allowed a bit of
+ * character on a good one as long as it is allowed none on a bad one.
+ */
+function dayVerdict(won, total) {
+  if (!total) return '';
+  if (total >= 3 && won === total) return 'Every one of them.';
+  if (won === 0) return 'Not one. Here it is anyway.';
+  const share = won / total;
+  if (share >= 0.75) return 'A good one.';
+  if (share >= 0.5) return 'More right than wrong.';
+  if (share >= 0.34) return 'More wrong than right.';
+  return 'A bad one.';
+}
+
+function recapHTML(picks) {
+  // Newest day first, and within a day the earliest kick-off first, which is
+  // the order the afternoon actually happened in.
+  const days = new Map();
+  for (const x of picks) {
+    const key = new Date(x.kickoff * 1000).toDateString();
+    const g = days.get(key) ?? { at: x.kickoff, list: [] };
+    g.at = Math.max(g.at, x.kickoff);
+    g.list.push(x);
+    days.set(key, g);
+  }
+
+  return [...days.values()]
+    .sort((a, b) => b.at - a.at)
+    .map((g) => {
+      const list = [...g.list].sort((a, b) => a.kickoff - b.kickoff);
+      const won = list.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
+      const graded = list.filter((x) => x.result !== 'VOID' && x.result !== 'PUSH').length;
+      const d = new Date(g.at * 1000);
+      const label = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+
+      return `
+      <section class="recap-day">
+        <div class="recap-head">
+          <h3>${esc(unshout(label))}</h3>
+          <span class="recap-tally">${won} of ${graded} landed</span>
+        </div>
+        ${graded ? `<p class="hand recap-say">${esc(dayVerdict(won, graded))}</p>` : ''}
+        ${list.map(recapCardHTML).join('')}
+      </section>`;
+    })
+    .join('');
+}
+
+const RESULT_TONE = {
+  WON: 'won', HALF_WON: 'part', LOST: 'lost', HALF_LOST: 'part', PUSH: 'back', VOID: 'back',
+};
+const RESULT_WORD = {
+  WON: 'Landed', HALF_WON: 'Half landed', LOST: 'Missed', HALF_LOST: 'Half missed',
+  PUSH: 'Refunded', VOID: 'Void',
+};
+
+function recapCardHTML(x) {
+  const d = market({
+    market: x.market, outcome: x.outcome, line: x.line,
+    home: x.home_team, away: x.away_team, odds: x.odds,
+  });
+  const tone = RESULT_TONE[x.result] ?? 'back';
+  const hg = x.home_goals;
+  const ag = x.away_goals;
+  const hasScore = Number.isInteger(hg) && Number.isInteger(ag);
+  const said = recap({
+    market: x.market, outcome: x.outcome, line: x.line, result: x.result,
+    homeGoals: hg, awayGoals: ag, home: x.home_team, away: x.away_team,
+  });
+
+  return `
+  <article class="recap is-${esc(tone)}">
+    <a class="recap-tie" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
+      <span class="recap-side">${crest(x.home_team ?? '', 'sm', x.home_team_id)}<span>${esc(x.home_team ?? '')}</span>${
+        hasScore ? `<b class="row-goals${hg > ag ? ' won' : ''}">${esc(hg)}</b>` : ''}</span>
+      <span class="recap-side">${crest(x.away_team ?? '', 'sm', x.away_team_id)}<span>${esc(x.away_team ?? '')}</span>${
+        hasScore ? `<b class="row-goals${ag > hg ? ' won' : ''}">${esc(ag)}</b>` : ''}</span>
+    </a>
+    <div class="recap-body">
+      <p class="recap-call">We said <b>${esc(d.name)}</b>${x.odds ? ` at ${dec(x.odds)}` : ''}.</p>
+      ${said ? `<p class="recap-what">${esc(said)}</p>` : ''}
+      ${(() => {
+        /*
+         * The argument we made before kick-off, shown back against what
+         * happened. On a loss it is the most useful thing on the page and the
+         * one thing nobody else publishes.
+         *
+         * Gated on content, not on a flag. Two thirds of the narratives on
+         * record were written by the template grammar and say "expected
+         * goals", "the model" and "our numbers" -- the private language the
+         * vocabulary rule exists to keep off the page, which is why this was
+         * never shown before. Judging each one on what it actually says means
+         * the page fills itself as the writing improves, with nothing to
+         * switch on.
+         */
+        const why = cleanProse(x.narrative, [String(x.odds), dec(x.odds), String(x.line), x.line]);
+        if (!why) return '';
+        return `
+        <details class="recap-why">
+          <summary>${tone === 'lost' ? 'The reason we gave' : 'Why we said it'}</summary>
+          <p>${esc(why)}</p>
+        </details>`;
+      })()}
+    </div>
+    <span class="mark ${esc(tone)}">${esc(RESULT_WORD[x.result] ?? 'Void')}</span>
+  </article>`;
 }
 
 // ---------------------------------------------------------------- leagues

@@ -201,12 +201,17 @@ export function describe({ market, outcome, line, home, away, odds, stake = 10 }
 
     case 'asian_handicap': {
       const t = outcome === 'HOME' ? H : A;
-      const start = -line;
+      // `line` is the home handicap, market-wide -- one -0.5 covers both
+      // quotes and the away side of it is +0.5. Printing the home number
+      // against the away name said "Elche -0.75" when Elche were getting
+      // three quarters of a goal, which is the bet backwards.
+      const own = outcome === 'HOME' ? line : -line;
+      const start = -own;
       return out(
-        `${t} ${line > 0 ? '+' : ''}${line}`,
+        `${t} ${own > 0 ? '+' : ''}${own}`,
         start > 0 ? `${t}, giving a ${fmtStart(start)} start` : `${t}, with a ${fmtStart(-start)} start`,
-        handicapWins(line, t),
-        { outcomes: handicapOutcomes(line, t) },
+        handicapWins(own, t),
+        { outcomes: handicapOutcomes(own, t) },
       );
     }
 
@@ -284,4 +289,204 @@ function fmtStart(n) {
   if (n === 1.5) return 'goal-and-a-half';
   if (n === 2) return 'two-goal';
   return `${n}-goal`;
+}
+
+/**
+ * What happened, once it has.
+ *
+ * `describe()` explains a call before kick-off. This is the other half: the
+ * same call read back against the scoreline, in the voice a supporter would
+ * use in the pub rather than the one a settlement engine would use in a log.
+ *
+ * The rule it follows is the rule the whole record follows -- a loss is said
+ * as plainly as a win, and neither gets an excuse. "We were unlucky" is not
+ * available here. The nearest it comes is naming how close it was, which is a
+ * fact about the score and not a plea.
+ *
+ * Returns null when the score cannot answer the market. Corners and cards are
+ * settled from stats the front end never receives, so rather than invent a
+ * sentence about them this says nothing and the page prints the mark alone.
+ */
+/** A score, or null. `Number(null)` is 0, which would grade an unplayed match. */
+function goals(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+export function recap({ market, outcome, line, result, homeGoals, awayGoals, home, away }) {
+  const hg = goals(homeGoals);
+  const ag = goals(awayGoals);
+  if (hg === null || ag === null) return null;
+
+  const H = home || 'the home side';
+  const A = away || 'the away side';
+  const total = hg + ag;
+  const won = result === 'WON' || result === 'HALF_WON';
+  const back = result === 'PUSH' || result === 'VOID';
+  const o = String(outcome ?? '').toLowerCase();
+
+  /*
+   * The grade and the scoreline have to agree before either is described.
+   *
+   * They come from different places -- `result` was written by the settle job
+   * against the stats feed, the goals are a column on the fixture -- and a
+   * fixture corrected after settlement, or a provider that revises a score,
+   * leaves the two saying different things. Writing prose from both then
+   * produces sentences that are not merely wrong but impossible: "four goals,
+   * one short of what we needed" on a line of 1.5.
+   *
+   * So when they disagree this says nothing and the page prints the mark on
+   * its own. An unexplained mark is a gap; an explained wrong one is a lie.
+   */
+  const fromScore = didItLand({ market, outcome, line, homeGoals: hg, awayGoals: ag });
+  const fromGrade = won ? 'won' : back ? 'back' : result === 'LOST' ? 'lost' : 'part';
+  if (fromScore && fromScore !== fromGrade && !(fromScore === 'part' || fromGrade === 'part')) return null;
+
+  // Numbers as words, because this is prose and "1 goal, 2 short" is a
+  // scoreboard, not a sentence. Anything past ten is a typo or a cricket score.
+  const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  const by = (n) => WORDS[n] ?? String(n);
+  const Cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+
+  const winner = hg > ag ? H : ag > hg ? A : null;
+  const score = `${hg}-${ag}`;
+  const flip = `${ag}-${hg}`;
+
+  switch (market) {
+    case '1x2':
+    case 'draw_no_bet':
+    case 'european_handicap': {
+      if (back) return `It finished level at ${score}, so the stake came back.`;
+      if (!winner) return won ? `It finished ${score}, which is what we said.` : `It finished level at ${score}.`;
+      if (won) return `${winner} won it ${winner === H ? score : flip}.`;
+      return `${winner} won it ${winner === H ? score : flip}, and we were on the other one.`;
+    }
+
+    case 'double_chance': {
+      if (won) return winner ? `${winner} won it ${winner === H ? score : flip}.` : `It finished level at ${score}.`;
+      return winner
+        ? `${winner} won it ${winner === H ? score : flip}, which was the one result that beat us.`
+        : `It finished level at ${score}.`;
+    }
+
+    case 'asian_handicap': {
+      const t = o === 'home' ? H : A;
+      const margin = o === 'home' ? hg - ag : ag - hg;
+      const need = -line;
+      if (back) return `${t} finished exactly on the line at ${score}, so the stake came back.`;
+      const cushion = Math.abs(margin - need);
+      if (won) return `${t} came out on the right side of it at ${score}.`;
+      return cushion <= 0.5
+        ? `${score}, and ${t} missed the line by the smallest margin there is.`
+        : `${score}, and ${t} was never on the right side of it.`;
+    }
+
+    case 'over_under_05':
+    case 'over_under_15':
+    case 'over_under_25':
+    case 'over_under_35': {
+      const n = line ?? 0.5;
+      const goals = `${by(total)} goal${total === 1 ? '' : 's'}`;
+      if (o === 'over') {
+        if (won) return `${Cap(goals)} in it, finishing ${score}.`;
+        const short = Math.ceil(n) - total;
+        if (total === 0) return `Goalless, and we wanted ${by(Math.ceil(n))}.`;
+        return `${score}. Only ${goals}, ${by(short)} short of what we needed.`;
+      }
+      if (won) return `${score}, and it stayed quiet enough.`;
+      const over = total - Math.floor(n);
+      return `${score}. ${Cap(by(over))} more than we left room for.`;
+    }
+
+    case 'btts': {
+      const both = hg >= 1 && ag >= 1;
+      if (o === 'yes') {
+        return won
+          ? `Both scored, ${score}.`
+          : `${score} — ${hg === 0 && ag === 0 ? 'neither side scored' : `${hg === 0 ? H : A} never got going`}.`;
+      }
+      return both
+        ? `${score}, and both of them found one.`
+        : `${score}, and ${hg === 0 ? H : A} was kept out.`;
+    }
+
+    default:
+      // Corners, cards: settled from numbers this page does not have.
+      return null;
+  }
+}
+
+/**
+ * Did it land, read straight off the scoreline.
+ *
+ * The record's marks come from the engine, which grades three hours after
+ * kick-off and writes `result` onto the pick. This is for the gap before that:
+ * a match that has just finished sits on the board for six more hours, and
+ * leaving it unmarked for most of that is the difference between a board that
+ * knows what happened and one that has not caught up.
+ *
+ * It is a second implementation of settlement, which is a thing worth being
+ * nervous about -- two graders that disagree would put a mark on the board the
+ * record then contradicts. engine/test/settle-agreement.test.ts runs both over
+ * every market and every plausible scoreline and fails if they ever differ.
+ *
+ * Returns 'won', 'lost', 'part' (some of the stake back), 'back' (all of it),
+ * or null where the score cannot answer -- corners and cards, which settle from
+ * numbers no page receives.
+ */
+export function didItLand({ market, outcome, line, homeGoals, awayGoals }) {
+  const hg = goals(homeGoals);
+  const ag = goals(awayGoals);
+  if (hg === null || ag === null) return null;
+  const o = String(outcome ?? '');
+  const lo = o.toLowerCase();
+  const total = hg + ag;
+  const yes = (b) => (b ? 'won' : 'lost');
+
+  switch (market) {
+    case '1x2':
+      return yes((o === 'HOME' && hg > ag) || (o === 'DRAW' && hg === ag) || (o === 'AWAY' && hg < ag));
+
+    case 'double_chance':
+      return yes((o === '1X' && hg >= ag) || (o === '12' && hg !== ag) || (o === 'X2' && hg <= ag));
+
+    case 'draw_no_bet':
+      if (hg === ag) return 'back';
+      return yes((o === 'HOME' && hg > ag) || (o === 'AWAY' && hg < ag));
+
+    case 'btts':
+      return yes((lo === 'yes') === (hg >= 1 && ag >= 1));
+
+    case 'over_under_05':
+    case 'over_under_15':
+    case 'over_under_25':
+    case 'over_under_35': {
+      const n = line ?? Number(market.slice(-2)) / 10;
+      return yes((lo === 'over') === (total > n));
+    }
+
+    case 'european_handicap': {
+      if (line === null || line === undefined) return null;
+      const adj = hg + line;
+      return yes((o === 'HOME' && adj > ag) || (o === 'DRAW' && adj === ag) || (o === 'AWAY' && adj < ag));
+    }
+
+    case 'asian_handicap': {
+      if (line === null || line === undefined) return null;
+      // `line` is the HOME handicap and belongs to the market, not to a side:
+      // one -0.5 covers both quotes, and the away side of it is +0.5. Both the
+      // margin and the line mirror for AWAY, and mirroring only one of them is
+      // how you grade a losing bet as a winner.
+      const side = o === 'HOME' ? 1 : -1;
+      const r = settleHandicap(line * side, (hg - ag) * side);
+      return r === 'win' ? 'won'
+        : r === 'loss' ? 'lost'
+        : r === 'push' ? 'back'
+        : 'part';
+    }
+
+    default:
+      return null;
+  }
 }
