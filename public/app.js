@@ -224,7 +224,7 @@ const READ_LABEL = {
 
 const state = {
   board: null, hours: 72, leagueName: '', heroVenue: [], hero: null,
-  user: null, authError: null, tick: null,
+  user: null, authError: null, tick: null, poll: null, onVisible: null,
   /*
    * The board opens on the games we have a call on.
    *
@@ -1184,6 +1184,44 @@ async function viewBoard(params = new URLSearchParams()) {
     paint();
   };
   paint();
+
+  /*
+   * The live tab, kept alive.
+   *
+   * The board was fetched once when the page rendered and never again, so a
+   * reader who opened "Live" and watched it watched a still photograph: the
+   * scores never moved, matches that finished stayed under way, and one that
+   * kicked off never appeared. A page with a red dot on it that does not
+   * change is worse than one without.
+   *
+   * A minute, because that is what the response is cached for at the edge --
+   * anything faster is served the same bytes -- and only while this tab is the
+   * one being looked at. The router clears it on the way out, and a backgrounded
+   * tab stops asking, because nobody is reading it.
+   */
+  const refresh = async () => {
+    if (document.hidden || state.when !== 'live') return;
+    try {
+      const fresh = await loadBoard();
+      fixtures.length = 0;
+      fixtures.push(...(fresh.fixtures ?? []));
+      for (const k of Object.keys(counts)) counts[k] = 0;
+      for (const f of fixtures) counts[whenOf(f)]++;
+      for (const b of app.querySelectorAll('.seg button')) {
+        const i = b.querySelector('i');
+        if (i) i.textContent = counts[b.dataset.when] ?? 0;
+        b.disabled = !counts[b.dataset.when];
+      }
+      paint();
+    } catch { /* a failed refresh leaves the last good board on screen */ }
+  };
+  state.poll = setInterval(refresh, 60000);
+  // Coming back to a backgrounded tab should not mean waiting up to a minute
+  // for the first honest frame. Stored on `state` so the router can take it
+  // off again -- an anonymous listener here would leave one behind per visit
+  // to the board, all of them firing.
+  state.onVisible = () => { if (!document.hidden) refresh(); };
+  addEventListener('visibilitychange', state.onVisible);
 }
 
 // ---------------------------------------------------------------- fixture
@@ -1674,7 +1712,7 @@ function readsFor(f, verdicts) {
   return { reads, rest: others.filter((r) => !shown.has(r.id)) };
 }
 
-async function viewFixture(id) {
+async function viewFixture(id, params = new URLSearchParams()) {
   app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
   let f;
   try { f = await getJSON(`/api/fixture/${id}`); } catch {
@@ -1798,6 +1836,17 @@ async function viewFixture(id) {
     ['table', 'Table', standingsHTML(f.standings, f.home, f.away, f.home_id, f.away_id)],
   ].filter(([, , html]) => html);
 
+  /*
+   * Which tab is open, from the address.
+   *
+   * It was always the first one, which meant the line-ups a reader had just
+   * scrolled through were gone the moment they hit reload, and a tab they
+   * wanted to send somebody arrived as the overview. The tab is a place on
+   * this page, so it belongs in the address like any other.
+   */
+  const asked = params.get('tab');
+  const open = TABS.some(([k]) => k === asked) ? asked : TABS[0]?.[0];
+
   app.innerHTML = `
   <section class="hero fx-top" data-shot="${f.venue_id ? 'yes' : 'none'}">
     <div class="hero-media">${venueShot(f.venue_id, '', true)}</div>
@@ -1826,9 +1875,10 @@ async function viewFixture(id) {
   <div class="wrap section dense">
 
     ${TABS.length > 1 ? `<div class="tabs" role="tablist">
-      ${TABS.map(([k, label], i) => `<button class="tab${i === 0 ? ' on' : ''}" data-tab="${k}" role="tab">${esc(label)}</button>`).join('')}
+      ${TABS.map(([k, label]) => `<button class="tab${k === open ? ' on' : ''}" data-tab="${k}" role="tab"
+        aria-selected="${k === open}">${esc(label)}</button>`).join('')}
     </div>` : ''}
-    ${TABS.map(([k, , html], i) => `<div class="tabpane" data-pane="${k}"${i === 0 ? '' : ' hidden'}>${html}</div>`).join('')}
+    ${TABS.map(([k, , html]) => `<div class="tabpane" data-pane="${k}"${k === open ? '' : ' hidden'}>${html}</div>`).join('')}
   </div>`;
 
   /*
@@ -1844,8 +1894,17 @@ async function viewFixture(id) {
   };
   for (const t of app.querySelectorAll('.tab')) {
     t.onclick = () => {
-      for (const o of app.querySelectorAll('.tab')) o.classList.toggle('on', o === t);
+      for (const o of app.querySelectorAll('.tab')) {
+        const on = o === t;
+        o.classList.toggle('on', on);
+        o.setAttribute('aria-selected', String(on));
+      }
       for (const pane of app.querySelectorAll('.tabpane')) pane.hidden = pane.dataset.pane !== t.dataset.tab;
+      // replaceState rather than a hash assignment: switching tab is not a
+      // navigation, and pushing one would make the back button walk through
+      // every tab a reader glanced at before leaving the page.
+      const q = t.dataset.tab === TABS[0][0] ? '' : `?tab=${encodeURIComponent(t.dataset.tab)}`;
+      history.replaceState(null, '', `${location.pathname}#/fixture/${encodeURIComponent(id)}${q}`);
     };
   }
 }
@@ -3097,12 +3156,14 @@ async function route() {
   // link itself -- does not count as somewhere to go back to.
   state.cameFromInApp = routed++ > 0;
   clearInterval(state.tick);
+  clearInterval(state.poll);
+  if (state.onVisible) { removeEventListener('visibilitychange', state.onVisible); state.onVisible = null; }
   for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.route === name);
   document.getElementById('nav').classList.remove('open');
   document.getElementById('burger').setAttribute('aria-expanded', 'false');
   window.scrollTo(0, 0);
   try {
-    if (name === 'fixture' && parts[1]) return await viewFixture(parts[1]);
+    if (name === 'fixture' && parts[1]) return await viewFixture(parts[1], params);
     if (name === 'board') return await viewBoard(params);
     if (name === 'leagues') return await viewLeagues();
     if (name === 'results') return await viewResults();
