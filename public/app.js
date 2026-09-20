@@ -248,6 +248,12 @@ const state = {
    * a history length above one, so Back walked people off the site.
    */
   cameFromInApp: false,
+  /*
+   * Whether the signed-in reader has a live membership. null means not asked
+   * yet -- which is different from false, and the difference is what stops the
+   * header claiming the free tier before it knows.
+   */
+  member: null,
 };
 
 /**
@@ -448,10 +454,13 @@ function heroHTML(hero = null, venueIds = [], detail = null) {
       <div class="hero-copy">
         <span class="timechip${isSoon(hero.kickoff) ? ' soon' : ''}">${esc(when)}</span>
         ${aside ? `<p class="kicker">${esc(aside)}</p>` : ''}
-        <div class="fx-stack">
+        <!-- The tie is the page's heading. Without this the home page had no
+             h1 at all whenever a hero fixture was set, which is the one case
+             it always is. -->
+        <h1 class="fx-stack">
           <span class="fx-line">${crest(hero.home, 'md', hero.home_id)}<span class="name">${esc(hero.home)}</span></span>
           <span class="fx-line">${crest(hero.away, 'md', hero.away_id)}<span class="name">${esc(hero.away)}</span></span>
-        </div>
+        </h1>
         <p class="hero-blurb">${esc(hero.league ?? '')}${hero.league ? '. ' : ''}Our call on it, the
            argument for it, and the thing that argues against it.</p>
         <div class="hero-cta">
@@ -471,14 +480,41 @@ function heroHTML(hero = null, venueIds = [], detail = null) {
  * A call is marked on the club it is about rather than spelled out, because at
  * this size there is room for a mark and not for a sentence.
  */
+/**
+ * What is on next, under a heading that is true.
+ *
+ * It used to be the first eight fixtures the board returned, in board order --
+ * which starts a day in the past, so "Next up" was eight matches that had all
+ * finished. The board reaches backwards on purpose; this rail does not, and
+ * the two had been sharing an order.
+ *
+ * Live first, because a game being played now beats one kicking off in six
+ * hours. Then soonest. And when there is genuinely nothing to come -- late on
+ * a Sunday, between windows -- it says what it is showing instead of claiming
+ * those games are still ahead.
+ */
 function nextRailHTML(fixtures) {
-  const soon = fixtures.slice(0, 8);
+  const rank = (f) => {
+    const k = matchState(f).kind;
+    return k === 'live' ? 0 : k === 'upcoming' ? 1 : 2;
+  };
+  const ahead = fixtures
+    .filter((f) => rank(f) < 2)
+    .sort((a, b) => rank(a) - rank(b) || (a.kickoff ?? 0) - (b.kickoff ?? 0));
+  const back = fixtures
+    .filter((f) => rank(f) === 2)
+    .sort((a, b) => (b.kickoff ?? 0) - (a.kickoff ?? 0));
+
+  const soon = (ahead.length ? ahead : back).slice(0, 8);
+  const heading = ahead.length
+    ? (ahead.every((f) => matchState(f).kind === 'live') ? 'On right now' : 'Next up')
+    : 'Just finished';
   if (!soon.length) return '';
   const clock = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
   return `
   <div class="wrap section dense">
-    <div class="section-head"><div><h2 class="display">Next up</h2></div>
-      <a class="btn btn-ghost btn-sm" href="#/board">The full board</a></div>
+    <div class="section-head"><div><h2 class="display">${esc(heading)}</h2></div>
+      <a class="btn btn-ghost btn-sm" href="#/board${heading === 'Just finished' ? '?when=played' : ''}">The full board</a></div>
     <div class="next-rail">
       ${soon.map((f) => {
         const k = new Date(f.kickoff * 1000);
@@ -700,7 +736,11 @@ function rowHTML(f) {
         // On a match in progress the bare time reads as the clock -- "LIVE
         // 12:00" looks like the twelfth minute of the second half. It is the
         // kick-off, so it says so, in the shorthand every football page uses.
-        : `<span class="row-time">${liveBadge(state)}</span><span class="row-day">ko ${esc(time)}</span>`}
+        // The day matters here too: the board reaches back past midnight, so
+        // "ko 16:30" alone cannot tell yesterday's game from this
+        // afternoon's.
+        : `<span class="row-time">${liveBadge(state)}</span><span class="row-day">${
+            day === 'Today' ? '' : `${esc(day)} · `}ko ${esc(time)}</span>`}
     </div>
 
     <div class="row-teams">
@@ -725,7 +765,21 @@ function rowHTML(f) {
         ? (landed
             ? `<span class="mark ${esc(landed)}">${esc(MARK[landed])}</span>${
                 pick ? `<span class="odds-book">at ${dec(p ? p.odds : pick.odds)}</span>` : ''}`
-            : `<span class="mark none">Full time</span>`)
+            /*
+             * Not "Full time" twice. The badge on the left of the row already
+             * says the match is over; this column is for what the call did,
+             * and when there was no call the honest answer is the same one an
+             * unplayed row gives. A pick the score cannot grade -- corners,
+             * cards -- says what we took it at and leaves the verdict to the
+             * fixture page, which has the numbers.
+             */
+            : pick
+              ? `<span class="odds-book">called at ${dec(p ? p.odds : pick.odds)}</span>`
+              : f.locked
+                ? `<span class="row-locked-mark">
+                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>
+                     Members</span>`
+                : `<span class="row-pass">Passed</span>`)
         : pick && p ? `
         <span class="odds-tile${p.local ? '' : ' away'}"><span class="odds">${dec(p.odds)}</span></span>
         <span class="odds-book">${pick.lean ? 'lean · ' : ''}${p.local ? esc(p.book) : `no ${esc(country())} book`}</span>`
@@ -926,7 +980,13 @@ async function viewBoard(params = new URLSearchParams()) {
    */
   const whenOf = (f) => {
     const k = matchState(f).kind;
-    return k === 'live' ? 'live' : k === 'upcoming' ? 'upcoming' : 'played';
+    if (k === 'live') return 'live';
+    // A postponed or abandoned match has not been played, so it does not
+    // belong under "already played" -- it was being counted there, and the
+    // lede counted it too. It sits with the games still to come, where the
+    // card's own "Postponed" badge says the rest.
+    if (k === 'upcoming' || k === 'off') return 'upcoming';
+    return 'played';
   };
   const counts = { upcoming: 0, live: 0, played: 0 };
   for (const f of fixtures) counts[whenOf(f)]++;
@@ -943,9 +1003,9 @@ async function viewBoard(params = new URLSearchParams()) {
   <div class="wrap section dense">
     <div class="section-head">
       <div>
-        <h2 class="display">The board</h2>
-        <p>${fixtures.filter((f) => f.top_pick || f.locked).length} calls across ${fixtures.length} games.${
-          furthest ? ` The last of them kicks off ${esc(dayLabel(furthest).toLowerCase())}.` : ''}</p>
+        <h1 class="display">The board</h1>
+        <!-- Written by paint(), from what is actually on screen. See ledeFor. -->
+        <p id="board-lede"></p>
       </div>
       <div class="filters">
         <!--
@@ -987,10 +1047,65 @@ async function viewBoard(params = new URLSearchParams()) {
    * list with no landmarks in it — and it meant every row had to carry its own
    * competition badge to say where it was.
    */
+  /*
+   * A sentence about the page you are looking at.
+   *
+   * It used to be computed once, over every fixture the API returned, and then
+   * never touched again -- so a reader on "Played", filtered to La Liga, with
+   * only called games showing, was told "43 calls across 250 games, the last of
+   * them kicks off Wednesday" about thirty-nine matches that had all finished.
+   * Every clause of that was wrong: the count, the total, and the tense.
+   *
+   * So it is written by paint(), from the same list the rows are built from,
+   * and the tense follows the tab.
+   */
+  const ledeFor = (inTab) => {
+    // Counted before the "only games we have a call on" filter, because "18
+    // calls across 18 games" is not a sentence anybody needs.
+    const called = inTab.filter((f) => f.top_pick || f.locked);
+    const games = `${inTab.length} game${inTab.length === 1 ? '' : 's'}`;
+    const calls = called.length === 1 ? 'one call' : `${called.length} calls`;
+    const where = state.leagueName ? ` in ${state.leagueName}` : '';
+
+    if (!inTab.length) return state.leagueName ? `Nothing${where} in this part of the board.` : '';
+
+    if (state.when === 'live') {
+      return `${games}${where} being played right now, ${called.length ? `${calls} among them` : 'none of them called'}.`;
+    }
+
+    if (state.when === 'played') {
+      // How many of them came in, worked out the same way the results page
+      // does it rather than from a stored mark, because the board card carries
+      // the selection and the score and nothing else.
+      let landed = 0;
+      let judged = 0;
+      for (const f of called) {
+        const pk = f.top_pick;
+        if (!pk || !Array.isArray(f.score)) continue;
+        const r = didItLand({
+          market: pk.market, outcome: pk.outcome, line: pk.line,
+          homeGoals: f.score[0], awayGoals: f.score[1],
+        });
+        if (!r) continue;
+        judged++;
+        if (r === 'won') landed++;
+      }
+      const record = judged ? ` ${landed} of ${judged} landed.` : '';
+      return `${games}${where} already played, ${called.length ? `${calls} among them.` : 'none of them called.'}${record}`;
+    }
+
+    const next = inTab.map((f) => f.kickoff).filter(Boolean);
+    const last = next.length ? Math.max(...next) : null;
+    return `${calls} across ${games}${where} still to play.${
+      last ? ` The last of them kicks off ${dayLabel(last).toLowerCase()}.` : ''}`;
+  };
+
   const paint = () => {
-    let shown = fixtures.filter((f) => whenOf(f) === state.when);
-    if (state.leagueName) shown = shown.filter((f) => f.league === state.leagueName);
-    if (state.show === 'calls') shown = shown.filter((f) => f.top_pick || f.locked);
+    let inTab = fixtures.filter((f) => whenOf(f) === state.when);
+    if (state.leagueName) inTab = inTab.filter((f) => f.league === state.leagueName);
+    document.getElementById('board-lede').textContent = ledeFor(inTab);
+
+    const shown = state.show === 'calls' ? inTab.filter((f) => f.top_pick || f.locked) : inTab;
 
     /*
      * Live, then to come, then done.
@@ -1691,7 +1806,7 @@ async function viewFixture(id) {
       <div class="hero-copy">
         <span class="timechip${isSoon(f.kickoff) ? ' soon' : ''}">${esc(kickoffLabel(f.kickoff))}</span>
         ${st.kind === 'upcoming' ? '' : liveBadge(st)}
-        <div class="fx-stack${sc ? ' scored' : ''}">
+        <h1 class="fx-stack${sc ? ' scored' : ''}">
           <span class="fx-line">
             ${crest(f.home, 'md', f.home_id)}
             <span class="name">${esc(f.home)}</span>
@@ -1702,7 +1817,7 @@ async function viewFixture(id) {
             <span class="name">${esc(f.away)}</span>
             ${sc ? `<span class="gf${ag > hg ? ' win' : ''}">${ag}</span>` : formChips(f.form?.away)}
           </span>
-        </div>
+        </h1>
         <p class="hero-blurb">${esc([f.league, ...meta.slice(1)].filter(Boolean).join(', '))}</p>
       </div>
     </div>
@@ -2328,8 +2443,39 @@ async function postJSON(path, body) {
  * costs. Signing in first is required because a payment with nobody attached to
  * it cannot be turned into a membership.
  */
+/*
+ * What the reader was trying to do when they were sent to sign in.
+ *
+ * It has to survive a round trip through an email client and back, so it is in
+ * storage rather than in memory or in the address bar. Without it the buyer who
+ * tapped "Sign in to join", signed in, and came back was returned to the home
+ * page with the purchase abandoned and nothing on screen acknowledging that
+ * they had been in the middle of anything.
+ */
+/*
+ * A redirect that does not leave a trap behind it.
+ *
+ * `#/account` signed out sends you to `#/signin`, and the back button sent you
+ * to `#/account`, which sent you to `#/signin` again: a reader could not get
+ * out of the pair without closing the tab. Replacing the entry rather than
+ * pushing one means Back goes to wherever they actually came from.
+ */
+const goInstead = (hash) => location.replace(`${location.pathname}${location.search}${hash}`);
+
+const INTENT_KEY = 'ow.after-signin';
+const setIntent = (v) => { try { localStorage.setItem(INTENT_KEY, v); } catch { /* private mode */ } };
+const takeIntent = () => {
+  try {
+    const v = localStorage.getItem(INTENT_KEY);
+    localStorage.removeItem(INTENT_KEY);
+    return v;
+  } catch { return null; }
+};
+
 async function startCheckout(plan = 'monthly') {
-  if (!(await currentUser())) { location.hash = '#/signin'; return; }
+  // A push, not a replace: pricing is somewhere a reader might reasonably want
+  // to go back to, unlike `#/account` signed out, which only ever bounces.
+  if (!(await currentUser())) { setIntent('buy'); location.hash = '#/signin'; return; }
   const button = document.getElementById('buy');
   if (button) { button.disabled = true; button.textContent = 'Opening checkout…'; }
   try {
@@ -2367,7 +2513,7 @@ async function viewPricing() {
   <div class="wrap section">
     <div class="section-head">
       <div>
-        <h2 class="display">Membership</h2>
+        <h1 class="display">Membership</h1>
         <p>Every match we cover, read properly. The call is the part you pay for.</p>
       </div>
     </div>
@@ -2416,16 +2562,27 @@ async function viewPricing() {
 
 /** Sign in. One email box and one button, because that is the whole of it. */
 async function viewSignin() {
-  if (await currentUser()) { location.hash = '#/account'; return; }
+  if (await currentUser()) { goInstead('#/account'); return; }
 
   const problem = state.authError;
   state.authError = null;
 
+  // Read without consuming: the intent is spent when the sign-in completes,
+  // not when the page renders. Saying it out loud is the difference between
+  // "why am I being asked for my email" and "yes, that is what I was doing".
+  let intent = null;
+  try { intent = localStorage.getItem(INTENT_KEY); } catch { /* private mode */ }
+  const because = intent === 'buy'
+    ? 'Then we will take you straight back to membership.'
+    : intent === '#/account'
+      ? 'Your account lives behind this.'
+      : null;
+
   app.innerHTML = `
   <div class="wrap section narrow">
     <div class="section-head"><div>
-      <h2 class="display">Sign in</h2>
-      <p>No password to remember or lose. We email you a link.</p>
+      <h1 class="display">Sign in</h1>
+      <p>No password to remember or lose. We email you a link.${because ? ` ${esc(because)}` : ''}</p>
     </div></div>
 
     ${problem ? `<p class="form-error">${esc(problem)}</p>` : ''}
@@ -2474,7 +2631,7 @@ async function viewSignin() {
 /** The account: what you have, what it costs, and how to stop it. */
 async function viewAccount() {
   const user = await currentUser();
-  if (!user) { location.hash = '#/signin'; return; }
+  if (!user) { setIntent('#/account'); goInstead('#/signin'); return; }
 
   app.innerHTML = '<div class="wrap section narrow"><div class="spinner">Loading…</div></div>';
   let account = { membership: null, receipts: [] };
@@ -2482,12 +2639,14 @@ async function viewAccount() {
 
   const m = account.membership;
   const active = m && m.expires_at * 1000 > Date.now();
+  // The page that knows for certain, so the header stops guessing.
+  state.member = Boolean(active);
   const when = (e) => new Date(e * 1000).toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' });
 
   app.innerHTML = `
   <div class="wrap section narrow">
     <div class="section-head"><div>
-      <h2 class="display">Your account</h2>
+      <h1 class="display">Your account</h1>
       <p>${esc(user.email ?? '')}</p>
     </div></div>
 
@@ -2526,7 +2685,14 @@ async function viewAccount() {
     </div>
   </div>`;
 
-  document.getElementById('out').onclick = async () => { await signOut(); location.hash = '#/home'; };
+  document.getElementById('out').onclick = async () => {
+    await signOut();
+    state.member = null;
+    state.board = null;
+    location.hash = '#/home';
+    await route();
+    headerAuth();
+  };
   const cancel = document.getElementById('cancel');
   // One tap, no "are you sure", no offer to stay. Retention mazes are a dark
   // pattern and in several places an illegal one.
@@ -2712,7 +2878,7 @@ function viewLegal(which) {
   if (!page) return notFound(`legal/${which}`);
   app.innerHTML = `
   <div class="wrap section">
-    <div class="section-head"><div><h2 class="display">${esc(page.title)}</h2>
+    <div class="section-head"><div><h1 class="display">${esc(page.title)}</h1>
       <p>Last updated ${esc(UPDATED)}.</p></div></div>
     <div class="prose">${page.body}</div>
   </div>`;
@@ -2903,7 +3069,28 @@ async function headerAuth() {
 
   const user = await currentUser();
   state.user = user;
-  const member = Boolean(state.board?.member);
+
+  /*
+   * Membership from the account, not from the board.
+   *
+   * `state.board.member` is whatever the last board response said, which on
+   * the pricing page is nothing at all and immediately after paying is the
+   * answer from before the payment. So the header told somebody who had just
+   * bought a membership that they were on the free tier, which is the single
+   * worst moment to get that wrong. `/api/account` answers the question
+   * directly; it is asked once per signed-in session and re-asked whenever
+   * something has changed.
+   */
+  let member = false;
+  if (user) {
+    if (state.member === null) {
+      try { state.member = Boolean((await getJSON('/api/account')).membership?.expires_at * 1000 > Date.now()); }
+      catch { state.member = Boolean(state.board?.member); }
+    }
+    member = state.member;
+  } else {
+    state.member = null;
+  }
 
   link.textContent = user ? 'Account' : 'Sign in';
   link.href = user ? '#/account' : '#/signin';
@@ -2971,13 +3158,36 @@ renderRegion();
  * fire-and-forget.
  */
 (async () => {
+  let signedInJustNow = false;
   try {
-    await completeSignIn();
+    signedInJustNow = await completeSignIn();
   } catch (err) {
     // A stale or reused magic link. Say so once, on the sign-in page, rather
     // than leaving someone looking at a home page wondering what happened.
     state.authError = err.message ?? 'That sign-in link did not work.';
     location.hash = '#/signin';
+  }
+  /*
+   * Pick up where they left off.
+   *
+   * A magic link opens on whatever address the redirect carries, which is the
+   * front page. Someone who was three taps into buying a membership when they
+   * were asked to sign in came back to the home page with no membership, no
+   * checkout and nothing saying what had happened -- and the only way back was
+   * to find the pricing page again and start over.
+   */
+  if (signedInJustNow) {
+    const intent = takeIntent();
+    if (intent === 'buy') {
+      location.hash = '#/pricing';
+      await route();
+      await startCheckout();
+      health();
+      headerAuth();
+      cookieNotice();
+      return;
+    }
+    if (intent && intent.startsWith('#/')) location.hash = intent;
   }
   await route();
   health();

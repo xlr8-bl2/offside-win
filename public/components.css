@@ -285,7 +285,8 @@
  * "vs" between them they read as a headline, which is what the last version
  * did, and a headline cannot also carry a crest at a size anyone can see.
  */
-.fx-stack { display: flex; flex-direction: column; gap: var(--space-4); }
+/* An h1 in the hero, so the browser's own heading margins have to go. */
+.fx-stack { display: flex; flex-direction: column; gap: var(--space-4); margin: 0; font-weight: inherit; }
 .fx-line { display: flex; align-items: center; gap: var(--space-4); min-width: 0; flex-wrap: wrap; }
 .fx-line .name {
   font-family: var(--display);
@@ -2663,3 +2664,25 @@
 /* The competitions we have nothing in still belong on the page -- it is a
    list of what is on, not a list of what we fancied -- but they recede. */
 .lg-list.muted .lg-name { color: var(--chalk-2); font-weight: var(--weight-normal); }
+
+/*
+ * On a touch screen, 34px is a miss waiting to happen.
+ *
+ * Every guideline puts the floor somewhere between 44 and 48, and the controls
+ * that were under it here are not incidental: the header's sign-in, the two
+ * consent buttons, the board's own to-play/live/played switch and the toggle
+ * that hides the games we have no call on. The type stays where it is -- this
+ * is padding, not a redesign -- and nothing above the touch breakpoint
+ * changes, because a cursor does not miss.
+ *
+ * It lives at the end of the last stylesheet on purpose: the rules it has to
+ * beat are ordinary single-class selectors, so specificity cannot settle it
+ * and order has to.
+ */
+@media (max-width: 700px) {
+  .btn-sm,
+  .seg button,
+  .board-toggle button,
+  select,
+  input { min-height: 44px; }
+}

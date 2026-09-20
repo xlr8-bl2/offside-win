@@ -506,6 +506,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .btn-danger:hover { border-color: var(--lost); background: rgba(203, 49, 49, 0.1); }
 
 .btn-sm { min-height: 34px; padding: var(--space-2) var(--space-5); font-size: var(--text-xs); }
+
 .btn-lg { min-height: 46px; padding: var(--space-4) var(--space-7); font-size: var(--text-md); }
 
 .btn-google {
