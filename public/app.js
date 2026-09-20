@@ -163,6 +163,13 @@ function crest(name, size = 'md', id = null, type = 'team') {
  * pieces of private vocabulary in one sentence, about a fact the page already
  * states as "line-ups not final". Gone.
  */
+/** The board's three states, in the order a matchday happens in. */
+const WHEN = [
+  { id: 'upcoming', label: 'To play' },
+  { id: 'live', label: 'Live' },
+  { id: 'played', label: 'Played' },
+];
+
 const READ_LABEL = {
   'availability.home.absences': 'Team news',
   'availability.away.absences': 'Team news',
@@ -210,6 +217,12 @@ const state = {
    * away and the count is stated, so nothing is hidden by it.
    */
   show: 'calls',
+  /*
+   * Which part of the board: still to play, being played, already played.
+   * Kept out of `show` because they are different questions -- a reader can
+   * want every finished game, or only the finished ones we called.
+   */
+  when: 'upcoming',
 };
 
 /**
@@ -237,6 +250,7 @@ function boardHash(hours = state.hours, league = state.leagueName) {
   if (Number(hours) !== 72) q.set('hours', String(hours));
   if (league) q.set('league', league);
   if (state.show === 'all') q.set('show', 'all');
+  if (state.when !== 'upcoming') q.set('when', state.when);
   const s = q.toString();
   return s ? `#/board?${s}` : '#/board';
 }
@@ -835,6 +849,10 @@ async function viewBoard(params = new URLSearchParams()) {
   else if (params.has('hours')) state.hours = 72;
   if (params.has('league')) state.leagueName = params.get('league');
   if (params.has('show')) state.show = params.get('show') === 'all' ? 'all' : 'calls';
+  if (params.has('when')) {
+    const w = params.get('when');
+    state.when = WHEN.some((x) => x.id === w) ? w : 'upcoming';
+  }
 
   app.innerHTML = `<div class="wrap section dense">
     <div class="rows">${'<div class="skeleton skeleton-row"></div>'.repeat(8)}</div>
@@ -858,6 +876,22 @@ async function viewBoard(params = new URLSearchParams()) {
    * kick-off says what they are really looking at, and it reads correctly on a
    * quiet Tuesday when the window is the thing doing the limiting.
    */
+  /*
+   * Three states, counted, so the control can say how much is behind each one
+   * and grey out the one with nothing in it. A tab that leads to an empty page
+   * is worse than no tab.
+   */
+  const whenOf = (f) => {
+    const k = matchState(f).kind;
+    return k === 'live' ? 'live' : k === 'upcoming' ? 'upcoming' : 'played';
+  };
+  const counts = { upcoming: 0, live: 0, played: 0 };
+  for (const f of fixtures) counts[whenOf(f)]++;
+  // Land somewhere with something on it rather than on an empty tab.
+  if (!counts[state.when]) {
+    state.when = counts.upcoming ? 'upcoming' : counts.live ? 'live' : 'played';
+  }
+
   const kickoffs = fixtures.map((f) => f.kickoff).filter(Boolean);
   const furthest = kickoffs.length ? Math.max(...kickoffs) : null;
   const capped = furthest !== null && furthest < Date.now() / 1000 + (state.hours - 6) * 3600;
@@ -871,9 +905,19 @@ async function viewBoard(params = new URLSearchParams()) {
           furthest ? ` The last of them kicks off ${esc(dayLabel(furthest).toLowerCase())}.` : ''}</p>
       </div>
       <div class="filters">
-        <div class="seg" role="group" aria-label="What to show">
-          <button type="button" data-show="calls"${state.show === 'calls' ? ' class="on"' : ''}>With a call</button>
-          <button type="button" data-show="all"${state.show === 'all' ? ' class="on"' : ''}>Everything</button>
+        <!--
+          The board's primary axis is time, not whether we fancied it.
+          "With a call / Everything" was in this slot and it answered a
+          question nobody arrives with; what a reader wants first is today's
+          games, what is on right now, and what has already finished. That was
+          the one thing the board could not do: everything played dropped off
+          after six hours, so by the evening the page could say what was coming
+          and not what had happened.
+        -->
+        <div class="seg" role="group" aria-label="When">
+          ${WHEN.map((w) => `
+            <button type="button" data-when="${w.id}"${state.when === w.id ? ' class="on"' : ''}
+              ${counts[w.id] ? '' : 'disabled'}>${esc(w.label)}<i>${counts[w.id]}</i></button>`).join('')}
         </div>
         <select id="hours-filter" aria-label="Time window">
           ${[24, 48, 72, 120, 240].map((h) => `<option value="${h}"${h === state.hours ? ' selected' : ''}>Next ${h}h</option>`).join('')}
@@ -884,6 +928,11 @@ async function viewBoard(params = new URLSearchParams()) {
         </select>
       </div>
     </div>
+    <p class="board-toggle">
+      <button type="button" id="calls-toggle">${state.show === 'calls'
+        ? 'Showing only games we have a call on — show every game'
+        : 'Showing every game — show only the ones we have a call on'}</button>
+    </p>
     <div class="rows" id="grid"></div>
     ${capped ? `<p class="board-foot">That is everything the board carries today.
       A longer window will not add to it until more fixtures are published.</p>` : ''}
@@ -896,7 +945,8 @@ async function viewBoard(params = new URLSearchParams()) {
    * competition badge to say where it was.
    */
   const paint = () => {
-    let shown = state.leagueName ? fixtures.filter((f) => f.league === state.leagueName) : fixtures;
+    let shown = fixtures.filter((f) => whenOf(f) === state.when);
+    if (state.leagueName) shown = shown.filter((f) => f.league === state.leagueName);
     if (state.show === 'calls') shown = shown.filter((f) => f.top_pick || f.locked);
 
     /*
@@ -939,19 +989,30 @@ async function viewBoard(params = new URLSearchParams()) {
               </h3>
               ${g.list.map(rowHTML).join('')}
             </section>`).join('')
-        : `<div class="empty-state"><b>No calls here right now</b>
-             <span>We would rather say nothing than pad the board. Switch to
-             Everything to see the games we are passing on.</span></div>`;
+        : state.show === 'calls'
+          ? `<div class="empty-state"><b>No calls here</b>
+               <span>We would rather say nothing than pad the board. Every game
+               is one tap away.</span></div>`
+          : `<div class="empty-state"><b>Nothing here</b>
+               <span>No games in this part of the board right now.</span></div>`;
   };
 
   for (const b of app.querySelectorAll('.seg button')) {
     b.onclick = () => {
-      state.show = b.dataset.show;
+      state.when = b.dataset.when;
       history.replaceState(null, '', boardHash());
       for (const o of app.querySelectorAll('.seg button')) o.classList.toggle('on', o === b);
       paint();
     };
   }
+  document.getElementById('calls-toggle').onclick = (e) => {
+    state.show = state.show === 'calls' ? 'all' : 'calls';
+    e.currentTarget.textContent = state.show === 'calls'
+      ? 'Showing only games we have a call on — show every game'
+      : 'Showing every game — show only the ones we have a call on';
+    history.replaceState(null, '', boardHash());
+    paint();
+  };
   // A longer window needs the board fetched again, so it goes through the
   // router. A league is a filter over what is already here, so it repaints in
   // place and only rewrites the address -- replaceState does not fire
@@ -1827,6 +1888,47 @@ function dayHTML(g) {
   </section>`;
 }
 
+
+/*
+ * The post-mortem: why it landed, or why it did not.
+ *
+ * Written by the engine at settlement -- see engine/src/postmortem.ts, which
+ * also says at length what it is allowed to claim. Three facts and a verdict:
+ * how near it came, whether the match looked like the one we described, and
+ * what the market did between our saying it and kick-off.
+ *
+ * Absent on everything settled before the engine existed, and the card simply
+ * does not draw it rather than showing an apology for a missing field.
+ */
+function postMortemHTML(x) {
+  let pm = null;
+  try {
+    pm = typeof x.postmortem_json === 'string' ? JSON.parse(x.postmortem_json) : x.postmortem_json;
+  } catch { pm = null; }
+  if (!pm || !pm.line) return '';
+
+  const facts = [];
+  if (typeof pm.swing === 'number') {
+    facts.push(pm.swing === 0
+      ? 'finished on the line'
+      : `${pm.swing} goal${pm.swing === 1 ? '' : 's'} ${pm.landed === 'missed' ? 'short' : 'to spare'}`);
+  }
+  if (pm.shape) {
+    facts.push(pm.shape === 'as we read it' ? 'the game we described' : `a ${pm.shape} game than we called`);
+  }
+  if (pm.market && pm.opening_odds && pm.closing_odds) {
+    facts.push(pm.market === 'held'
+      ? `price held at ${dec(pm.closing_odds)}`
+      : `${dec(pm.opening_odds)} to ${dec(pm.closing_odds)} by kick-off`);
+  }
+
+  return `
+  <div class="pm is-${esc(pm.landed)}">
+    <p class="pm-line">${esc(pm.line)}</p>
+    ${facts.length ? `<p class="pm-facts">${facts.map((f) => `<span>${esc(f)}</span>`).join('')}</p>` : ''}
+  </div>`;
+}
+
 const RESULT_TONE = {
   WON: 'won', HALF_WON: 'part', LOST: 'lost', HALF_LOST: 'part', PUSH: 'back', VOID: 'back',
 };
@@ -1860,6 +1962,7 @@ function recapCardHTML(x) {
     <div class="recap-body">
       <p class="recap-call">We said <b>${esc(d.name)}</b>${x.odds ? ` at ${dec(x.odds)}` : ''}.</p>
       ${said ? `<p class="recap-what">${esc(said)}</p>` : ''}
+      ${postMortemHTML(x)}
       ${(() => {
         /*
          * The argument we made before kick-off, shown back against what

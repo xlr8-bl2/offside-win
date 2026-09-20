@@ -168,8 +168,19 @@ function board(url: URL, env: Env, jwt: string | null): Promise<Response> {
   const hours = Math.min(240, Math.max(1, Number(url.searchParams.get('hours') ?? 72)));
   const league = Number(url.searchParams.get('league'));
 
+  /*
+   * How far back the board reaches.
+   *
+   * Six hours was enough to keep a match on the board while it was being
+   * played and nothing more: by the evening, everything that kicked off at
+   * lunchtime had vanished, so the page could say what was coming and could
+   * not say what had happened. A day back means the board answers both
+   * questions, which is what a board is for.
+   */
+  const back = Math.min(72, Math.max(6, Number(url.searchParams.get('back') ?? 24)));
+
   return passthrough(env, 'get_board', {
-    p_from: now - 6 * 3600,
+    p_from: now - back * 3600,
     p_to: now + hours * 3600,
     p_league: Number.isFinite(league) && league > 0 ? league : undefined,
   }, jwt);

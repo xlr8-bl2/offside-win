@@ -1360,8 +1360,16 @@
      cell, which is what a fixed inline-flex does inside a grid track. */
   .filters .seg,
   .filters .filter-wide { grid-column: 1 / -1; }
-  .filters .seg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .filters .seg button { white-space: nowrap; }
+  /* Three states now, so three tracks. It was two, and the third wrapped onto
+     a line of its own with half the control left empty beside it. */
+  .filters .seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .filters .seg button {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-inline: var(--space-2);
+  }
+  .seg button i { margin-left: 4px; }
 }
 
 .section.dense .section-head .display { font-size: var(--text-2xl); letter-spacing: var(--tracking-2xl); }
@@ -2429,4 +2437,77 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--chalk-3);
+}
+
+/* The count behind each state on the board's control. It is the difference
+   between a tab and a tab worth pressing. */
+.seg button i {
+  margin-left: var(--space-2);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-medium);
+  opacity: 0.55;
+}
+.seg button[disabled] { opacity: 0.35; cursor: default; }
+.seg button[disabled]:hover { background: transparent; color: inherit; }
+
+/* The call filter, demoted to a sentence. It answers a question nobody arrives
+   with, so it sits under the board rather than beside the thing that does. */
+.board-toggle { margin: var(--space-4) 0 var(--space-5); }
+.board-toggle button {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--chalk-3);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+  border-bottom: var(--border) solid transparent;
+}
+.board-toggle button:hover { color: var(--chalk-2); border-bottom-color: var(--rule-firm); }
+.board-toggle button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* ======================================================== the post-mortem
+ *
+ * Why it landed, or why it did not. The verdict reads as a sentence and the
+ * three facts behind it sit under it as a row, so a reader can take the
+ * sentence and move on, or check the working. The colour is on the left edge
+ * of the card already; this block stays neutral, because a page where every
+ * loss is red is a page that looks broken rather than honest.
+ */
+.pm {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--terrace);
+  border-radius: var(--radius-sm);
+}
+.pm-line {
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--chalk-2);
+}
+.pm-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-2);
+}
+.pm-facts span {
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--chalk-3);
+  white-space: nowrap;
+}
+.pm-facts span + span { position: relative; }
+.pm-facts span + span::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--space-2) * -1 - 1px);
+  top: 50%;
+  width: 3px; height: 3px;
+  margin-top: -1px;
+  border-radius: 50%;
+  background: var(--rule-firm);
 }

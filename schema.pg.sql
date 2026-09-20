@@ -243,6 +243,21 @@ CREATE TABLE IF NOT EXISTS pick (
   closing_odds double precision,
   clv          double precision
 );
+-- The price when we first called it, and what it had become by kick-off.
+--
+-- `odds` is overwritten on every slate run, because the board has to show a
+-- price somebody can still get. That makes it useless for asking the question
+-- that actually matters after a loss: did the market come round to us and the
+-- ball not go in, or were we wrong and the market knew it? So the first price
+-- is kept where nothing overwrites it, and the last one seen before kick-off
+-- is kept beside it.
+ALTER TABLE pick ADD COLUMN IF NOT EXISTS opening_odds double precision;
+
+-- The post-mortem: what the result says about the call, written at settlement.
+-- Nullable because every pick settled before this existed has none, and a page
+-- that demands it would show nothing for the whole back record.
+ALTER TABLE pick ADD COLUMN IF NOT EXISTS postmortem_json text;
+
 CREATE INDEX IF NOT EXISTS pick_fixture ON pick(fixture_id);
 CREATE INDEX IF NOT EXISTS pick_unsettled ON pick(settled_at, kickoff);
 CREATE INDEX IF NOT EXISTS pick_created ON pick(created_at);
@@ -650,7 +665,10 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
                       -- results page asks the reader to trust the mark.
                       f.home_goals, f.away_goals, f.status, f.league_id,
                       -- And the ids the crests are served by.
-                      f.home_team_id, f.away_team_id
+                      f.home_team_id, f.away_team_id,
+                      -- What the result says about the call, and what the
+                      -- market did between our saying it and kick-off.
+                      pk.postmortem_json, pk.opening_odds, pk.closing_odds
                FROM pick pk LEFT JOIN fixture f ON f.id = pk.fixture_id
                -- Settled picks stay public forever, membership or not: the
                -- results page is the only honest marketing this product has and
