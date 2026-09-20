@@ -115,6 +115,91 @@ const ROLE_WORD: Record<string, string> = {
   UNKNOWN: 'player',
 };
 
+/*
+ * ---------------------------------------------------------------------------
+ * PUB NUMBERS
+ *
+ * The rule the whole product is written to: a pub number is one a supporter
+ * says out loud -- "won four of their last six", "beat them 4-0". A
+ * spreadsheet number is one only an analyst says -- 1.78 goals, 2.17 points a
+ * game, 86%. The grammar below was full of the second kind, because it was
+ * built by reading evidence keys straight into sentences, and every one of
+ * them reached a reader.
+ *
+ * These converters are the fix. A frame asks for the shape of a number rather
+ * than the number, so there is no longer a path from a model output to a
+ * decimal on the page.
+ */
+
+/**
+ * A share of something, said as a fraction rather than a percentage.
+ *
+ * "34% of their goals" is the reason the sentence exists, which is exactly the
+ * case the rule covers: a bare percentage standing in for an argument. A
+ * supporter says a third of their goals, and means the same thing.
+ */
+function share(pct: number): string {
+  if (pct >= 55) return 'more than half';
+  if (pct >= 45) return 'close to half';
+  if (pct >= 37) return 'a good third';
+  if (pct >= 30) return 'a third';
+  if (pct >= 22) return 'a quarter';
+  if (pct >= 17) return 'a fifth';
+  if (pct >= 12) return 'a sixth';
+  return 'a small share';
+}
+
+/** A probability, said the way somebody says it out loud. */
+function chance(pct: number): string {
+  if (pct >= 92) return 'about as near a certainty as this game offers';
+  if (pct >= 85) return 'five times out of six';
+  if (pct >= 78) return 'four times out of five';
+  if (pct >= 70) return 'three times in four';
+  if (pct >= 62) return 'closer to two in three';
+  if (pct >= 55) return 'a little more often than not';
+  return 'more often than not';
+}
+
+/** How many goals a match looks like carrying, as a shape not a figure. */
+function goalShape(total: number): string {
+  if (total >= 3.6) return 'a game with goals in it';
+  if (total >= 3.0) return 'three goals or so';
+  if (total >= 2.4) return 'a couple either way';
+  if (total >= 1.9) return 'a tight one';
+  return 'a game that could stay goalless';
+}
+
+/** One side's attacking expectation, in goals rather than in a decimal. */
+function goalsWord(v: number): string {
+  if (v >= 2.4) return 'two or three';
+  if (v >= 1.8) return 'around two';
+  if (v >= 1.3) return 'a goal or two';
+  if (v >= 0.8) return 'about one';
+  return 'not much';
+}
+
+/** A run of form as whole points, which is how a table is read. */
+function pointsFrom(ppg: number, matches: number): string {
+  return `${Math.round(ppg * matches)} points from ${matches}`;
+}
+
+/** How far a price has moved, in words. Small moves are noise and say nothing. */
+function moveWord(pct: number): string {
+  const m = Math.abs(pct);
+  if (m >= 12) return 'sharply';
+  if (m >= 6) return 'clearly';
+  return 'a little';
+}
+
+/** How big a gap between two views is, without printing either. */
+function gapWord(points: number): string {
+  const g = Math.abs(points);
+  if (g >= 12) return 'a long way apart';
+  if (g >= 7) return 'well apart';
+  if (g >= 3) return 'apart';
+  return 'close together';
+}
+
 export type Frame = (c: Claim, rng: Rng) => string;
 
 /** "st"/"nd"/"rd"/"th" for an ordinal, so a frame never writes "3th". */
@@ -152,35 +237,35 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     (c) => {
       const pct = n(c.evidence.goal_share_pct);
       only(pct >= 5);
-      return `${c.subject} is out, and that is ${pct}% of ${s(c.evidence.team)}'s league goals removed from the side.`;
+      return `${c.subject} is out, and that is ${share(pct)} of ${s(c.evidence.team)}'s league goals removed from the side.`;
     },
     (c) => {
       const pct = n(c.evidence.goal_share_pct);
       only(pct >= 5);
-      return `${s(c.evidence.team)} are without ${c.subject}, who has supplied ${pct}% of their goals this season.`;
+      return `${s(c.evidence.team)} are without ${c.subject}, who has supplied ${share(pct)} of their goals this season.`;
     },
     (c) => {
       const pct = n(c.evidence.goal_share_pct);
       const cover = n(c.evidence.cover_at_position);
       const role = ROLE_WORD[s(c.evidence.role, 'UNKNOWN')] ?? 'player';
       only(pct >= 5);
-      return `Take ${c.subject} out and ${s(c.evidence.team)} lose ${pct}% of their scoring, with ${cover} fit ${plural(cover, role)} left to cover the position.`;
+      return `Take ${c.subject} out and ${s(c.evidence.team)} lose ${share(pct)} of their scoring, with ${cover} fit ${plural(cover, role)} left to cover the position.`;
     },
     (c) => {
       const pct = n(c.evidence.goal_share_pct);
       only(pct >= 5);
-      return `${pct}% of ${s(c.evidence.team)}'s goals this season have come from ${c.subject}, and ${c.subject} does not play here.`;
+      return `${c.subject} has supplied ${share(pct)} of ${s(c.evidence.team)}'s goals this season, and does not play here.`;
     },
     (c, rng) => {
       const pct = n(c.evidence.goal_share_pct);
       only(pct >= 5);
-      return `Losing ${c.subject} thins ${s(c.evidence.team)}'s attack ${intensity(c.magnitude, rng)} — ${pct}% of the season's goals sit with ${c.subject === 'the squad' ? 'them' : 'that name alone'}.`;
+      return `Losing ${c.subject} thins ${s(c.evidence.team)}'s attack ${intensity(c.magnitude, rng)} — ${share(pct)} of the season's goals sit with ${c.subject === 'the squad' ? 'them' : 'that name alone'}.`;
     },
     (c) => {
       const role = ROLE_WORD[s(c.evidence.role, 'UNKNOWN')] ?? 'player';
       const pct = n(c.evidence.goal_share_pct);
       only(pct >= 5);
-      return `The ${role} ${c.subject} misses out for ${s(c.evidence.team)}, and with ${c.subject} goes ${pct}% of their goal output.`;
+      return `The ${role} ${c.subject} misses out for ${s(c.evidence.team)}, and with ${c.subject} goes ${share(pct)} of their goal output.`;
     },
     (c) => {
       const cover = n(c.evidence.cover_at_position);
@@ -191,7 +276,7 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     (c) => {
       const pct = n(c.evidence.goal_share_pct);
       only(pct >= 30);
-      return `This is not a squad-depth question. ${cap(String(c.subject))} accounts for ${pct}% of what ${s(c.evidence.team)} score, and he is not in the side.`;
+      return `This is not a squad-depth question. ${cap(String(c.subject))} accounts for ${share(pct)} of what ${s(c.evidence.team)} score, and he is not in the side.`;
     },
     (c) => {
       const pct = n(c.evidence.goal_share_pct);
@@ -202,7 +287,7 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
       const role = ROLE_WORD[s(c.evidence.role, 'UNKNOWN')] ?? 'player';
       const pct = n(c.evidence.goal_share_pct);
       only(pct >= 5);
-      return `A ${role} carrying ${pct}% of ${s(c.evidence.team)}'s goals is unavailable, and replacing that is not a like-for-like swap.`;
+      return `A ${role} carrying ${share(pct)} of ${s(c.evidence.team)}'s goals is unavailable, and replacing that is not a like-for-like swap.`;
     },
   ],
 
@@ -210,12 +295,12 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     (c) => {
       const pct = n(c.evidence.goal_share_pct);
       only(pct >= 5);
-      return `${c.subject} is suspended, which takes ${pct}% of ${s(c.evidence.team)}'s goals out of the side.`;
+      return `${c.subject} is suspended, which takes ${share(pct)} of ${s(c.evidence.team)}'s goals out of the side.`;
     },
     (c) => {
       const pct = n(c.evidence.goal_share_pct);
       only(pct >= 5);
-      return `A suspension rules ${c.subject} out — ${pct}% of ${s(c.evidence.team)}'s scoring this season, unavailable by the letter of the rules rather than by choice.`;
+      return `A suspension rules ${c.subject} out — ${share(pct)} of ${s(c.evidence.team)}'s scoring this season, unavailable by the letter of the rules rather than by choice.`;
     },
     (c) => {
       const cover = n(c.evidence.cover_at_position);
@@ -225,17 +310,17 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     (c) => {
       const pct = n(c.evidence.goal_share_pct);
       only(pct >= 5);
-      return `With ${c.subject} banned, ${s(c.evidence.team)} field a side missing ${pct}% of its goal contribution.`;
+      return `With ${c.subject} banned, ${s(c.evidence.team)} field a side missing ${share(pct)} of its goal contribution.`;
     },
     (c, rng) => {
       const pct = n(c.evidence.goal_share_pct);
       only(pct >= 5);
-      return `${c.subject}'s suspension ${intensity(c.magnitude, rng)} weakens ${s(c.evidence.team)}, removing ${pct}% of the goals they have scored this season.`;
+      return `${c.subject}'s suspension ${intensity(c.magnitude, rng)} weakens ${s(c.evidence.team)}, removing ${share(pct)} of the goals they have scored this season.`;
     },
     (c) => {
       const pct = n(c.evidence.goal_share_pct);
       only(pct >= 20);
-      return `A ban rather than an injury, which makes it no less expensive: ${pct}% of ${s(c.evidence.team)}'s goals sit with ${c.subject}.`;
+      return `A ban rather than an injury, which makes it no less expensive: ${share(pct)} of ${s(c.evidence.team)}'s goals sit with ${c.subject}.`;
     },
     (c) => `${s(c.evidence.team)} lose ${c.subject} to suspension — a selection forced on them rather than chosen.`,
   ],
@@ -252,27 +337,27 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     (c) => {
       const p = n(c.evidence.confidence_pct);
       only(p < 85);
-      return `The eleven is predicted rather than confirmed, at ${p}% confidence, so selection is still an open question.`;
+      return `Nobody has named a side yet, so the eleven here is a projection and a rotation would change this.`;
     },
     (c) => {
       const p = n(c.evidence.confidence_pct);
       only(p < 70);
-      return `Nobody has named a side yet; the projected lineup carries only ${p}% confidence.`;
+      return `The eleven is a guess at this stage, and a good one is worth waiting for.`;
     },
     (c) => {
       const p = n(c.evidence.confidence_pct);
       only(p < 85);
-      return `Selection is unresolved — the lineup projection sits at ${p}% and rotation would change this read.`;
+      return `Who starts is unresolved, and a rotated side would change this read.`;
     },
     (c) => {
       const p = n(c.evidence.confidence_pct);
       only(p < 85);
-      return `At ${p}% confidence in the projected eleven, this is a call made before the team news.`;
+      return `This is a read made before the team news, which is worth knowing before acting on it.`;
     },
     (c) => {
       const p = n(c.evidence.confidence_pct);
       only(p < 60);
-      return `The lineup here is closer to a guess than a projection — ${p}% — and team news should move this materially.`;
+      return `The lineup here is closer to a guess than a projection, and team news should move it a long way.`;
     },
     (c) => {
       const p = n(c.evidence.confidence_pct);
@@ -394,7 +479,7 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     (c) => {
       const m = n(c.evidence.matches);
       only(m >= 60);
-      return `${n(c.evidence.matches)} matches under one manager means ${c.subject} do what they always do, and the model has seen all of it.`;
+      return `${n(c.evidence.matches)} matches under one manager means ${c.subject} do what they always do, and they have done it often enough to count on.`;
     },
     (c) => {
       only(n(c.evidence.matches) >= 60);
@@ -473,13 +558,15 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
   form: [
     (c) => {
       const g = n(c.evidence.goals_minus_xg);
+      const m = n(c.evidence.matches);
       only(Math.abs(g) >= 0.25);
-      return `${c.subject} have been ${g > 0 ? 'outscoring' : 'falling short of'} their expected goals by ${Math.abs(g).toFixed(2)} a game across ${n(c.evidence.matches)} matches — a gap that historically closes rather than holds.`;
+      return `${c.subject} have scored ${Math.round(Math.abs(g) * m)} ${g > 0 ? 'more' : 'fewer'} than the chances they made over ${m} matches — a gap that usually closes rather than holds.`;
     },
     (c) => {
       const g = n(c.evidence.goals_minus_xg);
+      const m = n(c.evidence.matches);
       only(Math.abs(g) >= 0.25);
-      return `Over ${n(c.evidence.matches)} matches ${c.subject}'s finishing has run ${Math.abs(g).toFixed(2)} goals a game ${g > 0 ? 'ahead of' : 'behind'} the chances created, which is not a level that usually persists.`;
+      return `Over ${m} matches ${c.subject} have finished ${g > 0 ? 'better' : 'worse'} than the chances they made, and that is not a level that usually holds.`;
     },
     (c) => {
       const g = n(c.evidence.goals_minus_xg);
@@ -632,13 +719,13 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
       const y = n(c.evidence.yellows_per_match);
       const a = n(c.evidence.league_average);
       only(y - a >= 1.0);
-      return `This is a card-heavy official — ${(y - a).toFixed(1)} bookings a game above the league norm — and that is worth more than it sounds in a tight fixture.`;
+      return `This is a card-heavy official, well above the league norm, and that is worth more than it sounds in a tight fixture.`;
     },
     (c) => {
       const y = n(c.evidence.yellows_per_match);
       const a = n(c.evidence.league_average);
       only(a - y >= 1.0);
-      return `A lenient whistle: ${y.toFixed(1)} cards a game where the league runs ${a.toFixed(1)}, which takes some of the sting out of the card markets.`;
+      return `A lenient whistle, some way below what this league usually sees, which takes the sting out of the card markets.`;
     },
   ],
 
@@ -646,29 +733,29 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     (c) => {
       const m = n(c.evidence.move_pct);
       only(m >= 3);
-      return `${s(c.evidence.outcome)} has ${s(c.evidence.direction) === 'SHORTENING' ? 'shortened' : 'drifted'} ${m.toFixed(1)}% since the line opened.`;
+      return `${s(c.evidence.outcome)} has ${s(c.evidence.direction) === 'SHORTENING' ? 'shortened' : 'drifted'} ${moveWord(m)} since the price opened.`;
     },
     (c) => {
       const m = n(c.evidence.move_pct);
       only(m >= 3);
-      return `Money has moved: ${m.toFixed(1)}% on ${s(c.evidence.outcome)} between opening and now.`;
+      return `Money has moved ${moveWord(m)} on ${s(c.evidence.outcome)} between opening and now.`;
     },
     (c) => {
       const m = n(c.evidence.move_pct);
       only(m >= 3);
-      return `The line has not stood still — ${s(c.evidence.outcome)} is ${m.toFixed(1)}% ${s(c.evidence.direction) === 'SHORTENING' ? 'shorter' : 'longer'} than it opened.`;
+      return `The price has not stood still — ${s(c.evidence.outcome)} is ${moveWord(m)} ${s(c.evidence.direction) === 'SHORTENING' ? 'shorter' : 'longer'} than it opened.`;
     },
     (c) => {
       const m = n(c.evidence.move_pct);
       only(m >= 8);
-      return `A ${m.toFixed(1)}% move on ${s(c.evidence.outcome)} is not noise. Somebody knows something, or thinks they do.`;
+      return `${s(c.evidence.outcome)} moving that far is not noise. Somebody knows something, or thinks they do.`;
     },
   ],
 
   market_sharp: [
     (c) => {
       only(n(c.evidence.gap_points) >= 2);
-      return `The sharp book prices ${s(c.evidence.outcome)} ${n(c.evidence.gap_points).toFixed(1)} points away from the wider market, and when those two disagree the sharp one is usually right.`;
+      return `The sharp book prices ${s(c.evidence.outcome)} ${gapWord(n(c.evidence.gap_points))} from the wider market, and when those two disagree the sharp one is usually right.`;
     },
     (c) => {
       only(n(c.evidence.gap_points) >= 2);
@@ -688,35 +775,35 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     },
     (c) => {
       only(n(c.evidence.gap_points) >= 2);
-      return `Traders and bookmakers disagree by ${n(c.evidence.gap_points).toFixed(1)} points on ${s(c.evidence.outcome)} here.`;
+      return `Traders and bookmakers are ${gapWord(n(c.evidence.gap_points))} on ${s(c.evidence.outcome)} here.`;
     },
     (c) => {
       only(n(c.evidence.gap_points) >= 2);
-      return `Two different crowds have priced ${s(c.evidence.outcome)} and landed ${n(c.evidence.gap_points).toFixed(1)} points apart.`;
+      return `Two different crowds have priced ${s(c.evidence.outcome)} and landed ${gapWord(n(c.evidence.gap_points))}.`;
     },
   ],
 
   rating_gap: [
     (c) => {
       only(n(c.evidence.edge_points) >= 2);
-      return `Our own numbers make this ${n(c.evidence.model_pct).toFixed(1)}% against the ${n(c.evidence.book_pct).toFixed(1)}% the price implies.`;
+      return `We make this more likely than the price does, and by enough to be worth acting on.`;
     },
     (c) => {
       only(n(c.evidence.edge_points) >= 2);
-      return `We rate it ${n(c.evidence.model_pct).toFixed(1)}%; the market is at ${n(c.evidence.book_pct).toFixed(1)}%. That gap is the bet.`;
+      return `We rate this higher than the market does, and that difference is the whole reason it is here.`;
     },
     (c) => {
       only(n(c.evidence.edge_points) >= 2);
-      return `The ${n(c.evidence.edge_points).toFixed(1)}-point difference between our ${n(c.evidence.model_pct).toFixed(1)}% and the book's ${n(c.evidence.book_pct).toFixed(1)}% is what makes this worth taking.`;
+      return `The books have this ${gapWord(n(c.evidence.edge_points))} from where we have it, in our favour.`;
     },
     (c) => {
       only(n(c.evidence.edge_points) >= 2);
-      return `The price says ${n(c.evidence.book_pct).toFixed(1)}%, we say ${n(c.evidence.model_pct).toFixed(1)}%, and we are taking our own side of that.`;
+      return `The market is shorter on this than we are, and we are taking our own side of it.`;
     },
     (c) => {
       const e = n(c.evidence.edge_points);
       only(e >= 8);
-      return `${e.toFixed(1)} points of disagreement with the market is the widest kind of gap this model publishes, and it is why this one is here.`;
+      return `This is as far from the market as we get, and that is why it is on the board at all.`;
     },
   ],
 
@@ -733,7 +820,7 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
       const w = n(c.evidence.wins);
       const m = n(c.evidence.matches);
       only(w >= 3);
-      return `${cap(s(c.evidence.team))} have won ${w} of their last ${m}, scoring ${n(c.evidence.goals_for).toFixed(1)} a game while they have been at it.`;
+      return `${cap(s(c.evidence.team))} have won ${w} of their last ${m}, scoring ${Math.round(n(c.evidence.goals_for) * m)} in the process.`;
     },
     (c) => {
       const kind = s(c.evidence.streak_kind, 'none');
@@ -745,13 +832,13 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
       const kind = s(c.evidence.streak_kind, 'none');
       const len = n(c.evidence.streak_length);
       only(kind === 'unbeaten' && len >= 4);
-      return `${cap(s(c.evidence.team))} are unbeaten in ${len}, conceding ${n(c.evidence.goals_against).toFixed(1)} a game across the run.`;
+      return `${cap(s(c.evidence.team))} are unbeaten in ${len}, conceding ${Math.round(n(c.evidence.goals_against) * len)} across the run.`;
     },
     (c) => {
       const kind = s(c.evidence.streak_kind, 'none');
       const len = n(c.evidence.streak_length);
       only(kind === 'lost' && len >= 3);
-      return `${cap(s(c.evidence.team))} have lost ${len} in a row and are shipping ${n(c.evidence.goals_against).toFixed(1)} goals a game doing it.`;
+      return `${cap(s(c.evidence.team))} have lost ${len} in a row and have shipped ${Math.round(n(c.evidence.goals_against) * len)} doing it.`;
     },
     (c) => {
       const kind = s(c.evidence.streak_kind, 'none');
@@ -762,12 +849,12 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     (c) => {
       const ppg = n(c.evidence.ppg);
       only(ppg >= 2);
-      return `${n(c.evidence.ppg).toFixed(2)} points a game across their last ${n(c.evidence.matches)} is title form, and it is the form ${s(c.evidence.team)} are in.`;
+      return `${pointsFrom(ppg, n(c.evidence.matches))} is title form, and it is the form ${s(c.evidence.team)} are in.`;
     },
     (c) => {
       const ppg = n(c.evidence.ppg);
       only(ppg <= 0.8);
-      return `${cap(s(c.evidence.team))} have managed ${ppg.toFixed(2)} points a game from their last ${n(c.evidence.matches)}, which is relegation form whatever the table currently says.`;
+      return `${cap(s(c.evidence.team))} have managed ${pointsFrom(ppg, n(c.evidence.matches))}, which is relegation form whatever the table currently says.`;
     },
     (c) => {
       // The sentence that makes "they travel badly" sayable. Only when the venue
@@ -776,7 +863,7 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
       const ppg = n(c.evidence.ppg);
       only(typeof vp === 'number' && Math.abs((vp as number) - ppg) >= 0.6);
       const better = (vp as number) > ppg;
-      return `${cap(s(c.evidence.team))} are a different side ${s(c.evidence.where)}: ${(vp as number).toFixed(2)} points a game there against ${ppg.toFixed(2)} overall, and this one is ${better ? 'in the half of the split that suits them' : 'in the half that does not'}.`;
+      return `${cap(s(c.evidence.team))} are a different side ${s(c.evidence.where)} — ${better ? 'markedly better' : 'markedly worse'} there than their overall record says — and this one is ${better ? 'in the half of the split that suits them' : 'in the half that does not'}.`;
     },
     (c) => {
       const cs = n(c.evidence.clean_sheets);
@@ -785,8 +872,9 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     },
     (c) => {
       const gf = n(c.evidence.goals_for);
+      const gm = n(c.evidence.matches);
       only(gf >= 2.2);
-      return `${cap(s(c.evidence.team))} are scoring ${gf.toFixed(1)} a game and have not looked like stopping.`;
+      return `${cap(s(c.evidence.team))} have scored ${Math.round(gf * gm)} in their last ${gm} and have not looked like stopping.`;
     },
     (c) => {
       const ga = n(c.evidence.goals_against);
@@ -831,12 +919,12 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
       const f = n(c.evidence.xg_for);
       const a = n(c.evidence.xg_against);
       only(f - a >= 0.6);
-      return `The model has ${s(c.evidence.team)} at ${f.toFixed(2)} goals here against ${s(c.evidence.opponent)}'s ${a.toFixed(2)} — that gap is the whole case.`;
+      return `${cap(s(c.evidence.team))} look good for ${goalsWord(f)} here and ${s(c.evidence.opponent)} for ${goalsWord(a)} — that gap is the whole case.`;
     },
     (c) => {
       const r = n(c.evidence.ratio);
       only(r >= 1.8);
-      return `${s(c.evidence.team)} project to score ${r.toFixed(1)} times what ${s(c.evidence.opponent)} manage. Games that one-sided on paper usually are.`;
+      return `${cap(s(c.evidence.team))} look good for several times what ${s(c.evidence.opponent)} manage. Games that one-sided on paper usually are.`;
     },
     (c) => {
       const f = n(c.evidence.xg_for);
@@ -846,40 +934,40 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
       // wrong way round — a double chance is often backed precisely because the
       // side is *not* favoured and the draw is carrying the bet.
       only(f > a && f - a < 0.7);
-      return `${cap(s(c.evidence.team))} are the better side at ${f.toFixed(2)} to ${a.toFixed(2)}, though not by the margin the confidence number might suggest — the cushion here is the draw, not the win.`;
+      return `${cap(s(c.evidence.team))} are the better side, though not by much — the cushion here is the draw, not the win.`;
     },
     (c) => {
       const f = n(c.evidence.xg_for);
       const a = n(c.evidence.xg_against);
       only(f >= 1.8 && a <= 1.1);
-      return `${f.toFixed(2)} against ${a.toFixed(2)}. ${cap(s(c.evidence.opponent))}'s route to a result runs through a clean sheet the numbers do not expect them to keep.`;
+      return `${cap(s(c.evidence.opponent))}'s route to a result runs through a clean sheet nobody expects them to keep.`;
     },
     (c, rng) => {
       const f = n(c.evidence.xg_for);
       const a = n(c.evidence.xg_against);
-      return `${cap(s(c.evidence.team))} are ${intensity(c.magnitude, rng)} the stronger side on expected goals, ${f.toFixed(2)} to ${a.toFixed(2)}, and the market has not argued with it.`;
+      return `${cap(s(c.evidence.team))} are ${intensity(c.magnitude, rng)} the stronger side — ${goalsWord(f)} against ${goalsWord(a)} — and the market has not argued with it.`;
     },
     (c) => {
       const a = n(c.evidence.xg_against);
-      return `For this to go wrong, ${s(c.evidence.opponent)} have to beat an expected ${a.toFixed(2)} goals by some distance — which is the risk, stated plainly.`;
+      return `For this to go wrong, ${s(c.evidence.opponent)} have to score well beyond ${goalsWord(a)} — which is the risk, stated plainly.`;
     },
     (c) => {
       const f = n(c.evidence.xg_for);
       const a = n(c.evidence.xg_against);
       const total = f + a;
-      return `Expected goals split ${f.toFixed(2)} to ${a.toFixed(2)}, ${total.toFixed(2)} in the match. The shape of that total is what this call reads.`;
+      return `${cap(goalShape(total))}, with ${s(c.evidence.team)} carrying the bulk of it. The shape of the match is what this call reads.`;
     },
     (c) => {
       const f = n(c.evidence.xg_for);
       const a = n(c.evidence.xg_against);
       only(f <= a);
-      return `${cap(s(c.evidence.team))} are not favoured here — ${f.toFixed(2)} to ${a.toFixed(2)} on expected goals — so what makes this a call is the draw counting, not a win being likely.`;
+      return `${cap(s(c.evidence.team))} are not favoured here, so what makes this a call is the draw counting rather than a win being likely.`;
     },
     (c) => {
       const f = n(c.evidence.xg_for);
       const a = n(c.evidence.xg_against);
       only(f <= a);
-      return `The numbers give ${s(c.evidence.opponent)} the better of it, ${a.toFixed(2)} to ${f.toFixed(2)}. This call survives that because it only needs ${s(c.evidence.team)} to avoid losing.`;
+      return `${cap(s(c.evidence.opponent))} have the better of this on paper. The call survives that because it only needs ${s(c.evidence.team)} to avoid losing.`;
     },
   ],
 
@@ -890,75 +978,77 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
   match_shape: [
     (c) => {
       const t = n(c.evidence.total);
-      return `The model reads this as a ${t.toFixed(2)}-goal match, and the call follows from that number rather than from either side.`;
+      return `This reads as ${goalShape(t)}, and the call follows from the shape of the game rather than from either side.`;
     },
     (c) => {
       const f = n(c.evidence.xg_home);
       const a = n(c.evidence.xg_away);
-      return `${f.toFixed(2)} expected for ${s(c.evidence.home)}, ${a.toFixed(2)} for ${s(c.evidence.away)} — neither side projects to run away with it, and the total is what matters here.`;
+      return `${goalsWord(f)} looks right for ${s(c.evidence.home)} and ${goalsWord(a)} for ${s(c.evidence.away)} — neither runs away with it, and the total is what matters here.`;
     },
     (c) => {
       const t = n(c.evidence.total);
       const line = n(c.evidence.line);
       only(Math.abs(t - line) >= 0.2);
-      return `Expected goals total ${t.toFixed(2)} against a line of ${line.toFixed(1)}: ${t > line ? 'above' : 'below'} it, which is the call.`;
+      return `${cap(goalShape(t))}, which lands ${t > line ? 'the right side of' : 'under'} the line this is priced on.`;
     },
     (c, rng) => {
       const t = n(c.evidence.total);
       only(t < 2.4);
-      return `A ${intensity(c.magnitude, rng)} one-sided game on the numbers still only projects ${t.toFixed(2)} goals in total, and the total is the bet.`;
+      return `A ${intensity(c.magnitude, rng)} one-sided game that still looks like ${goalShape(t)}, and the total is the bet.`;
     },
     (c) => {
       const f = n(c.evidence.xg_home);
       const a = n(c.evidence.xg_away);
       only(f + a < 2.4);
-      return `Neither attack is modelled to do much damage — ${f.toFixed(2)} and ${a.toFixed(2)} — so the goals market is where the confidence sits.`;
+      return `Neither attack looks like doing much damage, so the goals market is the surer read here.`;
     },
     (c) => {
       const f = n(c.evidence.xg_home);
       const a = n(c.evidence.xg_away);
       only(f + a >= 2.8);
-      return `${f.toFixed(2)} and ${a.toFixed(2)} makes ${(f + a).toFixed(2)} between them — enough traffic that the goals market is the clearer read here.`;
+      return `Both ends look busy — enough traffic between them that the goals market is the clearer read here.`;
     },
     (c) => {
       const f = n(c.evidence.xg_home);
       const a = n(c.evidence.xg_away);
       only(f + a >= 2.8);
-      return `Both sides are modelled to score: ${f.toFixed(2)} against ${a.toFixed(2)}, and a match with that much in it rarely stays quiet.`;
+      return `Both sides look good for a goal, and a match with that much in it rarely stays quiet.`;
     },
   ],
 
+  /*
+   * The closing line of a confident call.
+   *
+   * Every one of these used to end on "86%, priced 1.11" -- our own score
+   * dressed up as a reason, which is the single thing the vocabulary rule
+   * exists to keep off the page, and it was the last sentence of most
+   * narratives on the site. They say the same thing now in the register the
+   * rest of the writing is in: how often we think it happens, and whether the
+   * market agrees. The price is still on the page, in the place a price goes.
+   */
   confidence_case: [
     (c) => {
       const p = n(c.evidence.prob_pct);
-      const odds = n(c.evidence.odds);
       only(p >= 75);
-      return `That puts it at ${p.toFixed(0)}%, priced ${odds.toFixed(2)} — a high-probability call rather than a claim the market is wrong.`;
+      return `We would expect that ${chance(p)} — which makes this a read on the match rather than a claim the market has it wrong.`;
     },
     (c) => {
       const p = n(c.evidence.prob_pct);
-      const odds = n(c.evidence.odds);
       only(p < 75);
-      return `We make it ${p.toFixed(0)}% at ${odds.toFixed(2)} — likely rather than safe, and priced about where it should be.`;
+      return `Call it ${chance(p)}. Likely rather than safe, and priced about where it should be.`;
     },
     (c) => {
       const p = n(c.evidence.prob_pct);
-      const ret = n(c.evidence.return_pct);
-      return `${p.toFixed(0)}% likely, returning ${ret.toFixed(0)}p in the pound. The confidence is the point here, not the payout.`;
+      only(p >= 80);
+      return `${cap(chance(p))} is how often this goes our way, and the short price is the cost of that.`;
     },
     (c) => {
       const p = n(c.evidence.prob_pct);
-      const odds = n(c.evidence.odds);
-      return `We make it ${p.toFixed(0)}% at ${odds.toFixed(2)}. Short, and short for a reason — the market has this one read the same way we do.`;
+      return `${cap(chance(p))}, and the market has read it the same way — which is worth knowing rather than worth arguing with.`;
     },
     (c) => {
       const p = n(c.evidence.prob_pct);
-      return `Call it ${p.toFixed(0)}%. Nothing in the pricing disagrees, so take this as a read on the match rather than on the odds.`;
-    },
-    (c) => {
-      const p = n(c.evidence.prob_pct);
-      const odds = n(c.evidence.odds);
-      return `${p.toFixed(0)}% on our numbers, ${odds.toFixed(2)} on the board. Both are saying the same thing, which is worth knowing and is not an edge.`;
+      return `Call it ${chance(p)}. Nothing in the pricing disagrees, so take this as a read on the match rather than on the odds.`;
     },
   ],
 
