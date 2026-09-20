@@ -955,13 +955,18 @@
 
 .also { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .also-call {
+  max-width: 100%;
   padding: var(--space-2) var(--space-4);
   border: var(--border) solid var(--rule);
   border-radius: var(--radius-sm);
   background: var(--terrace);
   font-size: var(--text-xs);
   color: var(--chalk-2);
-  white-space: nowrap;
+  /* It was nowrap, which is fine for "Also: over 2.5" and not for "Moise Kean
+     — knee, out until November": five of those in a row pushed the fixture
+     page nine hundred pixels sideways on a phone. The reason a player is out
+     is a sentence, so it is allowed to be one. */
+  overflow-wrap: anywhere;
 }
 .also-call b { color: var(--chalk); font-weight: var(--weight-bold); font-variant-numeric: tabular-nums; }
 .caveat { display: inline-block; margin-left: var(--space-1); font-style: normal; color: var(--warn); }
@@ -1737,79 +1742,121 @@
  * The floor is now the width five players actually need, so the grid is at
  * least as wide as a pitch and scrolls when it has to.
  */
-.pitch {
-  display: grid;
-  grid-template-columns: minmax(330px, 1fr) 2px minmax(330px, 1fr);
-  padding: var(--space-5) var(--space-4);
-  overflow-x: auto;
-  border: var(--border) solid var(--hairline);
-  border-radius: var(--radius);
-  background:
-    repeating-linear-gradient(90deg, rgba(247, 244, 237, 0.016) 0 40px, transparent 40px 80px),
-    linear-gradient(160deg, #10241a, #0a1712);
+/* ============================================================ team sheet
+ *
+ * One pitch, two teams facing each other.
+ *
+ * It was two half-pitches stacked, both laid out in the same direction, which
+ * is a list with a green background: the entire point of drawing a team sheet
+ * is that you can see a back four against a front three. Home attacks up from
+ * the bottom, away attacks down from the top, and the markings are actually
+ * drawn -- that is what makes it read as a pitch rather than as a panel, and
+ * it costs one inline SVG scaled to a real 68x105 so the boxes are the right
+ * size relative to everything else.
+ */
+.sheet-heads {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
 }
-.pitch-mid { background: var(--hairline); }
-.pitch-half { display: grid; gap: var(--space-5); align-content: start; min-width: 0; }
-.pitch-half.flip { direction: rtl; }
-.pitch-half.flip > * { direction: ltr; }
-.pitch-head {
+.sheet-team {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding-bottom: var(--space-3);
-  border-bottom: var(--border) solid var(--hairline);
+  min-width: 0;
   font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
 }
+.sheet-team b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-heads .sheet-team:last-child { flex-direction: row-reverse; text-align: right; }
 .formation {
-  margin-left: auto;
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
   color: var(--floodlight-hi);
 }
-.pitch-row { display: flex; justify-content: space-evenly; gap: var(--space-2); }
-.pp { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); width: 62px; }
-.pp .crest { width: 34px; height: 34px; background: rgba(0, 0, 0, 0.35); }
+
+.pitch {
+  position: relative;
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-2);
+  aspect-ratio: 68 / 96;
+  border: var(--border) solid var(--hairline);
+  border-radius: var(--radius);
+  /* Mown stripes across the pitch, the way they are actually cut. */
+  background:
+    repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.022) 0 8%, transparent 8% 16%),
+    linear-gradient(170deg, #12281c, #0b1a13);
+  overflow: hidden;
+}
+.pitch-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.13);
+  stroke-width: 0.45;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.pitch-lines .spot { fill: rgba(255, 255, 255, 0.18); stroke: none; }
+
+.pitch-side {
+  position: relative;
+  display: grid;
+  align-content: space-between;
+  gap: var(--space-2);
+  min-height: 0;
+}
+.pitch-row {
+  display: flex;
+  justify-content: space-evenly;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.pp {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 64px;
+  min-width: 0;
+}
+.pp .crest {
+  width: 32px;
+  height: 32px;
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+/* The best-rated starter on each side. Ringed rather than labelled: the
+   rating behind it is ours and stays ours. */
+.pp.key .crest { box-shadow: 0 0 0 2px var(--floodlight-hi), 0 1px 4px rgba(0, 0, 0, 0.45); }
 .pp-name {
-  max-width: 62px;
-  font-size: var(--text-2xs);
-  color: var(--chalk-2);
-  text-align: center;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.outlist { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-5); }
-.outlist b { margin-right: var(--space-1); font-size: var(--text-xs); color: var(--chalk-3); font-weight: var(--weight-medium); }
-
-/*
- * On a phone the two sides stack.
- *
- * Side by side on a 390px screen means a horizontal scroll to see the second
- * team, which is not how anyone reads a team sheet on a phone. Stacked, each
- * half gets the full width and the mirroring goes with it — the flip exists so
- * the two sides face each other across a halfway line, and stacked there is no
- * halfway line to face across.
- */
-@media (max-width: 760px) {
-  .pitch {
-    grid-template-columns: minmax(0, 1fr);
-    overflow-x: visible;
-    gap: var(--space-5);
-  }
-  .pitch-mid { display: none; }
-  .pitch-half + .pitch-half { padding-top: var(--space-5); border-top: var(--border) solid var(--hairline); }
-  .pitch-half.flip { direction: ltr; }
-  .pp { width: 58px; }
-  .pp-name { max-width: 58px; }
+  font-size: 10px;
+  font-weight: var(--weight-medium);
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  color: var(--chalk);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
 }
 
-/* ------------------------------------------------------------- the venue */
-
-.venue { padding: 0; overflow: hidden; }
-.venue .panel-head { padding: var(--space-6) var(--space-7) 0; margin-bottom: var(--space-4); }
-.venue-shot { position: relative; aspect-ratio: 16 / 10; }
-.venue-shot img { width: 100%; height: 100%; object-fit: cover; }
+@media (max-width: 420px) {
+  .pitch { padding-inline: 2px; }
+  .pp { width: 54px; }
+  .pp .crest { width: 28px; height: 28px; }
+  .pp-name { font-size: 9px; }
+}
 
 /* ================================================================== tabs */
 
@@ -2363,3 +2410,23 @@
 
 /* "How it went" was sitting on top of the sentence above it. */
 .with-side .side-head { margin-top: var(--space-4); }
+
+/* Who is missing. A wrapping row rather than an inline run, because the reason
+   a player is out is a sentence and five of them side by side pushed the page
+   nine hundred pixels sideways on a phone. */
+.outlist {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+.outlist > b {
+  flex: 0 0 100%;
+  margin-bottom: var(--space-1);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--chalk-3);
+}

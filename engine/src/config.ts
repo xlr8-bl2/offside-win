@@ -263,8 +263,18 @@ export const config = {
   confident: {
     /** Publish a call at or above this probability. */
     floor: num('CONF_FLOOR', 0.8),
-    /** Cap per fixture. Their page shows 2-4; more than this reads as spam. */
-    perFixture: num('CONF_PER_FIXTURE', 2),
+    /**
+     * One call per fixture.
+     *
+     * It was two, on the reasoning that their page shows two to four. Measured
+     * against the settled record, the second call on a fixture is almost always
+     * the same read expressed twice -- over 1.5 goals and a double chance on
+     * the same one-sided game -- so it doubles the exposure without adding an
+     * opinion, and it is half the reason the board carries a hundred and sixty
+     * picks a day. One call per game is the whole product: what do you think
+     * happens here.
+     */
+    perFixture: num('CONF_PER_FIXTURE', 1),
     /**
      * Never publish a call this likely without saying what it pays. Over 0.5
      * goals is ~97% and prices near 1.02: true, worthless, and the fastest way
@@ -277,7 +287,7 @@ export const config = {
      * the pound. Correct, unusable, and it makes every other call on the page
      * look like padding.
      */
-    minOdds: num('CONF_MIN_ODDS', 1.1),
+    minOdds: num('CONF_MIN_ODDS', 1.13),
     /**
      * The floor for a fixture people came to the site for.
      *
@@ -297,6 +307,24 @@ export const config = {
     marqueeFloor: num('CONF_MARQUEE_FLOOR', 0.62),
     /** League rank at or below which a fixture counts as marquee. */
     marqueeRank: num('CONF_MARQUEE_RANK', 2),
+    /**
+     * How hard to punish a market family that has been overconfident.
+     *
+     * The settled record says the calls land about four points short of what
+     * their prices need -- 82% where 86% breaks even -- and that gap is not
+     * spread evenly: some families have been honest about themselves and some
+     * have not. `refreshCalibration` already measures exactly that, as
+     * mean_model_p against mean_actual, and until now nothing read it: the
+     * confident floor was a flat number and the feedback loop the whole engine
+     * is built around never reached the only calls that get published.
+     *
+     * It does now. A family that has been claiming five points more than it
+     * delivers needs five more points before it publishes, times this. One is
+     * "give back exactly what you overclaimed"; higher is stricter.
+     */
+    overconfidencePenalty: num('CONF_OVERCONF_PENALTY', 1),
+    /** Below this many settled picks a family's measured gap is noise. */
+    overconfidenceMinN: num('CONF_OVERCONF_MIN_N', 25),
   },
 
   selection: {

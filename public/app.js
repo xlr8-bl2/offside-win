@@ -11,7 +11,7 @@
  */
 
 import { describe as market, didItLand, recap } from './js/lib/markets.js';
-import { COUNTRY_NAMES, country, countryIsGuess, countryOptions, localPrice, setCountry } from './js/lib/books.js';
+import { COUNTRY_NAMES, cash, country, localPrice, purse } from './js/lib/books.js';
 import { cleanProse } from './js/lib/vocabulary.js';
 import { authHeaders, completeSignIn, currentUser, signInWithEmail, signInWithGoogle, signOut } from './js/lib/auth.js';
 
@@ -882,17 +882,6 @@ async function viewBoard(params = new URLSearchParams()) {
           <option value="">All leagues</option>
           ${leagues.map((l) => `<option${l === state.leagueName ? ' selected' : ''}>${esc(l)}</option>`).join('')}
         </select>
-        <!--
-          Where the reader is. It belongs beside the other filters because it
-          changes what the right-hand column says on every row: the price is
-          the best one at a book they can actually open, and which books those
-          are is the one thing about this board that is about them rather than
-          about the football.
-        -->
-        <select id="country-filter" class="filter-wide" aria-label="Show prices for books in">
-          ${countryOptions().map((c) =>
-            `<option value="${esc(c)}"${c === country() ? ' selected' : ''}>Prices in ${esc(COUNTRY_NAMES[c] ?? c)}</option>`).join('')}
-        </select>
       </div>
     </div>
     <div class="rows" id="grid"></div>
@@ -973,14 +962,6 @@ async function viewBoard(params = new URLSearchParams()) {
   document.getElementById('league-filter').onchange = (e) => {
     state.leagueName = e.target.value;
     history.replaceState(null, '', boardHash());
-    paint();
-  };
-  // The country is not in the URL: it is a property of the reader, not of the
-  // board, and a shared link should open with the recipient's books on it and
-  // not the sender's.
-  document.getElementById('country-filter').onchange = (e) => {
-    setCountry(e.target.value);
-    renderRegion();
     paint();
   };
   paint();
@@ -1120,6 +1101,44 @@ function squadHTML(lineups, home, away) {
   return both ? `<div class="grid-2">${both}</div>` : '';
 }
 
+/*
+ * The surname, which is not always the last word.
+ *
+ * "David De Gea" is not "Gea" and "Kevin De Bruyne" is not "Bruyne", which is
+ * what taking the final word gave us on a team sheet full of them. Spanish,
+ * Dutch, Portuguese and Arabic naming all put a particle in front of the name
+ * people actually use, so the particle comes with it.
+ */
+const PARTICLES = new Set([
+  'de', 'del', 'della', 'der', 'den', 'di', 'da', 'das', 'dos', 'do', 'du',
+  'van', 'von', 'la', 'le', 'lo', 'el', 'al', 'bin', 'ibn', 'mac', 'mc',
+  'ten', 'ter', 'st', 'san', 'santa', "o'",
+]);
+
+function surname(full) {
+  const parts = String(full ?? '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return parts[0] ?? '';
+  let i = parts.length - 1;
+  // Walk back over particles, but never consume the whole name.
+  while (i > 1 && PARTICLES.has(parts[i - 1].toLowerCase().replace(/\.$/, ''))) i--;
+  return parts.slice(i).join(' ');
+}
+
+/*
+ * The team sheet, on one pitch.
+ *
+ * It used to be two stacked half-pitches, both teams laid out in the same
+ * direction, which is not how a team sheet has ever been drawn: the whole
+ * point of the picture is that the two sides face each other, so you can see
+ * a back four against a front three. Two blocks pointing the same way is a
+ * list with a green background.
+ *
+ * So: one pitch, home attacking up from the bottom, away attacking down from
+ * the top, and the markings actually drawn -- halfway line, centre circle,
+ * both boxes, penalty spots, corner arcs. The markings are the thing that
+ * makes it read as a pitch rather than as a green panel, and they cost one
+ * inline SVG.
+ */
 function pitchHTML(lineups, home, away, homeId, awayId) {
   if (!lineups?.home?.players?.length || !lineups?.away?.players?.length) return '';
 
@@ -1141,17 +1160,35 @@ function pitchHTML(lineups, home, away, homeId, awayId) {
     return out.filter((r) => r.length);
   };
 
-  const player = (p) => `
-    <div class="pp" title="${esc(p.name)}">
+  // The best-rated starter per side, ringed. Not labelled with the rating --
+  // that is our own score and stays ours -- but worth pointing at.
+  const keyManOf = (side) => {
+    const rated = (side.players ?? []).filter((p) => p.starting !== false && typeof p.ai_score === 'number');
+    if (!rated.length) return null;
+    return rated.reduce((a, b) => (b.ai_score > a.ai_score ? b : a)).id;
+  };
+
+  const player = (p, keyMan) => `
+    <div class="pp${p.id === keyMan ? ' key' : ''}" title="${esc(p.name)}">
       ${crest(p.name, 'md', p.id, 'player')}
-      <span class="pp-name">${esc((p.name ?? '').split(' ').slice(-1)[0])}</span>
+      <span class="pp-name">${esc(surname(p.name))}</span>
     </div>`;
 
-  const half = (side, teamName, teamId, flip) => `
-    <div class="pitch-half${flip ? ' flip' : ''}">
-      <div class="pitch-head">${crest(teamName, 'sm', teamId)}<b>${esc(teamName)}</b>
-        ${side.formation ? `<span class="formation">${esc(side.formation)}</span>` : ''}</div>
-      ${rowsFor(side).map((row) => `<div class="pitch-row">${row.map(player).join('')}</div>`).join('')}
+  const sideHTML = (side, atTop) => {
+    const keyMan = keyManOf(side);
+    // Drawn from each side's own goal outwards, so the keepers end up at the
+    // two ends and the forwards meet in the middle.
+    const rows = rowsFor(side);
+    const ordered = atTop ? rows : [...rows].reverse();
+    return `<div class="pitch-side ${atTop ? 'away' : 'home'}">
+      ${ordered.map((row) => `<div class="pitch-row">${row.map((x) => player(x, keyMan)).join('')}</div>`).join('')}
+    </div>`;
+  };
+
+  const head = (teamName, teamId, side) => `
+    <div class="sheet-team">
+      ${crest(teamName, 'sm', teamId)}<b>${esc(teamName)}</b>
+      ${side?.formation ? `<span class="formation">${esc(side.formation)}</span>` : ''}
     </div>`;
 
   const out = (lineups.unavailable ?? []).filter((u) => u.name);
@@ -1160,11 +1197,31 @@ function pitchHTML(lineups, home, away, homeId, awayId) {
     <p class="panel-head">Team sheet ${lineups.status === 'confirmed'
       ? '<span class="tag ok">confirmed</span>'
       : '<span class="tag prov">predicted</span>'}</p>
-    <div class="pitch">
-      ${half(lineups.home, home, homeId, false)}
-      <div class="pitch-mid"></div>
-      ${half(lineups.away, away, awayId, true)}
+
+    <div class="sheet-heads">
+      ${head(away, awayId, lineups.away)}
+      ${head(home, homeId, lineups.home)}
     </div>
+
+    <div class="pitch">
+      <!-- The markings, drawn to a 68x105 pitch so the boxes are the right
+           size relative to it rather than eyeballed. -->
+      <svg class="pitch-lines" viewBox="0 0 68 105" preserveAspectRatio="none" aria-hidden="true">
+        <rect x="1" y="1" width="66" height="103" />
+        <line x1="1" y1="52.5" x2="67" y2="52.5" />
+        <circle cx="34" cy="52.5" r="9.15" />
+        <circle class="spot" cx="34" cy="52.5" r="0.6" />
+        <rect x="20.15" y="1" width="27.7" height="16.5" />
+        <rect x="26.85" y="1" width="14.3" height="5.5" />
+        <circle class="spot" cx="34" cy="12" r="0.6" />
+        <rect x="20.15" y="87.5" width="27.7" height="16.5" />
+        <rect x="26.85" y="98.5" width="14.3" height="5.5" />
+        <circle class="spot" cx="34" cy="93" r="0.6" />
+      </svg>
+      ${sideHTML(lineups.away, true)}
+      ${sideHTML(lineups.home, false)}
+    </div>
+
     ${out.length
       ? `<div class="outlist"><b>Unavailable</b>${out.map((u) => `<span class="also-call">${esc(u.name)}${u.reason ? ` — ${esc(u.reason)}` : ''}</span>`).join('')}</div>`
       : ''}
@@ -1520,19 +1577,25 @@ async function viewResults() {
   const settled = picks.filter((x) => x.result && x.result !== 'VOID' && x.result !== 'PUSH');
   const openPicks = open?.picks ?? [];
 
-  // A tenner a pick, because "-6.99 units" is a sentence in a language the
-  // reader does not speak. The sign is not softened: if it is down, it says
-  // down, which is the entire point of publishing this page at all.
-  const STAKE = 10;
+  /*
+   * There is no running profit-and-loss figure on this page, and that is a
+   * decision rather than an omission.
+   *
+   * What used to be here read "backing every one of them with £10, you would
+   * be £98.67 down" -- which is not a fact about our record, it is a fact
+   * about one staking plan nobody follows, invented here and then presented
+   * as the headline of the product. Nobody backs every call flat. Somebody
+   * taking four of them a week has a completely different number, and we do
+   * not know which four.
+   *
+   * What replaces it is not a rosier figure. It is no figure: every settled
+   * pick, won and lost, counted. That is the whole record and it is still
+   * published in full, including the losses, which is the part that actually
+   * matters. Nothing on this page may imply a profit either -- see the legal
+   * pages and engine/src/vocabulary.ts, which ban it outright.
+   */
   const n = Number(summary.n ?? 0);
   const wins = Number(summary.wins ?? 0);
-  const profit = typeof summary.pnl === 'number' ? summary.pnl * STAKE : null;
-
-  const money = (v) => `£${Math.abs(v).toFixed(2).replace(/\.00$/, '')}`;
-  const verdict = profit === null ? ''
-    : profit > 0 ? `you would be ${money(profit)} up`
-    : profit < 0 ? `you would be ${money(profit)} down`
-    : 'you would be exactly even';
 
   /*
    * The strike rate, said out loud.
@@ -1588,14 +1651,11 @@ async function viewResults() {
         ${stat(wins, 'won', 'won')}
         ${stat(n - wins, 'did not', 'lost')}
         ${stat(`${rate}%`, 'strike rate')}
-        ${profit === null ? '' : stat(`${profit < 0 ? '−' : '+'}${money(profit)}`,
-          `at £${STAKE} a pick`, profit < 0 ? 'lost' : 'won')}
+        ${stat(voided, 'stake back')}
       </div>
       ${formBarHTML(won, voided, lost, ['won', 'stake back', 'lost'],
         `The ${settled.length + voided} most recent, in order. The rate above covers all ${n}.`)}
-      <p class="record-sub">${profit !== null && profit < 0 && rate !== null && rate >= 60
-        ? 'Winning most of them is not the same as making money, and the prices are why.'
-        : esc(headline)}</p>
+      <p class="record-sub">${esc(headline)}</p>
       ${n > 0 && n < 100
         ? `<p class="record-note">That is ${n} results. It is not enough to tell a good run
              from a good model, and we will say so until it is.</p>`
@@ -2409,21 +2469,10 @@ function renderRegion() {
   const host = document.getElementById('region-pick');
   if (!host) return;
   const here = country();
-  host.innerHTML = `
-    <label for="region-select">${countryIsGuess() ? 'Prices shown for' : 'Showing prices for'}</label>
-    <select id="region-select">
-      ${countryOptions().map((c) =>
-        `<option value="${esc(c)}"${c === here ? ' selected' : ''}>${esc(COUNTRY_NAMES[c] ?? c)}</option>`).join('')}
-    </select>`;
-  host.querySelector('#region-select').onchange = (e) => {
-    setCountry(e.target.value);
-    const onBoard = document.getElementById('country-filter');
-    if (onBoard) onBoard.value = e.target.value;
-    // Every price on the page was resolved against the old country, so the
-    // whole view is stale — not just the prices, since a call with no local
-    // book reads differently from one with six.
-    route();
-  };
+  const where = COUNTRY_NAMES[here];
+  host.innerHTML = where
+    ? `<p>Prices and stakes shown for <b>${esc(where)}</b>, from the books licensed there.</p>`
+    : `<p>Prices shown from books that take customers in most countries.</p>`;
 }
 
 async function health() {

@@ -149,6 +149,94 @@ export function countryOptions() {
     .concat('XX');
 }
 
+/*
+ * What money looks like where the reader is.
+ *
+ * A stake line reading "£10 returns £11.10" to somebody in Lagos or São Paulo
+ * is the same failure as naming a bookmaker they cannot open an account with:
+ * technically true, and about somebody else. The stake is a round number in
+ * the local currency rather than a conversion of ten pounds, because it is an
+ * illustration of what a price pays, not a transaction -- ten pounds, ten
+ * euros and two thousand naira are all "a small round bet" in the place they
+ * are spent, and converting would produce ₦19,847.
+ */
+const MONEY = {
+  GB: { code: 'GBP', stake: 10 },
+  IE: { code: 'EUR', stake: 10 },
+  DE: { code: 'EUR', stake: 10 },
+  AT: { code: 'EUR', stake: 10 },
+  ES: { code: 'EUR', stake: 10 },
+  IT: { code: 'EUR', stake: 10 },
+  FR: { code: 'EUR', stake: 10 },
+  NL: { code: 'EUR', stake: 10 },
+  BE: { code: 'EUR', stake: 10 },
+  PT: { code: 'EUR', stake: 10 },
+  GR: { code: 'EUR', stake: 10 },
+  CH: { code: 'CHF', stake: 10 },
+  PL: { code: 'PLN', stake: 50 },
+  RO: { code: 'RON', stake: 50 },
+  SE: { code: 'SEK', stake: 100 },
+  DK: { code: 'DKK', stake: 100 },
+  NO: { code: 'NOK', stake: 100 },
+  FI: { code: 'EUR', stake: 10 },
+  TR: { code: 'TRY', stake: 500 },
+  BR: { code: 'BRL', stake: 50 },
+  AR: { code: 'ARS', stake: 10000 },
+  MX: { code: 'MXN', stake: 200 },
+  CL: { code: 'CLP', stake: 10000 },
+  CO: { code: 'COP', stake: 50000 },
+  CA: { code: 'CAD', stake: 10 },
+  AU: { code: 'AUD', stake: 10 },
+  NZ: { code: 'NZD', stake: 10 },
+  IN: { code: 'INR', stake: 1000 },
+  NG: { code: 'NGN', stake: 2000 },
+  GH: { code: 'GHS', stake: 50 },
+  KE: { code: 'KES', stake: 500 },
+  TZ: { code: 'TZS', stake: 10000 },
+  UG: { code: 'UGX', stake: 20000 },
+  ZM: { code: 'ZMW', stake: 100 },
+  CM: { code: 'XAF', stake: 5000 },
+  CI: { code: 'XOF', stake: 5000 },
+  SN: { code: 'XOF', stake: 5000 },
+  ZA: { code: 'ZAR', stake: 100 },
+  EG: { code: 'EGP', stake: 200 },
+  MA: { code: 'MAD', stake: 100 },
+  US: { code: 'USD', stake: 10 },
+  JP: { code: 'JPY', stake: 1000 },
+  XX: { code: 'USD', stake: 10 },
+};
+
+/** The currency and illustrative stake for where the reader is. */
+export function purse(code = country()) {
+  return MONEY[code] ?? MONEY.XX;
+}
+
+/**
+ * An amount, in the reader's own money.
+ *
+ * `Intl.NumberFormat` knows how many decimal places each currency takes --
+ * yen and naira are not written to two -- and which side the symbol goes.
+ * Getting that from a lookup table is how you end up with "10.00¥".
+ */
+export function cash(amount, code = country()) {
+  const { code: cur } = purse(code);
+  try {
+    const whole = Number.isInteger(amount);
+    // The locale is built from the country rather than taken from the device.
+    // A phone set to en-US renders NGN as "NGN 4,000"; en-NG renders it as
+    // "₦4,000", which is what somebody in Lagos is looking at everywhere else.
+    return new Intl.NumberFormat(code && code !== 'XX' ? `en-${code}` : undefined, {
+      style: 'currency',
+      currency: cur,
+      minimumFractionDigits: whole ? 0 : undefined,
+      maximumFractionDigits: whole ? 0 : 2,
+    }).format(amount);
+  } catch {
+    // An unknown code, or an engine without the currency data.
+    return `${Math.round(amount)} ${cur}`;
+  }
+}
+
 const STORE = 'offside.country';
 
 /** A reader who corrects us is right; the correction outlives the session. */

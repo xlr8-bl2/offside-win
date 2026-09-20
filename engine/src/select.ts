@@ -35,6 +35,24 @@ export interface CalibrationRow {
   market_family: MarketFamily;
   n: number;
   shrink: number;
+  /** What this family claimed, on average, and what it actually delivered. */
+  mean_model_p?: number | null;
+  mean_actual?: number | null;
+}
+
+/**
+ * How many points a family has been claiming that it does not deliver.
+ *
+ * Zero when it has been honest about itself, or when there is not yet enough
+ * settled history to tell a bad family from a bad fortnight.
+ */
+export function overclaim(family: MarketFamily, calibration: CalibrationMap): number {
+  const row = calibration.get(family);
+  if (!row || row.n < config.confident.overconfidenceMinN) return 0;
+  const said = row.mean_model_p;
+  const got = row.mean_actual;
+  if (typeof said !== 'number' || typeof got !== 'number') return 0;
+  return Math.max(0, said - got) * config.confident.overconfidencePenalty;
 }
 
 export type CalibrationMap = Map<MarketFamily, CalibrationRow>;
@@ -331,11 +349,20 @@ export function isLean(c: Candidate): boolean {
   return c.model_prob < config.confident.floor;
 }
 
-export function selectConfident(candidates: Candidate[], floor = config.confident.floor): Candidate[] {
+export function selectConfident(
+  candidates: Candidate[],
+  floor = config.confident.floor,
+  calibration: CalibrationMap = new Map(),
+): Candidate[] {
   const eligible = candidates
     .filter(
       (c) =>
-        c.model_prob >= floor &&
+        // A family that has been overclaiming has to clear a higher bar, by
+        // exactly what it has been overclaiming. This is the loop the engine
+        // is built around finally reaching the calls that get published: the
+        // floor was flat, so a market landing 57% while claiming 80% kept
+        // publishing at the same rate as one landing 84%.
+        c.model_prob >= floor + overclaim(MARKET_FAMILY[c.market], calibration) &&
         c.model_prob <= config.confident.ceiling &&
         c.odds >= config.confident.minOdds,
     )

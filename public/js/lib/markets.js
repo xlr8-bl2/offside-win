@@ -14,24 +14,31 @@
  *   name     "Osasuna -0.75"            — what a bookmaker calls it
  *   plain    "Osasuna, giving a start"  — what it is
  *   wins     "Osasuna win by two..."    — what has to happen
- *   returns  "£10 returns £23.50"       — what you get
+ *   returns  "£10 returns £23.50", or the same in the reader's own money
  *
  * Nothing in here may use the private vocabulary; see engine/src/vocabulary.ts.
  */
+
+import { cash, purse } from './books.js';
 
 const OVER_UNDER = { over: 'More than', under: 'Fewer than' };
 
 /* ------------------------------------------------------------------ money */
 
-/** Decimal odds to a returned amount, stake included, as a money string. */
-export function returned(odds, stake = 10, currency = '£') {
-  const total = stake * odds;
-  const s = total % 1 === 0 ? total.toFixed(0) : total.toFixed(2);
-  return `${currency}${s}`;
+/*
+ * Money, in the reader's own.
+ *
+ * "£10 returns £11.10" said to somebody in Lagos is the same failure as
+ * naming a bookmaker they cannot open an account with: true, and about
+ * somebody else. `purse()` supplies the currency and a round local stake --
+ * see js/lib/books.js for why the stake is round rather than converted.
+ */
+export function returned(odds, stake = purse().stake, code = undefined) {
+  return cash(Math.round(stake * odds * 100) / 100, code);
 }
 
-export function stakeLine(odds, stake = 10, currency = '£') {
-  return `${currency}${stake} returns ${returned(odds, stake, currency)}`;
+export function stakeLine(odds, stake = purse().stake, code = undefined) {
+  return `${cash(stake, code)} returns ${returned(odds, stake, code)}`;
 }
 
 /* -------------------------------------------------------------- handicaps */
@@ -175,7 +182,7 @@ function isInitialism(name) {
  *
  * @returns {{name:string, plain:string, wins:string, returns:string, outcomes?:Array}}
  */
-export function describe({ market, outcome, line, home, away, odds, stake = 10 }) {
+export function describe({ market, outcome, line, home, away, odds, stake = purse().stake }) {
   const H = home || 'the home side';
   const A = away || 'the away side';
   const money = odds ? stakeLine(odds, stake) : '';
