@@ -87,6 +87,7 @@ export function buildCandidates(
         shrunk_edge: edge * shrink,
         odds: bestQuote.odds,
         bookmaker: bestQuote.bookmaker,
+        prices: bm.quotes.get(outcome as Outcome) ?? [],
         kelly: kelly(modelProb, bestQuote.odds, config.selection.kellyFraction),
         confidence: mm.confidence,
         family,

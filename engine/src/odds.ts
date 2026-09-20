@@ -1,6 +1,6 @@
 import { bsdList, num, str, toEpoch } from './bsd.ts';
 import { devig } from './devig.ts';
-import type { BookMarket, MarketCode, Outcome, PushRule, Quote } from './types.ts';
+import type { BookMarket, BookPrice, MarketCode, Outcome, PushRule, Quote } from './types.ts';
 
 /**
  * Fetching quotes and working out what the book actually thinks.
@@ -50,6 +50,14 @@ const BOOK_WEIGHT: Record<string, number> = {
   '1xbet': 0.9,
 };
 const DEFAULT_BOOK_WEIGHT = 1.0;
+
+/**
+ * How many books' prices travel per outcome. Every card on the board carries
+ * this list, so it is a size decision as much as a completeness one: twelve
+ * covers every mainstream operator in any one country several times over, and
+ * the thirteenth-best price on a market is nobody's reason to read.
+ */
+const MAX_BOOKS = 12;
 
 export const MARKET_CODES = Object.keys(OUTCOMES) as MarketCode[];
 
@@ -126,13 +134,35 @@ export function buildBookMarkets(quotes: Quote[]): BookMarket[] {
   for (const g of groups.values()) {
     const wanted = OUTCOMES[g.market];
 
-    // Best price per outcome, and who is offering it.
-    const best = new Map<Outcome, { odds: number; bookmaker: string }>();
+    // Every book's price per outcome, best first, and the best of them.
+    //
+    // The full list travels because the best price in the world is regularly
+    // at a book the reader cannot open an account with. Which books those are
+    // depends on where they are sitting, which is a fact about them and not
+    // about this fixture — so the choosing happens on the page and all this
+    // stage does is refuse to throw the alternatives away.
+    const perOutcome = new Map<Outcome, Map<string, BookPrice>>();
     for (const q of g.quotes) {
-      const cur = best.get(q.outcome);
-      if (!cur || q.decimal_odds > cur.odds) {
-        best.set(q.outcome, { odds: q.decimal_odds, bookmaker: q.bookmaker_name });
+      const m = perOutcome.get(q.outcome) ?? new Map<string, BookPrice>();
+      const prev = m.get(q.bookmaker_slug);
+      // One row per book. A book quoting twice keeps its better price.
+      if (!prev || q.decimal_odds > prev.odds) {
+        m.set(q.bookmaker_slug, {
+          slug: q.bookmaker_slug,
+          book: q.bookmaker_name,
+          odds: q.decimal_odds,
+        });
       }
+      perOutcome.set(q.outcome, m);
+    }
+
+    const quotesByOutcome = new Map<Outcome, BookPrice[]>();
+    const best = new Map<Outcome, { odds: number; bookmaker: string }>();
+    for (const [o, m] of perOutcome) {
+      const list = [...m.values()].sort((a, b) => b.odds - a.odds).slice(0, MAX_BOOKS);
+      quotesByOutcome.set(o, list);
+      const top = list[0];
+      if (top) best.set(o, { odds: top.odds, bookmaker: top.book });
     }
 
     // Per-bookmaker complete sets.
@@ -206,6 +236,7 @@ export function buildBookMarkets(quotes: Quote[]): BookMarket[] {
       line: g.line,
       fair,
       best,
+      quotes: quotesByOutcome,
       overround: overroundWeight > 0 ? overroundAcc / overroundWeight : 1,
       method: methodUsed,
       movement,

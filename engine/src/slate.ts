@@ -57,6 +57,7 @@ function candidateForStorage(c: Candidate) {
     shrunk_edge: Number(c.shrunk_edge.toFixed(4)),
     odds: c.odds,
     bookmaker: c.bookmaker,
+    prices: c.prices,
     kelly: Number(c.kelly.toFixed(4)),
     confidence: Number(c.confidence.toFixed(3)),
     family: c.family,
@@ -406,6 +407,7 @@ export async function runSlate(): Promise<SlateReport> {
                 line: v.candidate.line,
                 odds: v.candidate.odds,
                 bookmaker: v.candidate.bookmaker ?? null,
+                prices: v.candidate.prices ?? [],
                 prob: Number(v.candidate.model_prob.toFixed(3)),
               }
             : null)(publishedVerdicts[0]),
@@ -419,6 +421,7 @@ export async function runSlate(): Promise<SlateReport> {
           prob: Number(v.candidate.model_prob.toFixed(3)),
           odds: v.candidate.odds,
           bookmaker: v.candidate.bookmaker ?? null,
+          prices: v.candidate.prices ?? [],
           // Whether anything in our context argues against it. This is the
           // differentiator, so it belongs where a reader sees it first.
           caveat: v.drivers.some((d) => d.claims.some((c) => c.polarity < 0)),

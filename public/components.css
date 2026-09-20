@@ -1141,6 +1141,21 @@
   color: var(--chalk-3);
   white-space: nowrap;
 }
+/*
+ * A price no book here is quoting.
+ *
+ * It is still shown -- the call is real and the number is what the market
+ * thinks -- but it is drawn as an outline rather than a solid tile, and the
+ * book name is replaced by "not here", so nobody goes looking for an account
+ * they cannot open. The fixture page says which book it belongs to.
+ */
+.odds-tile.away { background: transparent; border-style: dashed; }
+.odds-tile.away .odds { color: var(--chalk-3); }
+.row:hover .odds-tile.away { background: transparent; border-color: var(--chalk-3); }
+.row:hover .odds-tile.away .odds { color: var(--chalk-2); }
+
+.warnish { color: var(--warn); }
+
 .odds-tile.locked { border-style: dashed; border-color: var(--floodlight-dim); background: transparent; }
 .odds-locked {
   display: block;
@@ -1258,10 +1273,18 @@
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   cursor: pointer;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4.5L6 8.5L10 4.5' stroke='%238e877a' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4.5L6 8.5L10 4.5' stroke='%238d94a3' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right var(--space-4) center;
   background-size: 12px;
+  /* "Prices in United Kingdom" is longer than the control on a phone, and a
+     country name is not something to abbreviate in the markup -- it runs into
+     the chevron in whatever language the reader has. Clip it instead. */
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .filters select:hover { border-color: var(--chalk-3); }
 .filters select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
@@ -1270,6 +1293,13 @@
 @media (max-width: 620px) {
   .filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
   .filters select { padding-inline: var(--space-4) var(--space-7); }
+  /* The switch and the country run the full width; the two that pair up sit
+     side by side. The switch was clipping "Everything" against a half-width
+     cell, which is what a fixed inline-flex does inside a grid track. */
+  .filters .seg,
+  .filters .filter-wide { grid-column: 1 / -1; }
+  .filters .seg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .filters .seg button { white-space: nowrap; }
 }
 
 .section.dense .section-head .display { font-size: var(--text-2xl); letter-spacing: var(--tracking-2xl); }
