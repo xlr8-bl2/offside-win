@@ -1716,7 +1716,12 @@ async function viewResults() {
       </div>
       ${formBarHTML(won, voided, lost, ['won', 'stake back', 'lost'],
         `The ${settled.length + voided} most recent, in order. The rate above covers all ${n}.`)}
-      <p class="record-sub">${esc(headline)}</p>
+      <!-- Not a restatement of the strip above it. The numbers say what
+           happened; this says what they are and are not evidence of, which is
+           the only thing worth adding underneath them. -->
+      <p class="record-sub">Every call we have published, settled against the
+        real result. Each one below says how close it came and, where we have
+        the price history, whether the market agreed with us by kick-off.</p>
       ${n > 0 && n < 100
         ? `<p class="record-note">That is ${n} results. It is not enough to tell a good run
              from a good model, and we will say so until it is.</p>`
