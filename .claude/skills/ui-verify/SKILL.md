@@ -47,6 +47,7 @@ does. **Never disable certificate verification to get around this.**
 
 - pages that rendered almost nothing
 - horizontal scroll, in pixels, at any width
+- sibling elements overlapping each other, including behind tabs
 - `var()` references that resolve to nothing
 - decimals on the page (the vocabulary rule bans spreadsheet numbers)
 - banned terms
@@ -102,6 +103,18 @@ fine. The script waits 2.5s; do not shorten it and then trust the result.
 **A hash change is not a page load.** `page.goto` to a different `#/route` on
 an already-loaded page is a same-document navigation, so `waitUntil:
 'networkidle'` returns immediately. Use `load` and an explicit wait.
+
+**Overlap is not overflow.** A grid whose tracks collapse under their own
+content renders its children on top of each other while the page reports zero
+horizontal scroll, because the overlap is contained. Two team sheets sat in the
+same place on the line-ups tab for as long as that bug existed and every check
+passed. The overlap scan compares in-flow siblings and ignores anything with a
+negative margin, which is an author asking for overlap on purpose.
+
+**A hidden tab is an unmeasured tab.** A hidden element has a zero-size rect,
+so it cannot overlap anything and cannot be measured at all — the checker only
+ever saw whichever pane opens first. It reveals `.tabpane[hidden]` for the
+measurement now. That is why the pitch bug survived: it lived one tab across.
 
 **External hosts always fail here.** Google Fonts and the provider's image host
 both fail TLS in the sandbox. That means the typefaces are declared and applied
