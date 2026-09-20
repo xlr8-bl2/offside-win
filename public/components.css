@@ -2416,8 +2416,14 @@
   .pager-num { min-width: 38px; padding-inline: var(--space-2); }
 }
 
-/* "How it went" was sitting on top of the sentence above it. */
-.with-side .side-head { margin-top: var(--space-4); }
+/* "How it went" was sitting on top of the sentence above it, at a size that
+   read as a caption rather than as the heading of the longest section on the
+   page. */
+.with-side .side-head {
+  margin-top: var(--space-8);
+  font-size: var(--text-xl);
+  letter-spacing: var(--tracking-xl);
+}
 
 /* Who is missing. A wrapping row rather than an inline run, because the reason
    a player is out is a sentence and five of them side by side pushed the page
