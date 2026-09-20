@@ -1,4 +1,5 @@
 import { bsdOrNull, num } from './bsd.ts';
+import { postMortem } from './postmortem.ts';
 import { isQuarterLine } from './price.ts';
 import { exec, insertMany, kvSetJSON, select } from './store.ts';
 import { MARKET_FAMILY } from './types.ts';
@@ -169,8 +170,11 @@ export async function runSettle(): Promise<SettleReport> {
     outcome: Outcome;
     line: number | null;
     odds: number;
+    opening_odds: number | null;
+    closing_odds: number | null;
+    evidence_json: string | null;
   }>(
-    `SELECT id, fixture_id, market, outcome, line, odds
+    `SELECT id, fixture_id, market, outcome, line, odds, opening_odds, closing_odds, evidence_json
      FROM pick WHERE settled_at IS NULL AND kickoff < ? ORDER BY kickoff ASC LIMIT 500`,
     [cutoff],
   );
@@ -245,7 +249,29 @@ export async function runSettle(): Promise<SettleReport> {
     });
   }
 
-  const updates: Array<{ id: number; result: Result; pnl: number }> = [];
+  const updates: Array<{
+    id: number;
+    result: Result;
+    pnl: number;
+    clv: number | null;
+    postmortem: string | null;
+  }> = [];
+
+  /*
+   * The shape we published for the fixture, dug back out of the evidence the
+   * pick was stored with. Absent on everything settled before the post-mortem
+   * existed, which is why every field it feeds is nullable rather than the
+   * page demanding it.
+   */
+  const expectedOf = (raw: string | null): { home?: number; away?: number } => {
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw) as { expected?: { home?: number; away?: number } };
+      return parsed.expected ?? {};
+    } catch {
+      return {};
+    }
+  };
   for (const p of pending) {
     const s = scores.get(p.fixture_id);
     if (!s) {
@@ -257,21 +283,49 @@ export async function runSettle(): Promise<SettleReport> {
       // The match finished but the data needed to grade this market never
       // arrived. Void it rather than guess — a wrong grade corrupts calibration
       // permanently, and calibration is what the model steers by.
-      updates.push({ id: p.id, result: 'VOID', pnl: 0 });
+      updates.push({ id: p.id, result: 'VOID', pnl: 0, clv: null, postmortem: null });
       continue;
     }
-    updates.push({ id: p.id, result: graded.result, pnl: graded.pnl });
+
+    // What the result says about the call. See engine/src/postmortem.ts for
+    // what it is allowed to claim and, more to the point, what it is not.
+    const expected = expectedOf(p.evidence_json);
+    const pm = postMortem({
+      market: p.market,
+      outcome: p.outcome,
+      line: p.line,
+      result: graded.result,
+      homeGoals: s.homeGoals,
+      awayGoals: s.awayGoals,
+      expectedHome: expected.home ?? null,
+      expectedAway: expected.away ?? null,
+      openingOdds: p.opening_odds,
+      closingOdds: p.closing_odds,
+    });
+
+    // Where the price finished against where we called it. Recorded as a
+    // number because calibration averages it; said in words on the page.
+    const clv =
+      p.opening_odds && p.closing_odds && p.opening_odds > 1 && p.closing_odds > 1
+        ? Number((p.opening_odds / p.closing_odds - 1).toFixed(4))
+        : null;
+
+    updates.push({
+      id: p.id,
+      result: graded.result,
+      pnl: graded.pnl,
+      clv,
+      postmortem: JSON.stringify(pm),
+    });
     report.pnl += graded.pnl;
     report.settled++;
   }
 
   for (const u of updates) {
-    await exec('UPDATE pick SET settled_at = ?, result = ?, pnl = ? WHERE id = ?', [
-      now,
-      u.result,
-      u.pnl,
-      u.id,
-    ]);
+    await exec(
+      'UPDATE pick SET settled_at = ?, result = ?, pnl = ?, clv = ?, postmortem_json = ? WHERE id = ?',
+      [now, u.result, u.pnl, u.clv, u.postmortem, u.id],
+    );
   }
 
   await refreshCalibration();

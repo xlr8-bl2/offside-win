@@ -602,10 +602,22 @@ export async function runSlate(): Promise<SlateReport> {
           kelly: v.candidate.kelly,
           confidence: v.candidate.confidence,
           provisional: analysis.provisional ? 1 : 0,
+          // The price when we first said it. `odds` is overwritten every run
+          // because the board has to show a price somebody can still get, so
+          // this is the only record of what we actually called it at -- and
+          // the difference between the two is the one honest answer to "was
+          // the market with us or against us" after a loss.
+          opening_odds: v.candidate.odds,
           narrative: v.narrative,
           evidence_json: JSON.stringify({
             drivers: v.drivers.map(forStorage),
             set_aside: v.set_aside.map(forStorage),
+            // The shape we published for the match, so settlement can ask
+            // whether the game looked like we said it would.
+            expected: {
+              home: Number(analysis.lambda_home.toFixed(2)),
+              away: Number(analysis.lambda_away.toFixed(2)),
+            },
           }),
           created_at: analysis.computed_at,
         });
@@ -671,7 +683,7 @@ export async function runSlate(): Promise<SlateReport> {
       'pick',
       [
         'fixture_id', 'kickoff', 'market', 'outcome', 'line', 'kind', 'model_prob',
-        'book_prob', 'edge', 'shrunk_edge', 'odds', 'bookmaker', 'kelly',
+        'book_prob', 'edge', 'shrunk_edge', 'odds', 'opening_odds', 'bookmaker', 'kelly',
         'confidence', 'provisional', 'narrative', 'evidence_json', 'created_at',
       ],
       pickRows,
@@ -685,7 +697,11 @@ export async function runSlate(): Promise<SlateReport> {
           'edge = excluded.edge, shrunk_edge = excluded.shrunk_edge, odds = excluded.odds, ' +
           'bookmaker = excluded.bookmaker, kelly = excluded.kelly, ' +
           'confidence = excluded.confidence, provisional = excluded.provisional, ' +
-          'narrative = excluded.narrative, evidence_json = excluded.evidence_json ' +
+          'narrative = excluded.narrative, evidence_json = excluded.evidence_json, ' +
+          // Deliberately NOT opening_odds: it is set once, on the insert that
+          // first published the call, and never again. The last price this
+          // loop writes before the match starts is the closing one.
+          'closing_odds = excluded.odds ' +
           'WHERE pick.settled_at IS NULL',
       },
     );
