@@ -630,7 +630,13 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
          )
   FROM (
     SELECT (
-             (CASE WHEN (SELECT ok FROM m) THEN f.board_json
+             -- Finished matches are not walled, for the reason set out on
+             -- get_fixture below: the settled call is already published free
+             -- on the results page, so hiding it here hid the evidence and
+             -- sold the promise.
+             (CASE WHEN (SELECT ok FROM m)
+                     OR (f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL)
+                   THEN f.board_json
                    ELSE coalesce(f.board_free_json, f.board_json) END)::jsonb
              -- The score comes from the column, not from the card.
              --
@@ -657,8 +663,34 @@ $fn$;
 
 CREATE OR REPLACE FUNCTION get_fixture(p_id bigint)
 RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
-  SELECT (CASE WHEN has_membership() THEN f.bundle_json
-               ELSE coalesce(f.bundle_free_json, f.bundle_json) END)::json
+  SELECT (
+           -- A finished match is not the thing being sold, so it is not walled.
+           --
+           -- `get_picks` already publishes every settled call to everyone, on
+           -- the grounds that the record is the only honest marketing this
+           -- product has and gating it would defeat the point of publishing
+           -- losses. The fixture page was walling the same call the results
+           -- page was handing out, which is both inconsistent and the wrong
+           -- way round: it hid the evidence and sold the promise. The free
+           -- bundle is written at slate time, before kick-off, so the wall
+           -- cannot make this judgement -- the serving function can.
+           (CASE WHEN has_membership()
+                   OR (f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL)
+                 THEN f.bundle_json
+                 ELSE coalesce(f.bundle_free_json, f.bundle_json) END)::jsonb
+           -- Same overlay as get_board, and for the same reason. The bundle is
+           -- written when the slate last touched the fixture, which for a match
+           -- played yesterday was before it kicked off: it still says the game
+           -- is to come and carries no score. Everything the page says about
+           -- tense, about whether a price is still live, and about whether a
+           -- call landed hangs off these two keys, so they come from the
+           -- columns settlement writes rather than from the frozen card.
+           || CASE WHEN f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
+                   THEN jsonb_build_object(
+                          'score', jsonb_build_array(f.home_goals, f.away_goals),
+                          'status', 'finished')
+                   ELSE '{}'::jsonb END
+         )::json
   FROM fixture f WHERE f.id = p_id;
 $fn$;
 

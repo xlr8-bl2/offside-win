@@ -49,7 +49,15 @@ function kickoffLabel(epoch) {
   if (new Date(now.getTime() + 864e5).toDateString() === d.toDateString()) return `Tomorrow ${time}`;
   return `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} ${time}`;
 }
-const isSoon = (epoch) => epoch && epoch * 1000 - Date.now() < 6 * 3600e3;
+// Kick-off is within six hours and has not happened yet. The second half of
+// that was missing, so every match already played counted as "soon" -- a
+// game from last Tuesday wore the same urgent chip as one kicking off at
+// eight tonight.
+const isSoon = (epoch) => {
+  if (!epoch) return false;
+  const ms = epoch * 1000 - Date.now();
+  return ms > 0 && ms < 6 * 3600e3;
+};
 
 /**
  * What state a match is actually in.
@@ -233,6 +241,19 @@ const state = {
    * want every finished game, or only the finished ones we called.
    */
   when: 'upcoming',
+  /*
+   * Whether the reader got here by navigating inside the app, rather than by
+   * landing on a deep link. It is what a Back button needs and what
+   * `history.length` cannot tell you: a tab that has been anywhere at all has
+   * a history length above one, so Back walked people off the site.
+   */
+  cameFromInApp: false,
+  /*
+   * Whether the signed-in reader has a live membership. null means not asked
+   * yet -- which is different from false, and the difference is what stops the
+   * header claiming the free tier before it knows.
+   */
+  member: null,
 };
 
 /**
@@ -433,10 +454,13 @@ function heroHTML(hero = null, venueIds = [], detail = null) {
       <div class="hero-copy">
         <span class="timechip${isSoon(hero.kickoff) ? ' soon' : ''}">${esc(when)}</span>
         ${aside ? `<p class="kicker">${esc(aside)}</p>` : ''}
-        <div class="fx-stack">
+        <!-- The tie is the page's heading. Without this the home page had no
+             h1 at all whenever a hero fixture was set, which is the one case
+             it always is. -->
+        <h1 class="fx-stack">
           <span class="fx-line">${crest(hero.home, 'md', hero.home_id)}<span class="name">${esc(hero.home)}</span></span>
           <span class="fx-line">${crest(hero.away, 'md', hero.away_id)}<span class="name">${esc(hero.away)}</span></span>
-        </div>
+        </h1>
         <p class="hero-blurb">${esc(hero.league ?? '')}${hero.league ? '. ' : ''}Our call on it, the
            argument for it, and the thing that argues against it.</p>
         <div class="hero-cta">
@@ -456,14 +480,41 @@ function heroHTML(hero = null, venueIds = [], detail = null) {
  * A call is marked on the club it is about rather than spelled out, because at
  * this size there is room for a mark and not for a sentence.
  */
+/**
+ * What is on next, under a heading that is true.
+ *
+ * It used to be the first eight fixtures the board returned, in board order --
+ * which starts a day in the past, so "Next up" was eight matches that had all
+ * finished. The board reaches backwards on purpose; this rail does not, and
+ * the two had been sharing an order.
+ *
+ * Live first, because a game being played now beats one kicking off in six
+ * hours. Then soonest. And when there is genuinely nothing to come -- late on
+ * a Sunday, between windows -- it says what it is showing instead of claiming
+ * those games are still ahead.
+ */
 function nextRailHTML(fixtures) {
-  const soon = fixtures.slice(0, 8);
+  const rank = (f) => {
+    const k = matchState(f).kind;
+    return k === 'live' ? 0 : k === 'upcoming' ? 1 : 2;
+  };
+  const ahead = fixtures
+    .filter((f) => rank(f) < 2)
+    .sort((a, b) => rank(a) - rank(b) || (a.kickoff ?? 0) - (b.kickoff ?? 0));
+  const back = fixtures
+    .filter((f) => rank(f) === 2)
+    .sort((a, b) => (b.kickoff ?? 0) - (a.kickoff ?? 0));
+
+  const soon = (ahead.length ? ahead : back).slice(0, 8);
+  const heading = ahead.length
+    ? (ahead.every((f) => matchState(f).kind === 'live') ? 'On right now' : 'Next up')
+    : 'Just finished';
   if (!soon.length) return '';
   const clock = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
   return `
   <div class="wrap section dense">
-    <div class="section-head"><div><h2 class="display">Next up</h2></div>
-      <a class="btn btn-ghost btn-sm" href="#/board">The full board</a></div>
+    <div class="section-head"><div><h2 class="display">${esc(heading)}</h2></div>
+      <a class="btn btn-ghost btn-sm" href="#/board${heading === 'Just finished' ? '?when=played' : ''}">The full board</a></div>
     <div class="next-rail">
       ${soon.map((f) => {
         const k = new Date(f.kickoff * 1000);
@@ -685,7 +736,11 @@ function rowHTML(f) {
         // On a match in progress the bare time reads as the clock -- "LIVE
         // 12:00" looks like the twelfth minute of the second half. It is the
         // kick-off, so it says so, in the shorthand every football page uses.
-        : `<span class="row-time">${liveBadge(state)}</span><span class="row-day">ko ${esc(time)}</span>`}
+        // The day matters here too: the board reaches back past midnight, so
+        // "ko 16:30" alone cannot tell yesterday's game from this
+        // afternoon's.
+        : `<span class="row-time">${liveBadge(state)}</span><span class="row-day">${
+            day === 'Today' ? '' : `${esc(day)} · `}ko ${esc(time)}</span>`}
     </div>
 
     <div class="row-teams">
@@ -710,7 +765,21 @@ function rowHTML(f) {
         ? (landed
             ? `<span class="mark ${esc(landed)}">${esc(MARK[landed])}</span>${
                 pick ? `<span class="odds-book">at ${dec(p ? p.odds : pick.odds)}</span>` : ''}`
-            : `<span class="mark none">Full time</span>`)
+            /*
+             * Not "Full time" twice. The badge on the left of the row already
+             * says the match is over; this column is for what the call did,
+             * and when there was no call the honest answer is the same one an
+             * unplayed row gives. A pick the score cannot grade -- corners,
+             * cards -- says what we took it at and leaves the verdict to the
+             * fixture page, which has the numbers.
+             */
+            : pick
+              ? `<span class="odds-book">called at ${dec(p ? p.odds : pick.odds)}</span>`
+              : f.locked
+                ? `<span class="row-locked-mark">
+                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>
+                     Members</span>`
+                : `<span class="row-pass">Passed</span>`)
         : pick && p ? `
         <span class="odds-tile${p.local ? '' : ' away'}"><span class="odds">${dec(p.odds)}</span></span>
         <span class="odds-book">${pick.lean ? 'lean · ' : ''}${p.local ? esc(p.book) : `no ${esc(country())} book`}</span>`
@@ -911,7 +980,13 @@ async function viewBoard(params = new URLSearchParams()) {
    */
   const whenOf = (f) => {
     const k = matchState(f).kind;
-    return k === 'live' ? 'live' : k === 'upcoming' ? 'upcoming' : 'played';
+    if (k === 'live') return 'live';
+    // A postponed or abandoned match has not been played, so it does not
+    // belong under "already played" -- it was being counted there, and the
+    // lede counted it too. It sits with the games still to come, where the
+    // card's own "Postponed" badge says the rest.
+    if (k === 'upcoming' || k === 'off') return 'upcoming';
+    return 'played';
   };
   const counts = { upcoming: 0, live: 0, played: 0 };
   for (const f of fixtures) counts[whenOf(f)]++;
@@ -928,9 +1003,9 @@ async function viewBoard(params = new URLSearchParams()) {
   <div class="wrap section dense">
     <div class="section-head">
       <div>
-        <h2 class="display">The board</h2>
-        <p>${fixtures.filter((f) => f.top_pick || f.locked).length} calls across ${fixtures.length} games.${
-          furthest ? ` The last of them kicks off ${esc(dayLabel(furthest).toLowerCase())}.` : ''}</p>
+        <h1 class="display">The board</h1>
+        <!-- Written by paint(), from what is actually on screen. See ledeFor. -->
+        <p id="board-lede"></p>
       </div>
       <div class="filters">
         <!--
@@ -972,10 +1047,65 @@ async function viewBoard(params = new URLSearchParams()) {
    * list with no landmarks in it — and it meant every row had to carry its own
    * competition badge to say where it was.
    */
+  /*
+   * A sentence about the page you are looking at.
+   *
+   * It used to be computed once, over every fixture the API returned, and then
+   * never touched again -- so a reader on "Played", filtered to La Liga, with
+   * only called games showing, was told "43 calls across 250 games, the last of
+   * them kicks off Wednesday" about thirty-nine matches that had all finished.
+   * Every clause of that was wrong: the count, the total, and the tense.
+   *
+   * So it is written by paint(), from the same list the rows are built from,
+   * and the tense follows the tab.
+   */
+  const ledeFor = (inTab) => {
+    // Counted before the "only games we have a call on" filter, because "18
+    // calls across 18 games" is not a sentence anybody needs.
+    const called = inTab.filter((f) => f.top_pick || f.locked);
+    const games = `${inTab.length} game${inTab.length === 1 ? '' : 's'}`;
+    const calls = called.length === 1 ? 'one call' : `${called.length} calls`;
+    const where = state.leagueName ? ` in ${state.leagueName}` : '';
+
+    if (!inTab.length) return state.leagueName ? `Nothing${where} in this part of the board.` : '';
+
+    if (state.when === 'live') {
+      return `${games}${where} being played right now, ${called.length ? `${calls} among them` : 'none of them called'}.`;
+    }
+
+    if (state.when === 'played') {
+      // How many of them came in, worked out the same way the results page
+      // does it rather than from a stored mark, because the board card carries
+      // the selection and the score and nothing else.
+      let landed = 0;
+      let judged = 0;
+      for (const f of called) {
+        const pk = f.top_pick;
+        if (!pk || !Array.isArray(f.score)) continue;
+        const r = didItLand({
+          market: pk.market, outcome: pk.outcome, line: pk.line,
+          homeGoals: f.score[0], awayGoals: f.score[1],
+        });
+        if (!r) continue;
+        judged++;
+        if (r === 'won') landed++;
+      }
+      const record = judged ? ` ${landed} of ${judged} landed.` : '';
+      return `${games}${where} already played, ${called.length ? `${calls} among them.` : 'none of them called.'}${record}`;
+    }
+
+    const next = inTab.map((f) => f.kickoff).filter(Boolean);
+    const last = next.length ? Math.max(...next) : null;
+    return `${calls} across ${games}${where} still to play.${
+      last ? ` The last of them kicks off ${dayLabel(last).toLowerCase()}.` : ''}`;
+  };
+
   const paint = () => {
-    let shown = fixtures.filter((f) => whenOf(f) === state.when);
-    if (state.leagueName) shown = shown.filter((f) => f.league === state.leagueName);
-    if (state.show === 'calls') shown = shown.filter((f) => f.top_pick || f.locked);
+    let inTab = fixtures.filter((f) => whenOf(f) === state.when);
+    if (state.leagueName) inTab = inTab.filter((f) => f.league === state.leagueName);
+    document.getElementById('board-lede').textContent = ledeFor(inTab);
+
+    const shown = state.show === 'calls' ? inTab.filter((f) => f.top_pick || f.locked) : inTab;
 
     /*
      * Live, then to come, then done.
@@ -1104,15 +1234,28 @@ function lockedHTML(fixture = null) {
   </div>`;
 }
 
-function verdictHTML(v, home, away, fixture = null) {
+/**
+ * One published call.
+ *
+ * `when` carries whether the match has been played and the scoreline if it
+ * has. That is the difference between a page offering something and a page
+ * reporting something, and almost every line below turns on it: a price that
+ * can no longer be taken is history, not an offer; "backing this returns" is
+ * a promise about a game that is over; and the one thing a reader wants from
+ * a finished match -- did it come in -- was nowhere on the page at all.
+ */
+function verdictHTML(v, home, away, fixture = null, when = {}) {
+  const played = !!when.played;
+  const hg = when.hg ?? null;
+  const ag = when.ag ?? null;
+
   // A free copy keeps the narrative and drops the selection, so a verdict can
-  // arrive with everything except the thing being sold.
+  // arrive with everything except the thing being sold. The wall itself is
+  // rendered once by the caller, however many of these there are.
   if (!v.candidate) {
-    return `
-    <div class="verdict">
-      ${v.narrative ? `<p class="narrative">${esc(v.narrative)}</p>` : ''}
-      ${lockedHTML(fixture)}
-    </div>`;
+    return v.narrative
+      ? `<div class="verdict"><p class="narrative">${esc(v.narrative)}</p></div>`
+      : '';
   }
 
   const c = v.candidate;
@@ -1123,22 +1266,45 @@ function verdictHTML(v, home, away, fixture = null) {
     home, away, odds,
   });
 
+  // Derived here rather than stored: the bundle is written before kick-off, so
+  // it cannot carry a result. The scoreline can, and `didItLand` is the same
+  // reading the results page uses. Corners and cards return null -- they settle
+  // from numbers this page never receives -- and a null says nothing rather
+  // than guessing.
+  const landed = played && hg !== null && ag !== null
+    ? didItLand({ market: c.market, outcome: c.outcome, line: c.line, homeGoals: hg, awayGoals: ag })
+    : null;
+  const VERDICT_WORD = { won: 'Landed', lost: 'Did not land', part: 'Half back', back: 'Stake back' };
+  const story = landed
+    ? recap({ market: c.market, outcome: c.outcome, line: c.line, home, away,
+              homeGoals: hg, awayGoals: ag,
+              result: landed === 'won' ? 'WON' : landed === 'lost' ? 'LOST'
+                : landed === 'part' ? 'HALF_WON' : 'PUSH' })
+    : null;
+
   return `
-  <div class="verdict">
+  <div class="verdict${landed ? ` settled ${landed}` : ''}">
     <div class="verdict-head">
       <span class="sel">${esc(d.name)}</span>
-      <span class="price">${dec(odds)}</span>
+      ${landed
+        ? `<span class="mark ${landed}">${esc(VERDICT_WORD[landed] ?? '')}</span>`
+        : `<span class="price">${dec(odds)}</span>`}
     </div>
-    <p class="wins">${esc(d.wins)}</p>
+    ${landed
+      ? `<p class="wins">${esc(story ?? d.wins)}</p>`
+      : `<p class="wins">${esc(d.wins)}</p>`}
     <p class="narrative">${esc(v.narrative)}</p>
+    ${played ? `<p class="aside">Written before kick-off, and left as it was.</p>` : ''}
     <div class="verdict-meta">
-      ${p ? (p.local
-        ? `<span>Best price at <b>${esc(p.book)}</b> in ${esc(COUNTRY_NAMES[country()] ?? 'your country')}</span>`
-        : `<span class="warnish">No book in ${esc(COUNTRY_NAMES[country()] ?? 'your country')} is quoting this. ` +
-          `The ${dec(p.odds)} above is ${esc(p.book)}'s.</span>`) : ''}
-      <span>${esc(d.returns)}</span>
+      ${played
+        ? `<span>We put it up at ${dec(c.odds)}${c.bookmaker ? ` with ${esc(c.bookmaker)}` : ''}.</span>`
+        : `${p ? (p.local
+            ? `<span>Best price at <b>${esc(p.book)}</b> in ${esc(COUNTRY_NAMES[country()] ?? 'your country')}</span>`
+            : `<span class="warnish">No book in ${esc(COUNTRY_NAMES[country()] ?? 'your country')} is quoting this. ` +
+              `The ${dec(p.odds)} above is ${esc(p.book)}'s.</span>`) : ''}
+           <span>${esc(d.returns)}</span>`}
     </div>
-    ${p && p.local && p.count > 1 ? `
+    ${!played && p && p.local && p.count > 1 ? `
       <details class="settles">
         <summary>${p.count} book${p.count === 1 ? '' : 's'} where you are</summary>
         <table class="tbl settle-tbl"><tbody>
@@ -1148,7 +1314,7 @@ function verdictHTML(v, home, away, fixture = null) {
       </details>` : ''}
     ${d.outcomes?.length ? `
       <details class="settles">
-        <summary>How this settles</summary>
+        <summary>${played ? 'How it would have settled' : 'How this settles'}</summary>
         <table class="tbl settle-tbl"><tbody>
           ${d.outcomes.map((r) => `<tr><td>${esc(r.label)}</td><td class="num ${r.result.startsWith('half') ? 'part' : r.result}">${esc(r.effect)}</td></tr>`).join('')}
         </tbody></table>
@@ -1537,6 +1703,24 @@ async function viewFixture(id) {
   const verdicts = f.verdicts ?? [];
   const { reads, rest } = readsFor(f, verdicts);
 
+  /*
+   * Whether this match has been played, and by how much.
+   *
+   * Everything below reads off these three. Without them the page had one
+   * voice for every fixture: a kick-off time in the future tense, a price
+   * described as available, a call described as a call. On a match that
+   * finished two days ago all three were false, and the page had no way of
+   * knowing -- the bundle was written before kick-off, so it said the game was
+   * to come and carried no score. `get_fixture` now overlays the score column
+   * the way the board already did, which is what makes this possible at all.
+   */
+  const st = matchState(f);
+  const played = st.kind === 'ft';
+  const sc = Array.isArray(f.score) && f.score.length === 2
+    && f.score[0] !== null && f.score[1] !== null ? f.score : null;
+  const hg = sc ? Number(sc[0]) : null;
+  const ag = sc ? Number(sc[1]) : null;
+
   // The provider hands back round labels already joined with a middle dot
   // ("Regular season · Matchday 4"), which is the meta-string tell arriving
   // from outside. Split it back into its parts and let the one join rule below
@@ -1547,17 +1731,30 @@ async function viewFixture(id) {
     f.neutral ? 'neutral ground' : null,
   ].filter(Boolean);
 
+  /*
+   * A locked verdict says nothing about itself, so two of them say the same
+   * nothing twice. The wall was rendering once per call -- the same paragraph
+   * and the same button, stacked -- on every fixture carrying more than one.
+   * One wall, and it already names the count.
+   */
+  const anyLocked = verdicts.some((v) => !v.candidate);
+
+  const callHead = verdicts.length
+    ? (played ? 'What we called' : verdicts.length > 1 ? 'The calls' : 'The call')
+    : (played ? 'We did not call this one' : 'No call');
+
   const overview = `
     <div class="grid-2">
       <div>
         <div class="panel">
-          <p class="panel-head">${verdicts.length ? 'The call' : 'No call'}</p>
+          <p class="panel-head">${callHead}</p>
           ${verdicts.length
-            ? verdicts.map((v) => verdictHTML(v, f.home, f.away, f)).join('')
+            ? verdicts.map((v) => verdictHTML(v, f.home, f.away, f, { played, hg, ag })).join('')
+              + (anyLocked ? lockedHTML(f) : '')
             : `<p class="narrative">${esc(f.pass ?? 'Nothing here is worth a call. The price looks about right.')}</p>`}
         </div>
         ${reads.length ? `<div class="panel">
-          <p class="panel-head">${verdicts.length ? 'What made the call' : 'What stood out'}</p>
+          <p class="panel-head">${verdicts.length ? (played ? 'What made us call it' : 'What made the call') : 'What stood out'}</p>
           <div class="reads">${reads.map((r) => `<div class="read"><b>${esc(r.label)}</b><p>${esc(r.note)}</p></div>`).join('')}</div>
           ${rest.length ? `
             <details class="more-reads">
@@ -1567,20 +1764,20 @@ async function viewFixture(id) {
         </div>` : ''}
       </div>
       <div>
-        <div class="panel">
-          <p class="panel-head">How we see it</p>
+        ${[p.HOME, p.DRAW, p.AWAY].some((x) => typeof x === 'number') ? `<div class="panel">
+          <p class="panel-head">How we ${played ? 'saw' : 'see'} it</p>
           <div class="bars">${bar(f.home, p.HOME)}${bar('Draw', p.DRAW)}${bar(f.away, p.AWAY)}</div>
           <div class="numbers">
             <!-- "goals expected 3.33" was expected goals with the label filed
                  off: a banned term, a number no supporter says out loud, and on
                  the page a reader lands on from an advert. What the total is
                  actually being used to say is whether the game looks open. -->
-            <span>${((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0)) >= 3.1 ? 'goals look likely'
-                   : ((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0)) <= 2.1 ? 'this one looks tight'
-                   : 'an even game on paper'}</span>
-            ${f.provisional ? `<span class="tag prov">line-ups not final</span>` : ''}
+            <span>${((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0)) >= 3.1 ? (played ? 'we had goals in it' : 'goals look likely')
+                   : ((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0)) <= 2.1 ? (played ? 'we had it tight' : 'this one looks tight')
+                   : (played ? 'we had it even on paper' : 'an even game on paper')}</span>
+            ${f.provisional && !played ? `<span class="tag prov">line-ups not final</span>` : ''}
           </div>
-        </div>
+        </div>` : ''}
         ${formPanel(f.form, f.home, f.away)}
         ${f.venue_id ? `<div class="panel venue" data-shot="yes">
           <p class="panel-head">The ground</p>
@@ -1608,18 +1805,19 @@ async function viewFixture(id) {
       ${backHTML('Back to the board')}
       <div class="hero-copy">
         <span class="timechip${isSoon(f.kickoff) ? ' soon' : ''}">${esc(kickoffLabel(f.kickoff))}</span>
-        <div class="fx-stack">
+        ${st.kind === 'upcoming' ? '' : liveBadge(st)}
+        <h1 class="fx-stack${sc ? ' scored' : ''}">
           <span class="fx-line">
             ${crest(f.home, 'md', f.home_id)}
             <span class="name">${esc(f.home)}</span>
-            ${formChips(f.form?.home)}
+            ${sc ? `<span class="gf${hg > ag ? ' win' : ''}">${hg}</span>` : formChips(f.form?.home)}
           </span>
           <span class="fx-line">
             ${crest(f.away, 'md', f.away_id)}
             <span class="name">${esc(f.away)}</span>
-            ${formChips(f.form?.away)}
+            ${sc ? `<span class="gf${ag > hg ? ' win' : ''}">${ag}</span>` : formChips(f.form?.away)}
           </span>
-        </div>
+        </h1>
         <p class="hero-blurb">${esc([f.league, ...meta.slice(1)].filter(Boolean).join(', '))}</p>
       </div>
     </div>
@@ -1633,8 +1831,16 @@ async function viewFixture(id) {
     ${TABS.map(([k, , html], i) => `<div class="tabpane" data-pane="${k}"${i === 0 ? '' : ' hidden'}>${html}</div>`).join('')}
   </div>`;
 
+  /*
+   * `history.length > 1` is true of a tab that has been anywhere at all, so on
+   * a fixture opened straight from a link -- which is how a shared call
+   * arrives -- "Back to the board" walked the reader off the site, usually
+   * back to whatever they were reading before. Go back only when the previous
+   * entry is somewhere on this site; otherwise go to the board, which is what
+   * the button says it does.
+   */
   app.querySelector('.back').onclick = () => {
-    if (history.length > 1) history.back(); else location.hash = '#/board';
+    if (state.cameFromInApp) history.back(); else location.hash = '#/board';
   };
   for (const t of app.querySelectorAll('.tab')) {
     t.onclick = () => {
@@ -2237,8 +2443,39 @@ async function postJSON(path, body) {
  * costs. Signing in first is required because a payment with nobody attached to
  * it cannot be turned into a membership.
  */
+/*
+ * What the reader was trying to do when they were sent to sign in.
+ *
+ * It has to survive a round trip through an email client and back, so it is in
+ * storage rather than in memory or in the address bar. Without it the buyer who
+ * tapped "Sign in to join", signed in, and came back was returned to the home
+ * page with the purchase abandoned and nothing on screen acknowledging that
+ * they had been in the middle of anything.
+ */
+/*
+ * A redirect that does not leave a trap behind it.
+ *
+ * `#/account` signed out sends you to `#/signin`, and the back button sent you
+ * to `#/account`, which sent you to `#/signin` again: a reader could not get
+ * out of the pair without closing the tab. Replacing the entry rather than
+ * pushing one means Back goes to wherever they actually came from.
+ */
+const goInstead = (hash) => location.replace(`${location.pathname}${location.search}${hash}`);
+
+const INTENT_KEY = 'ow.after-signin';
+const setIntent = (v) => { try { localStorage.setItem(INTENT_KEY, v); } catch { /* private mode */ } };
+const takeIntent = () => {
+  try {
+    const v = localStorage.getItem(INTENT_KEY);
+    localStorage.removeItem(INTENT_KEY);
+    return v;
+  } catch { return null; }
+};
+
 async function startCheckout(plan = 'monthly') {
-  if (!(await currentUser())) { location.hash = '#/signin'; return; }
+  // A push, not a replace: pricing is somewhere a reader might reasonably want
+  // to go back to, unlike `#/account` signed out, which only ever bounces.
+  if (!(await currentUser())) { setIntent('buy'); location.hash = '#/signin'; return; }
   const button = document.getElementById('buy');
   if (button) { button.disabled = true; button.textContent = 'Opening checkout…'; }
   try {
@@ -2276,7 +2513,7 @@ async function viewPricing() {
   <div class="wrap section">
     <div class="section-head">
       <div>
-        <h2 class="display">Membership</h2>
+        <h1 class="display">Membership</h1>
         <p>Every match we cover, read properly. The call is the part you pay for.</p>
       </div>
     </div>
@@ -2325,16 +2562,27 @@ async function viewPricing() {
 
 /** Sign in. One email box and one button, because that is the whole of it. */
 async function viewSignin() {
-  if (await currentUser()) { location.hash = '#/account'; return; }
+  if (await currentUser()) { goInstead('#/account'); return; }
 
   const problem = state.authError;
   state.authError = null;
 
+  // Read without consuming: the intent is spent when the sign-in completes,
+  // not when the page renders. Saying it out loud is the difference between
+  // "why am I being asked for my email" and "yes, that is what I was doing".
+  let intent = null;
+  try { intent = localStorage.getItem(INTENT_KEY); } catch { /* private mode */ }
+  const because = intent === 'buy'
+    ? 'Then we will take you straight back to membership.'
+    : intent === '#/account'
+      ? 'Your account lives behind this.'
+      : null;
+
   app.innerHTML = `
   <div class="wrap section narrow">
     <div class="section-head"><div>
-      <h2 class="display">Sign in</h2>
-      <p>No password to remember or lose. We email you a link.</p>
+      <h1 class="display">Sign in</h1>
+      <p>No password to remember or lose. We email you a link.${because ? ` ${esc(because)}` : ''}</p>
     </div></div>
 
     ${problem ? `<p class="form-error">${esc(problem)}</p>` : ''}
@@ -2383,7 +2631,7 @@ async function viewSignin() {
 /** The account: what you have, what it costs, and how to stop it. */
 async function viewAccount() {
   const user = await currentUser();
-  if (!user) { location.hash = '#/signin'; return; }
+  if (!user) { setIntent('#/account'); goInstead('#/signin'); return; }
 
   app.innerHTML = '<div class="wrap section narrow"><div class="spinner">Loading…</div></div>';
   let account = { membership: null, receipts: [] };
@@ -2391,12 +2639,14 @@ async function viewAccount() {
 
   const m = account.membership;
   const active = m && m.expires_at * 1000 > Date.now();
+  // The page that knows for certain, so the header stops guessing.
+  state.member = Boolean(active);
   const when = (e) => new Date(e * 1000).toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' });
 
   app.innerHTML = `
   <div class="wrap section narrow">
     <div class="section-head"><div>
-      <h2 class="display">Your account</h2>
+      <h1 class="display">Your account</h1>
       <p>${esc(user.email ?? '')}</p>
     </div></div>
 
@@ -2435,7 +2685,14 @@ async function viewAccount() {
     </div>
   </div>`;
 
-  document.getElementById('out').onclick = async () => { await signOut(); location.hash = '#/home'; };
+  document.getElementById('out').onclick = async () => {
+    await signOut();
+    state.member = null;
+    state.board = null;
+    location.hash = '#/home';
+    await route();
+    headerAuth();
+  };
   const cancel = document.getElementById('cancel');
   // One tap, no "are you sure", no offer to stay. Retention mazes are a dark
   // pattern and in several places an illegal one.
@@ -2621,7 +2878,7 @@ function viewLegal(which) {
   if (!page) return notFound(`legal/${which}`);
   app.innerHTML = `
   <div class="wrap section">
-    <div class="section-head"><div><h2 class="display">${esc(page.title)}</h2>
+    <div class="section-head"><div><h1 class="display">${esc(page.title)}</h1>
       <p>Last updated ${esc(UPDATED)}.</p></div></div>
     <div class="prose">${page.body}</div>
   </div>`;
@@ -2647,7 +2904,31 @@ function readConsent() {
 function applyConsent(value) {
   try { localStorage.setItem(CONSENT_KEY, value); } catch { /* private mode: ask again next visit */ }
   document.getElementById('cookie-notice')?.remove();
+  document.body.style.paddingBottom = '';
   // Analytics would be loaded here, and only here, when value === 'accepted'.
+}
+
+/*
+ * Keep the page out from under the notice.
+ *
+ * On a wide screen the notice floats bottom-right, where it can still sit over
+ * the last thing in the footer, so its height is reserved at the foot of the
+ * document. Measured rather than guessed, because it wraps to two or three
+ * lines depending on width.
+ *
+ * On a phone it does not float at all -- see `.cookie` in components.css --
+ * so there is nothing to reserve and the style is cleared. That is the actual
+ * fix for the pricing page, where a floating notice sat on top of the button
+ * that takes the money: `elementFromPoint` on Buy returned the notice, so the
+ * tap went to the notice and nothing happened. A buyer with a card out,
+ * tapping a dead target.
+ */
+function reserveForNotice() {
+  const el = document.getElementById('cookie-notice');
+  if (!el) { document.body.style.paddingBottom = ''; return; }
+  if (getComputedStyle(el).position !== 'fixed') { document.body.style.paddingBottom = ''; return; }
+  const gap = el.getBoundingClientRect().height + 24;
+  document.body.style.paddingBottom = `${Math.ceil(gap)}px`;
 }
 
 function cookieNotice() {
@@ -2664,7 +2945,16 @@ function cookieNotice() {
     const v = e.target?.dataset?.consent;
     if (v) applyConsent(v);
   });
-  document.body.appendChild(el);
+  /*
+   * In the document, above the page, rather than appended to the end of the
+   * body. Where it floats (wide screens) the position in the DOM makes no
+   * difference; where it does not (phones) it has to be in the flow, and it
+   * has to be somewhere a reader will actually see it. Directly under the
+   * header is both.
+   */
+  document.body.insertBefore(el, app);
+  reserveForNotice();
+  addEventListener('resize', reserveForNotice);
 }
 
 /**
@@ -2716,9 +3006,14 @@ function notFound(name) {
 
 // ---------------------------------------------------------------- routing
 
+let routed = 0;
+
 async function route() {
   const { parts, params } = parseHash();
   const name = parts[0] || 'home';
+  // Set after the first render, so the first route of a session -- the deep
+  // link itself -- does not count as somewhere to go back to.
+  state.cameFromInApp = routed++ > 0;
   clearInterval(state.tick);
   for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.route === name);
   document.getElementById('nav').classList.remove('open');
@@ -2774,7 +3069,28 @@ async function headerAuth() {
 
   const user = await currentUser();
   state.user = user;
-  const member = Boolean(state.board?.member);
+
+  /*
+   * Membership from the account, not from the board.
+   *
+   * `state.board.member` is whatever the last board response said, which on
+   * the pricing page is nothing at all and immediately after paying is the
+   * answer from before the payment. So the header told somebody who had just
+   * bought a membership that they were on the free tier, which is the single
+   * worst moment to get that wrong. `/api/account` answers the question
+   * directly; it is asked once per signed-in session and re-asked whenever
+   * something has changed.
+   */
+  let member = false;
+  if (user) {
+    if (state.member === null) {
+      try { state.member = Boolean((await getJSON('/api/account')).membership?.expires_at * 1000 > Date.now()); }
+      catch { state.member = Boolean(state.board?.member); }
+    }
+    member = state.member;
+  } else {
+    state.member = null;
+  }
 
   link.textContent = user ? 'Account' : 'Sign in';
   link.href = user ? '#/account' : '#/signin';
@@ -2842,13 +3158,36 @@ renderRegion();
  * fire-and-forget.
  */
 (async () => {
+  let signedInJustNow = false;
   try {
-    await completeSignIn();
+    signedInJustNow = await completeSignIn();
   } catch (err) {
     // A stale or reused magic link. Say so once, on the sign-in page, rather
     // than leaving someone looking at a home page wondering what happened.
     state.authError = err.message ?? 'That sign-in link did not work.';
     location.hash = '#/signin';
+  }
+  /*
+   * Pick up where they left off.
+   *
+   * A magic link opens on whatever address the redirect carries, which is the
+   * front page. Someone who was three taps into buying a membership when they
+   * were asked to sign in came back to the home page with no membership, no
+   * checkout and nothing saying what had happened -- and the only way back was
+   * to find the pricing page again and start over.
+   */
+  if (signedInJustNow) {
+    const intent = takeIntent();
+    if (intent === 'buy') {
+      location.hash = '#/pricing';
+      await route();
+      await startCheckout();
+      health();
+      headerAuth();
+      cookieNotice();
+      return;
+    }
+    if (intent && intent.startsWith('#/')) location.hash = intent;
   }
   await route();
   health();
