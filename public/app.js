@@ -1511,9 +1511,25 @@ function readsFor(f, verdicts) {
 async function viewFixture(id) {
   app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
   let f;
-  try { f = await getJSON(`/api/fixture/${id}`); } catch (err) {
-    app.innerHTML = `<div class="wrap section">${backHTML('Back')}<div class="empty">${esc(err.message)}</div></div>`;
-    app.querySelector('.back').onclick = () => { location.hash = '#/board'; };
+  try { f = await getJSON(`/api/fixture/${id}`); } catch {
+    /*
+     * A fixture we cannot show. The provider's message was printed raw --
+     * "fixture not found or not yet analysed" -- under a Back button and
+     * nothing else, which tells a reader what our database thinks rather than
+     * what to do next. Both of those are true and only one is useful.
+     */
+    app.innerHTML = `
+    <div class="wrap section">
+      <div class="page-head">
+        <h1 class="display xl">Not on the board</h1>
+        <p class="page-sub">We have no write-up for this match. Either it is outside
+          the leagues we have fitted, or it has dropped off the back of the board.</p>
+      </div>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#/board">Today's board</a>
+        <a class="btn btn-ghost" href="#/leagues">What we cover</a>
+      </div>
+    </div>`;
     return;
   }
 
@@ -2503,10 +2519,7 @@ const LEGAL = {
 
 function viewLegal(which) {
   const page = LEGAL[which];
-  if (!page) {
-    app.innerHTML = `<div class="wrap section"><div class="empty">Page not found.</div></div>`;
-    return;
-  }
+  if (!page) return notFound(`legal/${which}`);
   app.innerHTML = `
   <div class="wrap section">
     <div class="section-head"><div><h2 class="display">${esc(page.title)}</h2>
@@ -2555,6 +2568,22 @@ function cookieNotice() {
   document.body.appendChild(el);
 }
 
+/** An address that is not one of ours. Say so, and offer the two ways out. */
+function notFound(name) {
+  app.innerHTML = `
+  <div class="wrap section">
+    <div class="page-head">
+      <h1 class="display xl">No such page</h1>
+      <p class="page-sub">There is nothing at <b>/${esc(String(name ?? '').slice(0, 40))}</b>.
+        It may have moved, or the link may have picked up a typo on the way here.</p>
+    </div>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#/board">Today's board</a>
+      <a class="btn btn-ghost" href="#/results">The record</a>
+    </div>
+  </div>`;
+}
+
 // ---------------------------------------------------------------- routing
 
 async function route() {
@@ -2574,7 +2603,17 @@ async function route() {
     if (name === 'signin') return await viewSignin();
     if (name === 'account') return await viewAccount();
     if (name === 'legal' && parts[1]) return viewLegal(parts[1]);
-    return await viewHome();
+    if (name === 'home') return await viewHome();
+    /*
+     * An address we do not have.
+     *
+     * Everything unrecognised used to fall through to the home page, so a
+     * typo, a stale bookmark or a link to a route that has since moved landed
+     * on the front page looking like it had worked -- and the reader went
+     * looking for whatever they had been sent, on a page that never had it.
+     * Saying so costs four lines and two ways out.
+     */
+    return notFound(name);
   } catch (err) {
     app.innerHTML = `<div class="wrap section"><div class="empty">${esc(err.message ?? 'Something went wrong.')}</div></div>`;
   }
