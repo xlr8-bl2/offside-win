@@ -89,8 +89,69 @@ for (const width of WIDTHS) {
         }
       }
 
+      /*
+       * Siblings sitting on top of each other.
+       *
+       * The checker measured the page for sideways scroll and never looked
+       * inside a container, so a grid whose tracks collapsed under their own
+       * content passed clean while it rendered two team sheets in the same
+       * place, names over names. Horizontal overflow was zero the whole time,
+       * because the overlap was contained.
+       *
+       * Only in-flow element siblings are compared: anything positioned is
+       * overlapping on purpose, and a scroll container's children legitimately
+       * sit outside it. Two pixels of tolerance keeps sub-pixel rounding and
+       * deliberate 1px rule overlaps out of the report.
+       */
+      /*
+       * Everything behind a tab, too.
+       *
+       * The checker only ever saw the pane that happens to open first, so a
+       * layout fault on the line-ups tab — two team sheets rendered on top of
+       * each other — passed clean for as long as it existed. A hidden element
+       * has a zero-size rect, so it cannot overlap anything and cannot be
+       * measured at all.
+       *
+       * The panes are revealed for the measurement only. The page is thrown
+       * away straight afterwards, and this is scoped to `.tabpane` rather than
+       * everything `[hidden]`, which would light up dialogs and menus that are
+       * hidden for good reasons.
+       */
+      for (const pane of document.querySelectorAll('.tabpane[hidden]')) pane.hidden = false;
+
+      const overlaps = [];
+      const describe = (el) =>
+        el.tagName.toLowerCase() + (el.className && typeof el.className === 'string'
+          ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '');
+      for (const parent of app?.querySelectorAll('*') ?? []) {
+        const kids = [...parent.children].filter((k) => {
+          const cs = getComputedStyle(k);
+          if (cs.position !== 'static' && cs.position !== 'relative') return false;
+          // A negative margin is an instruction to overlap — stacked crests,
+          // a pulled-up panel. Overlap the author asked for is not a finding;
+          // overlap from content bursting out of its track is.
+          return !['marginLeft', 'marginRight', 'marginTop', 'marginBottom']
+            .some((m) => parseFloat(cs[m]) < 0);
+        });
+        if (kids.length < 2 || kids.length > 24) continue;
+        for (let i = 0; i < kids.length && overlaps.length < 6; i++) {
+          for (let j = i + 1; j < kids.length; j++) {
+            const a = kids[i].getBoundingClientRect();
+            const b = kids[j].getBoundingClientRect();
+            if (!a.width || !a.height || !b.width || !b.height) continue;
+            const ox = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+            const oy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+            if (ox > 2 && oy > 2) {
+              overlaps.push(`${describe(kids[i])} over ${describe(kids[j])} by ${Math.round(ox)}x${Math.round(oy)}px`);
+              break;
+            }
+          }
+        }
+      }
+
       return {
         chars: text.trim().length,
+        overlaps: [...new Set(overlaps)],
         overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         unresolved: [...new Set(unresolved)],
         decimals: [...new Set(text.match(/\b\d+\.\d{1,2}\b/g) ?? [])].slice(0, 5),
@@ -101,6 +162,7 @@ for (const width of WIDTHS) {
     const say = (msg) => problems.push(`${width}px ${route}: ${msg}`);
     if (r.chars < 80) say(`rendered almost nothing (${r.chars} chars)`);
     if (r.overflow > 0) say(`scrolls sideways by ${r.overflow}px`);
+    for (const o of r.overlaps) say(`elements overlap: ${o}`);
     if (r.unresolved.length) say(`undefined tokens: ${r.unresolved.join(', ')}`);
     // A price is legitimate for a member and forbidden for everyone else --
     // except on the settled record, which is public and unfiltered forever,

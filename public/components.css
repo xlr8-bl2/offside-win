@@ -1189,31 +1189,41 @@
 
 /* A finished game recedes. A live one is marked by its badge and nothing else:
    red down the side of two thirds of the board reads as two hundred errors. */
-.row.is-ft .row-teams,
-.row.is-ft .row-call { opacity: 0.55; }
-.row.is-ft:hover .row-teams,
-.row.is-ft:hover .row-call { opacity: 1; }
+.row.is-ft .row-sel { color: var(--chalk-2); }
 
 @media (max-width: 760px) {
+  /*
+   * Back to content width on a phone: a fixed 124px reserved for the price on
+   * a 358px row is a third of it spent on nothing.
+   *
+   * `.row-when` is a centred column on the desktop layout. The mobile rule set
+   * `align-items: center` on top of that and never reset the direction, so the
+   * kick-off and its day stacked and centred themselves in a column the full
+   * width of the row — a 26px time floating in the middle of the card with
+   * everything else hard left. It is a left-aligned line here.
+   */
   .row {
-    /* Back to content width on a phone. The rows are stacked blocks there, so
-       there is no column to keep aligned, and a fixed 128px reserved on a
-       358px row is a third of it spent on nothing. */
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
       'when  price'
       'teams price'
       'call  call';
     gap: var(--space-2) var(--space-4);
-    padding: var(--space-5) var(--space-4);
+    padding: var(--space-4);
   }
-  .row-when { grid-area: when; display: flex; align-items: center; gap: var(--space-3); }
-  .row-league { grid-row: auto; }
+  .row-when {
+    grid-area: when;
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: var(--space-3);
+  }
   .row-day { margin-top: 0; }
   .row-teams { grid-area: teams; }
-  .row-call { grid-area: call; margin-top: var(--space-2); }
-  .row-price { grid-area: price; align-self: center; }
+  .row-call { grid-area: call; margin-top: var(--space-3); }
+  .row-price { grid-area: price; align-self: start; text-align: right; }
   .odds { font-size: var(--text-lg); }
+  .row-time { font-size: var(--text-lg); }
 }
 
 /* The end of a capped board. Quiet, and it says why rather than just stopping. */

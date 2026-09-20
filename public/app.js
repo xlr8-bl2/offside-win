@@ -825,16 +825,39 @@ async function viewBoard(params = new URLSearchParams()) {
     let shown = state.leagueName ? fixtures.filter((f) => f.league === state.leagueName) : fixtures;
     if (state.show === 'calls') shown = shown.filter((f) => f.top_pick || f.locked);
 
+    /*
+     * Live, then to come, then done.
+     *
+     * Kick-off order alone put a finished match at the top of every league
+     * block, because a finished match is the one that kicked off first. On a
+     * board headed "Next 72h" the first thing in every group was a game that
+     * had already been played.
+     */
+    const rank = (f) => {
+      const k = matchState(f).kind;
+      return k === 'live' ? 0 : k === 'upcoming' ? 1 : 2;
+    };
+    const order = (a, b) => {
+      const d = rank(a) - rank(b);
+      if (d) return d;
+      // Finished games read newest first; everything else soonest first.
+      return rank(a) === 2 ? (b.kickoff ?? 0) - (a.kickoff ?? 0) : (a.kickoff ?? 0) - (b.kickoff ?? 0);
+    };
+
     const groups = new Map();
     for (const f of shown) {
       const key = f.league ?? 'Other';
       if (!groups.has(key)) groups.set(key, { id: f.league_id, list: [] });
       groups.get(key).list.push(f);
     }
+    for (const g of groups.values()) g.list.sort(order);
+
+    // And the competitions themselves lead with whoever is on next.
+    const groupsSorted = [...groups.entries()].sort((a, b) => order(a[1].list[0], b[1].list[0]));
 
     document.getElementById('grid').innerHTML =
       shown.length
-        ? [...groups.entries()].map(([name, g]) => `
+        ? groupsSorted.map(([name, g]) => `
             <section class="league-block">
               <h3 class="league-head">
                 ${crest(name, 'xs', g.id, 'league')}${esc(name)}
