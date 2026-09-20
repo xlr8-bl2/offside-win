@@ -13,20 +13,22 @@
  * public by design and is confined to reading by row-level security and
  * SELECT-only grants declared in schema.pg.sql. The site is public, so public
  * reads of the serving tables change nothing.
+ *
+ * Since memberships, one more thing passes through: a reader's own Supabase
+ * JWT. It is still not verified here. It is swapped into the header this file
+ * already sets on the PostgREST call, in place of the anon key, and Postgres
+ * checks it -- which is what keeps a paywall inside a 10ms budget. The cost of
+ * telling one reader from another is one header.
  */
 
-interface Env {
+import { bearer, jsonHeaders } from './http.ts';
+import { checkout, renewal, webhook, type PayEnv } from './pay.ts';
+
+interface Env extends PayEnv {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   ASSETS: Fetcher;
 }
-
-const JSON_HEADERS = {
-  'content-type': 'application/json; charset=utf-8',
-  // Short edge cache: the slate refreshes every 30 minutes, and a board that is
-  // a minute stale is better than a thundering herd on the database.
-  'cache-control': 'public, max-age=60, stale-while-revalidate=300',
-};
 
 function fail(message: string, status: number): Response {
   return new Response(JSON.stringify({ error: message }), {
@@ -44,7 +46,12 @@ function fail(message: string, status: number): Response {
  * declares them; an omitted argument takes the function's default, which is how
  * `league` and `settled` express "no filter" without a second query.
  */
-async function rpc(env: Env, fn: string, args: Record<string, string | number | undefined>): Promise<Response> {
+async function rpc(
+  env: Env,
+  fn: string,
+  args: Record<string, string | number | undefined>,
+  jwt: string | null = null,
+): Promise<Response> {
   if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) {
     return fail('database is not configured', 503);
   }
@@ -56,11 +63,24 @@ async function rpc(env: Env, fn: string, args: Record<string, string | number | 
 
   const res = await fetch(url, {
     headers: {
+      // `apikey` stays the anon key -- it identifies the project, not the
+      // caller. `authorization` is what says who is asking, and swapping a
+      // reader's own token in there is the entire membership mechanism: the
+      // serving functions are SECURITY INVOKER, so auth.uid() resolves and the
+      // RLS policies do the rest.
       apikey: env.SUPABASE_ANON_KEY,
-      authorization: `Bearer ${env.SUPABASE_ANON_KEY}`,
+      authorization: `Bearer ${jwt ?? env.SUPABASE_ANON_KEY}`,
       accept: 'application/json',
     },
   });
+
+  // An expired or malformed token should cost a reader their membership for one
+  // request, not the page. Retrying as anonymous can only ever return less than
+  // the token would have, so the failure mode is a board that looks signed-out
+  // rather than a board that does not load.
+  if ((res.status === 401 || res.status === 403) && jwt) {
+    return rpc(env, fn, args, null);
+  }
 
   if (!res.ok) {
     // PostgREST's own error body names the constraint or the missing function,
@@ -72,10 +92,15 @@ async function rpc(env: Env, fn: string, args: Record<string, string | number | 
 }
 
 /** The common case: hand the database's bytes to the client unchanged. */
-async function passthrough(env: Env, fn: string, args: Record<string, string | number | undefined>): Promise<Response> {
-  const res = await rpc(env, fn, args);
+async function passthrough(
+  env: Env,
+  fn: string,
+  args: Record<string, string | number | undefined>,
+  jwt: string | null = null,
+): Promise<Response> {
+  const res = await rpc(env, fn, args, jwt);
   if (!res.ok) return res;
-  return new Response(res.body, { headers: JSON_HEADERS });
+  return new Response(res.body, { headers: jsonHeaders(jwt !== null) });
 }
 
 export default {
@@ -87,10 +112,26 @@ export default {
       return env.ASSETS.fetch(request);
     }
 
+    const jwt = bearer(request);
+
     try {
-      if (path === '/api/board') return await board(url, env);
-      if (path.startsWith('/api/fixture/')) return await fixture(path, env);
-      if (path === '/api/picks') return await picks(url, env);
+      if (path === '/api/config') return config(env);
+
+      // The write side. Kept together and kept POST-only: a payment route that
+      // answers a GET is a payment route that can be triggered by a link.
+      if (path.startsWith('/api/pay/') || path === '/api/account') {
+        if (path === '/api/account') {
+          return await passthrough(env, 'get_account', {}, jwt);
+        }
+        if (request.method !== 'POST') return fail('method not allowed', 405);
+        if (path === '/api/pay/checkout') return await checkout(request, env, jwt);
+        if (path === '/api/pay/renewal') return await renewal(request, env, jwt);
+        if (path === '/api/pay/webhook') return await webhook(request, env);
+        return fail('not found', 404);
+      }
+      if (path === '/api/board') return await board(url, env, jwt);
+      if (path.startsWith('/api/fixture/')) return await fixture(path, env, jwt);
+      if (path === '/api/picks') return await picks(url, env, jwt);
       if (path === '/api/model') return await passthrough(env, 'get_model', {});
       if (path === '/api/hero') return await passthrough(env, 'get_hero', {});
       if (path === '/api/health') return await passthrough(env, 'get_health', {});
@@ -101,23 +142,55 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-function board(url: URL, env: Env): Promise<Response> {
+/**
+ * What the browser needs to talk to Supabase Auth directly.
+ *
+ * Neither value is a secret. The anon key is Supabase's public client key and
+ * already ships in this file's own environment; serving it here simply saves a
+ * second substitution step in the deploy, and sign-in happens browser-to-GoTrue
+ * without the Worker in the path at all.
+ */
+function config(env: Env): Response {
+  return new Response(
+    JSON.stringify({ supabaseUrl: env.SUPABASE_URL ?? '', anonKey: env.SUPABASE_ANON_KEY ?? '' }),
+    {
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        // Same for everyone and changes only on deploy.
+        'cache-control': 'public, max-age=3600',
+      },
+    },
+  );
+}
+
+function board(url: URL, env: Env, jwt: string | null): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
   const hours = Math.min(240, Math.max(1, Number(url.searchParams.get('hours') ?? 72)));
   const league = Number(url.searchParams.get('league'));
 
+  /*
+   * How far back the board reaches.
+   *
+   * Six hours was enough to keep a match on the board while it was being
+   * played and nothing more: by the evening, everything that kicked off at
+   * lunchtime had vanished, so the page could say what was coming and could
+   * not say what had happened. A day back means the board answers both
+   * questions, which is what a board is for.
+   */
+  const back = Math.min(72, Math.max(6, Number(url.searchParams.get('back') ?? 24)));
+
   return passthrough(env, 'get_board', {
-    p_from: now - 6 * 3600,
+    p_from: now - back * 3600,
     p_to: now + hours * 3600,
     p_league: Number.isFinite(league) && league > 0 ? league : undefined,
-  });
+  }, jwt);
 }
 
-async function fixture(path: string, env: Env): Promise<Response> {
+async function fixture(path: string, env: Env, jwt: string | null): Promise<Response> {
   const id = Number(path.slice('/api/fixture/'.length));
   if (!Number.isFinite(id)) return fail('bad fixture id', 400);
 
-  const res = await rpc(env, 'get_fixture', { p_id: id });
+  const res = await rpc(env, 'get_fixture', { p_id: id }, jwt);
   if (!res.ok) return res;
 
   // The one endpoint that cannot stream: an unknown id comes back as the four
@@ -127,15 +200,15 @@ async function fixture(path: string, env: Env): Promise<Response> {
   // the whole rest of the request.
   const text = await res.text();
   if (text === 'null' || text === '') return fail('fixture not found or not yet analysed', 404);
-  return new Response(text, { headers: JSON_HEADERS });
+  return new Response(text, { headers: jsonHeaders(jwt !== null) });
 }
 
-function picks(url: URL, env: Env): Promise<Response> {
+function picks(url: URL, env: Env, jwt: string | null): Promise<Response> {
   const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit') ?? 60)));
   const settled = url.searchParams.get('settled');
 
   return passthrough(env, 'get_picks', {
     p_limit: limit,
     p_settled: settled === 'true' || settled === 'false' ? settled : undefined,
-  });
+  }, jwt);
 }

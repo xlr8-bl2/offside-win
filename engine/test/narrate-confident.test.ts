@@ -52,12 +52,17 @@ test('every sentence still appears when the evidence is there', () => {
     ledger: ledger(),
   });
   assert.match(out, /1\.16/, 'the price is missing');
-  // Any strength_gap frame is fine — they cite the rates, the ratio, or the
-  // opponent's number. Pinning one spelling makes this fail whenever a frame is
-  // added, which is not a regression.
-  assert.match(out, /2\.02|0\.82|2\.5 times|stronger side|better of it/, 'the mismatch is missing');
-  assert.match(out, /86%/, 'the confidence is missing');
-  assert.match(out, /34%/, 'the context is missing');
+  // Any strength_gap frame is fine — they describe the mismatch several ways.
+  // Pinning one spelling makes this fail whenever a frame is added, which is
+  // not a regression. The figures they used to cite are gone on purpose: a
+  // frame now asks for the shape of a number rather than the number.
+  assert.match(
+    out,
+    /stronger side|better of it|good for|not favoured|whole case|score well beyond|clean sheet/,
+    'the mismatch is missing',
+  );
+  assert.match(out, /times out of|two in three|more often than not|near a certainty/, 'how often we expect it is missing');
+  assert.match(out, /a third|a quarter|a fifth|half|a sixth|small share/i, 'the context is missing');
 });
 
 test('a bet that wins on less reads suppressing context as support', () => {

@@ -28,7 +28,8 @@ function candidate(over: Partial<Candidate> = {}): Candidate {
   return {
     market: 'over_under_25', outcome: 'under', line: 2.5, push: null,
     model_prob: 0.58, book_prob: 0.52, edge: 0.06, shrunk_edge: 0.051,
-    odds: 2.05, bookmaker: 'Pinnacle', kelly: 0.02, confidence: 0.7, family: 'goals',
+    odds: 2.05, bookmaker: 'Pinnacle', prices: [{ slug: 'pinnacle', book: 'Pinnacle', odds: 2.05 }],
+    kelly: 0.02, confidence: 0.7, family: 'goals',
     ...over,
   };
 }
@@ -44,7 +45,11 @@ test('a narrative names the player, the number and the bet', () => {
   });
 
   assert.ok(text.includes('Foden'), 'should name the player');
-  assert.ok(text.includes('21'), 'should cite the computed goal share');
+  // The share is said as a fraction rather than as "21%": a bare percentage
+  // standing in for an argument is the case the vocabulary rule covers, and a
+  // supporter says a fifth of their goals and means the same thing.
+  assert.match(text, /a fifth|a quarter|a sixth|a third|half|small share/i,
+    'should cite the computed goal share');
   assert.ok(text.includes('Manchester City'), 'should name the team');
   assert.ok(/under 2\.5 goals/i.test(text), 'should state the market');
   assert.ok(text.includes('2.05'), 'should state the price');

@@ -75,7 +75,10 @@ export function gate(
   if (n >= min) return computed(init);
   return thin({
     ...init,
-    note: `${init.note} — sample of ${n} is below the ${min} needed, so this is excluded.`,
+    // "sample of 20 is below the 30 needed" is the evidence state talking, and
+    // the evidence state is ours. What a reader needs is why this is being
+    // mentioned and then set aside, which is that there is not enough of it.
+    note: `${init.note} — though ${n} game${n === 1 ? '' : 's'} is too few to read much into, so it is left out of the call.`,
     evidence: { ...(init.evidence ?? {}), sample: n, required: min },
   });
 }

@@ -30,6 +30,47 @@ export const config = {
   },
 
   /**
+   * Sportradar's Images API, for the football photography.
+   *
+   * `level` is `t` on a trial key and `p` on a production one, and it is part
+   * of the URL rather than a header, so pointing a trial key at the production
+   * path returns 403 rather than anything helpful. It defaults to trial because
+   * that is what a new key is.
+   */
+  images: {
+    key: process.env.SPORTRADAR_GETTY_KEY ?? '',
+    level: (process.env.SPORTRADAR_IMAGES_LEVEL ?? 't') as 't' | 'p',
+    /** Days back to sweep for action shots. A week covers a midweek round. */
+    days: num('SPORTRADAR_IMAGE_DAYS', 7),
+    /*
+     * 1100ms was still drawing 429s, so the trial ceiling is tighter than one
+     * request a second or it counts a burst window. 2000ms with the retry
+     * behind it; a sweep has forty-five minutes and does not need to hurry.
+     */
+    minGapMs: num('SPORTRADAR_MIN_GAP_MS', 2000),
+    /*
+     * A hard ceiling on calls per run, and a breaker on top of it.
+     *
+     * A trial key's budget is the scarce resource, and one bad run spent close
+     * to four hundred requests being refused over and over. `budget` caps what
+     * a single run can cost; `tripAfter` consecutive refusals stops it dead,
+     * because a key that has turned away the last fifteen calls will turn away
+     * the next ninety.
+     */
+    budget: num('SPORTRADAR_BUDGET', 120),
+    tripAfter: num('SPORTRADAR_TRIP_AFTER', 8),
+    /** Dump what the manifests actually contain, for a run that matches none. */
+    debug: process.env.SPORTRADAR_DEBUG === '1',
+  },
+
+  /** Supabase Storage, which is where re-hosted photography lands. */
+  storage: {
+    url: (process.env.SUPABASE_URL ?? '').replace(/\/+$/, ''),
+    key: process.env.SUPABASE_SERVICE_KEY ?? '',
+    bucket: process.env.SUPABASE_IMAGE_BUCKET ?? 'shots',
+  },
+
+  /**
    * Which database the engine writes to. Postgres, since it reproduced the
    * board and the backtest (0.6200 against D1's 0.6209 over the same 34,210
    * matches) and the Worker now reads through it. D1 remains reachable with
@@ -222,8 +263,18 @@ export const config = {
   confident: {
     /** Publish a call at or above this probability. */
     floor: num('CONF_FLOOR', 0.8),
-    /** Cap per fixture. Their page shows 2-4; more than this reads as spam. */
-    perFixture: num('CONF_PER_FIXTURE', 2),
+    /**
+     * One call per fixture.
+     *
+     * It was two, on the reasoning that their page shows two to four. Measured
+     * against the settled record, the second call on a fixture is almost always
+     * the same read expressed twice -- over 1.5 goals and a double chance on
+     * the same one-sided game -- so it doubles the exposure without adding an
+     * opinion, and it is half the reason the board carries a hundred and sixty
+     * picks a day. One call per game is the whole product: what do you think
+     * happens here.
+     */
+    perFixture: num('CONF_PER_FIXTURE', 1),
     /**
      * Never publish a call this likely without saying what it pays. Over 0.5
      * goals is ~97% and prices near 1.02: true, worthless, and the fastest way
@@ -236,7 +287,44 @@ export const config = {
      * the pound. Correct, unusable, and it makes every other call on the page
      * look like padding.
      */
-    minOdds: num('CONF_MIN_ODDS', 1.1),
+    minOdds: num('CONF_MIN_ODDS', 1.13),
+    /**
+     * The floor for a fixture people came to the site for.
+     *
+     * A picks product with nothing on the Madrid derby is not a picks product.
+     * The board was silent on the biggest game of the weekend often enough to
+     * be the first thing anyone noticed, because an 80% bar is a high bar and
+     * the games with the most attention are also the most evenly matched --
+     * which is exactly why they are worth watching and exactly why they do not
+     * produce 80% calls.
+     *
+     * So a marquee fixture drops to this floor rather than passing. It is not
+     * a lower standard dressed up: the call is published with `lean: true` and
+     * the page says out loud that it is the best read on a close game rather
+     * than a strong call, which is the true statement and the only one worth
+     * making.
+     */
+    marqueeFloor: num('CONF_MARQUEE_FLOOR', 0.62),
+    /** League rank at or below which a fixture counts as marquee. */
+    marqueeRank: num('CONF_MARQUEE_RANK', 2),
+    /**
+     * How hard to punish a market family that has been overconfident.
+     *
+     * The settled record says the calls land about four points short of what
+     * their prices need -- 82% where 86% breaks even -- and that gap is not
+     * spread evenly: some families have been honest about themselves and some
+     * have not. `refreshCalibration` already measures exactly that, as
+     * mean_model_p against mean_actual, and until now nothing read it: the
+     * confident floor was a flat number and the feedback loop the whole engine
+     * is built around never reached the only calls that get published.
+     *
+     * It does now. A family that has been claiming five points more than it
+     * delivers needs five more points before it publishes, times this. One is
+     * "give back exactly what you overclaimed"; higher is stricter.
+     */
+    overconfidencePenalty: num('CONF_OVERCONF_PENALTY', 1),
+    /** Below this many settled picks a family's measured gap is noise. */
+    overconfidenceMinN: num('CONF_OVERCONF_MIN_N', 25),
   },
 
   selection: {

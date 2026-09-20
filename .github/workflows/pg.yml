@@ -60,4 +60,13 @@ jobs:
           HISTORY_SEASONS: ${{ inputs.seasons }}
           STATS_LIMIT: ${{ inputs.stats_limit }}
           PRICE_GOAL_DISPERSION: ${{ inputs.goal_dispersion }}
+          # The same optional keys the scheduled workflows pass. Without them a
+          # slate run from here silently falls back to the template grammar and
+          # writes no photography -- which is a different run from the one the
+          # cron does, while reporting success, and that is the worst kind of
+          # difference to have between two ways of doing the same thing.
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SPORTRADAR_GETTY_KEY: ${{ secrets.SPORTRADAR_GETTY_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: npm run ${{ inputs.command }}

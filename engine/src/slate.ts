@@ -4,8 +4,12 @@ import { analyseFixture } from './context/index.ts';
 import { checkComparisonEntitlement, gatherFixture } from './context/gather.ts';
 import { RepetitionLedger, narrate, narrateConfident, narratePass } from './narrate/compose.ts';
 import { chooseHero, type HeroCandidate } from './feature.ts';
+import { pubFacts } from './narrate/facts.ts';
+import { geminiWriter } from './narrate/gemini.ts';
+import { write, type Writer } from './narrate/write.ts';
+import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
-import { buildCandidates, driversFor, select, selectConfident, setAsideFor, type CalibrationMap } from './select.ts';
+import { buildCandidates, driversFor, floorForRank, isLean, marketLabel, select, selectConfident, setAsideFor, type CalibrationMap } from './select.ts';
 import { dbStats, insertMany, kvGetJSON, kvSetJSON, pickConflictTarget, select as dbSelect } from './store.ts';
 import type { CalibrationRow } from './select.ts';
 import type { Candidate, Factor, MarketFamily } from './types.ts';
@@ -19,9 +23,15 @@ import type { Candidate, Factor, MarketFamily } from './types.ts';
  */
 
 async function loadCalibration(): Promise<CalibrationMap> {
-  const rows = await dbSelect<{ market_family: MarketFamily; n: number; shrink: number }>(
-    'SELECT market_family, n, shrink FROM calibration',
-  );
+  // mean_model_p and mean_actual come with it now: the confident floor reads
+  // them to make a family that has been overclaiming earn its place again.
+  const rows = await dbSelect<{
+    market_family: MarketFamily;
+    n: number;
+    shrink: number;
+    mean_model_p: number | null;
+    mean_actual: number | null;
+  }>('SELECT market_family, n, shrink, mean_model_p, mean_actual FROM calibration');
   return new Map(rows.map((r) => [r.market_family, r as CalibrationRow]));
 }
 
@@ -53,6 +63,7 @@ function candidateForStorage(c: Candidate) {
     shrunk_edge: Number(c.shrunk_edge.toFixed(4)),
     odds: c.odds,
     bookmaker: c.bookmaker,
+    prices: c.prices,
     kelly: Number(c.kelly.toFixed(4)),
     confidence: Number(c.confidence.toFixed(3)),
     family: c.family,
@@ -76,8 +87,82 @@ export function leagueRank(leagueId: number): number {
   return config.leagueRank[leagueId] ?? config.unrankedLeague;
 }
 
+/**
+ * A written narrative is keyed on the call, not on the fixture.
+ *
+ * This matters more than it looks. The slate runs every fifteen minutes --
+ * ninety-six times a day -- and regenerating a paragraph on every pass would
+ * mean thousands of requests a day to rewrite prose that has not changed,
+ * which no free allowance survives and which was the plan's arithmetic being
+ * quietly wrong by two orders of magnitude.
+ *
+ * So the key is the thing the writing is about: the fixture and the exact
+ * selection. Reprice the same fixture and get the same call, and the paragraph
+ * is reused. Change the call -- a different market, a different line, a
+ * different side -- and it is written again, because it is now about something
+ * else. Team news arriving hours later changes the evidence but not usually the
+ * call, and re-reading a preview because a full-back is fit is not worth a
+ * request.
+ */
+export function narrativeKey(fixtureId: number, c: Candidate): string {
+  return `narr:${fixtureId}:${c.market}:${c.outcome}:${c.line ?? ''}`;
+}
+
+/** Long enough to outlive a fixture's build-up, short enough to expire. */
+const NARRATIVE_TTL = 14 * 86_400;
+
+/**
+ * The call, in words a person would use.
+ *
+ * marketLabel() speaks in market names because the ledger needs them to be
+ * exact. The writer needs the opposite: it is told never to mention the call,
+ * so this is only context, and context reads better without HOME and AWAY in
+ * it.
+ */
+function plainCall(c: Candidate, home: string, away: string): string {
+  return marketLabel(c)
+    .replace(/\bhome\b/gi, home)
+    .replace(/\baway\b/gi, away)
+    .replace(/\bHOME\b/g, home)
+    .replace(/\bAWAY\b/g, away);
+}
+
+/**
+ * The writer, when there is a key for one.
+ *
+ * Absent means the grammar keeps writing, which is a worse product and a
+ * working one. A slate that refused to run without an optional key would be a
+ * site that stops publishing because a free quota lapsed.
+ */
+function buildWriter(): Writer | null {
+  const apiKey = process.env['GEMINI_API_KEY'];
+  if (!apiKey) return null;
+  return geminiWriter({
+    apiKey,
+    model: process.env['GEMINI_MODEL'] || undefined,
+    ratePerMinute: Number(process.env['GEMINI_RPM'] ?? 15),
+  });
+}
+
 export async function runSlate(): Promise<SlateReport> {
   const now = Math.floor(Date.now() / 1000);
+  const writer = buildWriter();
+
+  // Counted rather than assumed. A silent drift back to template prose is
+  // exactly the failure worth noticing, and it is invisible on the page --
+  // the old voice still reads like writing, just worse.
+  let narrateAttempts = 0;
+  let narrateWritten = 0;
+  const narrateRejections: Record<string, number> = {};
+
+  // A bad key, a wrong model name or a spent quota fails every call in exactly
+  // the same way, and the limiter paces them four seconds apart -- so without
+  // this, a misconfigured run spends eight minutes discovering the same thing
+  // a hundred and twenty times. Three provider errors in a row and the run
+  // stops asking, says why once, and lets the grammar finish the slate.
+  let consecutiveErrors = 0;
+  let narrateReused = 0;
+  let writerGaveUp: string | null = null;
   const from = new Date((now - config.slate.lookbackHours * 3600) * 1000).toISOString();
   const to = new Date((now + config.slate.horizonHours * 3600) * 1000).toISOString();
 
@@ -176,7 +261,15 @@ export async function runSlate(): Promise<SlateReport> {
       const confidentVerdicts = (() => {
         if (!prediction) return [];
         const theirCands = buildCandidates(providerMarkets(prediction), analysis.book, calibration);
-        return selectConfident(theirCands).map((candidate) => {
+        // A game people came to the site for is answered even when it is close.
+        // Champions League and the big five drop to the marquee floor; the call
+        // then carries `lean` and the page frames it as a read on a tight game
+        // rather than a strong call.
+        return selectConfident(
+          theirCands,
+          floorForRank(leagueRank(analysis.league_id)),
+          calibration,
+        ).map((candidate) => {
           const drivers = driversFor(candidate, factors);
           return {
             kind: 'CONFIDENT' as const,
@@ -200,6 +293,78 @@ export async function runSlate(): Promise<SlateReport> {
       // it. Nothing here is user-facing on its own.
       const allVerdicts = [...verdicts, ...confidentVerdicts];
 
+      // The narrative, written rather than assembled.
+      //
+      // The grammar above says of itself that it is a template system, and it
+      // reads like one: one sentence per claim, joined with a space, opening
+      // with the call and its price because marketLabel() builds that lead in
+      // at generation time. Measured against the live site, fifteen of fifteen
+      // narratives named the market and the odds in their first six words --
+      // which is also why none of them can be shown to a reader who has not
+      // paid.
+      //
+      // So the grammar becomes the fact source and a model does the writing.
+      // It only ever sees pub facts, so it cannot reach for a spreadsheet
+      // number that is not in its input, and anything it writes is checked
+      // against the same vocabulary rule the free copy is filtered by.
+      //
+      // A rejection keeps the grammar's version. That path is load-bearing
+      // rather than tidy: the free tier this runs on has had its quotas cut
+      // sharply and without notice before, and the site has to keep publishing
+      // when it happens -- in the old voice, with the run saying how often.
+      if (writer && !writerGaveUp) {
+        for (const v of confidentVerdicts) {
+          // Written once per call, not once per run.
+          const key = narrativeKey(analysis.fixture_id, v.candidate);
+          const cached = await kvGetJSON<string>(key);
+          if (cached) {
+            v.narrative = cached;
+            narrateReused++;
+            continue;
+          }
+
+          narrateAttempts++;
+          const result = await write({
+            home: analysis.home_team,
+            away: analysis.away_team,
+            competition: ctx.league_name ?? 'this competition',
+            call: plainCall(v.candidate, analysis.home_team, analysis.away_team),
+            facts: pubFacts({
+              home: analysis.home_team,
+              away: analysis.away_team,
+              ledger: factors.map(forStorage),
+              form: {
+                home: (factors.find((f) => f.id === 'form.home')?.evidence ?? null) as Record<string, unknown> | null,
+                away: (factors.find((f) => f.id === 'form.away')?.evidence ?? null) as Record<string, unknown> | null,
+              },
+              h2h: (ctx.h2h ?? null) as Record<string, unknown> | null,
+              lineups: ctx.lineups ? { status: ctx.lineups.status } : null,
+            }),
+          }, writer);
+
+          if (result.text) {
+            v.narrative = result.text;
+            narrateWritten++;
+            consecutiveErrors = 0;
+            await kvSetJSON(key, result.text, NARRATIVE_TTL);
+          } else {
+            for (const r of result.rejections) narrateRejections[r] = (narrateRejections[r] ?? 0) + 1;
+            // A rejected draft is the writer working. A thrown request is the
+            // writer not being reachable, and only the second kind repeats.
+            if (result.error) {
+              consecutiveErrors++;
+              if (consecutiveErrors >= 3) {
+                writerGaveUp = result.error;
+                console.warn(`Narratives: giving up on ${writer.name} for this run — ${result.error}`);
+                break;
+              }
+            } else {
+              consecutiveErrors = 0;
+            }
+          }
+        }
+      }
+
       // What a reader is actually shown. The split exists because the two
       // audiences want different things: the ledger wants everything the model
       // said so it can be marked, the page wants only the calls we stand behind.
@@ -207,6 +372,31 @@ export async function runSlate(): Promise<SlateReport> {
 
       const passNarrative = selection.passReason
         ? narratePass(selection.passReason, analysis.home_team, analysis.away_team, analysis.fixture_id)
+        : null;
+
+      /*
+       * The score, but only once it is the final one.
+       *
+       * The provider carries a *running* score on the event, so a match on the
+       * hour mark reports 0-0 and means "nothing yet", not "it finished
+       * goalless". Writing that to the fixture published a live scoreline as a
+       * result: the board showed a game marked full time at the score it held
+       * when the slate last ran, and the results page printed "0-0" beside a
+       * call on fewer than 3.5 goals and marked it missed -- the settle job
+       * having graded the same pick against the real final score.
+       *
+       * So a score is only recorded once the provider says the match is over.
+       * Until then the column stays null and the page says nothing, which is
+       * the honest state for a game still being played.
+       */
+      const finished = /finish|ended|\bft\b|after|aet|\bap\b/i.test(String(event['status'] ?? ''));
+      const homeGoals = finished ? num(event['home_score']) : undefined;
+      const awayGoals = finished ? num(event['away_score']) : undefined;
+      // The running score is still worth showing -- a board that says LIVE and
+      // nothing else is a board that has not caught up. It travels on the card
+      // under its own name so no page can mistake it for a result.
+      const liveScore = !finished && num(event['home_score']) !== undefined && num(event['away_score']) !== undefined
+        ? [num(event['home_score'])!, num(event['away_score'])!]
         : null;
 
       // The board card: small, because the board loads all of them at once.
@@ -236,6 +426,11 @@ export async function runSlate(): Promise<SlateReport> {
         provisional: analysis.provisional,
         lineup_status: analysis.lineup_status,
         confidence: Number(confidence.toFixed(3)),
+        // What actually happened, where it already has. The board reaches six
+        // hours back, and a row that says FT without a scoreline is the least
+        // useful thing a results-carrying board can print.
+        score: homeGoals === undefined || awayGoals === undefined ? null : [homeGoals, awayGoals],
+        live_score: liveScore,
         lambda: [Number(analysis.lambda_home.toFixed(2)), Number(analysis.lambda_away.toFixed(2))],
         odds_1x2: Object.fromEntries(
           (analysis.book.find((b) => b.market === '1x2')?.fair ?? new Map()).entries(),
@@ -256,7 +451,11 @@ export async function runSlate(): Promise<SlateReport> {
                 line: v.candidate.line,
                 odds: v.candidate.odds,
                 bookmaker: v.candidate.bookmaker ?? null,
+                prices: v.candidate.prices ?? [],
                 prob: Number(v.candidate.model_prob.toFixed(3)),
+                // Cleared the marquee floor but not the normal one. The page
+                // says so rather than presenting a close game as a strong call.
+                lean: isLean(v.candidate),
               }
             : null)(publishedVerdicts[0]),
         pass: passNarrative,
@@ -269,6 +468,8 @@ export async function runSlate(): Promise<SlateReport> {
           prob: Number(v.candidate.model_prob.toFixed(3)),
           odds: v.candidate.odds,
           bookmaker: v.candidate.bookmaker ?? null,
+          prices: v.candidate.prices ?? [],
+          lean: isLean(v.candidate),
           // Whether anything in our context argues against it. This is the
           // differentiator, so it belongs where a reader sees it first.
           caveat: v.drivers.some((d) => d.claims.some((c) => c.polarity < 0)),
@@ -346,6 +547,7 @@ export async function runSlate(): Promise<SlateReport> {
         // old page read like a debug view.
         verdicts: publishedVerdicts.map((v) => ({
           candidate: candidateForStorage(v.candidate),
+          lean: isLean(v.candidate),
           narrative: v.narrative,
           drivers: v.drivers.map(forStorage),
           set_aside: v.set_aside.map(forStorage),
@@ -363,11 +565,23 @@ export async function runSlate(): Promise<SlateReport> {
         away_team: analysis.away_team,
         status: analysis.status,
         provisional: analysis.provisional ? 1 : 0,
+        // Columns rather than fields inside the blob, because everything that
+        // reads backwards -- the results record, the recap -- is built from
+        // `pick` joined to `fixture` and cannot see inside board_json.
+        home_goals: homeGoals ?? null,
+        away_goals: awayGoals ?? null,
+        home_team_id: analysis.home_team_id,
+        away_team_id: analysis.away_team_id,
         // Also a column, not just a field inside board_json, because the board
         // has to sort on it and SQL cannot see inside the blob.
         rank: leagueRank(analysis.league_id),
         board_json: JSON.stringify(board),
         bundle_json: JSON.stringify(bundle),
+        // The same fixture with the call taken out, written here rather than
+        // derived at request time: the Worker has 10ms and parses nothing, so
+        // the free copy has to be a column the serving function can choose.
+        board_free_json: JSON.stringify(freeBoard(board)),
+        bundle_free_json: JSON.stringify(freeBundle(bundle)),
         computed_at: analysis.computed_at,
       });
 
@@ -388,10 +602,22 @@ export async function runSlate(): Promise<SlateReport> {
           kelly: v.candidate.kelly,
           confidence: v.candidate.confidence,
           provisional: analysis.provisional ? 1 : 0,
+          // The price when we first said it. `odds` is overwritten every run
+          // because the board has to show a price somebody can still get, so
+          // this is the only record of what we actually called it at -- and
+          // the difference between the two is the one honest answer to "was
+          // the market with us or against us" after a loss.
+          opening_odds: v.candidate.odds,
           narrative: v.narrative,
           evidence_json: JSON.stringify({
             drivers: v.drivers.map(forStorage),
             set_aside: v.set_aside.map(forStorage),
+            // The shape we published for the match, so settlement can ask
+            // whether the game looked like we said it would.
+            expected: {
+              home: Number(analysis.lambda_home.toFixed(2)),
+              away: Number(analysis.lambda_away.toFixed(2)),
+            },
           }),
           created_at: analysis.computed_at,
         });
@@ -440,7 +666,9 @@ export async function runSlate(): Promise<SlateReport> {
       'fixture',
       [
         'id', 'league_id', 'kickoff', 'home_team', 'away_team', 'status',
-        'provisional', 'rank', 'board_json', 'bundle_json', 'computed_at',
+        'provisional', 'home_goals', 'away_goals', 'home_team_id', 'away_team_id',
+        'rank', 'board_json', 'bundle_json',
+        'board_free_json', 'bundle_free_json', 'computed_at',
       ],
       fixtureRows,
       { conflictTarget: 'id' },
@@ -455,7 +683,7 @@ export async function runSlate(): Promise<SlateReport> {
       'pick',
       [
         'fixture_id', 'kickoff', 'market', 'outcome', 'line', 'kind', 'model_prob',
-        'book_prob', 'edge', 'shrunk_edge', 'odds', 'bookmaker', 'kelly',
+        'book_prob', 'edge', 'shrunk_edge', 'odds', 'opening_odds', 'bookmaker', 'kelly',
         'confidence', 'provisional', 'narrative', 'evidence_json', 'created_at',
       ],
       pickRows,
@@ -469,7 +697,11 @@ export async function runSlate(): Promise<SlateReport> {
           'edge = excluded.edge, shrunk_edge = excluded.shrunk_edge, odds = excluded.odds, ' +
           'bookmaker = excluded.bookmaker, kelly = excluded.kelly, ' +
           'confidence = excluded.confidence, provisional = excluded.provisional, ' +
-          'narrative = excluded.narrative, evidence_json = excluded.evidence_json ' +
+          'narrative = excluded.narrative, evidence_json = excluded.evidence_json, ' +
+          // Deliberately NOT opening_odds: it is set once, on the insert that
+          // first published the call, and never again. The last price this
+          // loop writes before the match starts is the closing one.
+          'closing_odds = excluded.odds ' +
           'WHERE pick.settled_at IS NULL',
       },
     );
@@ -485,6 +717,24 @@ export async function runSlate(): Promise<SlateReport> {
 
   await kvSetJSON('narrate:ledger', ledger.snapshot());
   await kvSetJSON('slate:last_run', { at: now, ...report });
+
+  if (writer && writerGaveUp) {
+    console.log(
+      `Narratives: ${narrateReused} reused, ${narrateWritten}/${narrateAttempts} written before ${writer.name} stopped answering `
+      + `(${writerGaveUp}). The rest are the template grammar's.`,
+    );
+  } else if (writer) {
+    const fellBack = narrateAttempts - narrateWritten;
+    console.log(
+      `Narratives: ${narrateReused} reused, ${narrateWritten}/${narrateAttempts} written by ${writer.name}`
+      + (fellBack > 0
+        ? `, ${fellBack} fell back to the grammar (${Object.entries(narrateRejections)
+            .map(([k, v]) => `${k} ${v}`).join(', ')})`
+        : ''),
+    );
+  } else {
+    console.log('Narratives: no GEMINI_API_KEY, so the template grammar wrote them all.');
+  }
 
   report.requests = bsdStats.requests;
   report.d1Queries = dbStats.queries;

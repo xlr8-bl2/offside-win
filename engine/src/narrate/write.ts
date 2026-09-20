@@ -48,6 +48,16 @@ export interface WriteResult {
   text: string | null;
   rejections: Rejection[];
   provider: string;
+  /**
+   * Why the provider threw, when it did.
+   *
+   * Recording only the word "error" was a mistake worth not repeating: the
+   * first real run came back twelve for twelve rejected with no indication of
+   * whether that was a bad key, a wrong model name, a spent quota or a
+   * network, and the whole point of the fallback is that it fails quietly --
+   * so quietly that nothing said what had gone wrong.
+   */
+  error?: string;
 }
 
 const MIN_WORDS = 55;
@@ -137,9 +147,14 @@ export async function write(req: WriteRequest, writer: Writer): Promise<WriteRes
     let draft: string;
     try {
       draft = (await writer.generate(prompt)).trim();
-    } catch {
+    } catch (err) {
       rejections.push('error');
-      break;
+      return {
+        text: null,
+        rejections,
+        provider: writer.name,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
 
     const problems = validate(draft, req);

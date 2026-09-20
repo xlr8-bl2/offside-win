@@ -20,3 +20,14 @@ binding = "ASSETS"
 [vars]
 SUPABASE_URL = "REPLACE_WITH_SUPABASE_URL"
 SUPABASE_ANON_KEY = "REPLACE_WITH_SUPABASE_ANON_KEY"
+
+# Where the money goes and which environment takes it. None of these are
+# secrets -- a wallet address is public by nature and the base URL is in the
+# docs -- so they live here where they can be read and changed in a diff.
+#
+# Staging until KYB is done. Point COINFLOW_BASE_URL at api.coinflow.cash and
+# the same code takes real cards.
+COINFLOW_BASE_URL = "https://api-sandbox.coinflow.cash"
+COINFLOW_WALLET = ""
+COINFLOW_BLOCKCHAIN = "solana"
+SITE_URL = "https://offside-win.ashleymbaht.workers.dev"

@@ -18,7 +18,7 @@
     "settle": "npm -w engine run settle",
     "backtest": "npm -w engine run backtest",
     "migrate": "npm -w engine run migrate",
-    "test": "npm -w engine test",
+    "test": "npm -w engine test && npm -w worker test",
     "typecheck": "npm -w engine run typecheck && npm -w worker run typecheck",
     "dev": "npm -w worker run dev",
     "deploy": "npm -w worker run deploy",
@@ -26,6 +26,9 @@
     "board:stats": "npm -w engine run board:stats",
     "eval:provider": "npm -w engine run eval:provider",
     "h2h": "npm -w engine run h2h",
-    "market": "npm -w engine run market"
+    "market": "npm -w engine run market",
+    "renew": "npm -w engine run renew",
+    "narrate:preview": "npm -w engine run narrate:preview",
+    "images": "npm -w engine run images"
   }
 }

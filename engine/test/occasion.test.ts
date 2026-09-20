@@ -23,38 +23,38 @@ test('normalise strips decoration but keeps the distinguishing word', () => {
 });
 
 test('El Clasico is found under either spelling and either way round', () => {
-  assert.equal(namedFixture('Real Madrid', 'FC Barcelona')?.kicker, 'EL CLÁSICO');
-  assert.equal(namedFixture('Fútbol Club Barcelona', 'Real Madrid')?.kicker, 'EL CLÁSICO');
+  assert.equal(namedFixture('Real Madrid', 'FC Barcelona')?.kicker, 'El Clásico');
+  assert.equal(namedFixture('Fútbol Club Barcelona', 'Real Madrid')?.kicker, 'El Clásico');
 });
 
 test('the Madrid derby is not mistaken for El Clasico', () => {
-  assert.equal(namedFixture('Real Madrid', 'Club Atlético de Madrid')?.kicker, 'THE MADRID DERBY');
+  assert.equal(namedFixture('Real Madrid', 'Club Atlético de Madrid')?.kicker, 'The Madrid derby');
 });
 
 test('both sides must match, so an ambiguous name cannot fire alone', () => {
   // Three clubs in one live board normalise to something containing "rangers".
-  assert.equal(namedFixture('Celtic', 'Rangers')?.kicker, 'THE OLD FIRM');
+  assert.equal(namedFixture('Celtic', 'Rangers')?.kicker, 'The Old Firm');
   assert.equal(namedFixture('Celtic', 'Enugu Rangers International'), null);
   assert.equal(namedFixture('Stafford Rangers', 'Queens Park Rangers'), null);
 });
 
 test('a club that is only noise words still normalises to something', () => {
   assert.ok(normalise('Sporting CP').length > 0);
-  assert.equal(namedFixture('Benfica', 'Sporting CP')?.kicker, 'THE LISBON DERBY');
+  assert.equal(namedFixture('Benfica', 'Sporting CP')?.kicker, 'The Lisbon derby');
 });
 
 test('stage is read off the round label the provider already sends', () => {
-  assert.equal(stageOf('Quarterfinals')?.kicker, 'QUARTER-FINAL');
-  assert.equal(stageOf('Semifinals')?.kicker, 'SEMI-FINAL');
-  assert.equal(stageOf('Final')?.kicker, 'THE FINAL');
+  assert.equal(stageOf('Quarterfinals')?.kicker, 'Quarter-final');
+  assert.equal(stageOf('Semifinals')?.kicker, 'Semi-final');
+  assert.equal(stageOf('Final')?.kicker, 'The final');
   assert.equal(stageOf('League phase · Matchday 1'), null);
   assert.equal(stageOf('Regular season · Matchday 9'), null);
   assert.equal(stageOf(null), null);
 });
 
 test('a semi-final is not read as a final', () => {
-  assert.equal(stageOf('Semifinals')?.kicker, 'SEMI-FINAL');
-  assert.equal(stageOf('Quarterfinals')?.kicker, 'QUARTER-FINAL');
+  assert.equal(stageOf('Semifinals')?.kicker, 'Semi-final');
+  assert.equal(stageOf('Quarterfinals')?.kicker, 'Quarter-final');
 });
 
 test('the provider derby flag can break a tie but never leads', () => {
@@ -78,20 +78,20 @@ test('El Clasico outranks a Champions League night', () => {
   const clasico = occasionOf({ home: 'Real Madrid', away: 'FC Barcelona', league_id: 3, rank: 2 });
   const ucl = occasionOf({ home: 'Sparta Praha', away: 'Club Brugge', league_id: 7, rank: 1 });
   assert.ok(clasico.weight > ucl.weight, `${clasico.weight} should beat ${ucl.weight}`);
-  assert.equal(clasico.kicker, 'EL CLÁSICO');
+  assert.equal(clasico.kicker, 'El Clásico');
 });
 
 test('the biggest final outranks even a named fixture', () => {
   // A Clasico in the Champions League final is the final first.
   const o = occasionOf({ home: 'Real Madrid', away: 'FC Barcelona', league_id: 7, rank: 1, round_label: 'Final' });
-  assert.equal(o.kicker, 'THE FINAL');
+  assert.equal(o.kicker, 'The final');
 });
 
 test('but a named fixture wins a smaller one', () => {
   // A Clasico in the Copa del Rey final is still the Clasico — that is the
   // headline anyone would write, and "THE FINAL" throws away the better one.
   const o = occasionOf({ home: 'Real Madrid', away: 'FC Barcelona', league_id: 12, rank: 4, round_label: 'Final' });
-  assert.equal(o.kicker, 'EL CLÁSICO');
+  assert.equal(o.kicker, 'El Clásico');
 });
 
 test('the Europa League does not outrank a big-league fixture on weight alone', () => {

@@ -38,4 +38,9 @@ jobs:
           # Must match the tracked set ratings fits, or the slate prices
           # fixtures in leagues that have no ratings. Empty means all of them.
           LEAGUES: ${{ vars.LEAGUES }}
+          # Optional. Without it the template grammar writes the narratives, in
+          # the old voice, and the run says so -- which is the fallback working
+          # rather than a failure. Google has cut this free tier sharply and
+          # without notice before, so that path has to stay live.
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: npm run slate

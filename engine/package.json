@@ -17,7 +17,10 @@
     "eval:provider": "tsx scripts/eval-provider.mjs",
     "h2h": "tsx scripts/head-to-head.mts",
     "market": "tsx scripts/is-it-the-market.mts",
-    "poster:preview": "tsx scripts/poster-preview.mts"
+    "poster:preview": "tsx scripts/poster-preview.mts",
+    "renew": "tsx src/run.ts renew",
+    "narrate:preview": "tsx scripts/narrate-preview.mts",
+    "images": "tsx src/run.ts images"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
