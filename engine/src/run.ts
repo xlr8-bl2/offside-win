@@ -5,6 +5,8 @@ import { config, requireEnv } from './config.ts';
 import { backfillHistory } from './history.ts';
 import { probe } from './probe.ts';
 import { fitAllLeagues } from './ratings/fit.ts';
+import { syncTeamShots } from './images/sync.ts';
+import { coinflowCharger, renewDue } from './membership/renew.ts';
 import { runSettle } from './settle.ts';
 import { pruneBoard, runSlate } from './slate.ts';
 import { closeDb, dbStats, migrate, schemaFile, select } from './store.ts';
@@ -18,6 +20,8 @@ import { closeDb, dbStats, migrate, schemaFile, select } from './store.ts';
  *   ratings   — refit Dixon-Coles and the corner/card models
  *   slate     — reprice the next few days and publish the board
  *   settle    — grade finished picks and refresh calibration
+ *   renew     — charge the memberships falling due today
+ *   images    — find a photograph for each team and re-host it
  *   backtest  — walk-forward evaluation
  *
  * Every entry point applies the schema first and the slate cold-starts itself,
@@ -43,6 +47,45 @@ const commands: Record<string, () => Promise<unknown>> = {
     requireEnv({ provider: false });
     await ensureSchema();
     console.log('Schema applied.');
+  },
+
+  /**
+   * Charge the memberships falling due, and chase the ones that decline.
+   *
+   * No provider key is needed to run it; it is needed to charge anything. A run
+   * with nothing due does nothing and says so, which is the normal case and
+   * should stay quiet rather than look like a failure.
+   */
+  async renew() {
+    requireEnv({ provider: false });
+    await ensureSchema();
+    const report = await renewDue(coinflowCharger());
+    console.log(
+      `Renewals: ${report.due} due, ${report.renewed} renewed, `
+      + `${report.declined} declined, ${report.abandoned} given up on, ${report.skipped} skipped.`,
+    );
+    return report;
+  },
+
+  /**
+   * Football photography, which the odds provider does not sell.
+   *
+   * It gives crests, league badges and stadium architecture. What it has no
+   * equivalent of is a player mid-celebration, and that is the whole difference
+   * between a page that looks like a fixture list and a page that looks like
+   * football. Needs SPORTRADAR_GETTY_KEY; without it this is a no-op that says
+   * so rather than a failure.
+   */
+  async images() {
+    requireEnv({ provider: false });
+    await ensureSchema();
+    const r = await syncTeamShots();
+    console.log(
+      `Photography: swept ${r.leagues} competitions, ${r.manifests} manifests, `
+      + `${r.assets} assets seen, ${r.matched} matched to our teams, `
+      + `${r.stored} stored, ${r.skipped} ambiguous, ${r.failed} failed.`,
+    );
+    return r;
   },
 
   async history() {

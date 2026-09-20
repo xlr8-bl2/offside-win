@@ -36,6 +36,29 @@ CREATE TABLE IF NOT EXISTS team (
   updated_at  bigint NOT NULL
 );
 
+-- A photograph of a team, re-hosted.
+--
+-- One row per team, holding the best action shot we have found for them. The
+-- URL points at our own storage rather than at Sportradar: every request to
+-- their image API needs the key in a header, and a browser cannot be given the
+-- key on a site whose source is public.
+--
+-- `credit` is NOT NULL on purpose. Agency photography travels with its
+-- copyright line and a page that drops it is the kind of thing that ends a
+-- licence. A row with no credit is a row we must not publish, so the column
+-- makes that unrepresentable rather than a rule somebody has to remember.
+CREATE TABLE IF NOT EXISTS team_shot (
+  team_id     bigint PRIMARY KEY,
+  url         text NOT NULL,
+  credit      text NOT NULL,
+  title       text,
+  asset_id    text,
+  width       integer,
+  height      integer,
+  taken_at    bigint,
+  updated_at  bigint NOT NULL
+);
+
 -- ---------------------------------------------------------------- history
 
 CREATE TABLE IF NOT EXISTS match (
@@ -155,6 +178,45 @@ CREATE INDEX IF NOT EXISTS fixture_league_kickoff ON fixture(league_id, kickoff)
 ALTER TABLE fixture ADD COLUMN IF NOT EXISTS rank integer NOT NULL DEFAULT 6;
 CREATE INDEX IF NOT EXISTS fixture_day_rank ON fixture((kickoff / 86400), rank, kickoff);
 
+-- The same fixture with the call taken out: the write-up, the form, the team
+-- news and the line-ups, but no selection, no price and no bookmaker. Written
+-- by the slate beside the full copy rather than derived here, because the
+-- Worker's whole design is that nothing is assembled at request time.
+--
+-- Nullable, and the serving functions fall back to the full copy when it is.
+-- That is deliberate: until the slate has rewritten a fixture these columns are
+-- empty, and the alternative to falling back is a blank board. Nothing leaks
+-- that is not already public today -- the wall simply engages per fixture as
+-- the slate catches up. get_health reports how many are still waiting, so a
+-- slate that never runs cannot leave the paywall quietly disabled.
+ALTER TABLE fixture ADD COLUMN IF NOT EXISTS board_free_json  text;
+ALTER TABLE fixture ADD COLUMN IF NOT EXISTS bundle_free_json text;
+
+-- The final score.
+--
+-- Everything on this site that looks backwards needed it and nothing had it.
+-- The board could say FT but not what happened; the results page marked a pick
+-- won or lost and could not print the scoreline that decided it, so a reader
+-- was asked to take our word for the grade. That is the one thing a record
+-- publishing its own losses cannot afford to ask for.
+--
+-- Written from two places on purpose. The slate sets it every quarter of an
+-- hour for anything inside its lookback window, which is what makes a match
+-- read as played within minutes of finishing. Settlement sets it again from
+-- the score it graded against, which reaches further back and is the version
+-- that is authoritative -- a pick and the scoreline beside it can then never
+-- disagree, because they came from the same number.
+ALTER TABLE fixture ADD COLUMN IF NOT EXISTS home_goals integer;
+ALTER TABLE fixture ADD COLUMN IF NOT EXISTS away_goals integer;
+
+-- The provider's team ids, which are also the keys to its image service:
+-- /img/team/{id}/ returns the real crest. They were on the board card and
+-- nowhere a SQL query could reach them, so every page built from `pick` rather
+-- than from the card -- the whole results record -- drew generated monograms
+-- beside clubs whose badge we already had.
+ALTER TABLE fixture ADD COLUMN IF NOT EXISTS home_team_id bigint;
+ALTER TABLE fixture ADD COLUMN IF NOT EXISTS away_team_id bigint;
+
 CREATE TABLE IF NOT EXISTS pick (
   id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   fixture_id   bigint NOT NULL,
@@ -181,6 +243,21 @@ CREATE TABLE IF NOT EXISTS pick (
   closing_odds double precision,
   clv          double precision
 );
+-- The price when we first called it, and what it had become by kick-off.
+--
+-- `odds` is overwritten on every slate run, because the board has to show a
+-- price somebody can still get. That makes it useless for asking the question
+-- that actually matters after a loss: did the market come round to us and the
+-- ball not go in, or were we wrong and the market knew it? So the first price
+-- is kept where nothing overwrites it, and the last one seen before kick-off
+-- is kept beside it.
+ALTER TABLE pick ADD COLUMN IF NOT EXISTS opening_odds double precision;
+
+-- The post-mortem: what the result says about the call, written at settlement.
+-- Nullable because every pick settled before this existed has none, and a page
+-- that demands it would show nothing for the whole back record.
+ALTER TABLE pick ADD COLUMN IF NOT EXISTS postmortem_json text;
+
 CREATE INDEX IF NOT EXISTS pick_fixture ON pick(fixture_id);
 CREATE INDEX IF NOT EXISTS pick_unsettled ON pick(settled_at, kickoff);
 CREATE INDEX IF NOT EXISTS pick_created ON pick(created_at);
@@ -218,6 +295,110 @@ CREATE TABLE IF NOT EXISTS kv (
   expires_at bigint,
   updated_at bigint NOT NULL
 );
+
+-- ------------------------------------------------------------ membership
+--
+-- What a reader buys, what they currently hold, and what they paid. Every
+-- table here is private: the policies below are scoped to auth.uid() rather
+-- than USING (true), so the public anon key -- which has no uid -- matches no
+-- rows at all. That is the same seam the serving tables use, pointed the other
+-- way.
+--
+-- None of these carry a foreign key to auth.users. Deliberately: auth.users is
+-- GoTrue's, this file is re-applied on every entry point, and a cross-schema
+-- reference is a permissions failure waiting for a bad day. A payment record
+-- also has to outlive the account it belonged to, which a cascade would
+-- prevent. A deleted user leaves rows nobody can ever read, which is harmless.
+
+CREATE TABLE IF NOT EXISTS plan (
+  id           text PRIMARY KEY,
+  name         text NOT NULL,
+  days         integer NOT NULL,
+  amount_minor bigint NOT NULL,
+  currency     text NOT NULL,
+  active       integer NOT NULL DEFAULT 1,
+  sort         integer NOT NULL DEFAULT 0,
+  updated_at   bigint NOT NULL
+);
+
+-- The amount is in minor units -- pence, not pounds -- because a price in
+-- floating point is a rounding error with a customer attached to it.
+INSERT INTO plan (id, name, days, amount_minor, currency, active, sort, updated_at)
+VALUES ('monthly', 'Monthly', 30, 900, 'GBP', 1, 0, floor(extract(epoch FROM now()))::bigint)
+ON CONFLICT (id) DO NOTHING;
+
+-- The entitlement, and the only one of these four a browser ever reads. It
+-- carries the card's brand and last four so the account page can say "Visa
+-- ending 4242" without going anywhere near the credential table.
+CREATE TABLE IF NOT EXISTS membership (
+  user_id      uuid PRIMARY KEY,
+  plan_id      text NOT NULL,
+  expires_at   bigint NOT NULL,
+  auto_renew   integer NOT NULL DEFAULT 0,
+  cancelled_at bigint,
+  dunning_from bigint,
+  attempts     integer NOT NULL DEFAULT 0,
+  card_brand   text,
+  card_last4   text,
+  created_at   bigint NOT NULL,
+  updated_at   bigint NOT NULL
+);
+CREATE INDEX IF NOT EXISTS membership_renewing ON membership(expires_at) WHERE auto_renew = 1;
+
+-- The credential. Private: no grant to anon at all, so nothing holding the
+-- public key can read it whatever JWT it presents.
+--
+-- The first attempt at this granted the table and revoked the sensitive
+-- columns. That does not work -- a table-level SELECT satisfies every column
+-- and the column revoke is silently a no-op, which a live database said and a
+-- regex never would. The fix is not to grant the table.
+--
+-- It holds a vault token and the last four digits. Never a card number, never
+-- a CVV -- those stay with the processor, which is the whole reason to use one.
+--
+-- origin_ref is the irreplaceable column. Every merchant-initiated charge has
+-- to cite the customer-initiated payment that carried CVV and 3DS, so losing
+-- it means that card can never be charged again. consent_at, consent_ip and
+-- consent_terms are the stored-credential disclosure the card networks require
+-- at that same first payment. All four are written before anything reads them.
+CREATE TABLE IF NOT EXISTS payment_method (
+  user_id       uuid PRIMARY KEY,
+  provider      text NOT NULL,
+  vault_token   text NOT NULL,
+  origin_ref    text NOT NULL,
+  brand         text,
+  last4         text,
+  exp_month     integer,
+  exp_year      integer,
+  consent_at    bigint NOT NULL,
+  consent_ip    text,
+  consent_terms text NOT NULL,
+  created_at    bigint NOT NULL,
+  updated_at    bigint NOT NULL
+);
+
+-- Also private, for the same reason: raw_json is whatever the processor sent,
+-- which is their schema and not ours, and may carry more about a person than
+-- the account page has any business showing. Readers get the payment_receipt
+-- view below instead, which names its columns.
+CREATE TABLE IF NOT EXISTS payment (
+  id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  provider     text NOT NULL,
+  provider_ref text NOT NULL,
+  user_id      uuid NOT NULL,
+  plan_id      text NOT NULL,
+  amount_minor bigint NOT NULL,
+  currency     text NOT NULL,
+  status       text NOT NULL,
+  raw_json     text NOT NULL,
+  created_at   bigint NOT NULL
+);
+CREATE INDEX IF NOT EXISTS payment_user ON payment(user_id, created_at);
+
+-- The idempotency key, and the only thing standing between a retried webhook
+-- and a membership extended twice. Processors retry on any non-200, including
+-- ones where the write already succeeded.
+CREATE UNIQUE INDEX IF NOT EXISTS payment_provider_ref ON payment(provider, provider_ref);
 
 -- ------------------------------------------------------------- serving API
 --
@@ -257,6 +438,20 @@ $fn$;
 -- picks nobody was ever shown -- which is the opposite of what a results page
 -- is for. The other kinds keep being marked; they live in the by-kind view
 -- below, which is how we judge the model rather than how we present it.
+-- What the account page shows: a receipt, not a processor payload.
+--
+-- The WHERE clause is doing the security work here, not a policy. A view is
+-- not RLS-aware by default -- it runs with its owner's rights, which is how it
+-- can read a table anon cannot -- so filtering to auth.uid() inside the view is
+-- the only thing standing between one member and everyone else's payments.
+-- Do not remove it, and do not add a column from the base table without asking
+-- whether a browser should hold it.
+CREATE OR REPLACE VIEW payment_receipt AS
+  SELECT p.created_at, p.plan_id, p.amount_minor, p.currency, p.status
+  FROM payment p
+  WHERE p.user_id = auth.uid()
+  ORDER BY p.created_at DESC;
+
 CREATE OR REPLACE VIEW pick_summary AS
   SELECT count(*)                                                   AS n,
          count(*) FILTER (WHERE result IN ('WON', 'HALF_WON'))       AS wins,
@@ -282,15 +477,161 @@ CREATE OR REPLACE VIEW pick_summary_by_kind AS
   WHERE settled_at IS NOT NULL AND result IS DISTINCT FROM 'VOID'
   GROUP BY kind;
 
+-- Does the caller hold a membership that has not run out?
+--
+-- SECURITY INVOKER is not a concession here, it is what makes this correct. The
+-- function reads `membership` under that table's own policy, so an anonymous
+-- caller -- who has no auth.uid() -- matches no rows and gets false, with no
+-- special case anywhere. It must also be declared before the serving functions
+-- that call it: a LANGUAGE sql body is parsed at creation, and migrate() sends
+-- statements in file order.
+CREATE OR REPLACE FUNCTION has_membership()
+RETURNS boolean LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+  SELECT EXISTS (
+    SELECT 1 FROM membership m
+    WHERE m.user_id = auth.uid()
+      AND m.expires_at > floor(extract(epoch FROM now()))::bigint
+  );
+$fn$;
+
+-- ------------------------------------------------------------ the writes
+--
+-- Two functions the webhook calls, and the only things in this file that are
+-- not reads. They are private: no grant to anon, so the public key cannot reach
+-- them however it asks. The Worker calls them holding a service key, which
+-- bypasses RLS -- that is what makes them work and also why they are written to
+-- do exactly one thing each.
+--
+-- Both are one round trip on purpose. The processor expects a 200 inside five
+-- seconds and retries up to sixteen times over eighteen hours if it does not
+-- get one, so a read-then-write from the Worker would be two chances to be slow
+-- and two chances to race a retry.
+
+-- Record a payment and extend the membership it paid for.
+--
+-- Idempotent by construction. The insert is guarded by the unique index on
+-- (provider, provider_ref), and if it does nothing then this delivery has been
+-- seen before and the membership must not be extended a second time. With
+-- sixteen retries in play that is the normal case, not the exotic one.
+CREATE OR REPLACE FUNCTION record_payment(
+  p_provider text, p_ref text, p_user uuid, p_plan text,
+  p_amount bigint, p_currency text, p_status text, p_raw text,
+  p_origin_ref text DEFAULT NULL, p_brand text DEFAULT NULL, p_last4 text DEFAULT NULL
+) RETURNS json LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = public AS $fn$
+DECLARE
+  v_now  bigint := floor(extract(epoch FROM now()))::bigint;
+  v_days integer;
+  v_new  bigint;
+  v_rows integer;
+BEGIN
+  INSERT INTO payment (provider, provider_ref, user_id, plan_id, amount_minor, currency, status, raw_json, created_at)
+  VALUES (p_provider, p_ref, p_user, p_plan, p_amount, p_currency, p_status, p_raw, v_now)
+  ON CONFLICT (provider, provider_ref) DO NOTHING;
+
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows = 0 THEN
+    RETURN json_build_object('applied', false, 'reason', 'already recorded');
+  END IF;
+
+  SELECT days INTO v_days FROM plan WHERE id = p_plan;
+  IF v_days IS NULL THEN
+    RETURN json_build_object('applied', false, 'reason', 'unknown plan');
+  END IF;
+
+  -- Renewing early adds to whatever is left rather than discarding it, which is
+  -- the difference between a renewal and a punishment for being early.
+  INSERT INTO membership (user_id, plan_id, expires_at, created_at, updated_at, card_brand, card_last4)
+  VALUES (p_user, p_plan, v_now + v_days * 86400, v_now, v_now, p_brand, p_last4)
+  ON CONFLICT (user_id) DO UPDATE SET
+    plan_id      = excluded.plan_id,
+    expires_at   = greatest(membership.expires_at, v_now) + v_days * 86400,
+    cancelled_at = NULL,
+    dunning_from = NULL,
+    attempts     = 0,
+    card_brand   = coalesce(excluded.card_brand, membership.card_brand),
+    card_last4   = coalesce(excluded.card_last4, membership.card_last4),
+    updated_at   = v_now
+  RETURNING expires_at INTO v_new;
+
+  -- The credential reference, captured at the first payment because it is the
+  -- only moment it exists. Nothing charges it until the renewal job does.
+  IF p_origin_ref IS NOT NULL THEN
+    INSERT INTO payment_method (user_id, provider, vault_token, origin_ref, brand, last4, consent_at, consent_terms, created_at, updated_at)
+    VALUES (p_user, p_provider, '', p_origin_ref, p_brand, p_last4, v_now, 'v1', v_now, v_now)
+    ON CONFLICT (user_id) DO UPDATE SET
+      origin_ref = excluded.origin_ref,
+      brand      = coalesce(excluded.brand, payment_method.brand),
+      last4      = coalesce(excluded.last4, payment_method.last4),
+      updated_at = v_now;
+  END IF;
+
+  RETURN json_build_object('applied', true, 'expires_at', v_new);
+END;
+$fn$;
+
+-- End a membership that was charged back or refunded.
+--
+-- Without this the product is free to anyone willing to dispute nine pounds.
+-- Access stops immediately rather than at the end of the period: the money has
+-- gone back, so the thing it bought goes with it.
+CREATE OR REPLACE FUNCTION revoke_membership(p_provider text, p_ref text, p_status text)
+RETURNS json LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = public AS $fn$
+DECLARE
+  v_now  bigint := floor(extract(epoch FROM now()))::bigint;
+  v_user uuid;
+BEGIN
+  UPDATE payment SET status = p_status
+  WHERE provider = p_provider AND provider_ref = p_ref
+  RETURNING user_id INTO v_user;
+
+  IF v_user IS NULL THEN
+    RETURN json_build_object('revoked', false, 'reason', 'no such payment');
+  END IF;
+
+  UPDATE membership
+  SET expires_at = least(expires_at, v_now), auto_renew = 0, cancelled_at = v_now, updated_at = v_now
+  WHERE user_id = v_user;
+
+  RETURN json_build_object('revoked', true);
+END;
+$fn$;
+
+-- Everything the account page shows, in one call.
+--
+-- Reads `membership` under its own policy and `payment_receipt`, which filters
+-- to the caller inside the view. An anonymous caller gets nulls and an empty
+-- list rather than an error -- the page redirects to sign-in on its own.
+CREATE OR REPLACE FUNCTION get_account()
+RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+  SELECT json_build_object(
+           'membership', (
+             SELECT to_json(m) FROM (
+               SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4
+               FROM membership WHERE user_id = auth.uid()
+             ) m
+           ),
+           'receipts', coalesce((
+             SELECT json_agg(r) FROM (
+               SELECT created_at, plan_id, amount_minor, currency, status
+               FROM payment_receipt LIMIT 24
+             ) r
+           ), '[]'::json)
+         );
+$fn$;
+
 CREATE OR REPLACE FUNCTION get_board(p_from bigint, p_to bigint, p_league bigint DEFAULT NULL)
 RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+  WITH m AS MATERIALIZED (SELECT has_membership() AS ok)
   SELECT json_build_object(
            'generated_at', floor(extract(epoch FROM now()))::bigint,
            'count', count(*),
-           'fixtures', coalesce(json_agg(b.board_json::json ORDER BY (b.kickoff / 86400) ASC, b.rank ASC, b.kickoff ASC), '[]'::json)
+           'member', (SELECT ok FROM m),
+           'fixtures', coalesce(json_agg(b.card ORDER BY (b.kickoff / 86400) ASC, b.rank ASC, b.kickoff ASC), '[]'::json)
          )
   FROM (
-    SELECT f.board_json, f.kickoff, f.rank
+    SELECT (CASE WHEN (SELECT ok FROM m) THEN f.board_json
+                 ELSE coalesce(f.board_free_json, f.board_json) END)::json AS card,
+           f.kickoff, f.rank
     FROM fixture f
     WHERE f.kickoff BETWEEN p_from AND p_to
       AND (p_league IS NULL OR f.league_id = p_league)
@@ -301,7 +642,9 @@ $fn$;
 
 CREATE OR REPLACE FUNCTION get_fixture(p_id bigint)
 RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
-  SELECT f.bundle_json::json FROM fixture f WHERE f.id = p_id;
+  SELECT (CASE WHEN has_membership() THEN f.bundle_json
+               ELSE coalesce(f.bundle_free_json, f.bundle_json) END)::json
+  FROM fixture f WHERE f.id = p_id;
 $fn$;
 
 -- p_settled: 'true' for settled picks, 'false' for open ones, anything else for
@@ -317,9 +660,22 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
                SELECT pk.id, pk.fixture_id, pk.kickoff, pk.market, pk.outcome, pk.line, pk.kind,
                       pk.model_prob, pk.book_prob, pk.edge, pk.odds, pk.bookmaker, pk.kelly,
                       pk.confidence, pk.provisional, pk.narrative, pk.result, pk.pnl,
-                      f.home_team, f.away_team
+                      f.home_team, f.away_team,
+                      -- The scoreline that decided the grade. Without it the
+                      -- results page asks the reader to trust the mark.
+                      f.home_goals, f.away_goals, f.status, f.league_id,
+                      -- And the ids the crests are served by.
+                      f.home_team_id, f.away_team_id,
+                      -- What the result says about the call, and what the
+                      -- market did between our saying it and kick-off.
+                      pk.postmortem_json, pk.opening_odds, pk.closing_odds
                FROM pick pk LEFT JOIN fixture f ON f.id = pk.fixture_id
+               -- Settled picks stay public forever, membership or not: the
+               -- results page is the only honest marketing this product has and
+               -- gating it would defeat the point of publishing losses. Open
+               -- picks are the thing being sold, so they need a membership.
                WHERE pk.kind = 'CONFIDENT'
+                 AND (pk.settled_at IS NOT NULL OR has_membership())
                  AND ((p_settled = 'true'  AND pk.settled_at IS NOT NULL)
                    OR (p_settled = 'false' AND pk.settled_at IS NULL)
                    OR (p_settled IS DISTINCT FROM 'true' AND p_settled IS DISTINCT FROM 'false'))
@@ -376,6 +732,7 @@ CREATE OR REPLACE FUNCTION get_health()
 RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
   WITH s AS (
     SELECT count(*) AS fixtures,
+           count(*) FILTER (WHERE board_free_json IS NULL) AS without_free_copy,
            round((extract(epoch FROM now()) - max(computed_at)) / 60)::bigint AS age_minutes
     FROM fixture
   )
@@ -383,7 +740,11 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
            'ok', true,
            'fixtures', s.fixtures,
            'last_computed_minutes_ago', s.age_minutes,
-           'stale', s.age_minutes IS NULL OR s.age_minutes > 120
+           'stale', s.age_minutes IS NULL OR s.age_minutes > 120,
+           -- Non-zero means those fixtures are still serving the full copy to
+           -- everyone, because the slate has not rewritten them yet. Expected
+           -- briefly after a deploy and a bug if it does not fall to zero.
+           'unwalled', s.without_free_copy
          )
   FROM s;
 $fn$;
@@ -400,6 +761,11 @@ ALTER TABLE league ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS league_read ON league;
 CREATE POLICY league_read ON league FOR SELECT TO anon USING (true);
 GRANT SELECT ON league TO anon;
+
+ALTER TABLE team_shot ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS team_shot_read ON team_shot;
+CREATE POLICY team_shot_read ON team_shot FOR SELECT TO anon USING (true);
+GRANT SELECT ON team_shot TO anon;
 
 ALTER TABLE team ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS team_read ON team;
@@ -456,6 +822,61 @@ DROP POLICY IF EXISTS kv_read ON kv;
 CREATE POLICY kv_read ON kv FOR SELECT TO anon USING (true);
 GRANT SELECT ON kv TO anon;
 
+-- The membership tables. Same four-line shape as everything above, but the
+-- USING clause is a predicate rather than `true`, and that is the whole
+-- mechanism: PostgREST runs as `anon` for a visitor and as the signed-in user
+-- when the Worker forwards their JWT instead of the anon key. auth.uid() is
+-- NULL in the first case, so `user_id = auth.uid()` is never true and not one
+-- row comes back. No second role, no service key on the read path.
+
+-- The price list is the exception and is genuinely public: the pricing page
+-- reads it, and the checkout route reads it server-side so the amount charged
+-- can never come from the client.
+ALTER TABLE plan ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS plan_read ON plan;
+CREATE POLICY plan_read ON plan FOR SELECT TO anon USING (active = 1);
+GRANT SELECT ON plan TO anon;
+
+ALTER TABLE membership ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS membership_read ON membership;
+CREATE POLICY membership_read ON membership FOR SELECT TO anon USING (user_id = auth.uid());
+GRANT SELECT ON membership TO anon;
+
+-- The one write a reader is allowed to make: turning their own renewal on or
+-- off. Two separate mechanisms have to agree before it happens, and it is worth
+-- being precise about which does what, because the obvious alternative -- a
+-- service key in the Worker plus JWT verification to decide whose row to touch
+-- -- is more code, more CPU and a far larger blast radius for the same result.
+--
+--   The policy picks the row. USING stops the update reaching anyone else's
+--   membership; WITH CHECK stops it being reassigned to someone else on the way
+--   out.
+--
+--   The grant picks the columns. Naming them is the whole point: `expires_at`
+--   is absent, so a member can stop their renewal and cannot extend their own
+--   access by a single second.
+--
+-- Verified against a live Postgres rather than reasoned about: a member flips
+-- their own flag, is refused on expires_at, updates zero rows when aiming at
+-- somebody else's, and cannot insert or delete at all.
+DROP POLICY IF EXISTS membership_self_update ON membership;
+CREATE POLICY membership_self_update ON membership FOR UPDATE TO anon
+  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+GRANT UPDATE (auto_renew, cancelled_at, updated_at) ON membership TO anon;
+
+-- These two are private and get no grant of any kind. RLS is still enabled so
+-- that a grant added later in a hurry cannot quietly open them, and
+-- engine/test/schema.test.ts asserts the absence rather than trusting it.
+ALTER TABLE payment_method ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payment ENABLE ROW LEVEL SECURITY;
+
+-- The safe projection of `payment`, filtered to the caller inside the view.
+GRANT SELECT ON payment_receipt TO anon;
+
+-- No table here grants a write to anyone. The webhook writes with credentials
+-- that bypass RLS entirely and the renewal job writes over the pooler, so
+-- nothing that reaches these tables came through the public key.
+
 GRANT SELECT ON pick_summary TO anon;
 -- Not granted to anon. The by-kind split carries closing-line value and the
 -- record of calls we do not publish -- both are how we judge the model, not
@@ -467,6 +888,8 @@ REVOKE ALL ON pick_summary_by_kind FROM anon;
 -- are SECURITY INVOKER, so each one still reads under the anon SELECT policies
 -- above and can reach nothing a direct select could not.
 GRANT EXECUTE ON FUNCTION try_json(text) TO anon;
+GRANT EXECUTE ON FUNCTION has_membership() TO anon;
+GRANT EXECUTE ON FUNCTION get_account() TO anon;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint) TO anon;
 GRANT EXECUTE ON FUNCTION get_fixture(bigint) TO anon;
 GRANT EXECUTE ON FUNCTION get_picks(integer, text) TO anon;

@@ -1,0 +1,47 @@
+name: narrate-preview
+
+# Read the writer's output before any of it reaches a reader.
+#
+# Writes nothing: it reads fixtures already on the board and prints narratives
+# to the log. Running the slate would do the same generation but also write the
+# free copies that switch the paywall on, which is not a side effect you want
+# from "let me see what it sounds like".
+#
+# Push-triggered as well as dispatchable, because a workflow that has never run
+# on the default branch cannot be dispatched, and push is the way round that
+# from a working branch.
+on:
+  push:
+    branches: ['claude/**']
+    paths: ['engine/scripts/narrate-preview.mts', '.github/workflows/narrate-preview.yml']
+  workflow_dispatch:
+    inputs:
+      count:
+        description: 'How many narratives to write'
+        type: string
+        default: '12'
+      model:
+        # Free text rather than a fixed list: Google retires these names and a
+        # choice list would have to be edited in lockstep. Blank uses the
+        # current default in engine/src/narrate/gemini.ts.
+        description: 'Gemini model (blank for the default)'
+        type: string
+        default: ''
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+      - name: Write some previews
+        env:
+          DB_BACKEND: postgres
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ inputs.model }}
+          PREVIEW_COUNT: ${{ inputs.count || '12' }}
+        run: npm run narrate:preview

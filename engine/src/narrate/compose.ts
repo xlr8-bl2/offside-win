@@ -258,10 +258,20 @@ export function narrate(input: NarrateInput): string {
   const sentences: string[] = [];
   let previous: Claim | null = null;
 
+  /*
+   * A frame is a clause as often as it is a sentence.
+   *
+   * `joinAfterConnective` already lowercases one that lands mid-sentence, but
+   * nothing did the opposite for one that starts a sentence -- so a frame
+   * opening on a value rather than a name shipped in lower case: "a goal or
+   * two looks right for Fiorentina". The frames cannot decide this for
+   * themselves because they do not know which position they are in. The
+   * composer does, so it owns it, in both directions.
+   */
   if (opener) {
     const s = renderClaim(opener, rng, ledger);
     if (s) {
-      sentences.push(s);
+      sentences.push(capitalise(s));
       previous = opener;
     }
   }
@@ -270,14 +280,14 @@ export function narrate(input: NarrateInput): string {
     const rendered = renderClaim(claim, rng, ledger);
     if (rendered === null) continue;
 
-    let sentence = rendered;
+    let sentence = capitalise(rendered);
     if (previous) {
       // The first claim after the form opener follows *from* it; the rest are
       // peers of each other.
       sentence =
         i === 0 && previous === opener && canFollowConnective(rendered)
           ? causalJoin(rendered, nouns, rng)
-          : connectiveFor(previous, claim, rng) + joinAfterConnective(sentence, nouns);
+          : connectiveFor(previous, claim, rng) + joinAfterConnective(rendered, nouns);
     }
     sentences.push(sentence);
     previous = claim;
@@ -286,7 +296,7 @@ export function narrate(input: NarrateInput): string {
   const conclusion = sentences.length
     ? renderClaim(conclusionClaim(candidate, input.homeTeam, input.awayTeam), rng, ledger)
     : null;
-  if (conclusion) sentences.push(conclusion);
+  if (conclusion) sentences.push(capitalise(conclusion));
 
   // No claims cleared: say what the bet is and be honest that the case rests on
   // the numbers rather than on a story.
@@ -405,6 +415,12 @@ function strengthGapClaim(input: ConfidentInput): Claim | null {
         total,
         xg_home: xg.home,
         xg_away: xg.away,
+        // "The total is what matters here" is true of a goals market and false
+        // of a 12, which also has no side and so lands in the same place. The
+        // frames that argue from the total check this before they fire.
+        // 1/0 rather than a boolean: the evidence map is string|number, which
+        // is what keeps a frame from rendering an object into a sentence.
+        is_total: /over_under|total_/.test(input.candidate.market) || input.candidate.market === 'btts' ? 1 : 0,
         home: input.homeTeam,
         away: input.awayTeam,
         ...(input.candidate.line !== null ? { line: input.candidate.line } : {}),
@@ -635,7 +651,7 @@ export function narrateConfident(input: ConfidentInput): string {
   const conclusion = sentences.length
     ? render(conclusionClaim(candidate, input.homeTeam, input.awayTeam))
     : null;
-  if (conclusion) sentences.push(conclusion);
+  if (conclusion) sentences.push(capitalise(conclusion));
 
   const lead = `${capitalise(marketLabel(candidate))} at ${candidate.odds.toFixed(2)}.`;
   const verdict = render(confidenceVerdict(candidate));

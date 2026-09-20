@@ -67,6 +67,35 @@ jobs:
             console.log("wrangler.toml points at " + url);
           '
 
+      # Unlike SUPABASE_ANON_KEY these are real secrets, so they are pushed as
+      # wrangler secrets rather than substituted into a committed file. The
+      # repo is public; nothing here may end up in git or in a log.
+      #
+      # Each is optional on purpose. Payments are unconfigured until an account
+      # exists, and a missing key must leave the read path deploying normally
+      # rather than failing the whole workflow -- the site is not a shop yet.
+      - name: Push the payment secrets
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          COINFLOW_API_KEY: ${{ secrets.COINFLOW_API_KEY }}
+          COINFLOW_WEBHOOK_SECRET: ${{ secrets.COINFLOW_WEBHOOK_SECRET }}
+        run: |
+          set -uo pipefail
+          for name in SUPABASE_SERVICE_KEY COINFLOW_API_KEY COINFLOW_WEBHOOK_SECRET; do
+            value="${!name:-}"
+            if [ -z "$value" ]; then
+              echo "$name is not set - skipping (payments stay switched off)"
+              continue
+            fi
+            # Piped rather than passed as an argument, so it never becomes a
+            # process-table entry or a shell history line.
+            printf '%s' "$value" | npx wrangler secret put "$name" >/dev/null \
+              && echo "$name pushed" || echo "WARNING: could not push $name"
+          done
+
       - name: Deploy worker
         working-directory: worker
         env:

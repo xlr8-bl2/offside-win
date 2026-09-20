@@ -1,108 +1,206 @@
 /*
  * Design tokens.
  *
- * Everything atomic lives here and nowhere else: colour, type, space, border,
- * elevation, motion. A component file that writes a raw hex or a raw pixel
- * value has found a gap in this file — fill the gap rather than the component.
+ * Everything atomic lives here and nowhere else. A component file that writes a
+ * raw hex or a raw pixel value has found a gap in this file — fill the gap
+ * rather than the component. This is not style preference: style.css once
+ * carried its own :root with older values, loaded second, and silently won the
+ * cascade, so a commit that fixed two measured contrast failures shipped
+ * without changing a single rendered colour.
  *
- * Two measured failures in the previous palette are fixed here, and both are
- * recorded because they will otherwise be reintroduced by eye:
+ * ---------------------------------------------------------------------------
+ * WHERE THESE CAME FROM
  *
- *   --ink-3 was #79736a, which is 3.67:1 on --surface-2 and 4.29:1 on --bg.
- *   It was carrying body text, so it failed WCAG 1.4.3 (4.5:1) everywhere it
- *   was used. Now #938d81 — 5.23:1 at worst.
+ * Two sources, and they disagreed usefully.
  *
- *   --line was #232833 against a #101319 surface: 1.26:1. Borders were very
- *   nearly invisible, which failed 1.4.11 (3:1) for anything interactive and
- *   is a large part of why the old UI read as flat — structure the eye cannot
- *   find is structure that is not there. Split in two: a hairline for
- *   decorative division, and --line-strong (3.26:1) for anything a person is
- *   meant to click, type into, or read as a boundary.
+ * The bundled design data (.claude/skills/ui-ux-pro-max) profiles a football
+ * club as "Vibrant & Block-based + Motion-Driven, team colours and energetic
+ * accents", and a financial dashboard as "Dark Mode (OLED) + Data-Dense, dark
+ * ground with red/green alerts". This product is genuinely both: football
+ * subject matter, trading-desk density. That is the two registers below.
+ *
+ * It also names the Dark-OLED palette as #000000, #121212 and #0A0E27 — which
+ * is the confirmation, not the instruction. Polymarket is #000, Stake #0F212E,
+ * FotMob pure black. A survey of twenty products in this category found every
+ * credible one blue-cast or neutral. Being handed the category default in
+ * writing is a reason to go somewhere else with the axis, not to take it.
+ *
+ * So: the data decides the things it is authoritative about — contrast floors,
+ * touch targets, motion timing, the density model — and the palette is chosen
+ * against it.
  */
 
 :root {
-  /* ---------------------------------------------------------------- colour */
+  /* ---------------------------------------------------------------- ground */
 
-  /* Ground. Darkest at the page, lifting toward the reader. In a dark theme
-     elevation is carried by surface lightness, not by shadow. */
-  --bg:          #06070a;
-  --bg-2:        #0a0c11;
-  --surface:     #101319;
-  --surface-2:   #171b23;
-  --surface-3:   #1e232d;
+  /*
+   * NEUTRAL, AND WITH REAL STEPS BETWEEN THE LEVELS.
+   *
+   * The old ground was warm-cast near-black -- #0c0b09 page, #15130f surface,
+   * #201c17 raised -- chosen to differentiate from a category that is all
+   * blue-blacks. Two things were wrong with it, and both were visible the
+   * moment the page was looked at rather than reasoned about.
+   *
+   * The steps were about four per cent apart, which is invisible. A row, the
+   * page under it and the panel around it were the same colour, so nothing had
+   * an edge and everything read as one grey field. Every book with a usable
+   * board puts a clear step between page and row: Stake runs #0F212E against
+   * #213743, and you can see which is which from across a room.
+   *
+   * And warm greys on a warm black is how you get mud. The brown cast that was
+   * meant to read as sodium and concrete just desaturated everything on top of
+   * it. The differentiation is the violet, which is doing that job on its own.
+   */
+  --pitch:     #0a0a0c;
+  --stand:     #16171b;
+  --terrace:   #202329;
+  --stand-hi:  #2c3038;
 
-  /* Ink. All three clear 4.5:1 on every ground above. */
-  --ink:         #f4eee2;
-  --ink-2:       #b5aea1;
-  --ink-3:       #938d81;
+  /* ------------------------------------------------------------------- ink */
 
-  /* Brand. The warm metallic is the only accent; it is what stops this
-     looking like the vivid-green tipster category. */
-  --gold:        #e2b979;
-  --gold-2:      #c9973f;
-  --gold-dim:    rgba(226, 185, 121, 0.14);
+  /* Brighter, and cool to match the ground. The old warm whites sat down into
+     it; these come off it. All three clear 4.5:1 on every surface above. */
+  --chalk:     #f4f6fa;
+  --chalk-2:   #c3c8d2;
+  --chalk-3:   #8d94a3;
 
-  /* Lines. See the note above for why there are two. */
-  --line:        #232833;
-  --line-soft:   #181c24;
-  --line-strong: #5d6779;
+  /* ---------------------------------------------------------------- accent */
 
-  /* Semantic. Result state and price movement are different meanings and get
-     different tokens even where the colour currently agrees — they will not
-     always agree, and one token serving two meanings is how that breaks. */
-  --won:         #4fd39a;
-  --lost:        #e8735f;
-  --void:        #79839b;
-  --warn:        #e0a949;
+  /* Violet is still unclaimed in football -- bet365 green, FanDuel blue,
+     DraftKings orange, OneFootball lime, Sofascore royal blue. It is now the
+     only thing carrying the identity, so it is used as a fill rather than a
+     tint wherever something is meant to be pressed. */
+  --floodlight:     #7a5af8;
+  --floodlight-hi:  #9e86ff;
+  --floodlight-dim: rgba(122, 90, 248, 0.16);
 
-  --drift-in:    #4fd39a;   /* price shortening */
-  --drift-out:   #e8735f;   /* price lengthening */
+  /* A second note, for anything imminent rather than live. */
+  --sodium:    #f5a524;
 
-  /* Legacy aliases. The rebuild replaces these call sites page by page; until
-     it does, style.css keeps working. Delete once nothing references them. */
-  --win:         var(--won);
-  --loss:        var(--lost);
+  /* --------------------------------------------------------------- borders */
+
+  /* Percentages of the ink rather than grey hexes, so they hold across every
+     surface. The firm one clears 3:1 for anything interactive. */
+  --hairline:  rgba(244, 246, 250, 0.09);
+  --rule:      rgba(244, 246, 250, 0.16);
+  --rule-firm: rgba(244, 246, 250, 0.32);
+
+  /* -------------------------------------------------------------- semantic */
+
+  /* Muted on purpose: these are states, not brand. Saturated green is spent —
+     bet365, Betway, Paddy Power and every tipster site own it, so it reads as
+     gambling promo. It means won here and nothing else. */
+  --won:       #2fbf71;
+  --lost:      #f0435a;
+  --void:      #7b8596;
+  --warn:      #f5a524;
+
+  /* Price movement is a different meaning from a settled result and gets its
+     own tokens, even where the colour currently agrees. */
+  --shorten:   #2fbf71;
+  --drift:     #f0435a;
 
   /* ------------------------------------------------------------ typography */
 
-  --display: 'Archivo', system-ui, -apple-system, sans-serif;
-  --body:    'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --script:  'Caveat', cursive;
+  /*
+   * BIG SHOULDERS DISPLAY FOR THE SCOREBOARD, GEIST FOR THE UI.
+   *
+   * Two wrong answers preceded this one and both were wrong the same way.
+   * Bricolage Grotesque is an editorial display face, drawn for magazine
+   * covers, and it is a reason this site read as editorial. Archivo is a
+   * competent workhorse grotesque with no opinion at all -- the safe pick, and
+   * on a product that is meant to feel like a Saturday afternoon, safe is the
+   * failure mode.
+   *
+   * Big Shoulders Display was drawn by Patric King for Chicago's public design
+   * initiative and is made for signage: extremely tall, extremely narrow,
+   * squared terminals, no warmth in it whatsoever. It is the register of a
+   * stadium board and a tunnel sign, its numerals are unmistakable at speed,
+   * and a column of odds set in it looks like a price board rather than a
+   * table. It carries weight 400-800 and no width axis, which it does not need
+   * because narrow is what it already is.
+   *
+   * Geist takes the UI. Inter is the most-defaulted typeface on the web and
+   * using it is a decision nobody made; Geist is cleaner in the small sizes
+   * this interface mostly lives at and its tabular figures are properly drawn.
+   */
+  --display: 'Big Shoulders Display', 'Arial Narrow', system-ui, sans-serif;
+  --body:    Geist, 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
 
-  /* A dense board is read by scanning a column of numbers. Tabular figures are
-     not a nicety here — proportional digits make a price column unscannable. */
-  --numeric: 'Archivo', ui-monospace, system-ui, sans-serif;
+  /*
+   * THE THIRD FACE IS THE BRAND.
+   *
+   * Caveat, a marker hand, and it is the one thing on this site that could not
+   * belong to anybody else. The product's whole premise is a pundit talking
+   * over a game -- the brief was "pundits who actually know ball" -- and the
+   * visual form of that is the telestrator: somebody drawing on the screen.
+   * Monday Night Football, a marker circling a full-back who has stepped up.
+   *
+   * So the handwriting is not decoration. It is the annotation layer: the
+   * aside, the signature, the thing a person scribbled next to the data. Which
+   * is exactly why it is rationed. It goes on the brand's own voice -- the
+   * sign-off, the lead-in, the take -- and never on a number, a price, a
+   * scoreline or a control. The moment it labels data it stops being a voice
+   * and becomes a font choice.
+   *
+   * It was in this codebase once, as `--script`, and got flattened into an
+   * alias for the display face during a rebuild. Nobody noticed it had gone
+   * except the person who missed it.
+   */
+  --hand: Caveat, 'Bradley Hand', 'Segoe Script', cursive;
 
-  --text-2xs: 0.6875rem;   /* 11px — chips, over-line labels */
-  --text-xs:  0.75rem;     /* 12px — dense table cells */
-  --text-sm:  0.8125rem;   /* 13px — secondary */
-  --text-md:  0.9375rem;   /* 15px — body */
-  --text-lg:  1.0625rem;   /* 17px — lead */
-  --text-xl:  1.375rem;    /* 22px */
-  --text-2xl: 1.875rem;    /* 30px */
-  --text-3xl: clamp(2rem, 4.5vw, 3.25rem);
-  --text-4xl: clamp(2.75rem, 8vw, 5.5rem);
+  /*
+   * No width axis on the display face, so these are kept only because the
+   * component layer still names them and an unresolved var() invalidates the
+   * whole declaration. They resolve to 100 and do nothing.
+   */
+  --wide:      100;
+  --condensed: 100;
+  --tight:     100;
 
+  /* A scoreboard shouts. 800 is for numbers and one headline per screen. */
   --weight-normal: 400;
-  --weight-medium: 600;
+  --weight-medium: 500;
   --weight-bold:   700;
-  --weight-black:  900;
+  --weight-black:  800;
 
-  --leading-tight: 1.1;
-  --leading-snug:  1.3;
+  --text-2xs: 0.6875rem;
+  --text-xs:  0.75rem;
+  --text-sm:  0.8125rem;
+  --text-md:  0.875rem;
+  --text-lg:  1rem;
+  /*
+   * From --text-xl up, these sizes are set in the display face, and the display
+   * face is Big Shoulders: a signage type so narrow that at a given pixel size
+   * it reads roughly a third smaller than a normal grotesque. Seen rendered for
+   * the first time at the old numbers, every heading on the site looked timid.
+   * These are the same scale pushed up to match it optically.
+   */
+  --text-xl:  1.625rem;
+  --text-2xl: 2rem;
+  --text-3xl: clamp(2rem, 3.2vw, 2.75rem);
+  --text-4xl: clamp(2.5rem, 4.2vw, 3.5rem);
+  /* The matchup on a masthead, and nothing else on the site. */
+  --text-hero: clamp(2.25rem, 4.4vw, 3.75rem);
+
+  --leading-tight:  1.02;
+  --leading-snug:   1.3;
   --leading-normal: 1.55;
-  --leading-loose: 1.7;
 
-  --tracking-tight: -0.02em;
-  --tracking-normal: 0;
-  --tracking-wide:  0.06em;
-  --tracking-caps:  0.1em;
+  /* Tracking tightens as size grows. Flat tracking across a scale is the
+     amateur tell. */
+  --tracking-hero: -0.005em;
+  --tracking-4xl: -0.005em;
+  --tracking-3xl: 0;
+  --tracking-2xl: 0;
+  --tracking-xl:  0.005em;
+  --tracking-md:  -0.006em;
+  --tracking-sm:  0;
+  --tracking-wide: 0.04em;
+  --tracking-num: -0.02em;
 
-  /* ---------------------------------------------------------------- space */
+  /* ----------------------------------------------------------------- space */
 
-  /* 4px base. Density comes from having 4 and 6 available, not from
-     improvising values between the steps of a coarser scale. */
-  --space-0:  0;
   --space-1:  4px;
   --space-2:  6px;
   --space-3:  8px;
@@ -112,55 +210,112 @@
   --space-7:  24px;
   --space-8:  32px;
   --space-9:  40px;
-  --space-10: 56px;
-  --space-11: 72px;
-  --space-12: 96px;
+  --space-10: 48px;
+  --space-11: 64px;
+  --space-12: 80px;
+  --space-13: 96px;
 
-  --gutter: clamp(16px, 4.5vw, 64px);
-  --maxw:   1380px;
+  /*
+   * The board's outer columns are fixed rather than content-sized.
+   *
+   * Each row is its own grid, so an `auto` column resolves per row: "£10
+   * returns £11.40" is wider than "£10 returns £11", and that difference
+   * pushed the call column a few pixels left or right on every line. A board
+   * a reader scans down has to have one geometry, not one per row.
+   */
+  --col-when:  86px;
+  --col-price: 124px;
+  /* The right-hand rail: a dense list beside the main column, as the reference
+     runs its news down the side of everything. */
+  --col-side: 340px;
 
-  /* --------------------------------------------------------------- border */
+  --gutter: clamp(16px, 3vw, 32px);
+  /* Capped. Full-bleed data is a dashboard smell; Polymarket holds at 1168px
+     despite being a data product. */
+  --maxw:   1180px;
+  --maxw-read: 680px;
 
-  --radius-sm: 8px;
-  --radius:    14px;
-  --radius-lg: 24px;
+  /* ---------------------------------------------------------------- shape */
+
+  /* Three values and no more. A long radius vocabulary is what Bootstrap gave
+     everyone and it shows. */
+  /*
+   * Buttons are rounded rectangles, not pills.
+   *
+   * Everything on this site was a 999px pill, which is the shape a marketing
+   * page uses. The reference reserves the pill for the navigation and for
+   * status chips, and gives every actual button an 8px corner. That one change
+   * does more to make a page look like a product than any amount of colour.
+   */
+  --radius-sm: 4px;
+  --radius:    8px;
+  --radius-lg: 12px;
+  /*
+   * `--radius-pill` is for things that are actually round -- a crest, a status
+   * dot, a progress track. It is NOT for labels. Every tag, chip, badge and
+   * navigation item on this site was a 999px lozenge, which is the shape a
+   * marketing page uses for a feature list, and thirteen of them on one screen
+   * is what "generically styled" looks like. Labels are square now.
+   */
   --radius-pill: 999px;
 
-  --border:       1px;
-  --border-thick: 2px;
+  --border: 1px;
 
   /* ------------------------------------------------------------ elevation */
 
-  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --elev-2: 0 4px 12px rgba(0, 0, 0, 0.45);
-  --elev-3: 0 12px 32px rgba(0, 0, 0, 0.55);
-  --elev-inset: inset 0 1px 0 rgba(244, 238, 226, 0.04);
+  /* An inset ring plus a shallow offset, never a single heavy drop. Identical
+     rounded cards each wearing the same soft grey shadow is the SaaS-card tell
+     — depth here comes from the 4% surface steps and the hairlines. */
+  --ring-inset: inset 0 1px 0 rgba(247, 244, 237, 0.045);
+  --elev-1: var(--ring-inset), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --elev-2: var(--ring-inset), 0 8px 16px rgba(0, 0, 0, 0.32);
+  --elev-3: var(--ring-inset), 0 20px 48px rgba(0, 0, 0, 0.44);
 
-  /* Focus. 2.4.7 wants this visible, and on a near-black ground the accent
-     alone is not enough — the dark ring is what separates it from the gold. */
-  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--gold);
+  --focus-ring: 0 0 0 2px var(--pitch), 0 0 0 4px var(--floodlight);
 
   /* --------------------------------------------------------------- motion */
 
+  /* The data's block-based register specifies 200–300ms for deliberate
+     transitions; anything a finger is waiting on stays under 150. */
   --dur-instant: 80ms;
   --dur-fast:    140ms;
   --dur-normal:  220ms;
-  --dur-slow:    400ms;
+  --dur-slow:    420ms;
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
 
-  /* ---------------------------------------------------------------- misc */
+  /* ----------------------------------------------------------------- misc */
 
-  --tap: 44px;   /* 2.5.5 minimum touch target */
+  /* 44px, and the data adds the part everyone forgets: adjacent targets need
+     8px of clear space between them, not just size of their own. */
+  --tap: 44px;
+  --tap-gap: var(--space-3);
+
+  /* The sticky header's height, needed in three places that are not the header
+     itself: the mobile nav's top edge, scroll-padding for in-page anchors, and
+     the sticky filter bar on the board. */
+  --header-h: 56px;
   --z-header: 100;
-  --z-rail: 200;
   --z-overlay: 300;
 }
 
-/* 2.3.3 — respect a stated preference for less movement. Odds flashes and
-   poster transitions are exactly the kind of motion this is asking about. */
+/* Numerals everywhere. Tabular figures are the single highest ratio of effort
+   to perceived quality in a product full of prices: every digit takes the same
+   width, so columns align and a price moving from 1.90 to 2.05 does not shift
+   the layout. Non-tabular figures make a live board jitter on every tick. */
+html {
+  font-variant-numeric: lining-nums tabular-nums;
+  font-feature-settings: 'cv01' 1, 'ss03' 1;
+}
+
+/* A condensed cut from the display family, for anything that has to survive
+   a long club name or a column of prices. */
+.condensed {
+  font-family: var(--display);
+  font-variation-settings: 'wdth' var(--condensed);
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --dur-instant: 0ms;

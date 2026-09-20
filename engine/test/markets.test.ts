@@ -66,6 +66,18 @@ test('a whole line says the stake comes back', () => {
   assert.match(d.wins, /your stake comes back/i);
 });
 
+test('the away side of a handicap is the mirror of the home one', () => {
+  // `line` is the home handicap and belongs to the market: one -0.75 covers
+  // both quotes. Printed against the away name it was saying "Elche -0.75"
+  // when Elche were the side being given three quarters of a goal.
+  const away = mkt({ market: 'asian_handicap', outcome: 'AWAY', line: -0.75, home: 'Osasuna', away: 'Elche', odds: 2.35 });
+  assert.equal(away.name, 'Elche +0.75');
+  assert.match(away.plain, /three-quarter-goal start/);
+  // And the home side of the same market still reads the other way round.
+  const home = mkt({ market: 'asian_handicap', outcome: 'HOME', line: -0.75, home: 'Osasuna', away: 'Elche', odds: 2.35 });
+  assert.equal(home.name, 'Osasuna -0.75');
+});
+
 test('draw no bet explains the refund rather than naming itself', () => {
   const d = mkt({ market: 'draw_no_bet', outcome: 'HOME', home: 'Genoa', away: 'Sudtirol', odds: 1.5 });
   assert.equal(d.name, 'Genoa to win');
@@ -95,11 +107,19 @@ test('goals markets say a whole number of goals', () => {
   assert.match(under.wins, /^3 goals or fewer/);
 });
 
-test('every market shows what a stake returns', () => {
-  assert.equal(returned(2.35, 10), '£23.50');
-  assert.equal(returned(2, 10), '£20');
-  const d = mkt({ market: '1x2', outcome: 'HOME', home: 'Arsenal', away: 'Spurs', odds: 1.75 });
-  assert.equal(d.returns, '£10 returns £17.50');
+test('every market shows what a stake returns, in the reader\'s own money', () => {
+  // The country is passed rather than detected: the default comes from the
+  // device's timezone, so a test that assumed pounds passed in London and
+  // failed on a CI runner in Virginia, which is the test being about the
+  // runner rather than about the code.
+  assert.equal(returned(2.35, 10, 'GB'), '£23.50');
+  assert.equal(returned(2, 10, 'GB'), '£20');
+  assert.equal(returned(2, 2000, 'NG'), '₦4,000');
+  assert.equal(returned(2, 1000, 'JP'), '¥2,000');
+
+  const d = mkt({ market: '1x2', outcome: 'HOME', home: 'Arsenal', away: 'Spurs', odds: 1.75, stake: 10 });
+  // Whatever the runner's locale, a stake line names one currency twice.
+  assert.match(d.returns, /^(\D+)10 returns \1\s?17\.50$/, d.returns);
 });
 
 test('no description uses the private vocabulary', () => {

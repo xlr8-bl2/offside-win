@@ -10,7 +10,10 @@
  * reasoning is the product and it ships in full; the machinery does not.
  */
 
-import { describe as market } from './js/lib/markets.js';
+import { describe as market, didItLand, recap } from './js/lib/markets.js';
+import { COUNTRY_NAMES, cash, country, localPrice, purse } from './js/lib/books.js';
+import { cleanProse } from './js/lib/vocabulary.js';
+import { authHeaders, completeSignIn, currentUser, signInWithEmail, signInWithGoogle, signOut } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
 
@@ -19,8 +22,16 @@ const esc = (s) =>
 const pct = (v, dp = 0) => (typeof v === 'number' && isFinite(v) ? `${(v * 100).toFixed(dp)}%` : '—');
 const dec = (v) => (typeof v === 'number' && isFinite(v) ? v.toFixed(2) : '—');
 
+/**
+ * Every read goes through here, which is why the token goes on here.
+ *
+ * authHeaders() returns an empty object for a signed-out reader without
+ * loading anything, so this costs nothing on the page most people see. It also
+ * never throws: a failure to attach a token produces an anonymous request,
+ * which is a page that loads rather than a page that does not.
+ */
 async function getJSON(path) {
-  const res = await fetch(path);
+  const res = await fetch(path, { headers: await authHeaders() });
   if (!res.ok) {
     let msg = 'Something went wrong loading this.';
     try { msg = (await res.json()).error ?? msg; } catch { /* body was not json */ }
@@ -33,12 +44,67 @@ function kickoffLabel(epoch) {
   if (!epoch) return '';
   const d = new Date(epoch * 1000);
   const now = new Date();
-  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
   if (d.toDateString() === now.toDateString()) return `Today ${time}`;
   if (new Date(now.getTime() + 864e5).toDateString() === d.toDateString()) return `Tomorrow ${time}`;
   return `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} ${time}`;
 }
 const isSoon = (epoch) => epoch && epoch * 1000 - Date.now() < 6 * 3600e3;
+
+/**
+ * What state a match is actually in.
+ *
+ * The board runs from six hours ago so that today's games stay on it, which
+ * means a third of it has already kicked off and a chunk of it has finished —
+ * and every one of them was rendered as though it were still to come, with a
+ * kick-off time and nothing else. A hundred and seventy-seven matches on a
+ * three-hundred-match board were lying about their state.
+ *
+ * The provider's status is authoritative where it has one. Where it says
+ * `notstarted` about a game that kicked off ninety minutes ago — which happens,
+ * because the feed lags — the clock is trusted over the flag, but only far
+ * enough to stop claiming the match is upcoming.
+ */
+const LIVE_STATES = new Set(['1st_half', '2nd_half', 'extra_time', 'penalties', 'live']);
+
+function matchState(f) {
+  const status = String(f?.status ?? '').toLowerCase();
+  if (status === 'finished' || status === 'ended' || status === 'aet' || status === 'ap') {
+    return { kind: 'ft', label: 'Full time', short: 'FT' };
+  }
+  if (status === 'halftime' || status === 'ht') {
+    return { kind: 'live', label: 'Half time', short: 'HT' };
+  }
+  if (LIVE_STATES.has(status)) return { kind: 'live', label: 'Live', short: 'LIVE' };
+  if (status === 'postponed' || status === 'cancelled' || status === 'canceled') {
+    return { kind: 'off', label: 'Postponed', short: 'OFF' };
+  }
+  const started = f?.kickoff && f.kickoff * 1000 < Date.now();
+  // Feed says not started, clock says otherwise. Say "under way" rather than
+  // inventing a half we cannot see.
+  if (started) return { kind: 'live', label: 'Under way', short: 'LIVE' };
+  return { kind: 'upcoming', label: '', short: '' };
+}
+
+/** The red dot and the word, for anything that is happening now. */
+function liveBadge(state) {
+  if (state.kind === 'upcoming') return '';
+  const cls = state.kind === 'live' ? 'live-badge' : 'live-badge done';
+  return `<span class="${cls}">${state.kind === 'live' ? '<i></i>' : ''}${esc(state.short)}</span>`;
+}
+
+const MINOR = new Set(['the', 'of', 'a', 'an', 'and', 'in', 'on', 'at', 'de', 'del', 'da', 'do']);
+
+function unshout(text) {
+  const t = String(text ?? '').trim();
+  if (!t || t !== t.toUpperCase() || !/[A-Z]{4}/.test(t)) return t;
+  // Title case rather than sentence case: these are names. Flattening
+  // "THE MADRID DERBY" to "The madrid derby" trades one wrong reading for
+  // another, and a proper noun in lower case looks like a typo.
+  return t.toLowerCase().replace(/[^\s-]+/g, (w, i) => (
+    i > 0 && MINOR.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)
+  ));
+}
 
 // ---------------------------------------------------------- team identity
 
@@ -84,13 +150,32 @@ function crest(name, size = 'md', id = null, type = 'team') {
  * like `style.opponent_adjustment` is a note to ourselves, not a heading for a
  * reader, and a page that leaks them reads like a debug view.
  */
+/*
+ * What a factor is called when a reader sees it.
+ *
+ * An id that is not in here never reaches the page. That is the point of the
+ * map: the ledger carries everything the engine weighed, including several
+ * things that exist only so the engine can weigh them, and the page is not a
+ * dump of the ledger.
+ *
+ * `availability.rotation_risk` used to be in here as "Selection" and printed
+ * "Lineup is predicted rather than confirmed, at 65% confidence" -- three
+ * pieces of private vocabulary in one sentence, about a fact the page already
+ * states as "line-ups not final". Gone.
+ */
+/** The board's three states, in the order a matchday happens in. */
+const WHEN = [
+  { id: 'upcoming', label: 'To play' },
+  { id: 'live', label: 'Live' },
+  { id: 'played', label: 'Played' },
+];
+
 const READ_LABEL = {
   'availability.home.absences': 'Team news',
   'availability.away.absences': 'Team news',
   'availability.home.full_strength': 'Squad',
   'availability.away.full_strength': 'Squad',
   'availability.lineup_confirmed': 'Line-ups',
-  'availability.rotation_risk': 'Selection',
   'stakes.season': "What's at stake",
   'stakes.table': "What's at stake",
   'fixture.derby': 'Derby',
@@ -119,7 +204,56 @@ const READ_LABEL = {
 
 // ------------------------------------------------------------------ state
 
-const state = { board: null, hours: 72, leagueName: '', heroVenue: [], hero: null };
+const state = {
+  board: null, hours: 72, leagueName: '', heroVenue: [], hero: null,
+  user: null, authError: null, tick: null,
+  /*
+   * The board opens on the games we have a call on.
+   *
+   * Forty-four per cent of it has no call, and by kick-off order that meant the
+   * first four rows of the product all read "No call — the price looks about
+   * right to us." That is an honest sentence and a terrible opening: a reader
+   * arriving on the picks page should land on picks. Everything is one tap
+   * away and the count is stated, so nothing is hidden by it.
+   */
+  show: 'calls',
+  /*
+   * Which part of the board: still to play, being played, already played.
+   * Kept out of `show` because they are different questions -- a reader can
+   * want every finished game, or only the finished ones we called.
+   */
+  when: 'upcoming',
+};
+
+/**
+ * The hash, split into a path and a query.
+ *
+ * `location.hash.slice(2).split('/')` was fine while every route was a bare
+ * path, and wrong the moment one carried state: `#/board?league=La%20Liga`
+ * came back as a single part named `board?league=La%20Liga`, so the router
+ * fell through to home. Splitting the query off first is the whole fix.
+ */
+function parseHash() {
+  const raw = (location.hash || '#/home').slice(1);
+  const cut = raw.indexOf('?');
+  const path = cut === -1 ? raw : raw.slice(0, cut);
+  const query = cut === -1 ? '' : raw.slice(cut + 1);
+  return {
+    parts: path.replace(/^\//, '').split('/').filter(Boolean),
+    params: new URLSearchParams(query),
+  };
+}
+
+/** The board's own address, so a filtered board can be sent to someone. */
+function boardHash(hours = state.hours, league = state.leagueName) {
+  const q = new URLSearchParams();
+  if (Number(hours) !== 72) q.set('hours', String(hours));
+  if (league) q.set('league', league);
+  if (state.show === 'all') q.set('show', 'all');
+  if (state.when !== 'upcoming') q.set('when', state.when);
+  const s = q.toString();
+  return s ? `#/board?${s}` : '#/board';
+}
 
 async function loadBoard() {
   state.board = await getJSON(`/api/board?hours=${state.hours}`);
@@ -177,143 +311,273 @@ function venueShot(venueIds, className, eager = false) {
     onload="window.__shotCheck(this)" onerror="window.__shotMissing(this)">`;
 }
 
-function heroHTML(hero = null, venueIds = []) {
+/**
+ * The masthead.
+ *
+ * One photograph, edge to edge, with the fixture in the bottom-left of it.
+ *
+ * The version before this put the picture in a bounded plate beside the type,
+ * to keep the type off a bright photograph. That solved the problem by giving
+ * up the thing photography is for. The answer is a scrim shaped to the layout
+ * -- heaviest where the words are, clear where the subject is -- which is what
+ * every club site and every broadcaster does, and it is the single change that
+ * makes a page look like football rather than like a fixture list.
+ *
+ * The fixture is two rows, crest then name, rather than "A vs B" across one
+ * line. Stacked, the crests can be big enough to recognise.
+ */
+/**
+ * The match centre that sits on the photograph.
+ *
+ * The masthead was a tie, a line and two buttons on top of a picture, and the
+ * right two thirds of it were empty. Everything here is already in the fixture
+ * bundle and none of it is behind the wall: where the two sides sit in the
+ * table, how they have been going, and what has happened the other 128 times
+ * they have met. No price, because the front door carries none.
+ *
+ * The countdown is the only thing on this site that moves. A board of football
+ * about to kick off should feel like it is about to kick off.
+ */
+function ordinal(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '';
+  const s = ['th', 'st', 'nd', 'rd'];
+  const m = v % 100;
+  return v + (s[(m - 20) % 10] ?? s[m] ?? s[0]);
+}
+
+function matchCentreHTML(hero, d) {
+  if (!d) return '';
+  const st = d.standings ?? {};
+  const h2h = d.h2h ?? {};
+
+  const side = (name, id, table, form) => `
+    <div class="mc-side">
+      ${crest(name, 'sm', id)}
+      <span class="mc-name">${esc(name)}</span>
+      ${table?.position ? `<span class="mc-pos">${esc(ordinal(table.position))}</span>` : ''}
+      ${formChips(form)}
+    </div>`;
+
+  const meetings = Number(h2h.total_matches) || 0;
+  return `
+  <aside class="matchcentre">
+    <div class="mc-block mc-clock">
+      <span class="mc-label">Kicks off in</span>
+      <span class="mc-count" data-countdown="${Number(hero.kickoff) || 0}">—</span>
+    </div>
+
+    ${(st.home?.position || st.away?.position) ? `
+      <div class="mc-block">
+        <span class="mc-label">In the table</span>
+        ${side(hero.home, hero.home_id, st.home, d.form?.home)}
+        ${side(hero.away, hero.away_id, st.away, d.form?.away)}
+      </div>` : ''}
+
+    ${meetings ? `
+      <div class="mc-block">
+        <span class="mc-label">${meetings} meetings</span>
+        ${formBarHTML(
+          Number(h2h.home_wins) || 0,
+          Number(h2h.draws) || 0,
+          Number(h2h.away_wins) || 0,
+          [`${hero.home}`, 'drawn', `${hero.away}`],
+          '',
+          'neutral',
+        )}
+      </div>` : ''}
+  </aside>`;
+}
+
+function heroHTML(hero = null, venueIds = [], detail = null) {
   const queue = hero?.venue_id ? [hero.venue_id, ...venueIds] : [].concat(venueIds).filter(Boolean);
-  const kicker = hero?.kicker ?? '88 leagues · every day';
 
-  // With a fixture chosen, the masthead is about tonight's game. Without one —
-  // an empty board, a failed slate — it falls back to the standing headline
-  // rather than to an empty stage.
-  // Long club names have to be allowed to shrink. "RSC Anderlecht v Olympique
-  // Lyonnais" at the size "Arsenal v Everton" wants filled the whole viewport and
-  // pushed the buttons off the bottom of it.
-  const longest = hero ? Math.max(hero.home.length, hero.away.length) : 0;
-  const size = longest > 20 ? '3.1vw' : longest > 14 ? '4vw' : '5.2vw';
+  if (!hero) {
+    return `
+    <section class="hero" data-shot="${queue.length ? 'yes' : 'none'}">
+      <div class="hero-media">${venueShot(queue, '', true)}</div>
+      <div class="wrap hero-inner">
+        <div class="hero-copy">
+          <h1 class="display">The picks for the biggest games.</h1>
+          <p class="hero-blurb">Every call comes with the reason behind it. And the reason
+             not to like it. Eighty-eight competitions, updated through the day.</p>
+          <div class="hero-cta">
+            <a class="btn btn-primary" href="#/board">Today's picks</a>
+            <a class="btn btn-ghost" href="#/results">See the results</a>
+          </div>
+        </div>
+      </div>
+    </section>`;
+  }
 
-  const body = hero
-    ? `<h1 class="display hero-fx" style="--fx: clamp(1.9rem, ${size}, 4.6rem)">
-         <span>${esc(hero.home)}</span>
-         <em>vs</em>
-         <span>${esc(hero.away)}</span>
-       </h1>
-       <p class="lede">${esc(hero.league)} · ${esc(kickoffLabel(hero.kickoff))}. Our call, and the reasons behind it.</p>
-       <div class="hero-cta">
-         <a class="btn btn-primary btn-lg" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">Read the analysis
-           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
-         <a class="btn btn-ghost btn-lg" href="#/board">All of today's picks</a>
-       </div>`
-    : `<h1 class="display">The picks for the <em>biggest</em> games.</h1>
-       <p class="lede">Every call comes with the reason behind it. And the reason not to like it.</p>
-       <div class="hero-cta">
-         <a class="btn btn-primary btn-lg" href="#/board">Today's picks
-           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
-         <a class="btn btn-ghost btn-lg" href="#/results">See the results</a>
-       </div>`;
+  const when = kickoffLabel(hero.kickoff);
+  // The occasion is the pundit's aside — "the Madrid derby", "Champions League
+  // night" — so it goes in the handwriting above the tie, not buried in a
+  // sentence under it. The league stays in the blurb, where it is a fact.
+  const aside = unshout(hero.kicker) || hero.league || '';
 
   return `
   <section class="hero" data-shot="${queue.length ? 'yes' : 'none'}">
     <div class="hero-media">${venueShot(queue, '', true)}</div>
-    <div class="hero-inner">
-      <p class="kicker">${esc(kicker)}</p>
-      ${body}
-      <p class="script hero-script">Same games.<br>Better picks.</p>
-      ${hero
-        ? `<div class="hero-badges">
-             ${crest(hero.home, 'xl', hero.home_id)}
-             <span class="hero-vs">V</span>
-             ${crest(hero.away, 'xl', hero.away_id)}
-           </div>`
-        : ''}
+    <div class="wrap hero-inner">
+      <div class="hero-copy">
+        <span class="timechip${isSoon(hero.kickoff) ? ' soon' : ''}">${esc(when)}</span>
+        ${aside ? `<p class="kicker">${esc(aside)}</p>` : ''}
+        <div class="fx-stack">
+          <span class="fx-line">${crest(hero.home, 'md', hero.home_id)}<span class="name">${esc(hero.home)}</span></span>
+          <span class="fx-line">${crest(hero.away, 'md', hero.away_id)}<span class="name">${esc(hero.away)}</span></span>
+        </div>
+        <p class="hero-blurb">${esc(hero.league ?? '')}${hero.league ? '. ' : ''}Our call on it, the
+           argument for it, and the thing that argues against it.</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">Read the analysis</a>
+          <a class="btn btn-ghost" href="#/board">All of today's picks</a>
+        </div>
+      </div>
+      ${matchCentreHTML(hero, detail)}
     </div>
-  </section>
-  <div class="trust"><div class="trust-inner">
-    ${[
-      ['88 leagues', 'Europe, the Americas, Asia'],
-      ['Updated every 15 minutes', 'Prices and team news'],
-      ['Every pick explained', 'Including what argues against it'],
-      ['Full results published', 'Won and lost, nothing hidden'],
-    ].map(([t, sub]) => `<div class="trust-item"><b>${esc(t)}</b><span>${esc(sub)}</span></div>`).join('')}
-  </div></div>`;
+  </section>`;
 }
-
-function railHTML(fixtures) {
-  const byLeague = new Map();
-  for (const f of fixtures) {
-    const k = f.league_id ?? f.league;
-    const e = byLeague.get(k) ?? { name: f.league ?? '', id: f.league_id, n: 0, rank: f.rank ?? 6 };
-    e.n++;
-    e.rank = Math.min(e.rank, f.rank ?? 6);
-    byLeague.set(k, e);
-  }
-  // By prominence, not by fixture count — otherwise the rail opens on whichever
-  // minor division happens to have the fullest card that day.
-  const top = [...byLeague.values()]
-    .sort((a, b) => (a.rank ?? 6) - (b.rank ?? 6) || b.n - a.n)
-    .slice(0, 16);
-  if (!top.length) return '';
-  return `
-  <div class="rail"><div class="rail-inner">
-    <span class="rail-label">On today</span>
-    ${top.map((l) => `<a class="rail-item" href="#/board">${crest(l.name, 'sm', l.id, 'league')}<b>${esc(l.name)}</b><span class="count">${l.n}</span></a>`).join('')}
-  </div></div>`;
-}
-
 
 /**
- * A pick, and the only four things a reader gets: what it is, what has to
- * happen, the price, and who is offering it.
+ * What is on after the headline fixture.
  *
- * No class tag, no percentage, no meter. Those were our filing system and our
- * scoring leaking onto the page; see engine/src/vocabulary.ts.
+ * Six compact cards, each the board row stripped to two clubs and a kick-off.
+ * A call is marked on the club it is about rather than spelled out, because at
+ * this size there is room for a mark and not for a sentence.
  */
-function pickHTML(pick, f) {
-  const d = market({
-    market: pick.market, outcome: pick.outcome, line: pick.line,
-    home: f.home, away: f.away, odds: pick.odds,
-  });
+function nextRailHTML(fixtures) {
+  const soon = fixtures.slice(0, 8);
+  if (!soon.length) return '';
+  const clock = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
   return `
-  <div class="card-pick">
-    <span class="sel">${esc(d.name)}</span>
-    <p class="wins">${esc(d.wins)}</p>
-    <div class="pick-meta">
-      <span class="price">${dec(pick.odds)}</span>
-      ${pick.bookmaker ? `<span class="book">at ${esc(pick.bookmaker)}</span>` : ''}
-      <span class="ret">${esc(d.returns)}</span>
+  <div class="wrap section dense">
+    <div class="section-head"><div><h2 class="display">Next up</h2></div>
+      <a class="btn btn-ghost btn-sm" href="#/board">The full board</a></div>
+    <div class="next-rail">
+      ${soon.map((f) => {
+        const k = new Date(f.kickoff * 1000);
+        const time = k.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const st = matchState(f);
+        const mark = (f.top_pick || f.locked) ? '<span class="pill call">call</span>' : '';
+        return `
+        <a class="nextcard" href="#/fixture/${encodeURIComponent(f.id)}">
+          <span class="nextcard-side">${crest(f.home, 'sm', f.home_id)}<span>${esc(f.home)}</span>${mark}</span>
+          <span class="nextcard-side">${crest(f.away, 'sm', f.away_id)}<span>${esc(f.away)}</span></span>
+          <span class="nextcard-foot">
+            <span>${st.kind === 'upcoming' ? esc(dayLabel(f.kickoff)) : liveBadge(st)}</span>
+            <time>${clock}${esc(time)}</time>
+          </span>
+        </a>`;
+      }).join('')}
     </div>
   </div>`;
 }
 
-function cardHTML(f) {
-  const pick = f.top_pick;
-  // top_pick is the first confident call, so the rest start at one.
-  const extra = (f.confident ?? []).slice(pick ? 1 : 0).slice(0, 2);
+/** The one block of solid colour on the site, and it sells the membership. */
+function promoHTML(user) {
   return `
-  <article class="card" data-id="${f.id}" tabindex="0" role="link" aria-label="${esc(f.home)} versus ${esc(f.away)}">
-    <div class="card-top">
-      <span class="card-league">${crest(f.league ?? '', 'sm', f.league_id, 'league')}<span>${esc(f.league ?? '')}</span></span>
-      <span class="card-kick${isSoon(f.kickoff) ? ' soon' : ''}">${esc(kickoffLabel(f.kickoff))}</span>
-    </div>
-
-    <div class="vs">
-      <div class="vs-side">${crest(f.home, 'lg', f.home_id)}<span>${esc(f.home)}</span></div>
-      <span class="vs-mark">vs</span>
-      <div class="vs-side">${crest(f.away, 'lg', f.away_id)}<span>${esc(f.away)}</span></div>
-    </div>
-
-    ${pick ? pickHTML(pick, f) : `<div class="card-pick none">
-           <b>No call here</b>
-           <span>The price looks about right to us. We would rather say nothing than pad the board.</span>
-         </div>`}
-    ${extra.length
-      ? `<div class="also">${extra.map((c) => {
-           const d = market({ market: c.market, outcome: c.outcome, line: c.line, home: f.home, away: f.away, odds: c.odds });
-           return `<span class="also-call">${esc(d.name)} <b>${dec(c.odds)}</b></span>`;
-         }).join('')}</div>`
-      : ''}
-    <span class="card-go">Read the analysis →</span>
-  </article>`;
+  <section class="promo">
+    <p class="hand promo-aside">nobody else prints the losses</p>
+    <h2>Every call, every competition.</h2>
+    <p>The analysis is free and stays free. Membership is the call itself — which market,
+       which side, the price and the book offering it.</p>
+    <a class="btn btn-light" href="#/pricing">${user ? 'See what membership costs' : 'Become a member'}</a>
+  </section>`;
 }
 
+/**
+ * The right-hand rail: the calls that are live now.
+ *
+ * The reference runs its newsroom down this side of every page and the layout
+ * depends on it being there. We have no newsroom, so this carries the thing a
+ * reader came for instead — which is a better use of the column anyway.
+ */
+function sideHTML(fixtures) {
+  const withCall = fixtures.filter((f) => f.top_pick).slice(0, 10);
+  if (!withCall.length) return '';
+  return `
+  <aside>
+    <h2 class="side-head">Live calls <a href="#/board">All</a></h2>
+    <div class="side-list">
+      ${withCall.map((f) => {
+        const d = market({
+          market: f.top_pick.market, outcome: f.top_pick.outcome, line: f.top_pick.line,
+          home: f.home, away: f.away, odds: f.top_pick.odds,
+        });
+        return `
+        <a class="side-item" href="#/fixture/${encodeURIComponent(f.id)}">
+          <span class="side-thumb">${crest(f.home, 'sm', f.home_id)}${crest(f.away, 'sm', f.away_id)}</span>
+          <span class="side-body">
+            <span class="side-sel">${esc(d.name)}</span>
+            <span class="side-meta">${esc(kickoffLabel(f.kickoff))}<b>${dec(f.top_pick.odds)}</b></span>
+          </span>
+        </a>`;
+      }).join('')}
+    </div>
+  </aside>`;
+}
+
+/**
+ * Won, drawn, lost as one bar — in counts, with its scope stated.
+ *
+ * The keys used to be percentages, which put "77% won" six lines under a
+ * headline reading "a 83% strike rate". Both were true and they had different
+ * denominators: the headline covers the whole settled record, the bar covers
+ * only the picks this page fetched. Two rates that close together read as the
+ * page contradicting itself, which is exactly what it was accused of.
+ *
+ * Counts do not compete with a rate the way a second rate does, and the scope
+ * line says what is being counted, so the bar can keep its detail.
+ */
+function formBarHTML(w, d, l, labels = ['won', 'drawn', 'lost'], scope = '', tone = '') {
+  const total = w + d + l;
+  if (!total) return '';
+  const pc = (n) => (n / total) * 100;
+  return `
+  <div class="formbar${tone ? ` ${tone}` : ''}">
+    <div class="formbar-track">
+      ${w ? `<i class="w" style="width:${pc(w)}%"></i>` : ''}
+      ${d ? `<i class="d" style="width:${pc(d)}%"></i>` : ''}
+      ${l ? `<i class="l" style="width:${pc(l)}%"></i>` : ''}
+    </div>
+    <div class="formbar-keys">
+      <span class="w"><b>${w}</b> ${esc(labels[0])}</span>
+      ${d ? `<span class="d"><b>${d}</b> ${esc(labels[1])}</span>` : ''}
+      <span class="l"><b>${l}</b> ${esc(labels[2])}</span>
+    </div>
+    ${scope ? `<p class="formbar-scope">${esc(scope)}</p>` : ''}
+  </div>`;
+}
+
+/**
+ * Settled picks as rows.
+ *
+ * The competition and the kick-off sit on their own muted line above the two
+ * clubs, which is what keeps the row itself down to a tie and one number. The
+ * price shows only where it is history a reader has gone looking for — never on
+ * the front door, which carries no odds at all.
+ */
+function playedHTML(picks, { showOdds = false } = {}) {
+  if (!picks.length) return '';
+  return `
+  <div class="played">
+    ${picks.map((x) => {
+      const won = x.result === 'WON' || x.result === 'HALF_WON';
+      const lost = x.result === 'LOST' || x.result === 'HALF_LOST';
+      const badge = showOdds ? dec(x.odds) : won ? 'Won' : lost ? 'Lost' : 'Void';
+      return `
+      <a class="played-row" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
+        <div class="played-meta"><span>${esc(kickoffLabel(x.kickoff))}</span></div>
+        <div class="played-tie">
+          <span class="played-side">${crest(x.home_team ?? '', 'sm', x.home_team_id)}<span>${esc(x.home_team ?? '')}</span></span>
+          <span class="played-score ${won ? 'w' : lost ? 'l' : ''}">${esc(badge)}</span>
+          <span class="played-side away">${crest(x.away_team ?? '', 'sm', x.away_team_id)}<span>${esc(x.away_team ?? '')}</span></span>
+        </div>
+      </a>`;
+    }).join('')}
+  </div>`;
+}
 
 /**
  * One fixture, one line.
@@ -329,45 +593,105 @@ function cardHTML(f) {
  */
 function rowHTML(f) {
   const pick = f.top_pick;
+  // The price a reader here can actually get on, which is rarely the best
+  // price in the world — see js/lib/books.js.
+  const p = pick && localPrice(pick.prices ?? [{ slug: '', book: pick.bookmaker, odds: pick.odds }]);
   const d = pick && market({
     market: pick.market, outcome: pick.outcome, line: pick.line,
-    home: f.home, away: f.away, odds: pick.odds,
+    home: f.home, away: f.away, odds: p ? p.odds : pick.odds,
   });
   const k = new Date(f.kickoff * 1000);
   // 24-hour: "11:00 PM" wraps in the column, and a board is read the way a
   // fixture list is printed.
   const time = k.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const state = matchState(f);
   const day = dayLabel(f.kickoff);
 
+  /*
+   * A played match has to read as played.
+   *
+   * The board reaches six hours back, so on any evening a third of it is
+   * matches that are over. They were drawn identically to the ones still to
+   * come: a kick-off time, a call, and a price presented as if it could still
+   * be taken. The only thing separating them was a small FT.
+   *
+   * Three things change instead. The score goes where the crest and the name
+   * are, the way a fixture list prints it. The price column becomes the mark —
+   * whether the call landed. And the row gets its own surface, so the eye sorts
+   * the board into over and not-over before reading a word of it.
+   */
+  const score = Array.isArray(f.score) && f.score.length === 2 ? f.score : null;
+  const played = state.kind === 'ft' && score;
+  // A match in progress shows its running score and no mark. `live_score` is a
+  // separate field from `score` on purpose: one is what it is at this minute,
+  // the other is how it finished, and printing the first as the second is how
+  // a goalless first half became a result.
+  const running = !played && Array.isArray(f.live_score) && f.live_score.length === 2 ? f.live_score : null;
+  const shown = score ?? running;
+  const landed = played && pick
+    ? didItLand({ market: pick.market, outcome: pick.outcome, line: pick.line,
+                  homeGoals: score[0], awayGoals: score[1] })
+    : null;
+  const MARK = { won: 'Landed', lost: 'Missed', back: 'Refunded', part: 'Half back' };
+
+  /*
+   * A game we passed on is one line, not four.
+   *
+   * It used to render the full card with "No call -- the price looks about
+   * right to us." underneath, which is an honest sentence that costs the same
+   * vertical space as an actual call and says it two hundred times down one
+   * board. The pass is still on the board, still reachable, and the reasoning
+   * is still on the fixture page. It just stops being the tallest thing on a
+   * page about picks.
+   */
+  const pass = !pick && !f.locked && !played;
+  // A locked row is the same shape as a pass: two lines, with the offer in the
+  // column the price would be in. The sentence it used to carry -- "We have a
+  // call on this one." -- was three lines of card spent saying nothing a lock
+  // does not already say, on the rows a reader is least able to act on.
+  const terse = pass || (f.locked && !played);
+
   return `
-  <article class="row" data-id="${f.id}" tabindex="0" role="link"
-           aria-label="${esc(f.home)} versus ${esc(f.away)}">
+  <a class="row is-${state.kind}${played ? ' is-played' : ''}${terse ? ' is-terse' : ''}" href="#/fixture/${encodeURIComponent(f.id)}"
+     aria-label="${esc(f.home)} versus ${esc(f.away)}">
     <div class="row-when">
-      <span class="row-league" title="${esc(f.league ?? '')}">
-        ${crest(f.league ?? '', 'xs', f.league_id, 'league')}
-      </span>
-      <span class="row-time">${esc(time)}</span>
-      <span class="row-day">${esc(day)}</span>
+      ${state.kind === 'upcoming'
+        ? `<span class="row-time">${esc(time)}</span><span class="row-day">${esc(day)}</span>`
+        : `<span class="row-time">${liveBadge(state)}</span><span class="row-day">${esc(time)}</span>`}
     </div>
 
     <div class="row-teams">
-      <span class="row-side">${crest(f.home, 'sm', f.home_id)}<span>${esc(f.home)}</span></span>
-      <span class="row-side">${crest(f.away, 'sm', f.away_id)}<span>${esc(f.away)}</span></span>
+      <span class="row-side">${crest(f.home, 'sm', f.home_id)}<span>${esc(f.home)}</span>${
+        shown ? `<b class="row-goals${shown[0] > shown[1] ? ' won' : ''}">${esc(shown[0])}</b>` : ''}</span>
+      <span class="row-side">${crest(f.away, 'sm', f.away_id)}<span>${esc(f.away)}</span>${
+        shown ? `<b class="row-goals${shown[1] > shown[0] ? ' won' : ''}">${esc(shown[1])}</b>` : ''}</span>
     </div>
 
-    <div class="row-call">
-      ${d
-        ? `<div class="row-sel">${esc(d.name)}</div><p class="row-wins">${esc(d.wins)}</p>`
-        : `<p class="row-none">No call — the price looks about right to us.</p>`}
-    </div>
+    ${d ? `<div class="row-call">
+      <div class="row-sel">${esc(d.name)}</div>
+      <p class="row-wins">${
+        played
+          ? esc(recap({ market: pick.market, outcome: pick.outcome, line: pick.line,
+                        result: landed === 'won' ? 'WON' : landed === 'lost' ? 'LOST' : 'VOID',
+                        homeGoals: score[0], awayGoals: score[1], home: f.home, away: f.away }) ?? d.wins)
+          : esc(d.wins)}</p>
+    </div>` : ''}
 
     <div class="row-price">
-      ${pick ? `
-        <span class="odds">${dec(pick.odds)}</span>
-        ${pick.bookmaker ? `<span class="odds-book">at <b>${esc(pick.bookmaker)}</b></span>` : ''}
-        <span class="odds-return">${esc(d.returns)}</span>` : ''}
+      ${played
+        ? (landed
+            ? `<span class="mark ${esc(landed)}">${esc(MARK[landed])}</span>${
+                pick ? `<span class="odds-book">at ${dec(p ? p.odds : pick.odds)}</span>` : ''}`
+            : `<span class="mark none">Full time</span>`)
+        : pick && p ? `
+        <span class="odds-tile${p.local ? '' : ' away'}"><span class="odds">${dec(p.odds)}</span></span>
+        <span class="odds-book">${pick.lean ? 'lean · ' : ''}${p.local ? esc(p.book) : `no ${esc(country())} book`}</span>`
+        : f.locked ? `<span class="row-locked-mark">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>
+                        Members</span>`
+        : `<span class="row-pass">Passed</span>`}
     </div>
-  </article>`;
+  </a>`;
 }
 
 /** "Today", "Tomorrow", or the weekday — nobody reads a date they can infer. */
@@ -412,63 +736,6 @@ function spread(fixtures, limit) {
   return out;
 }
 
-function bandHTML(sample) {
-  if (!sample) return '';
-  const { fixture, verdict } = sample;
-  return `
-  <section class="band" data-shot="${fixture.venue_id ? 'yes' : 'none'}">
-    <div class="band-media">${venueShot(fixture.venue_id, '')}</div>
-    <div class="band-inner">
-      <div>
-        <p class="eyebrow">Why ours</p>
-        <h2 class="display">Anyone can pick<br>a favourite.</h2>
-        <p class="lede" style="margin-top:20px">
-          The hard part is saying why — and saying what the pick has going against it.
-          That is on every call here.
-        </p>
-        <ul class="points">
-          <li><span class="n">01</span><div><b>The case, in plain English</b><span>Form, team news, rest, what the game is worth. Written out, not hidden behind a number.</span></div></li>
-          <li><span class="n">02</span><div><b>The catch, out loud</b><span>When something argues against the pick, we print it. Nobody else does.</span></div></li>
-          <li><span class="n">03</span><div><b>What it actually pays</b><span>A big strike rate at short odds is not a win. The return is always on the card.</span></div></li>
-        </ul>
-      </div>
-      <div class="reason">
-        <div class="qmeta">
-          ${crest(fixture.home, 'sm', fixture.home_id)}
-          <b style="color:var(--ink);font-weight:700">${esc(fixture.home)} v ${esc(fixture.away)}</b>
-          <span class="qodds">${dec(verdict.candidate?.odds ?? verdict.odds)}</span>
-        </div>
-        ${esc(verdict.narrative)}
-      </div>
-    </div>
-  </section>`;
-}
-
-function stripHTML(picks) {
-  const done = picks.filter((x) => x.result && x.result !== 'VOID').slice(0, 12);
-  if (!done.length) return '';
-  return `
-  <div class="strip"><div class="strip-inner">
-    <span class="rail-label">Recent results</span>
-    ${done.map((x) => {
-      const won = x.result === 'WON' || x.result === 'HALF_WON';
-      return `<span class="res">${crest(x.home_team ?? '', 'sm')}<span>${esc(x.home_team ?? '')} v ${esc(x.away_team ?? '')}</span>
-        <span class="score">${dec(x.odds)}</span><span class="mark ${won ? 'w' : 'l'}">${won ? '✓' : '✕'}</span></span>`;
-    }).join('')}
-  </div></div>`;
-}
-
-async function sampleNarrative(candidates) {
-  for (const f of candidates.slice(0, 5)) {
-    try {
-      const full = await getJSON(`/api/fixture/${f.id}`);
-      const v = (full.verdicts ?? []).find((x) => x.narrative && x.narrative.length > 150);
-      if (v) return { fixture: full, verdict: v };
-    } catch { /* next */ }
-  }
-  return null;
-}
-
 async function viewHome() {
   app.innerHTML = heroHTML(state.hero, state.heroVenue) + '<div class="spinner">Loading the board…</div>';
   let board;
@@ -477,6 +744,12 @@ async function viewHome() {
       loadBoard(),
       getJSON('/api/hero').catch(() => null),
     ]);
+    // The hero endpoint carries the fixture id and little else. The bundle
+    // behind it has the table, the form and the head-to-head, none of which is
+    // behind the wall, and all of which the masthead was leaving on the floor.
+    state.heroDetail = state.hero?.fixture_id
+      ? await getJSON(`/api/fixture/${state.hero.fixture_id}`).catch(() => null)
+      : null;
   } catch (err) {
     app.innerHTML = heroHTML(null, []) + `<div class="wrap section"><div class="empty">${esc(err.message)}</div></div>`;
     return;
@@ -486,7 +759,10 @@ async function viewHome() {
   const top = spread(withPicks, 8);
 
   let recent = [];
-  try { recent = (await getJSON('/api/picks?limit=40&settled=true')).picks ?? []; } catch { /* strip is optional */ }
+  try { recent = (await getJSON('/api/picks?limit=40&settled=true')).picks ?? []; } catch { /* optional */ }
+  const settled = recent.filter((x) => x.result && x.result !== 'VOID');
+  const won = settled.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
+  const lost = settled.filter((x) => x.result === 'LOST' || x.result === 'HALF_LOST').length;
 
   // Grounds hosting today's games, strongest call first. The browser works down
   // the list until one has a photograph, so the masthead is always a real
@@ -494,99 +770,90 @@ async function viewHome() {
   state.heroVenue = [...top, ...fixtures].map((f) => f.venue_id).filter(Boolean);
 
   app.innerHTML =
-    heroHTML(state.hero, state.heroVenue) +
-    railHTML(fixtures) +
-    `<div class="wrap section">
-       <div class="section-head">
-         <div>
-           <h2 class="display">Today's top picks</h2>
-           <p>${withPicks.length} calls across ${new Set(fixtures.map((f) => f.league)).size} leagues.</p>
+    heroHTML(state.hero, state.heroVenue, state.heroDetail) +
+    nextRailHTML(fixtures.filter((f) => f.id !== state.hero?.fixture_id)) +
+    `<div class="wrap section dense">
+       <div class="with-side">
+         <div class="stack" style="gap:var(--space-9)">
+           ${promoHTML(state.user)}
+           <div>
+             <div class="section-head">
+               <div><h2 class="display">How the last ${settled.length} went</h2></div>
+               <a class="btn btn-ghost btn-sm" href="#/results">The full record</a>
+             </div>
+             ${formBarHTML(won, settled.length - won - lost, lost, ['won', 'void', 'lost'],
+               `The last ${settled.length} to finish.`)}
+             ${playedHTML(settled.slice(0, 8))}
+           </div>
          </div>
-         <a class="btn btn-ghost" href="#/board">All ${fixtures.length} games</a>
+         ${sideHTML(top)}
        </div>
-       ${top.length ? `<div class="cards">${top.map(cardHTML).join('')}</div>`
-                    : `<div class="empty">Nothing worth calling right now. Check back shortly.</div>`}
-     </div>` +
-    stripHTML(recent) +
-    bandHTML(await sampleNarrative(top)) +
-    statsHTML(fixtures, recent) +
-    leaguesHTML(fixtures) +
-    closingHTML();
+     </div>`;
 
-  wireCards();
+  tickCountdowns();
 }
 
 /**
- * Four figures, all of them true.
+ * A back link.
  *
- * The reference designs lead on "500K+ active users" and "78% average prediction
- * accuracy". We have neither, and inventing them on a page that will eventually
- * take money is not a shortcut worth taking. These are read from the board and
- * the ledger, and they say enough.
+ * It used to be the character `←` typed into the label, which is the same
+ * mistake as `→` on a call to action: a glyph doing an icon's job, at whatever
+ * size and weight the text around it happens to be, with a screen reader
+ * announcing "left arrow back to the board".
  */
-function statsHTML(fixtures, recent) {
-  const calls = fixtures.filter((f) => f.top_pick).length;
-  const settled = recent.filter((x) => x.result && x.result !== 'VOID').length;
-  const items = [
-    ['88', 'Leagues covered'],
-    [String(fixtures.length), 'Games on the board'],
-    [String(calls), 'Calls live right now'],
-    [settled ? String(settled) : 'All', settled ? 'Results settled' : 'Picks published'],
-  ];
-  return `
-  <section class="statband"><div class="wrap">
-    <div class="statgrid">
-      ${items.map(([b, l]) => `<div class="statcell"><b>${esc(b)}</b><span>${esc(l)}</span></div>`).join('')}
-    </div>
-  </div></section>`;
+/**
+ * The countdown, ticking.
+ *
+ * One interval for the page rather than one per element, cleared by the router
+ * before it renders anything else — a timer left running after a route change
+ * writes into a node that is no longer in the document, and the leak only shows
+ * up after a reader has moved around for a while.
+ */
+function tickCountdowns() {
+  clearInterval(state.tick);
+  const paint = () => {
+    const nodes = app.querySelectorAll('[data-countdown]');
+    if (!nodes.length) { clearInterval(state.tick); return; }
+    for (const el of nodes) {
+      const left = Number(el.dataset.countdown) * 1000 - Date.now();
+      if (left <= 0) { el.textContent = 'Under way'; el.classList.add('live'); continue; }
+      const s = Math.floor(left / 1000);
+      const d = Math.floor(s / 86400);
+      const h = Math.floor((s % 86400) / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      el.textContent = d > 0
+        ? `${d}d ${String(h).padStart(2, '0')}h`
+        : `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+    }
+  };
+  paint();
+  state.tick = setInterval(paint, 1000);
 }
 
-function leaguesHTML(fixtures) {
-  const byLeague = new Map();
-  for (const f of fixtures) {
-    const k = f.league_id ?? f.league;
-    const e = byLeague.get(k) ?? { name: f.league ?? '', id: f.league_id, n: 0, rank: f.rank ?? 6 };
-    e.n++;
-    e.rank = Math.min(e.rank, f.rank ?? 6);
-    byLeague.set(k, e);
-  }
-  const rows = [...byLeague.values()]
-    .sort((a, b) => (a.rank ?? 6) - (b.rank ?? 6) || b.n - a.n)
-    .slice(0, 12);
-  if (!rows.length) return '';
-  return `
-  <div class="wrap section">
-    <div class="section-head">
-      <div><h2 class="display">Every league that matters</h2>
-      <p>From the Champions League down. ${rows.length} in play right now, 88 covered.</p></div>
-      <a class="btn btn-ghost" href="#/leagues">All leagues</a>
-    </div>
-    <div class="lgrid">
-      ${rows.map((e) => `
-        <a class="lcard" href="#/board" data-league="${esc(e.name)}">
-          ${crest(e.name, 'lg', e.id, 'league')}
-          <b>${esc(e.name)}</b>
-          <span>${e.n} ${e.n === 1 ? 'game' : 'games'}</span>
-        </a>`).join('')}
-    </div>
-  </div>`;
-}
-
-function closingHTML() {
-  return `
-  <section class="closing"><div class="wrap closing-in">
-    <div>
-      <p class="script" style="margin:0 0 4px">Your next win</p>
-      <h2 class="display">is one pick away.</h2>
-    </div>
-    <a class="btn btn-primary btn-lg" href="#/board">See today's board
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
-  </div></section>`;
+function backHTML(label) {
+  return `<button class="back" type="button">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+    ${esc(label)}
+  </button>`;
 }
 
 // ------------------------------------------------------------------ board
 
-async function viewBoard() {
+async function viewBoard(params = new URLSearchParams()) {
+  // The filters live in the URL, so a filtered board survives a reload and can
+  // be sent to someone. They used to live only in `state`, which meant the one
+  // thing a reader would want to share -- "the La Liga card for the next two
+  // days" -- was the one thing they could not.
+  const hours = Number(params.get('hours'));
+  if ([24, 48, 72, 120, 240].includes(hours)) state.hours = hours;
+  else if (params.has('hours')) state.hours = 72;
+  if (params.has('league')) state.leagueName = params.get('league');
+  if (params.has('show')) state.show = params.get('show') === 'all' ? 'all' : 'calls';
+  if (params.has('when')) {
+    const w = params.get('when');
+    state.when = WHEN.some((x) => x.id === w) ? w : 'upcoming';
+  }
+
   app.innerHTML = `<div class="wrap section dense">
     <div class="rows">${'<div class="skeleton skeleton-row"></div>'.repeat(8)}</div>
   </div>`;
@@ -598,14 +865,60 @@ async function viewBoard() {
   const fixtures = board.fixtures ?? [];
   const leagues = [...new Set(fixtures.map((f) => f.league).filter(Boolean))].sort();
 
+  /*
+   * How far the board actually reaches, which is not the same as the window
+   * asked for.
+   *
+   * `get_board` takes the first 300 rows and counts them afterwards, so on a
+   * busy weekend "next 240 hours" and "next 48 hours" return the same three
+   * hundred games and the API's own `count` says 300 either way. The filter
+   * then looks broken, because from the reader's side it is. Naming the last
+   * kick-off says what they are really looking at, and it reads correctly on a
+   * quiet Tuesday when the window is the thing doing the limiting.
+   */
+  /*
+   * Three states, counted, so the control can say how much is behind each one
+   * and grey out the one with nothing in it. A tab that leads to an empty page
+   * is worse than no tab.
+   */
+  const whenOf = (f) => {
+    const k = matchState(f).kind;
+    return k === 'live' ? 'live' : k === 'upcoming' ? 'upcoming' : 'played';
+  };
+  const counts = { upcoming: 0, live: 0, played: 0 };
+  for (const f of fixtures) counts[whenOf(f)]++;
+  // Land somewhere with something on it rather than on an empty tab.
+  if (!counts[state.when]) {
+    state.when = counts.upcoming ? 'upcoming' : counts.live ? 'live' : 'played';
+  }
+
+  const kickoffs = fixtures.map((f) => f.kickoff).filter(Boolean);
+  const furthest = kickoffs.length ? Math.max(...kickoffs) : null;
+  const capped = furthest !== null && furthest < Date.now() / 1000 + (state.hours - 6) * 3600;
+
   app.innerHTML = `
   <div class="wrap section dense">
     <div class="section-head">
       <div>
         <h2 class="display">The board</h2>
-        <p>${fixtures.length} games · ${fixtures.filter((f) => f.top_pick).length} with a call.</p>
+        <p>${fixtures.filter((f) => f.top_pick || f.locked).length} calls across ${fixtures.length} games.${
+          furthest ? ` The last of them kicks off ${esc(dayLabel(furthest).toLowerCase())}.` : ''}</p>
       </div>
       <div class="filters">
+        <!--
+          The board's primary axis is time, not whether we fancied it.
+          "With a call / Everything" was in this slot and it answered a
+          question nobody arrives with; what a reader wants first is today's
+          games, what is on right now, and what has already finished. That was
+          the one thing the board could not do: everything played dropped off
+          after six hours, so by the evening the page could say what was coming
+          and not what had happened.
+        -->
+        <div class="seg" role="group" aria-label="When">
+          ${WHEN.map((w) => `
+            <button type="button" data-when="${w.id}"${state.when === w.id ? ' class="on"' : ''}
+              ${counts[w.id] ? '' : 'disabled'}>${esc(w.label)}<i>${counts[w.id]}</i></button>`).join('')}
+        </div>
         <select id="hours-filter" aria-label="Time window">
           ${[24, 48, 72, 120, 240].map((h) => `<option value="${h}"${h === state.hours ? ' selected' : ''}>Next ${h}h</option>`).join('')}
         </select>
@@ -615,29 +928,104 @@ async function viewBoard() {
         </select>
       </div>
     </div>
+    <p class="board-toggle">
+      <button type="button" id="calls-toggle">${state.show === 'calls'
+        ? 'Showing only games we have a call on — show every game'
+        : 'Showing every game — show only the ones we have a call on'}</button>
+    </p>
     <div class="rows" id="grid"></div>
+    ${capped ? `<p class="board-foot">That is everything the board carries today.
+      A longer window will not add to it until more fixtures are published.</p>` : ''}
   </div>`;
 
+  /*
+   * Grouped by competition, which is how every board a reader has ever used is
+   * laid out. Ungrouped, three hundred fixtures across forty-four leagues is a
+   * list with no landmarks in it — and it meant every row had to carry its own
+   * competition badge to say where it was.
+   */
   const paint = () => {
-    const shown = state.leagueName ? fixtures.filter((f) => f.league === state.leagueName) : fixtures;
+    let shown = fixtures.filter((f) => whenOf(f) === state.when);
+    if (state.leagueName) shown = shown.filter((f) => f.league === state.leagueName);
+    if (state.show === 'calls') shown = shown.filter((f) => f.top_pick || f.locked);
+
+    /*
+     * Live, then to come, then done.
+     *
+     * Kick-off order alone put a finished match at the top of every league
+     * block, because a finished match is the one that kicked off first. On a
+     * board headed "Next 72h" the first thing in every group was a game that
+     * had already been played.
+     */
+    const rank = (f) => {
+      const k = matchState(f).kind;
+      return k === 'live' ? 0 : k === 'upcoming' ? 1 : 2;
+    };
+    const order = (a, b) => {
+      const d = rank(a) - rank(b);
+      if (d) return d;
+      // Finished games read newest first; everything else soonest first.
+      return rank(a) === 2 ? (b.kickoff ?? 0) - (a.kickoff ?? 0) : (a.kickoff ?? 0) - (b.kickoff ?? 0);
+    };
+
+    const groups = new Map();
+    for (const f of shown) {
+      const key = f.league ?? 'Other';
+      if (!groups.has(key)) groups.set(key, { id: f.league_id, list: [] });
+      groups.get(key).list.push(f);
+    }
+    for (const g of groups.values()) g.list.sort(order);
+
+    // And the competitions themselves lead with whoever is on next.
+    const groupsSorted = [...groups.entries()].sort((a, b) => order(a[1].list[0], b[1].list[0]));
+
     document.getElementById('grid').innerHTML =
       shown.length
-        ? shown.map(rowHTML).join('')
-        : `<div class="empty-state"><b>Nothing in this league right now</b>
-             <span>Try a longer window, or clear the filter to see the whole board.</span></div>`;
-    wireCards();
+        ? groupsSorted.map(([name, g]) => `
+            <section class="league-block">
+              <h3 class="league-head">
+                ${crest(name, 'xs', g.id, 'league')}${esc(name)}
+                <span class="count">${g.list.length}</span>
+              </h3>
+              ${g.list.map(rowHTML).join('')}
+            </section>`).join('')
+        : state.show === 'calls'
+          ? `<div class="empty-state"><b>No calls here</b>
+               <span>We would rather say nothing than pad the board. Every game
+               is one tap away.</span></div>`
+          : `<div class="empty-state"><b>Nothing here</b>
+               <span>No games in this part of the board right now.</span></div>`;
   };
-  document.getElementById('hours-filter').onchange = (e) => { state.hours = Number(e.target.value); viewBoard(); };
-  document.getElementById('league-filter').onchange = (e) => { state.leagueName = e.target.value; paint(); };
-  paint();
-}
 
-function wireCards() {
-  for (const el of app.querySelectorAll('.card[data-id], .row[data-id]')) {
-    const go = () => { location.hash = `#/fixture/${el.dataset.id}`; };
-    el.onclick = go;
-    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+  for (const b of app.querySelectorAll('.seg button')) {
+    b.onclick = () => {
+      state.when = b.dataset.when;
+      history.replaceState(null, '', boardHash());
+      for (const o of app.querySelectorAll('.seg button')) o.classList.toggle('on', o === b);
+      paint();
+    };
   }
+  document.getElementById('calls-toggle').onclick = (e) => {
+    state.show = state.show === 'calls' ? 'all' : 'calls';
+    e.currentTarget.textContent = state.show === 'calls'
+      ? 'Showing only games we have a call on — show every game'
+      : 'Showing every game — show only the ones we have a call on';
+    history.replaceState(null, '', boardHash());
+    paint();
+  };
+  // A longer window needs the board fetched again, so it goes through the
+  // router. A league is a filter over what is already here, so it repaints in
+  // place and only rewrites the address -- replaceState does not fire
+  // hashchange, which is what keeps that from turning into a second render.
+  document.getElementById('hours-filter').onchange = (e) => {
+    location.hash = boardHash(Number(e.target.value), state.leagueName);
+  };
+  document.getElementById('league-filter').onchange = (e) => {
+    state.leagueName = e.target.value;
+    history.replaceState(null, '', boardHash());
+    paint();
+  };
+  paint();
 }
 
 // ---------------------------------------------------------------- fixture
@@ -656,25 +1044,80 @@ function wireCards() {
  * table of what each result does, because a quarter-line handicap cannot be
  * explained in a sentence.
  */
-function verdictHTML(v, home, away) {
+/**
+ * The wall.
+ *
+ * Placed where the call would have been, directly under the reasoning, because
+ * that is the moment it is worth anything: a reader who has just been argued
+ * into caring about a match is in a different position from one shown a price
+ * before they have read a word. It states what is behind it and what it costs,
+ * and it does not nag.
+ */
+function lockedHTML(fixture = null) {
+  const n = Number(fixture?.locked_calls) || 0;
+  const tie = fixture?.home && fixture?.away
+    ? `${fixture.home} v ${fixture.away}`
+    : 'this match';
+  // Name the match and say how many calls are on it. A wall that states what
+  // it is holding is a different proposition from one that states only that it
+  // is shut, and the count gives nothing away: no market, no side, no price.
+  const head = n > 1
+    ? `${n} calls on ${tie}.`
+    : `Our call on ${tie}.`;
+
+  return `
+  <div class="locked">
+    <div class="locked-body">
+      <b>${esc(head)}</b>
+      <p>Which market, which side, the price and the book offering it.
+         The reading of the match above stays free, always.</p>
+    </div>
+    <a class="btn btn-accent" href="#/pricing">See what membership costs</a>
+  </div>`;
+}
+
+function verdictHTML(v, home, away, fixture = null) {
+  // A free copy keeps the narrative and drops the selection, so a verdict can
+  // arrive with everything except the thing being sold.
+  if (!v.candidate) {
+    return `
+    <div class="verdict">
+      ${v.narrative ? `<p class="narrative">${esc(v.narrative)}</p>` : ''}
+      ${lockedHTML(fixture)}
+    </div>`;
+  }
+
   const c = v.candidate;
+  const p = localPrice(c.prices ?? [{ slug: '', book: c.bookmaker, odds: c.odds }]);
+  const odds = p ? p.odds : c.odds;
   const d = market({
     market: c.market, outcome: c.outcome, line: c.line,
-    home, away, odds: c.odds,
+    home, away, odds,
   });
 
   return `
   <div class="verdict">
     <div class="verdict-head">
       <span class="sel">${esc(d.name)}</span>
-      <span class="price">${dec(c.odds)}</span>
+      <span class="price">${dec(odds)}</span>
     </div>
     <p class="wins">${esc(d.wins)}</p>
     <p class="narrative">${esc(v.narrative)}</p>
     <div class="verdict-meta">
-      ${c.bookmaker ? `<span>Best price at <b>${esc(c.bookmaker)}</b></span>` : ''}
+      ${p ? (p.local
+        ? `<span>Best price at <b>${esc(p.book)}</b> in ${esc(COUNTRY_NAMES[country()] ?? 'your country')}</span>`
+        : `<span class="warnish">No book in ${esc(COUNTRY_NAMES[country()] ?? 'your country')} is quoting this. ` +
+          `The ${dec(p.odds)} above is ${esc(p.book)}'s.</span>`) : ''}
       <span>${esc(d.returns)}</span>
     </div>
+    ${p && p.local && p.count > 1 ? `
+      <details class="settles">
+        <summary>${p.count} book${p.count === 1 ? '' : 's'} where you are</summary>
+        <table class="tbl settle-tbl"><tbody>
+          ${(c.prices ?? []).filter((q) => localPrice([q]).local).sort((a, b) => b.odds - a.odds)
+            .map((q) => `<tr><td>${esc(q.book)}</td><td class="num">${dec(q.odds)}</td></tr>`).join('')}
+        </tbody></table>
+      </details>` : ''}
     ${d.outcomes?.length ? `
       <details class="settles">
         <summary>How this settles</summary>
@@ -695,6 +1138,67 @@ function verdictHTML(v, home, away) {
  *
  * Faces come from /img/player/{id}/ and are small headshots, which is exactly
  * the size this needs — the same art would fall apart blown up in a masthead.
+ */
+const POSITION = { G: 'Goalkeeper', D: 'Defender', M: 'Midfielder', F: 'Forward' };
+
+function squadHTML(lineups, home, away) {
+  const side = (label, s) => {
+    const players = (s?.players ?? []).filter((x) => x?.name);
+    if (!players.length) return '';
+    return `
+    <div class="panel">
+      <p class="panel-head">${esc(label)}${s.formation ? ` <span>${esc(s.formation)}</span>` : ''}</p>
+      <div class="squad">
+        ${players.map((x) => `
+          <div class="squad-row">
+            <span class="name">${esc(x.name)}</span>
+            <span class="pos">${esc(POSITION[x.position] ?? x.position ?? '')}</span>
+            <span class="no">${x.starting === false ? 'sub' : ''}</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  };
+  const both = side(home, lineups?.home) + side(away, lineups?.away);
+  return both ? `<div class="grid-2">${both}</div>` : '';
+}
+
+/*
+ * The surname, which is not always the last word.
+ *
+ * "David De Gea" is not "Gea" and "Kevin De Bruyne" is not "Bruyne", which is
+ * what taking the final word gave us on a team sheet full of them. Spanish,
+ * Dutch, Portuguese and Arabic naming all put a particle in front of the name
+ * people actually use, so the particle comes with it.
+ */
+const PARTICLES = new Set([
+  'de', 'del', 'della', 'der', 'den', 'di', 'da', 'das', 'dos', 'do', 'du',
+  'van', 'von', 'la', 'le', 'lo', 'el', 'al', 'bin', 'ibn', 'mac', 'mc',
+  'ten', 'ter', 'st', 'san', 'santa', "o'",
+]);
+
+function surname(full) {
+  const parts = String(full ?? '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return parts[0] ?? '';
+  let i = parts.length - 1;
+  // Walk back over particles, but never consume the whole name.
+  while (i > 1 && PARTICLES.has(parts[i - 1].toLowerCase().replace(/\.$/, ''))) i--;
+  return parts.slice(i).join(' ');
+}
+
+/*
+ * The team sheet, on one pitch.
+ *
+ * It used to be two stacked half-pitches, both teams laid out in the same
+ * direction, which is not how a team sheet has ever been drawn: the whole
+ * point of the picture is that the two sides face each other, so you can see
+ * a back four against a front three. Two blocks pointing the same way is a
+ * list with a green background.
+ *
+ * So: one pitch, home attacking up from the bottom, away attacking down from
+ * the top, and the markings actually drawn -- halfway line, centre circle,
+ * both boxes, penalty spots, corner arcs. The markings are the thing that
+ * makes it read as a pitch rather than as a green panel, and they cost one
+ * inline SVG.
  */
 function pitchHTML(lineups, home, away, homeId, awayId) {
   if (!lineups?.home?.players?.length || !lineups?.away?.players?.length) return '';
@@ -717,28 +1221,68 @@ function pitchHTML(lineups, home, away, homeId, awayId) {
     return out.filter((r) => r.length);
   };
 
-  const player = (p) => `
-    <div class="pp" title="${esc(p.name)}">
+  // The best-rated starter per side, ringed. Not labelled with the rating --
+  // that is our own score and stays ours -- but worth pointing at.
+  const keyManOf = (side) => {
+    const rated = (side.players ?? []).filter((p) => p.starting !== false && typeof p.ai_score === 'number');
+    if (!rated.length) return null;
+    return rated.reduce((a, b) => (b.ai_score > a.ai_score ? b : a)).id;
+  };
+
+  const player = (p, keyMan) => `
+    <div class="pp${p.id === keyMan ? ' key' : ''}" title="${esc(p.name)}">
       ${crest(p.name, 'md', p.id, 'player')}
-      <span class="pp-name">${esc((p.name ?? '').split(' ').slice(-1)[0])}</span>
+      <span class="pp-name">${esc(surname(p.name))}</span>
     </div>`;
 
-  const half = (side, teamName, teamId, flip) => `
-    <div class="pitch-half${flip ? ' flip' : ''}">
-      <div class="pitch-head">${crest(teamName, 'sm', teamId)}<b>${esc(teamName)}</b>
-        ${side.formation ? `<span class="formation">${esc(side.formation)}</span>` : ''}</div>
-      ${rowsFor(side).map((row) => `<div class="pitch-row">${row.map(player).join('')}</div>`).join('')}
+  const sideHTML = (side, atTop) => {
+    const keyMan = keyManOf(side);
+    // Drawn from each side's own goal outwards, so the keepers end up at the
+    // two ends and the forwards meet in the middle.
+    const rows = rowsFor(side);
+    const ordered = atTop ? rows : [...rows].reverse();
+    return `<div class="pitch-side ${atTop ? 'away' : 'home'}">
+      ${ordered.map((row) => `<div class="pitch-row">${row.map((x) => player(x, keyMan)).join('')}</div>`).join('')}
+    </div>`;
+  };
+
+  const head = (teamName, teamId, side) => `
+    <div class="sheet-team">
+      ${crest(teamName, 'sm', teamId)}<b>${esc(teamName)}</b>
+      ${side?.formation ? `<span class="formation">${esc(side.formation)}</span>` : ''}
     </div>`;
 
   const out = (lineups.unavailable ?? []).filter((u) => u.name);
   return `
   <div class="panel">
-    <p class="panel-head">Team sheet · ${esc(lineups.status === 'confirmed' ? 'confirmed' : 'predicted')}</p>
-    <div class="pitch">
-      ${half(lineups.home, home, homeId, false)}
-      <div class="pitch-mid"></div>
-      ${half(lineups.away, away, awayId, true)}
+    <p class="panel-head">Team sheet ${lineups.status === 'confirmed'
+      ? '<span class="tag ok">confirmed</span>'
+      : '<span class="tag prov">predicted</span>'}</p>
+
+    <div class="sheet-heads">
+      ${head(away, awayId, lineups.away)}
+      ${head(home, homeId, lineups.home)}
     </div>
+
+    <div class="pitch">
+      <!-- The markings, drawn to a 68x105 pitch so the boxes are the right
+           size relative to it rather than eyeballed. -->
+      <svg class="pitch-lines" viewBox="0 0 68 105" preserveAspectRatio="none" aria-hidden="true">
+        <rect x="1" y="1" width="66" height="103" />
+        <line x1="1" y1="52.5" x2="67" y2="52.5" />
+        <circle cx="34" cy="52.5" r="9.15" />
+        <circle class="spot" cx="34" cy="52.5" r="0.6" />
+        <rect x="20.15" y="1" width="27.7" height="16.5" />
+        <rect x="26.85" y="1" width="14.3" height="5.5" />
+        <circle class="spot" cx="34" cy="12" r="0.6" />
+        <rect x="20.15" y="87.5" width="27.7" height="16.5" />
+        <rect x="26.85" y="98.5" width="14.3" height="5.5" />
+        <circle class="spot" cx="34" cy="93" r="0.6" />
+      </svg>
+      ${sideHTML(lineups.away, true)}
+      ${sideHTML(lineups.home, false)}
+    </div>
+
     ${out.length
       ? `<div class="outlist"><b>Unavailable</b>${out.map((u) => `<span class="also-call">${esc(u.name)}${u.reason ? ` — ${esc(u.reason)}` : ''}</span>`).join('')}</div>`
       : ''}
@@ -781,23 +1325,41 @@ function formPanel(form, home, away) {
   if (!h && !a) return '';
 
   const one = (d) => Number(d ?? 0).toFixed(1);
-  const two = (d) => Number(d ?? 0).toFixed(2);
+  const int = (d) => String(Math.round(Number(d ?? 0)));
+
+  // "4-1-1" is how the record arrives. A supporter says "won four of six"; they
+  // do not say "1.83 points a game", which is the number this row used to show
+  // and exactly the kind the vocabulary rule exists to keep off the page.
+  const won = (ev) => {
+    const m = /^(\d+)-(\d+)-(\d+)$/.exec(String(ev?.record ?? ''));
+    return m ? Number(m[1]) : null;
+  };
 
   const rows = [
-    ['points a game', h?.ppg, a?.ppg, two],
+    ['won', won(h), won(a), int],
     ['goals scored', h?.goals_for, a?.goals_for, one],
     ['goals conceded', h?.goals_against, a?.goals_against, one],
-    ['clean sheets', h?.clean_sheets, a?.clean_sheets, (d) => String(Math.round(Number(d ?? 0)))],
+    ['clean sheets', h?.clean_sheets, a?.clean_sheets, int],
   ].filter(([, hv, av]) => typeof hv === 'number' || typeof av === 'number');
 
-  // "1.83 a game at home" against "0.90 a game on the road" — the travel read.
+  /**
+   * The travel read, said rather than scored.
+   *
+   * The interesting thing here was never the figure, it was the gap: whether a
+   * side is a different proposition away from home. So compare the two and
+   * print the comparison. "They travel badly" is what a fan would say; "0.90 a
+   * game on the road" is what a spreadsheet would.
+   */
+  const split = (ev, name, better, worse) => {
+    if (typeof ev?.venue_ppg !== 'number' || typeof ev?.ppg !== 'number' || (ev.venue_matches ?? 0) < 2) return null;
+    if (ev.venue_ppg > ev.ppg * 1.2) return `${esc(name)} ${better}`;
+    if (ev.venue_ppg < ev.ppg * 0.8) return `${esc(name)} ${worse}`;
+    return null;
+  };
+
   const splits = [
-    typeof h?.venue_ppg === 'number' && h.venue_matches >= 2
-      ? `${esc(home)} take <b>${two(h.venue_ppg)}</b> a game at home`
-      : null,
-    typeof a?.venue_ppg === 'number' && a.venue_matches >= 2
-      ? `${esc(away)} take <b>${two(a.venue_ppg)}</b> a game on the road`
-      : null,
+    split(h, home, 'are a different side at home', 'have been worse at home than on their travels'),
+    split(a, away, 'travel well', 'travel badly'),
   ].filter(Boolean);
 
   const runOf = (ev) => {
@@ -808,13 +1370,13 @@ function formPanel(form, home, away) {
 
   return `
   <div class="panel">
-    <p class="panel-head">Form · last ${Math.max(h?.matches ?? 0, a?.matches ?? 0)}</p>
+    <p class="panel-head">Form <span>last ${Math.max(h?.matches ?? 0, a?.matches ?? 0)}</span></p>
     <div class="form-top">
       <div class="form-side">${formChips(h)}${runOf(h)}</div>
       <div class="form-side right">${runOf(a)}${formChips(a)}</div>
     </div>
     ${rows.map(([label, hv, av, fmt]) => statBar(label, hv ?? 0, av ?? 0, fmt)).join('')}
-    ${splits.length ? `<p class="form-split">${splits.join(' · ')}</p>` : ''}
+    ${splits.length ? `<p class="form-split">${splits.join('. ')}.</p>` : ''}
   </div>`;
 }
 
@@ -823,13 +1385,19 @@ function h2hHTML(h2h, home, away) {
   const recent = (h2h.recent_matches ?? []).slice(0, 6);
   return `
   <div class="panel">
-    <p class="panel-head">Head to head · ${h2h.total_matches} meetings</p>
-    ${statBar(`${home} wins · draws · ${away} wins`, h2h.home_wins ?? 0, h2h.away_wins ?? 0)}
-    <div class="numbers" style="margin-top:14px">
+    <p class="panel-head">Head to head <span>${h2h.total_matches} meetings</span></p>
+    ${statBar('wins', h2h.home_wins ?? 0, h2h.away_wins ?? 0)}
+    <div class="numbers">
       <span>${esc(home)} <b>${h2h.home_wins ?? 0}</b></span>
       <span>drawn <b>${h2h.draws ?? 0}</b></span>
       <span>${esc(away)} <b>${h2h.away_wins ?? 0}</b></span>
-      ${typeof h2h.avg_total_goals === 'number' ? `<span>goals a game <b>${h2h.avg_total_goals.toFixed(2)}</b></span>` : ''}
+      ${typeof h2h.avg_total_goals === 'number'
+        // Same rule as everywhere else: a supporter says "there are always
+        // goals in this one", not "3.33 goals a game".
+        ? `<span>${h2h.avg_total_goals >= 3.1 ? 'there are usually goals in this one'
+            : h2h.avg_total_goals <= 2.1 ? 'these two are usually tight'
+            : 'nothing one-sided about the goals'}</span>`
+        : ''}
     </div>
     ${recent.length ? `<div class="h2h-list">${recent.map((m) => `
       <div class="h2h-row">
@@ -852,7 +1420,7 @@ function standingsHTML(st, home, away, homeId, awayId) {
     : '';
   return `
   <div class="panel">
-    <p class="panel-head">In the table${st.size ? ` · ${st.size} teams` : ''}</p>
+    <p class="panel-head">In the table${st.size ? ` <span>${st.size} teams</span>` : ''}</p>
     <div class="scroll-x"><table class="tbl">
       <thead><tr><th>#</th><th>Team</th><th class="num">P</th><th class="num">GD</th><th class="num">Pts</th></tr></thead>
       <tbody>${row(st.home, home, homeId)}${row(st.away, away, awayId)}</tbody>
@@ -860,27 +1428,79 @@ function standingsHTML(st, home, away, homeId, awayId) {
   </div>`;
 }
 
+
+/*
+ * Which of the things we weighed a reader actually sees.
+ *
+ * The panel used to print the whole ledger, filtered by a regular expression
+ * over the prose. That is backwards twice over. It let through every factor
+ * that looked and found nothing -- "the reverse fixture finished 3-2, too
+ * close to carry a revenge motive", "safely mid-table, with 31 games
+ * remaining", "the manager has 25 matches in charge" -- which is a page of
+ * sentences that change nobody's mind, in front of the one or two that do. And
+ * it decided on wording, so every rephrasing silently changed what shipped.
+ *
+ * The ledger already knows the answer. A factor carries `moves`, the rates it
+ * actually shifted, and `strength`, how hard it argued. A factor that moved
+ * nothing and argued weakly did not contribute to the call, whatever its
+ * sentence reads like.
+ *
+ * Better still, when there is a call the engine has already ranked the factors
+ * that drove it -- `verdict.drivers`, most dispositive first. That is the real
+ * answer to "why this call", so it leads, and everything else folds away.
+ */
+function readsFor(f, verdicts) {
+  const named = (x) =>
+    x && x.state === 'COMPUTED' && READ_LABEL[x.id] && x.note
+      ? { id: x.id, label: READ_LABEL[x.id], note: x.note, strength: x.strength ?? 0, moves: (x.moves ?? []).length }
+      : null;
+
+  const dedupe = (list) => {
+    const seen = new Set();
+    return list.filter((r) => {
+      if (!r || seen.has(r.note)) return false;
+      seen.add(r.note);
+      return true;
+    });
+  };
+
+  // The call's own drivers, in the engine's order. Free copy has no verdicts,
+  // so this is empty there and the ledger has to answer on its own.
+  const drivers = dedupe((verdicts[0]?.drivers ?? []).map(named)).slice(0, 4);
+
+  const ledger = dedupe((f.ledger ?? []).map(named));
+  const driverIds = new Set(drivers.map((r) => r.id));
+  const others = ledger.filter((r) => !driverIds.has(r.id));
+
+  // Did it change anything, or argue hard enough to be worth a reader's time?
+  const carried = (r) => r.moves > 0 || r.strength >= 0.45;
+
+  const reads = drivers.length ? drivers : others.filter(carried).slice(0, 5);
+  const shown = new Set(reads.map((r) => r.id));
+  return { reads, rest: others.filter((r) => !shown.has(r.id)) };
+}
+
 async function viewFixture(id) {
   app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
   let f;
   try { f = await getJSON(`/api/fixture/${id}`); } catch (err) {
-    app.innerHTML = `<div class="wrap section"><button class="back">← Back</button><div class="empty">${esc(err.message)}</div></div>`;
+    app.innerHTML = `<div class="wrap section">${backHTML('Back')}<div class="empty">${esc(err.message)}</div></div>`;
     app.querySelector('.back').onclick = () => { location.hash = '#/board'; };
     return;
   }
 
   const p = f.odds_1x2 ?? {};
   const verdicts = f.verdicts ?? [];
-  const NOTHING = /^(not a|no |neither side holds a clear|conditions are unremarkable|the sharp book and the wider market agree|the line has barely moved|scoring about what their chances are worth)/i;
-  const reads = (f.ledger ?? [])
-    .filter((x) => x.state === 'COMPUTED' && READ_LABEL[x.id] && x.note && !NOTHING.test(x.note))
-    .map((x) => ({ label: READ_LABEL[x.id], note: x.note }))
-    .filter((x, i, arr) => arr.findIndex((y) => y.note === x.note) === i);
+  const { reads, rest } = readsFor(f, verdicts);
 
+  // The provider hands back round labels already joined with a middle dot
+  // ("Regular season · Matchday 4"), which is the meta-string tell arriving
+  // from outside. Split it back into its parts and let the one join rule below
+  // decide how they are set.
   const meta = [
     kickoffLabel(f.kickoff),
-    f.round_label || f.league,
-    f.neutral ? 'Neutral ground' : null,
+    ...String(f.round_label || f.league || '').split(/\s*·\s*/).filter(Boolean),
+    f.neutral ? 'neutral ground' : null,
   ].filter(Boolean);
 
   const overview = `
@@ -889,21 +1509,32 @@ async function viewFixture(id) {
         <div class="panel">
           <p class="panel-head">${verdicts.length ? 'The call' : 'No call'}</p>
           ${verdicts.length
-            ? verdicts.map((v) => verdictHTML(v, f.home, f.away)).join('')
+            ? verdicts.map((v) => verdictHTML(v, f.home, f.away, f)).join('')
             : `<p class="narrative">${esc(f.pass ?? 'Nothing here is worth a call. The price looks about right.')}</p>`}
         </div>
         ${reads.length ? `<div class="panel">
-          <p class="panel-head">What we looked at</p>
+          <p class="panel-head">${verdicts.length ? 'What made the call' : 'What stood out'}</p>
           <div class="reads">${reads.map((r) => `<div class="read"><b>${esc(r.label)}</b><p>${esc(r.note)}</p></div>`).join('')}</div>
+          ${rest.length ? `
+            <details class="more-reads">
+              <summary>${rest.length} other thing${rest.length === 1 ? '' : 's'} we checked</summary>
+              <div class="reads">${rest.map((r) => `<div class="read"><b>${esc(r.label)}</b><p>${esc(r.note)}</p></div>`).join('')}</div>
+            </details>` : ''}
         </div>` : ''}
       </div>
       <div>
         <div class="panel">
           <p class="panel-head">How we see it</p>
           <div class="bars">${bar(f.home, p.HOME)}${bar('Draw', p.DRAW)}${bar(f.away, p.AWAY)}</div>
-          <div class="numbers" style="margin-top:18px">
-            <span>goals expected <b>${dec((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0))}</b></span>
-            ${f.provisional ? `<span class="tag prov" style="padding:7px 12px">line-ups not final</span>` : ''}
+          <div class="numbers">
+            <!-- "goals expected 3.33" was expected goals with the label filed
+                 off: a banned term, a number no supporter says out loud, and on
+                 the page a reader lands on from an advert. What the total is
+                 actually being used to say is whether the game looks open. -->
+            <span>${((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0)) >= 3.1 ? 'goals look likely'
+                   : ((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0)) <= 2.1 ? 'this one looks tight'
+                   : 'an even game on paper'}</span>
+            ${f.provisional ? `<span class="tag prov">line-ups not final</span>` : ''}
           </div>
         </div>
         ${formPanel(f.form, f.home, f.away)}
@@ -919,37 +1550,38 @@ async function viewFixture(id) {
   // built from what actually rendered rather than from a fixed list.
   const TABS = [
     ['overview', 'Overview', overview],
-    ['lineups', 'Line-ups', pitchHTML(f.lineups, f.home, f.away, f.home_id, f.away_id)],
+    ['lineups', 'Line-ups',
+      pitchHTML(f.lineups, f.home, f.away, f.home_id, f.away_id)
+      + squadHTML(f.lineups, f.home, f.away)],
     ['h2h', 'Head to head', h2hHTML(f.h2h, f.home, f.away)],
     ['table', 'Table', standingsHTML(f.standings, f.home, f.away, f.home_id, f.away_id)],
   ].filter(([, , html]) => html);
 
   app.innerHTML = `
-  <div class="wrap section tight">
-    <button class="back">← Back to the board</button>
-
-    <div class="fx-hero" data-shot="${f.venue_id ? 'yes' : 'none'}">
-      <div class="fx-hero-media">${venueShot(f.venue_id, '')}</div>
-      <div class="fx-hero-in">
-        <p class="kicker">${esc(f.league ?? '')}</p>
-        <div class="fx-teams">
-          <div class="fx-side">
-            ${crest(f.home, 'xl', f.home_id)}
+  <section class="hero fx-top" data-shot="${f.venue_id ? 'yes' : 'none'}">
+    <div class="hero-media">${venueShot(f.venue_id, '', true)}</div>
+    <div class="wrap hero-inner">
+      ${backHTML('Back to the board')}
+      <div class="hero-copy">
+        <span class="timechip${isSoon(f.kickoff) ? ' soon' : ''}">${esc(kickoffLabel(f.kickoff))}</span>
+        <div class="fx-stack">
+          <span class="fx-line">
+            ${crest(f.home, 'md', f.home_id)}
             <span class="name">${esc(f.home)}</span>
             ${formChips(f.form?.home)}
-          </div>
-          <div class="fx-mid">
-            <div class="fx-when">${esc(kickoffLabel(f.kickoff))}</div>
-            <div class="fx-league">${meta.slice(1).map(esc).join(' · ')}</div>
-          </div>
-          <div class="fx-side">
-            ${crest(f.away, 'xl', f.away_id)}
+          </span>
+          <span class="fx-line">
+            ${crest(f.away, 'md', f.away_id)}
             <span class="name">${esc(f.away)}</span>
             ${formChips(f.form?.away)}
-          </div>
+          </span>
         </div>
+        <p class="hero-blurb">${esc([f.league, ...meta.slice(1)].filter(Boolean).join(', '))}</p>
       </div>
     </div>
+  </section>
+
+  <div class="wrap section dense">
 
     ${TABS.length > 1 ? `<div class="tabs" role="tablist">
       ${TABS.map(([k, label], i) => `<button class="tab${i === 0 ? ' on' : ''}" data-tab="${k}" role="tab">${esc(label)}</button>`).join('')}
@@ -978,81 +1610,389 @@ function bar(label, v) {
 
 async function viewResults() {
   app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
-  let data;
-  try { data = await getJSON('/api/picks?limit=150'); } catch (err) {
+  /*
+   * Two requests, because one cannot answer both halves of this page.
+   *
+   * It used to ask for the newest 150 picks and split them locally. On a busy
+   * Saturday the newest 150 are all of today's, none of which have finished,
+   * so the page printed "95 of the last 111 picks won" from the summary and
+   * then "Nothing has finished yet" directly underneath it. The API can filter
+   * by settled; asking it to is the whole fix.
+   */
+  let data, open;
+  try {
+    [data, open] = await Promise.all([
+      getJSON('/api/picks?limit=120&settled=true'),
+      getJSON('/api/picks?limit=20&settled=false').catch(() => ({ picks: [] })),
+    ]);
+  } catch (err) {
     app.innerHTML = `<div class="wrap section"><div class="empty">${esc(err.message)}</div></div>`;
     return;
   }
 
   const summary = data.summary ?? {};
   const picks = data.picks ?? [];
-  const settled = picks.filter((x) => x.result && x.result !== 'VOID');
+  // A refund is neither won nor lost, so it belongs in the middle band and
+  // nowhere else. Counting PUSH here as well as in `voided` is what made the
+  // bar say "the 126 most recent" over 120 picks.
+  const settled = picks.filter((x) => x.result && x.result !== 'VOID' && x.result !== 'PUSH');
+  const openPicks = open?.picks ?? [];
 
-  // A tenner a pick, because "-6.99 units" is a sentence in a language the
-  // reader does not speak. The sign is not softened: if it is down, it says
-  // down, which is the entire point of publishing this page at all.
-  const STAKE = 10;
+  /*
+   * There is no running profit-and-loss figure on this page, and that is a
+   * decision rather than an omission.
+   *
+   * What used to be here read "backing every one of them with £10, you would
+   * be £98.67 down" -- which is not a fact about our record, it is a fact
+   * about one staking plan nobody follows, invented here and then presented
+   * as the headline of the product. Nobody backs every call flat. Somebody
+   * taking four of them a week has a completely different number, and we do
+   * not know which four.
+   *
+   * What replaces it is not a rosier figure. It is no figure: every settled
+   * pick, won and lost, counted. That is the whole record and it is still
+   * published in full, including the losses, which is the part that actually
+   * matters. Nothing on this page may imply a profit either -- see the legal
+   * pages and engine/src/vocabulary.ts, which ban it outright.
+   */
   const n = Number(summary.n ?? 0);
   const wins = Number(summary.wins ?? 0);
-  const profit = typeof summary.pnl === 'number' ? summary.pnl * STAKE : null;
 
-  const money = (v) => `£${Math.abs(v).toFixed(2).replace(/\.00$/, '')}`;
-  const verdict = profit === null ? ''
-    : profit > 0 ? `you would be ${money(profit)} up`
-    : profit < 0 ? `you would be ${money(profit)} down`
-    : 'you would be exactly even';
-
+  /*
+   * The strike rate, said out loud.
+   *
+   * It is not the banned kind of percentage. What the vocabulary rule bans is a
+   * confidence score -- our own number, dressed up as a reason -- and a bare
+   * percentage standing in for an argument. This is a count of what happened,
+   * which is the one number on this site that is not an opinion.
+   *
+   * It never appears on its own, though, and that is the important half. A high
+   * strike rate at short prices loses money, which is exactly what our record
+   * does, so the rate and the money are printed in the same breath. Publishing
+   * "86% of our picks won" and stopping there would be the single most
+   * misleading true sentence available to us.
+   */
+  const rate = n > 0 ? Math.round((wins / n) * 100) : null;
   const headline = n === 0
     ? 'Nothing has finished yet. The first results land as today\'s games do.'
-    : `Of the last ${n} picks, ${wins} won.`;
+    : `${wins} of the last ${n} picks won. That is ${[8, 11, 18].includes(rate) || (rate >= 80 && rate < 90) ? 'an' : 'a'} ${rate}% strike rate.`;
+
+  const won = settled.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
+  const lost = settled.filter((x) => x.result === 'LOST' || x.result === 'HALF_LOST').length;
+  const voided = picks.filter((x) => x.result === 'VOID' || x.result === 'PUSH').length;
+
+  /*
+   * The masthead, rebuilt.
+   *
+   * What was here put "Results" at subheading size and then set the record
+   * underneath it in the largest type on the site -- two lines of display face
+   * on a phone, pushing the actual results below the fold, with the page's own
+   * title reading as a caption to it. The hierarchy was upside down and the
+   * biggest element was the one that reflowed worst.
+   *
+   * The numbers are a strip instead. Four figures, each with what it is, which
+   * is how anybody reads a record and is legible at any width because it is a
+   * grid rather than a sentence. The sentence stays, at sentence size, because
+   * it says the thing the numbers cannot: that winning most of them is not the
+   * same as making money.
+   */
+  const stat = (v, label, tone = '') =>
+    `<div class="stat${tone ? ` ${tone}` : ''}"><b>${esc(v)}</b><span>${esc(label)}</span></div>`;
 
   app.innerHTML = `
   <div class="wrap section">
-    <div class="section-head"><div>
-      <h2 class="display">Results</h2>
-      <p>Every pick we have published, marked against the real result. Nothing removed, nothing hidden.</p>
-    </div></div>
-
-    <div class="record">
-      <p class="record-line">${esc(headline)}</p>
-      ${profit === null ? '' : `<p class="record-sub">Backing every one of them with £${STAKE}, ${esc(verdict)}.</p>`}
-      ${n > 0 && n < 100
-        ? `<p class="record-note">That is ${n} results. It is not enough to tell a good run from a good model, and we will say so until it is.</p>`
-        : ''}
+    <div class="page-head">
+      <h1 class="display xl">Results</h1>
+      <p class="page-sub">Every pick we have published, marked against the real result.
+        Nothing removed, nothing hidden.</p>
     </div>
 
-    ${picks.length ? `<div class="scroll-x"><table class="tbl">
-      <thead><tr><th>Game</th><th>Call</th><th class="num">Odds</th><th class="num">Result</th></tr></thead>
-      <tbody>${picks.map((x) => {
-        const d = market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team, odds: x.odds });
-        return `
-        <tr>
-          <td>${x.home_team ? `${esc(x.home_team)} v ${esc(x.away_team)}` : '—'}</td>
-          <td>${esc(d.name)}</td>
-          <td class="num">${dec(x.odds)}</td>
-          <td class="num">${resultTag(x.result)}</td>
-        </tr>`;
-      }).join('')}</tbody></table></div>`
-      : `<div class="empty">Nothing published yet.</div>`}
+    ${n === 0 ? `<p class="record-sub">${esc(headline)}</p>` : `
+      <div class="record-strip">
+        ${stat(wins, 'won', 'won')}
+        ${stat(n - wins, 'did not', 'lost')}
+        ${stat(`${rate}%`, 'strike rate')}
+        ${stat(voided, 'stake back')}
+      </div>
+      ${formBarHTML(won, voided, lost, ['won', 'stake back', 'lost'],
+        `The ${settled.length + voided} most recent, in order. The rate above covers all ${n}.`)}
+      <!-- Not a restatement of the strip above it. The numbers say what
+           happened; this says what they are and are not evidence of, which is
+           the only thing worth adding underneath them. -->
+      <p class="record-sub">Every call we have published, settled against the
+        real result. Each one below says how close it came and, where we have
+        the price history, whether the market agreed with us by kick-off.</p>
+      ${n > 0 && n < 100
+        ? `<p class="record-note">That is ${n} results. It is not enough to tell a good run
+             from a good model, and we will say so until it is.</p>`
+        : ''}`}
 
-    ${settled.length === 0 && picks.length > 0
-      ? `<p class="foot-note" style="margin-top:20px">${picks.length} are still to play.</p>` : ''}
+    <div class="with-side">
+      <div>
+        <h2 class="side-head">How it went</h2>
+        <div id="recap">${picks.length ? ''
+          : `<div class="empty-state"><b>Nothing has finished yet</b>
+               <span>The first results land as today's games do.</span></div>`}</div>
+      </div>
+      <aside>
+        <h2 class="side-head">Still to play</h2>
+        ${(() => {
+          const upcoming = openPicks.slice(0, 12);
+          if (!upcoming.length) return `<p class="acct-line">Nothing open right now.</p>`;
+          return `<div class="side-list">${upcoming.map((x) => {
+            const d = market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team, odds: x.odds });
+            return `
+            <a class="side-item" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
+              <span class="side-thumb">${crest(x.home_team ?? '', 'sm', x.home_team_id)}${crest(x.away_team ?? '', 'sm', x.away_team_id)}</span>
+              <span class="side-body">
+                <span class="side-sel">${esc(d.name)}</span>
+                <span class="side-meta">${esc(kickoffLabel(x.kickoff))}<b>${dec(x.odds)}</b></span>
+              </span>
+            </a>`;
+          }).join('')}</div>`;
+        })()}
+      </aside>
+    </div>
+  </div>`;
+
+  /*
+   * The recap, a matchday at a time.
+   *
+   * A hundred and twenty settled picks is twenty screens of scrolling, and a
+   * record nobody reaches the bottom of is a record nobody reads. Paging it by
+   * day matches how the thing is actually remembered -- you look up a Saturday,
+   * not pick number 84 -- and it means the page below the fold is finite.
+   *
+   * The page lives in the address, so a particular matchday can be sent to
+   * somebody, and the back button walks through them.
+   */
+  if (picks.length) {
+    /*
+     * Paged by pick rather than by matchday, which was the first attempt and
+     * the wrong unit: a Saturday carries a hundred and seven of these and a
+     * Sunday thirteen, so a page per day is one screen followed by twenty.
+     * Twenty picks is a page whatever the fixture list looks like, and the day
+     * headings still fall where the days do inside it.
+     */
+    const ordered = [...picks].sort((a, b) => b.kickoff - a.kickoff);
+    const PER = 20;
+    const pages = Math.max(1, Math.ceil(ordered.length / PER));
+
+    const paint = (page) => {
+      const p = Math.min(Math.max(1, page), pages);
+      const host = document.getElementById('recap');
+      if (!host) return;
+      host.innerHTML =
+        groupByDay(ordered.slice((p - 1) * PER, p * PER)).map(dayHTML).join('') +
+        pagerHTML(p, pages, 'Results pages');
+      for (const b of host.querySelectorAll('[data-page]')) {
+        b.onclick = (e) => {
+          e.preventDefault();
+          const next = Number(b.dataset.page);
+          history.replaceState(null, '', `#/results?p=${next}`);
+          paint(next);
+          document.getElementById('recap')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        };
+      }
+    };
+    paint(Number(parseHash().params.get('p')) || 1);
+  }
+}
+
+/**
+ * A pager.
+ *
+ * Numbered rather than "load more", because a number is a place you can go
+ * back to and a button is not. Long runs collapse around the current page so
+ * the control never wraps: 1 … 4 5 6 … 20.
+ */
+function pagerHTML(page, pages, label = 'Pages') {
+  if (pages <= 1) return '';
+  const want = new Set([1, pages, page, page - 1, page + 1]);
+  if (page <= 3) { want.add(2); want.add(3); }
+  if (page >= pages - 2) { want.add(pages - 1); want.add(pages - 2); }
+  const nums = [...want].filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b);
+
+  const out = [];
+  let prev = 0;
+  for (const n of nums) {
+    if (n - prev > 1) out.push('<span class="pager-gap">…</span>');
+    out.push(`<button type="button" class="pager-num${n === page ? ' on' : ''}" data-page="${n}"
+      ${n === page ? 'aria-current="page"' : ''}>${n}</button>`);
+    prev = n;
+  }
+
+  return `
+  <nav class="pager" aria-label="${esc(label)}">
+    <button type="button" class="pager-step" data-page="${page - 1}" ${page === 1 ? 'disabled' : ''}>Newer</button>
+    <div class="pager-nums">${out.join('')}</div>
+    <button type="button" class="pager-step" data-page="${page + 1}" ${page === pages ? 'disabled' : ''}>Older</button>
+  </nav>`;
+}
+
+
+/**
+ * Every settled call, matchday by matchday.
+ *
+ * This is the page the record was missing. What was here before was a list of
+ * ties with a mark beside each one -- true, and unreadable, and it asked the
+ * reader to take our word for the grade because the scoreline that decided it
+ * was nowhere on the page.
+ *
+ * So each one now carries three things in order: what happened, what we said
+ * would happen, and the reason we gave at the time. The third is the one that
+ * matters on a loss. Anybody can publish their record; publishing the argument
+ * that turned out to be wrong, next to the result that proved it wrong, is the
+ * part nobody does, and it is the only version of this page worth reading.
+ *
+ * Grouped by day because that is how a football weekend is remembered -- not
+ * as a running total, but as a Saturday that went well or a Sunday that did
+ * not. Each day is tallied and given a line, and the line is allowed a bit of
+ * character on a good one as long as it is allowed none on a bad one.
+ */
+function dayVerdict(won, total) {
+  if (!total) return '';
+  if (total >= 3 && won === total) return 'Every one of them.';
+  if (won === 0) return 'Not one. Here it is anyway.';
+  const share = won / total;
+  if (share >= 0.75) return 'A good one.';
+  if (share >= 0.5) return 'More right than wrong.';
+  if (share >= 0.34) return 'More wrong than right.';
+  return 'A bad one.';
+}
+
+/** Newest matchday first; within one, the order the afternoon happened in. */
+function groupByDay(picks) {
+  const days = new Map();
+  for (const x of picks) {
+    const key = new Date(x.kickoff * 1000).toDateString();
+    const g = days.get(key) ?? { at: x.kickoff, list: [] };
+    g.at = Math.max(g.at, x.kickoff);
+    g.list.push(x);
+    days.set(key, g);
+  }
+  return [...days.values()]
+    .sort((a, b) => b.at - a.at)
+    .map((g) => ({ at: g.at, list: [...g.list].sort((a, b) => a.kickoff - b.kickoff) }));
+}
+
+function dayHTML(g) {
+  const won = g.list.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
+  const graded = g.list.filter((x) => x.result !== 'VOID' && x.result !== 'PUSH').length;
+  const label = new Date(g.at * 1000)
+    .toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  return `
+  <section class="recap-day">
+    <div class="recap-head">
+      <h3>${esc(unshout(label))}</h3>
+      <span class="recap-tally">${won} of ${graded} landed</span>
+    </div>
+    ${graded ? `<p class="hand recap-say">${esc(dayVerdict(won, graded))}</p>` : ''}
+    ${g.list.map(recapCardHTML).join('')}
+  </section>`;
+}
+
+
+/*
+ * The post-mortem: why it landed, or why it did not.
+ *
+ * Written by the engine at settlement -- see engine/src/postmortem.ts, which
+ * also says at length what it is allowed to claim. Three facts and a verdict:
+ * how near it came, whether the match looked like the one we described, and
+ * what the market did between our saying it and kick-off.
+ *
+ * Absent on everything settled before the engine existed, and the card simply
+ * does not draw it rather than showing an apology for a missing field.
+ */
+function postMortemHTML(x) {
+  let pm = null;
+  try {
+    pm = typeof x.postmortem_json === 'string' ? JSON.parse(x.postmortem_json) : x.postmortem_json;
+  } catch { pm = null; }
+  if (!pm || !pm.line) return '';
+
+  const facts = [];
+  if (typeof pm.swing === 'number') {
+    facts.push(pm.swing === 0
+      ? 'finished on the line'
+      : `${pm.swing} goal${pm.swing === 1 ? '' : 's'} ${pm.landed === 'missed' ? 'short' : 'to spare'}`);
+  }
+  if (pm.shape) {
+    facts.push(pm.shape === 'as we read it' ? 'the game we described' : `a ${pm.shape} game than we called`);
+  }
+  if (pm.market && pm.opening_odds && pm.closing_odds) {
+    facts.push(pm.market === 'held'
+      ? `price held at ${dec(pm.closing_odds)}`
+      : `${dec(pm.opening_odds)} to ${dec(pm.closing_odds)} by kick-off`);
+  }
+
+  return `
+  <div class="pm is-${esc(pm.landed)}">
+    <p class="pm-line">${esc(pm.line)}</p>
+    ${facts.length ? `<p class="pm-facts">${facts.map((f) => `<span>${esc(f)}</span>`).join('')}</p>` : ''}
   </div>`;
 }
 
-/** Won, lost, or the stake came back — said the way it happened. */
-function resultTag(result) {
-  if (!result) return '<span class="pending">To play</span>';
-  const map = {
-    WON: ['won', 'Won'],
-    HALF_WON: ['won', 'Won half'],
-    LOST: ['lost', 'Lost'],
-    HALF_LOST: ['lost', 'Lost half'],
-    PUSH: ['void', 'Stake back'],
-    VOID: ['void', 'Void'],
-  };
-  const [cls, label] = map[result] ?? ['void', result[0] + result.slice(1).toLowerCase()];
-  return `<span class="tag ${cls}">${esc(label)}</span>`;
+const RESULT_TONE = {
+  WON: 'won', HALF_WON: 'part', LOST: 'lost', HALF_LOST: 'part', PUSH: 'back', VOID: 'back',
+};
+const RESULT_WORD = {
+  WON: 'Landed', HALF_WON: 'Half landed', LOST: 'Missed', HALF_LOST: 'Half missed',
+  PUSH: 'Refunded', VOID: 'Void',
+};
+
+function recapCardHTML(x) {
+  const d = market({
+    market: x.market, outcome: x.outcome, line: x.line,
+    home: x.home_team, away: x.away_team, odds: x.odds,
+  });
+  const tone = RESULT_TONE[x.result] ?? 'back';
+  const hg = x.home_goals;
+  const ag = x.away_goals;
+  const hasScore = Number.isInteger(hg) && Number.isInteger(ag);
+  const said = recap({
+    market: x.market, outcome: x.outcome, line: x.line, result: x.result,
+    homeGoals: hg, awayGoals: ag, home: x.home_team, away: x.away_team,
+  });
+
+  return `
+  <article class="recap is-${esc(tone)}">
+    <a class="recap-tie" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
+      <span class="recap-side">${crest(x.home_team ?? '', 'sm', x.home_team_id)}<span>${esc(x.home_team ?? '')}</span>${
+        hasScore ? `<b class="row-goals${hg > ag ? ' won' : ''}">${esc(hg)}</b>` : ''}</span>
+      <span class="recap-side">${crest(x.away_team ?? '', 'sm', x.away_team_id)}<span>${esc(x.away_team ?? '')}</span>${
+        hasScore ? `<b class="row-goals${ag > hg ? ' won' : ''}">${esc(ag)}</b>` : ''}</span>
+    </a>
+    <div class="recap-body">
+      <p class="recap-call">We said <b>${esc(d.name)}</b>${x.odds ? ` at ${dec(x.odds)}` : ''}.</p>
+      ${said ? `<p class="recap-what">${esc(said)}</p>` : ''}
+      ${postMortemHTML(x)}
+      ${(() => {
+        /*
+         * The argument we made before kick-off, shown back against what
+         * happened. On a loss it is the most useful thing on the page and the
+         * one thing nobody else publishes.
+         *
+         * Gated on content, not on a flag. Two thirds of the narratives on
+         * record were written by the template grammar and say "expected
+         * goals", "the model" and "our numbers" -- the private language the
+         * vocabulary rule exists to keep off the page, which is why this was
+         * never shown before. Judging each one on what it actually says means
+         * the page fills itself as the writing improves, with nothing to
+         * switch on.
+         */
+        const why = cleanProse(x.narrative, [String(x.odds), dec(x.odds), String(x.line), x.line]);
+        if (!why) return '';
+        return `
+        <details class="recap-why">
+          <summary>${tone === 'lost' ? 'The reason we gave' : 'Why we said it'}</summary>
+          <p>${esc(why)}</p>
+        </details>`;
+      })()}
+    </div>
+    <span class="mark ${esc(tone)}">${esc(RESULT_WORD[x.result] ?? 'Void')}</span>
+  </article>`;
 }
 
 // ---------------------------------------------------------------- leagues
@@ -1080,19 +2020,259 @@ async function viewLeagues() {
     </div></div>
     <div class="cards">
       ${rows.map((e) => `
-        <article class="card" data-league="${esc(e.name)}" tabindex="0">
-          <div class="card-top"><span class="card-league">${crest(e.name, 'md', e.id, 'league')}<span style="font-size:0.95rem;color:var(--ink);font-weight:600">${esc(e.name)}</span></span></div>
+        <a class="card" href="${esc(boardHash(state.hours, e.name))}">
+          <div class="card-top"><span class="card-league">${crest(e.name, 'md', e.id, 'league')}<span>${esc(e.name)}</span></span></div>
           <div class="also">
             <span class="also-call">${e.n} <b>games</b></span>
             <span class="also-call">${e.picks} <b>calls</b></span>
           </div>
-        </article>`).join('')}
+        </a>`).join('')}
+    </div>
+  </div>`;
+}
+
+
+// ------------------------------------------------- membership: the pages
+
+/**
+ * A write, which is a different shape from every other request this file makes.
+ *
+ * Reads are GET and stream through the Worker untouched. These three do not:
+ * they are POSTs that need the reader's token to say who is asking, and the
+ * Worker answers them itself rather than proxying a serving function.
+ */
+async function postJSON(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(await authHeaders()) },
+    body: JSON.stringify(body ?? {}),
+  });
+  let data = null;
+  try { data = await res.json(); } catch { /* no body */ }
+  if (!res.ok) throw new Error(data?.error ?? 'Something went wrong. Nothing has been charged.');
+  return data;
+}
+
+/**
+ * Hand over to the processor.
+ *
+ * The plan is named, never priced: the amount is read from the database on the
+ * server side, so a client that asks to pay a penny is told what it actually
+ * costs. Signing in first is required because a payment with nobody attached to
+ * it cannot be turned into a membership.
+ */
+async function startCheckout(plan = 'monthly') {
+  if (!(await currentUser())) { location.hash = '#/signin'; return; }
+  const button = document.getElementById('buy');
+  if (button) { button.disabled = true; button.textContent = 'Opening checkout…'; }
+  try {
+    const { link } = await postJSON('/api/pay/checkout', { plan });
+    if (!link) throw new Error('The payment page could not be opened.');
+    location.href = link;
+  } catch (err) {
+    if (button) { button.disabled = false; button.textContent = 'Become a member'; }
+    alert(err.message);
+  }
+}
+
+/** Turn renewal on or off. Takes effect immediately, both ways. */
+async function setRenewal(on) {
+  try {
+    await postJSON('/api/pay/renewal', { auto_renew: on });
+    await viewAccount();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+/**
+ * What a membership costs.
+ *
+ * One plan, one price, one button. No decoy tier that exists only to flatter
+ * the one beside it, and no claim about returns anywhere on the page -- the
+ * settled record is public and negative, so selling coverage and explanation is
+ * the only honest pitch and it is the one that survives an ad review.
+ */
+async function viewPricing() {
+  const user = await currentUser();
+
+  app.innerHTML = `
+  <div class="wrap section">
+    <div class="section-head">
+      <div>
+        <h2 class="display">Membership</h2>
+        <p>Every match we cover, read properly. The call is the part you pay for.</p>
+      </div>
+    </div>
+
+    <div class="pricing">
+      <div class="panel plan-free">
+        <h3 class="panel-head">Free, forever</h3>
+        <ul class="ticks">
+          <li>Every fixture across 88 leagues</li>
+          <li>The full write-up on each one</li>
+          <li>Form, team news, line-ups, head-to-head</li>
+          <li>The complete settled record, wins and losses alike</li>
+        </ul>
+      </div>
+
+      <div class="panel plan-paid">
+        <h3 class="panel-head">Member</h3>
+        <p class="plan-price"><b>£9</b><span>a month</span></p>
+        <ul class="ticks">
+          <li><b>The call itself</b> — which market and which side</li>
+          <li><b>The price</b>, and the bookmaker offering it</li>
+          <li>What has to happen for it to win, in plain English</li>
+          <li>Every open call, not just the ones on the front page</li>
+        </ul>
+        <button class="btn btn-accent btn-lg" id="buy">
+          ${user ? 'Become a member' : 'Sign in to join'}
+        </button>
+        <p class="plan-note">Thirty days. Cancel whenever you like, in one tap.</p>
+      </div>
+    </div>
+
+    <div class="prose pricing-small">
+      <h2>What this is not</h2>
+      <p>It is not tipping and it is not advice to place a bet. We publish what we
+         think will happen and why, and we publish the record of how that has gone —
+         including when it has gone badly. Nothing here is a promise of profit, and
+         a high strike rate at short odds can still lose money.</p>
+      <p>18+. <a href="#/legal/responsible">Gambling can be a problem</a> — if it has
+         stopped being entertainment you can afford, that page is more use than any
+         call on this site.</p>
     </div>
   </div>`;
 
-  for (const el of app.querySelectorAll('[data-league]')) {
-    el.onclick = () => { state.leagueName = el.dataset.league; location.hash = '#/board'; };
-  }
+  document.getElementById('buy').onclick = () => startCheckout();
+}
+
+/** Sign in. One email box and one button, because that is the whole of it. */
+async function viewSignin() {
+  if (await currentUser()) { location.hash = '#/account'; return; }
+
+  const problem = state.authError;
+  state.authError = null;
+
+  app.innerHTML = `
+  <div class="wrap section narrow">
+    <div class="section-head"><div>
+      <h2 class="display">Sign in</h2>
+      <p>No password to remember or lose. We email you a link.</p>
+    </div></div>
+
+    ${problem ? `<p class="form-error">${esc(problem)}</p>` : ''}
+
+    <div class="panel signin">
+      <button class="btn btn-ghost btn-lg btn-google" id="google">Continue with Google</button>
+      <div class="or"><span>or</span></div>
+      <form id="magic" novalidate>
+        <label for="email">Your email address</label>
+        <input id="email" name="email" type="email" autocomplete="email"
+               inputmode="email" required placeholder="you@example.com">
+        <button class="btn btn-primary btn-lg" type="submit">Email me a link</button>
+      </form>
+      <p class="signin-note" id="note"></p>
+    </div>
+
+    <p class="prose pricing-small">By signing in you agree to our
+      <a href="#/legal/terms">terms</a> and <a href="#/legal/privacy">privacy policy</a>.</p>
+  </div>`;
+
+  const note = document.getElementById('note');
+  const say = (msg, bad) => { note.textContent = msg; note.className = bad ? 'signin-note bad' : 'signin-note ok'; };
+
+  document.getElementById('google').onclick = async (e) => {
+    e.currentTarget.disabled = true;
+    try { await signInWithGoogle(); } catch (err) { say(err.message, true); e.currentTarget.disabled = false; }
+  };
+
+  document.getElementById('magic').onsubmit = async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('email').value.trim();
+    if (!email) return say('Put your email address in first.', true);
+    const button = e.currentTarget.querySelector('button');
+    button.disabled = true;
+    say('Sending…');
+    try {
+      await signInWithEmail(email);
+      say(`Check ${email}. The link signs you straight in.`);
+    } catch (err) {
+      say(err.message, true);
+      button.disabled = false;
+    }
+  };
+}
+
+/** The account: what you have, what it costs, and how to stop it. */
+async function viewAccount() {
+  const user = await currentUser();
+  if (!user) { location.hash = '#/signin'; return; }
+
+  app.innerHTML = '<div class="wrap section narrow"><div class="spinner">Loading…</div></div>';
+  let account = { membership: null, receipts: [] };
+  try { account = await getJSON('/api/account'); } catch { /* shown as no membership */ }
+
+  const m = account.membership;
+  const active = m && m.expires_at * 1000 > Date.now();
+  const when = (e) => new Date(e * 1000).toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' });
+
+  app.innerHTML = `
+  <div class="wrap section narrow">
+    <div class="section-head"><div>
+      <h2 class="display">Your account</h2>
+      <p>${esc(user.email ?? '')}</p>
+    </div></div>
+
+    <div class="panel">
+      <h3 class="panel-head">Membership</h3>
+      ${active ? `
+        <p class="acct-state on">Active until <b>${esc(when(m.expires_at))}</b>.</p>
+        <p class="acct-line">${m.auto_renew
+          ? `It renews itself on that date${m.card_last4 ? ` using your ${esc(m.card_brand ?? 'card')} ending ${esc(m.card_last4)}` : ''}.`
+          : 'It will not renew itself — access simply stops on that date.'}</p>
+        ${m.auto_renew
+          ? `<button class="btn btn-quiet" id="cancel">Stop renewing</button>`
+          : `<button class="btn btn-primary" id="resume">Renew each month</button>`}
+      ` : `
+        <p class="acct-state off">You are not a member.</p>
+        <p class="acct-line">The reading of each match is free. The call, the price and
+           the bookmaker are not.</p>
+        <a class="btn btn-accent" href="#/pricing">See what it costs</a>
+      `}
+    </div>
+
+    ${account.receipts?.length ? `
+      <div class="panel">
+        <h3 class="panel-head">Payments</h3>
+        <table class="tbl"><tbody>
+          ${account.receipts.map((r) => `
+            <tr><td>${esc(when(r.created_at))}</td>
+                <td>${esc(r.status)}</td>
+                <td class="num">${esc(money(r.amount_minor, r.currency))}</td></tr>`).join('')}
+        </tbody></table>
+      </div>` : ''}
+
+    <div class="panel">
+      <h3 class="panel-head">This browser</h3>
+      <button class="btn btn-ghost" id="out">Sign out</button>
+    </div>
+  </div>`;
+
+  document.getElementById('out').onclick = async () => { await signOut(); location.hash = '#/home'; };
+  const cancel = document.getElementById('cancel');
+  // One tap, no "are you sure", no offer to stay. Retention mazes are a dark
+  // pattern and in several places an illegal one.
+  if (cancel) cancel.onclick = () => setRenewal(false);
+  const resume = document.getElementById('resume');
+  if (resume) resume.onclick = () => setRenewal(true);
+}
+
+/** Money, from minor units, without floating point anywhere near it. */
+function money(minor, currency) {
+  const n = Number(minor ?? 0);
+  const sign = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$';
+  return `${sign}${(n / 100).toFixed(2).replace(/\.00$/, '')}`;
 }
 
 // ------------------------------------------------------------------ legal
@@ -1106,8 +2286,15 @@ const LEGAL = {
       <p>This policy explains what offside.win collects, why, and what you can do about it.
          It is written to be read rather than to be survived.</p>
       <h2>What we collect</h2>
-      <p><b>Nothing that identifies you, unless you give it to us.</b> There is no account to
-         create and no form to fill in, so we hold no name, email address or payment detail.</p>
+      <p><b>Nothing, until you make an account.</b> You can read every fixture, every write-up and
+         the whole results record without telling us anything at all.</p>
+      <p>If you sign in, we hold your <b>email address</b> — because that is how you sign in — and,
+         if you become a member, the <b>dates your membership runs</b> and a <b>record of each
+         payment</b>: when, how much, and whether it went through.</p>
+      <p><b>We never see your card.</b> Card details are entered on our payment processor's own
+         page and never touch this site or our database. What we are told is the brand and the last
+         four digits, so your account page can say "Visa ending 4242" and you know which card is
+         on file. That is all we could tell anyone, including ourselves.</p>
       <p>Our host records standard server logs — IP address, browser, page requested, time — which
          are used to keep the site up and to spot abuse, and are not used to build a profile of you.</p>
       <h2>Analytics</h2>
@@ -1118,17 +2305,26 @@ const LEGAL = {
       <ul>
         <li>Sell or share your data with advertisers or data brokers.</li>
         <li>Track you across other websites.</li>
-        <li>Send you email, because we do not have your address.</li>
+        <li>Send you marketing email. If you have an account you will get sign-in links and
+            notices about your membership, and nothing else.</li>
       </ul>
       <h2>Third parties</h2>
+      <p>Two companies process data on our behalf, and only what they need to do their job.
+         <b>Supabase</b> stores the accounts and runs the sign-in. <b>Coinflow</b> takes the
+         payments and holds the card details we never see. Both are bound by their own agreements
+         with us and may not use your data for anything else.</p>
+      <p>If you sign in with Google, Google is told that you signed in to this site. We are told
+         your email address and nothing more.</p>
       <p>Pages load club crests, league marks and stadium photographs from our data provider, and
          fonts from Google Fonts. Those requests reach their servers and are subject to their own
          policies. Match and odds data comes from our provider; none of your information is sent to
          them.</p>
       <h2>Your rights</h2>
       <p>Where the UK GDPR or EU GDPR applies you may ask what we hold, ask for it to be corrected
-         or deleted, and complain to your data protection authority. Since we hold no personal data
-         beyond server logs, most such requests will be answered by telling you exactly that.</p>
+         or deleted, and complain to your data protection authority. Ask and we will delete your
+         account and your email address. We have to keep the record of payments themselves for as
+         long as tax and accounting law requires, which we cannot waive — but it can be separated
+         from you.</p>
       <h2>Contact</h2>
       <p>Questions about this policy can be sent to the address on our contact page.</p>`,
   },
@@ -1140,6 +2336,9 @@ const LEGAL = {
       <p>One item of local storage records whether you accepted or declined non-essential cookies,
          so the notice is not shown on every visit. It holds a single value and nothing else. It
          cannot be switched off, because without it we cannot remember that you said no.</p>
+      <p>If you sign in, a second item holds your session — the thing that keeps you signed in
+         between visits. It is set only after you sign in, it is removed when you sign out, and
+         without it an account would not work at all.</p>
       <h2>Analytics — optional, off until you say otherwise</h2>
       <p>If you accept, an analytics cookie may be set to count visits and see which pages are
          read. If you decline, the analytics script is never loaded, so no such cookie can exist.</p>
@@ -1170,8 +2369,46 @@ const LEGAL = {
       <h2>Liability</h2>
       <p>To the fullest extent the law allows, we are not liable for any loss arising from your use
          of this site, including money lost betting.</p>
+      <h2>Membership</h2>
+      <p>Reading the site is free: every fixture, every write-up, the form, the team news and the
+         full record of results. A membership adds the call itself — which market, which side, the
+         price, and the bookmaker offering it.</p>
+      <p>A membership runs for thirty days from the day you pay. If you have turned renewal on, we
+         charge the same card again on the day it runs out, at the price shown on the membership
+         page at that time; we will tell you before any price changes. You can stop renewal at any
+         time from your account page, in one tap, and keep the access you have already paid for
+         until it runs out.</p>
+      <p>Because this is digital content delivered immediately, you are asked at checkout to agree
+         that it starts straight away. Doing so ends the 14-day right to cancel that would otherwise
+         apply under UK consumer law. If you would rather keep that right, do not agree, and your
+         access will begin after the 14 days have passed.</p>
       <h2>Changes</h2>
       <p>These terms may change. The date below shows when they were last revised.</p>`,
+  },
+  refunds: {
+    title: 'Refunds',
+    body: `
+      <p>Short, because it should be.</p>
+      <h2>If it did not work</h2>
+      <p>If the site was down, or your membership did not start after you paid, tell us and we will
+         put it right — either by extending your membership by the time you lost, or by refunding
+         you in full. No argument and no form.</p>
+      <h2>If you changed your mind</h2>
+      <p>Tell us within 14 days of your first payment and you can have it back, provided you agreed
+         at checkout to wait rather than to start immediately. If you asked to start immediately,
+         that right ends when your access begins — which is what agreeing to it means, and why we
+         ask rather than assume.</p>
+      <h2>If you simply want to stop</h2>
+      <p>Turn renewal off on your account page. You keep what you have paid for until it runs out
+         and are not charged again. We do not refund part of a month already under way, and we do
+         not make you ask a person to leave.</p>
+      <h2>What we will not refund</h2>
+      <p><b>Losing bets.</b> Nothing here is advice to stake money and no call is a promise. Our
+         record is published in full, wins and losses alike, so that is knowable before you pay
+         rather than after.</p>
+      <h2>How to ask</h2>
+      <p>Write to the address on our contact page from the email address on the account. We answer
+         every refund request, including the ones we turn down.</p>`,
   },
   responsible: {
     title: 'Responsible gambling',
@@ -1261,22 +2498,89 @@ function cookieNotice() {
 // ---------------------------------------------------------------- routing
 
 async function route() {
-  const parts = (location.hash || '#/home').slice(2).split('/');
+  const { parts, params } = parseHash();
   const name = parts[0] || 'home';
+  clearInterval(state.tick);
   for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.route === name);
   document.getElementById('nav').classList.remove('open');
   document.getElementById('burger').setAttribute('aria-expanded', 'false');
   window.scrollTo(0, 0);
   try {
     if (name === 'fixture' && parts[1]) return await viewFixture(parts[1]);
-    if (name === 'board') return await viewBoard();
+    if (name === 'board') return await viewBoard(params);
     if (name === 'leagues') return await viewLeagues();
     if (name === 'results') return await viewResults();
+    if (name === 'pricing') return await viewPricing();
+    if (name === 'signin') return await viewSignin();
+    if (name === 'account') return await viewAccount();
     if (name === 'legal' && parts[1]) return viewLegal(parts[1]);
     return await viewHome();
   } catch (err) {
     app.innerHTML = `<div class="wrap section"><div class="empty">${esc(err.message ?? 'Something went wrong.')}</div></div>`;
   }
+}
+
+/**
+ * Point the header link at the right place.
+ *
+ * Runs after the first paint rather than blocking it: the link reads "Sign in"
+ * until we know otherwise, which is right for almost everyone and wrong for a
+ * few hundred milliseconds for the rest.
+ */
+/**
+ * Say what the reader has, in the header, always.
+ *
+ * Three states and they are visibly different: signed out, signed in on the
+ * free tier, and a member. The version before this showed "Sign in" or
+ * "Account" and nothing else, so a free reader had no way of knowing there was
+ * a tier above them until a call was withheld. Meeting the gate for the first
+ * time at the moment you are refused something is the worst way to meet it, and
+ * it is the complaint this answers.
+ */
+async function headerAuth() {
+  const link = document.getElementById('account-link');
+  const tag = document.getElementById('plan-tag');
+  const upgrade = document.getElementById('upgrade-link');
+  if (!link) return;
+
+  const user = await currentUser();
+  state.user = user;
+  const member = Boolean(state.board?.member);
+
+  link.textContent = user ? 'Account' : 'Sign in';
+  link.href = user ? '#/account' : '#/signin';
+
+  if (tag) {
+    tag.hidden = !user;
+    tag.textContent = member ? 'Member' : 'Free';
+    tag.className = member ? 'plan-tag on' : 'plan-tag';
+    tag.href = member ? '#/account' : '#/pricing';
+  }
+  if (upgrade) {
+    upgrade.hidden = member;
+    upgrade.textContent = user ? 'Upgrade' : 'Get the calls';
+  }
+}
+
+/**
+ * The country control.
+ *
+ * Prices are only useful attached to a book somebody can open an account with,
+ * and which books those are is decided by where the reader is sitting. We work
+ * that out from the device's timezone, which is right most of the time and
+ * quietly wrong the rest — a phone bought abroad, a VPN, a traveller.
+ *
+ * So the guess is stated out loud rather than applied silently. A reader who
+ * sees the wrong country can fix it in one tap, and the fix sticks.
+ */
+function renderRegion() {
+  const host = document.getElementById('region-pick');
+  if (!host) return;
+  const here = country();
+  const where = COUNTRY_NAMES[here];
+  host.innerHTML = where
+    ? `<p>Prices and stakes shown for <b>${esc(where)}</b>, from the books licensed there.</p>`
+    : `<p>Prices shown from books that take customers in most countries.</p>`;
 }
 
 async function health() {
@@ -1297,6 +2601,28 @@ document.getElementById('burger').onclick = (e) => {
 };
 
 window.addEventListener('hashchange', route);
-route();
-health();
-cookieNotice();
+
+renderRegion();
+
+/**
+ * Boot.
+ *
+ * The sign-in has to be finished before the first render, not alongside it: a
+ * view that reads the session while the code is still being exchanged would
+ * paint the signed-out page and then not correct itself. Everything after it is
+ * fire-and-forget.
+ */
+(async () => {
+  try {
+    await completeSignIn();
+  } catch (err) {
+    // A stale or reused magic link. Say so once, on the sign-in page, rather
+    // than leaving someone looking at a home page wondering what happened.
+    state.authError = err.message ?? 'That sign-in link did not work.';
+    location.hash = '#/signin';
+  }
+  await route();
+  health();
+  headerAuth();
+  cookieNotice();
+})();

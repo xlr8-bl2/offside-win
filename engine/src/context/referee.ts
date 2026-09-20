@@ -40,10 +40,23 @@ export function refereeFactors(ctx: FixtureContext): Factor[] {
       id: 'referee.tendency',
       section: '§13',
       tier: 5,
-      note:
-        `The referee averages ${ref.yellows_per.toFixed(1)} yellows and ${ref.reds_per.toFixed(2)} reds ` +
-        `per match across ${ref.matches} games, against a league average of ${leagueYellows.toFixed(1)} ` +
-        `and ${leagueReds.toFixed(2)}.`,
+      // Counted, not averaged. A referee showing "3.5 yellows per match" is a
+      // row in a table; the same referee showing 70 yellow cards in 20 games
+      // where 72 would be usual is a thing said out loud, and it makes the
+      // comparison the point rather than the decimal.
+      note: (() => {
+        const seen = Math.round(ref.yellows_per * ref.matches);
+        const usual = Math.round(leagueYellows * ref.matches);
+        const reds = Math.round(ref.reds_per * ref.matches);
+        const cards =
+          seen === usual
+            ? `exactly what this league averages`
+            : `where ${usual} would be usual in this league`;
+        return (
+          `${seen} yellow cards in this referee's last ${ref.matches} games, ${cards}` +
+          (reds > 0 ? `, and ${reds} red${reds === 1 ? '' : 's'}.` : `, with nobody sent off.`)
+        );
+      })(),
       evidence: {
         matches: ref.matches,
         yellows_per_match: Number(ref.yellows_per.toFixed(2)),

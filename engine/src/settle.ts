@@ -1,4 +1,5 @@
 import { bsdOrNull, num } from './bsd.ts';
+import { postMortem } from './postmortem.ts';
 import { isQuarterLine } from './price.ts';
 import { exec, insertMany, kvSetJSON, select } from './store.ts';
 import { MARKET_FAMILY } from './types.ts';
@@ -155,6 +156,70 @@ export interface SettleReport {
   settled: number;
   unresolved: number;
   pnl: number;
+  /** Older picks given a post-mortem after the fact. */
+  backfilled: number;
+}
+
+/**
+ * Post-mortems for picks that were settled before there was such a thing.
+ *
+ * They get the part the score alone answers -- how many goals would have had
+ * to change -- and nothing else. The shape we published and the price at
+ * kick-off were not being recorded when these were graded, so those stay null
+ * and the page prints one fact instead of three rather than guessing at the
+ * other two.
+ *
+ * Bounded per run because it walks the whole back record, and it is idempotent
+ * because it only ever touches rows with no post-mortem on them.
+ */
+export async function backfillPostMortems(limit = 400): Promise<number> {
+  const rows = await select<{
+    id: number;
+    market: MarketCode;
+    outcome: Outcome;
+    line: number | null;
+    result: Result;
+    home_goals: number | null;
+    away_goals: number | null;
+    opening_odds: number | null;
+    closing_odds: number | null;
+    evidence_json: string | null;
+  }>(
+    `SELECT p.id, p.market, p.outcome, p.line, p.result, p.opening_odds, p.closing_odds,
+            p.evidence_json, f.home_goals, f.away_goals
+     FROM pick p JOIN fixture f ON f.id = p.fixture_id
+     WHERE p.settled_at IS NOT NULL
+       AND p.postmortem_json IS NULL
+       AND p.result IS NOT NULL
+       AND f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
+     ORDER BY p.kickoff DESC LIMIT ?`,
+    [limit],
+  );
+
+  let done = 0;
+  for (const r of rows) {
+    let expected: { home?: number; away?: number } = {};
+    try {
+      expected = (JSON.parse(r.evidence_json ?? '{}') as { expected?: typeof expected }).expected ?? {};
+    } catch { /* an older shape, or none at all */ }
+
+    const pm = postMortem({
+      market: r.market,
+      outcome: r.outcome,
+      line: r.line,
+      result: r.result,
+      homeGoals: r.home_goals!,
+      awayGoals: r.away_goals!,
+      expectedHome: expected.home ?? null,
+      expectedAway: expected.away ?? null,
+      openingOdds: r.opening_odds,
+      closingOdds: r.closing_odds,
+    });
+    await exec('UPDATE pick SET postmortem_json = ? WHERE id = ?', [JSON.stringify(pm), r.id]);
+    done++;
+  }
+  if (done) console.log(`Wrote ${done} post-mortems for picks settled before there were any.`);
+  return done;
 }
 
 export async function runSettle(): Promise<SettleReport> {
@@ -169,15 +234,20 @@ export async function runSettle(): Promise<SettleReport> {
     outcome: Outcome;
     line: number | null;
     odds: number;
+    opening_odds: number | null;
+    closing_odds: number | null;
+    evidence_json: string | null;
   }>(
-    `SELECT id, fixture_id, market, outcome, line, odds
+    `SELECT id, fixture_id, market, outcome, line, odds, opening_odds, closing_odds, evidence_json
      FROM pick WHERE settled_at IS NULL AND kickoff < ? ORDER BY kickoff ASC LIMIT 500`,
     [cutoff],
   );
 
-  const report: SettleReport = { considered: pending.length, settled: 0, unresolved: 0, pnl: 0 };
+  const report: SettleReport = { considered: pending.length, settled: 0, unresolved: 0, pnl: 0, backfilled: 0 };
   if (pending.length === 0) {
     console.log('Nothing to settle.');
+    report.backfilled = await backfillPostMortems();
+    await kvSetJSON('settle:last_run', { at: now, ...report });
     return report;
   }
 
@@ -221,6 +291,18 @@ export async function runSettle(): Promise<SettleReport> {
       };
     }
 
+    // The scoreline the grade was made against, written back onto the fixture
+    // so the results page can print it beside the mark. Settlement is the
+    // authoritative source: the slate writes a running score every quarter of
+    // an hour and stops caring once a match falls out of its window, and a
+    // half-time score left behind as final would make every page that reads it
+    // quietly wrong.
+    await exec('UPDATE fixture SET home_goals = ?, away_goals = ? WHERE id = ?', [
+      row.home_goals,
+      row.away_goals,
+      id,
+    ]);
+
     scores.set(id, {
       homeGoals: row.home_goals!,
       awayGoals: row.away_goals!,
@@ -233,7 +315,29 @@ export async function runSettle(): Promise<SettleReport> {
     });
   }
 
-  const updates: Array<{ id: number; result: Result; pnl: number }> = [];
+  const updates: Array<{
+    id: number;
+    result: Result;
+    pnl: number;
+    clv: number | null;
+    postmortem: string | null;
+  }> = [];
+
+  /*
+   * The shape we published for the fixture, dug back out of the evidence the
+   * pick was stored with. Absent on everything settled before the post-mortem
+   * existed, which is why every field it feeds is nullable rather than the
+   * page demanding it.
+   */
+  const expectedOf = (raw: string | null): { home?: number; away?: number } => {
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw) as { expected?: { home?: number; away?: number } };
+      return parsed.expected ?? {};
+    } catch {
+      return {};
+    }
+  };
   for (const p of pending) {
     const s = scores.get(p.fixture_id);
     if (!s) {
@@ -245,23 +349,52 @@ export async function runSettle(): Promise<SettleReport> {
       // The match finished but the data needed to grade this market never
       // arrived. Void it rather than guess — a wrong grade corrupts calibration
       // permanently, and calibration is what the model steers by.
-      updates.push({ id: p.id, result: 'VOID', pnl: 0 });
+      updates.push({ id: p.id, result: 'VOID', pnl: 0, clv: null, postmortem: null });
       continue;
     }
-    updates.push({ id: p.id, result: graded.result, pnl: graded.pnl });
+
+    // What the result says about the call. See engine/src/postmortem.ts for
+    // what it is allowed to claim and, more to the point, what it is not.
+    const expected = expectedOf(p.evidence_json);
+    const pm = postMortem({
+      market: p.market,
+      outcome: p.outcome,
+      line: p.line,
+      result: graded.result,
+      homeGoals: s.homeGoals,
+      awayGoals: s.awayGoals,
+      expectedHome: expected.home ?? null,
+      expectedAway: expected.away ?? null,
+      openingOdds: p.opening_odds,
+      closingOdds: p.closing_odds,
+    });
+
+    // Where the price finished against where we called it. Recorded as a
+    // number because calibration averages it; said in words on the page.
+    const clv =
+      p.opening_odds && p.closing_odds && p.opening_odds > 1 && p.closing_odds > 1
+        ? Number((p.opening_odds / p.closing_odds - 1).toFixed(4))
+        : null;
+
+    updates.push({
+      id: p.id,
+      result: graded.result,
+      pnl: graded.pnl,
+      clv,
+      postmortem: JSON.stringify(pm),
+    });
     report.pnl += graded.pnl;
     report.settled++;
   }
 
   for (const u of updates) {
-    await exec('UPDATE pick SET settled_at = ?, result = ?, pnl = ? WHERE id = ?', [
-      now,
-      u.result,
-      u.pnl,
-      u.id,
-    ]);
+    await exec(
+      'UPDATE pick SET settled_at = ?, result = ?, pnl = ?, clv = ?, postmortem_json = ? WHERE id = ?',
+      [now, u.result, u.pnl, u.clv, u.postmortem, u.id],
+    );
   }
 
+  report.backfilled = await backfillPostMortems();
   await refreshCalibration();
   await kvSetJSON('settle:last_run', { at: now, ...report });
 

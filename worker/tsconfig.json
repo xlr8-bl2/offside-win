@@ -4,10 +4,16 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["ES2022"],
-    "types": ["@cloudflare/workers-types"],
+    // The worker itself runs on workerd; its tests run on node.
+    "types": ["@cloudflare/workers-types", "node"],
     "strict": true,
     "noEmit": true,
+    // The engine writes explicit .ts on every local import because it runs
+    // under node's type stripping. Wrangler bundles with esbuild, which
+    // resolves them the same way, so the worker matches rather than inventing
+    // a second convention for the same repo.
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts"]
 }

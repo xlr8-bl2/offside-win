@@ -113,4 +113,53 @@ if (!anyOk) {
   console.log('\n  PostgREST reachable.');
 }
 
+/*
+ * The service key, if one is configured.
+ *
+ * It is the only credential that can write a membership, and it is used on
+ * exactly one route, which is itself gated behind a webhook secret that may not
+ * exist yet. So there is a real window where the key is deployed and nothing at
+ * all exercises it -- and the first thing that would is a customer's payment.
+ * That is the wrong moment to find out it was pasted wrong.
+ *
+ * The check is a read of `payment`, which anon is granted nothing on. A 200
+ * proves the key really does carry service privileges; a 401 or 403 proves it
+ * does not, whatever it looks like. Nothing is written.
+ */
+const serviceKey = process.env.SUPABASE_SERVICE_KEY;
+console.log('\n--- service key (the payment write path) ---');
+
+if (!serviceKey) {
+  console.log('  not set. Payments stay switched off, which is a valid state.');
+} else {
+  const shape = serviceKey.startsWith('sb_secret_') ? 'a secret key'
+    : serviceKey.startsWith('eyJ') ? 'a JWT (legacy service_role key)'
+    : 'an unrecognised format';
+  console.log(`  key looks like: ${shape}`);
+
+  if (serviceKey === process.env.SUPABASE_ANON_KEY) {
+    console.log('  FAIL: this is the anon key. The webhook would be unable to write anything.');
+    process.exitCode = 1;
+  } else if (serviceKey.startsWith('sb_publishable_')) {
+    console.log('  FAIL: this is the publishable key, not the secret one.');
+    process.exitCode = 1;
+  } else {
+    try {
+      // `payment` is granted to nobody, so anon cannot read it and the service
+      // role can. That difference is the whole test.
+      const r = await fetch(`${process.env.SUPABASE_URL}/rest/v1/payment?select=id&limit=1`, {
+        headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+      });
+      if (r.ok) {
+        console.log('  reads a table anon cannot. The key carries service privileges.');
+      } else {
+        console.log(`  FAIL: ${r.status} ${r.statusText} — ${(await r.text()).slice(0, 140).replace(/\s+/g, ' ')}`);
+        process.exitCode = 1;
+      }
+    } catch (e) {
+      console.log(`  could not check: ${e.message}`);
+    }
+  }
+}
+
 console.log('\nPostgres is usable. That is what the engine needs.');

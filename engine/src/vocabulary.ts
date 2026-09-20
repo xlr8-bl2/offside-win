@@ -108,8 +108,8 @@ export const BANNED: BannedTerm[] = [
  * Scorelines and dates are the exception a supporter genuinely says, so
  * "4-0" and "2026" survive; "1.78" does not.
  */
-const SPREADSHEET_NUMBER = /(?<![\d-])\d+\.\d{1,2}(?![\d%])/;
-const PERCENTAGE = /\b\d{1,3}(?:\.\d+)?\s*%/;
+export const SPREADSHEET_NUMBER = /(?<![\d-])\d+\.\d{1,2}(?![\d%])/;
+export const PERCENTAGE = /\b\d{1,3}(?:\.\d+)?\s*%/;
 
 export interface Violation {
   term: string;
