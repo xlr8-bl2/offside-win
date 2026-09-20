@@ -629,8 +629,23 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
            'fixtures', coalesce(json_agg(b.card ORDER BY (b.kickoff / 86400) ASC, b.rank ASC, b.kickoff ASC), '[]'::json)
          )
   FROM (
-    SELECT (CASE WHEN (SELECT ok FROM m) THEN f.board_json
-                 ELSE coalesce(f.board_free_json, f.board_json) END)::json AS card,
+    SELECT (
+             (CASE WHEN (SELECT ok FROM m) THEN f.board_json
+                   ELSE coalesce(f.board_free_json, f.board_json) END)::jsonb
+             -- The score comes from the column, not from the card.
+             --
+             -- The board reaches a day back and the slate only rewrites the
+             -- last six hours, so a match that finished yesterday afternoon
+             -- keeps whatever card it had when it was still to be played: no
+             -- score, and a status saying it had not kicked off. Overlaying
+             -- the column costs nothing here and means the scoreline is
+             -- whatever settlement last wrote, however old the card is.
+             || CASE WHEN f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
+                     THEN jsonb_build_object(
+                            'score', jsonb_build_array(f.home_goals, f.away_goals),
+                            'status', 'finished')
+                     ELSE '{}'::jsonb END
+           )::json AS card,
            f.kickoff, f.rank
     FROM fixture f
     WHERE f.kickoff BETWEEN p_from AND p_to
