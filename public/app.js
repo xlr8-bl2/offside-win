@@ -990,8 +990,38 @@ async function viewBoard(params = new URLSearchParams()) {
   };
   const counts = { upcoming: 0, live: 0, played: 0 };
   for (const f of fixtures) counts[whenOf(f)]++;
-  // Land somewhere with something on it rather than on an empty tab.
-  if (!counts[state.when]) {
+
+  /*
+   * Land on a page with something on it.
+   *
+   * The rule used to be "a tab with fixtures in it", which is not the same
+   * question the board is being asked. The board opens on games we have a call
+   * on, so late in the evening -- when everything still to play is tomorrow and
+   * we have called none of it yet -- it opened on "To play", filtered to calls,
+   * and rendered nothing at all under the line "0 calls across 51 games". The
+   * front page of the product, empty, while thirty-eight called games sat one
+   * tap away under "Played".
+   *
+   * The same thing happened coming in from the leagues page: a link to Serie A
+   * landed on "To play", where Serie A had nothing, having just been told on
+   * the previous page that Serie A had calls.
+   *
+   * So the landing tab is chosen against what the reader will actually be
+   * shown -- the when filter and the league filter and the calls filter
+   * together -- and only falls back to bare fixture counts if nothing anywhere
+   * satisfies all three. An address that names a tab is still obeyed; this
+   * only decides where an unspecified board opens.
+   */
+  if (!params.has('when')) {
+    const holds = (when) => fixtures.filter((f) =>
+      whenOf(f) === when
+      && (!state.leagueName || f.league === state.leagueName)
+      && (state.show !== 'calls' || f.top_pick || f.locked)).length;
+    const order = ['upcoming', 'live', 'played'];
+    state.when = order.find(holds)
+      ?? order.find((w) => counts[w])
+      ?? 'upcoming';
+  } else if (!counts[state.when]) {
     state.when = counts.upcoming ? 'upcoming' : counts.live ? 'live' : 'played';
   }
 
@@ -1069,8 +1099,12 @@ async function viewBoard(params = new URLSearchParams()) {
 
     if (!inTab.length) return state.leagueName ? `Nothing${where} in this part of the board.` : '';
 
+    // "1 game ... one call among them" is not a sentence. One of anything is
+    // an it.
+    const them = inTab.length === 1 ? 'it' : 'them';
     if (state.when === 'live') {
-      return `${games}${where} being played right now, ${called.length ? `${calls} among them` : 'none of them called'}.`;
+      return `${games}${where} being played right now, ${
+        called.length ? `${calls} among ${them}` : `no call on ${inTab.length === 1 ? 'it' : 'any of them'}`}.`;
     }
 
     if (state.when === 'played') {
@@ -1091,7 +1125,8 @@ async function viewBoard(params = new URLSearchParams()) {
         if (r === 'won') landed++;
       }
       const record = judged ? ` ${landed} of ${judged} landed.` : '';
-      return `${games}${where} already played, ${called.length ? `${calls} among them.` : 'none of them called.'}${record}`;
+      return `${games}${where} already played, ${
+        called.length ? `${calls} among ${them}.` : `no call on ${inTab.length === 1 ? 'it' : 'any of them'}.`}${record}`;
     }
 
     const next = inTab.map((f) => f.kickoff).filter(Boolean);
