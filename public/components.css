@@ -1880,25 +1880,9 @@
 .record-sub { margin: var(--space-4) 0 0; font-size: var(--text-lg); color: var(--chalk-2); max-width: 54ch; }
 .record-note { margin: var(--space-5) 0 0; font-size: var(--text-sm); color: var(--chalk-3); max-width: 60ch; line-height: var(--leading-normal); }
 
-.ledger { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3); margin-bottom: var(--space-8); }
-.stat {
-  padding: var(--space-6);
-  background: var(--stand);
-  border: var(--border) solid var(--hairline);
-  border-radius: var(--radius);
-}
-.stat b {
-  display: block;
-  font-family: var(--display);
-  font-variation-settings: 'wdth' var(--condensed);
-  font-weight: var(--weight-bold);
-  font-size: var(--text-2xl);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: var(--tracking-2xl);
-  line-height: 1;
-  margin-bottom: var(--space-3);
-}
-.stat span { font-size: var(--text-xs); color: var(--chalk-3); }
+/* `.ledger` and its own `.stat` lived here for a panel no view renders any
+   more, and a second `.stat` further down was quietly overriding it from the
+   bottom of the file. One definition now, with the record strip. */
 
 /* ============================================================== the wall */
 
@@ -2212,3 +2196,170 @@
   .recap-body { grid-area: body; }
   .recap .mark { grid-area: mark; align-self: start; }
 }
+
+/* The rest of what we checked, folded away. Nothing is hidden; it is just not
+   in front of the two facts that decided the call. */
+.more-reads { margin-top: var(--space-5); }
+.more-reads summary {
+  display: inline-block;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--chalk-3);
+  cursor: pointer;
+}
+.more-reads summary:hover { color: var(--chalk-2); }
+.more-reads[open] summary { margin-bottom: var(--space-4); color: var(--chalk-2); }
+
+/* A game we passed on, and a game behind the wall: two lines, not four. The
+   answer sits in the column the price would be in, and the reasoning is still
+   one tap away on the fixture page. */
+.row.is-terse { padding-block: var(--space-3); }
+.row-pass {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--chalk-3);
+  white-space: nowrap;
+}
+
+/* The wall, on a board row. An offer rather than an absence, so it takes the
+   accent colour -- but at the weight of a label, not a button: two hundred
+   purple buttons down a board is a page that is shouting. */
+.row-locked-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--floodlight-hi);
+  white-space: nowrap;
+}
+.row-locked-mark svg {
+  width: 13px; height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* ======================================================== a page masthead
+ *
+ * The title is the biggest thing on the page. That sounds obvious and the
+ * results page had it the other way round: "Results" at subheading size with
+ * the record set beneath it in the largest display type on the site, so the
+ * page's own name read as a caption and the element that reflowed worst was
+ * the one taking up the most room.
+ */
+.page-head { margin-bottom: var(--space-7); }
+.page-sub {
+  margin-top: var(--space-3);
+  max-width: 56ch;
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  color: var(--chalk-2);
+}
+
+/*
+ * The record, as figures.
+ *
+ * Four numbers with what each one is. A record is read by scanning, not by
+ * parsing a sentence, and a grid is legible at any width where a two-line
+ * display-face sentence is not. Two across on a phone, four on a laptop.
+ */
+.record-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: var(--border);
+  margin-bottom: var(--space-6);
+  background: var(--rule-firm);
+  border: var(--border) solid var(--rule-firm);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.stat {
+  padding: var(--space-5);
+  background: var(--stand);
+}
+.stat b {
+  display: block;
+  font-family: var(--display);
+  font-variation-settings: 'wdth' var(--condensed);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-black);
+  font-size: var(--text-3xl);
+  letter-spacing: var(--tracking-2xl);
+  line-height: 1;
+}
+.stat span {
+  display: block;
+  margin-top: var(--space-2);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--chalk-3);
+}
+.stat.won b  { color: var(--won); }
+.stat.lost b { color: var(--lost); }
+
+/* ================================================================= pager
+ *
+ * Numbered, not "load more". A number is somewhere you can go back to; a
+ * button that grows the page is not, and it makes the thing you were reading
+ * move. The steps read Newer and Older rather than Previous and Next, because
+ * on a record that is what the direction actually means.
+ */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-top: var(--space-8);
+  padding-top: var(--space-5);
+  border-top: var(--border) solid var(--rule-firm);
+}
+.pager-nums { display: flex; align-items: center; gap: var(--space-2); }
+.pager-num,
+.pager-step {
+  min-height: var(--tap);
+  padding: var(--space-2) var(--space-4);
+  background: transparent;
+  border: var(--border) solid var(--rule-firm);
+  border-radius: var(--radius-sm);
+  color: var(--chalk-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.pager-num { min-width: var(--tap); padding-inline: var(--space-3); }
+.pager-num:hover,
+.pager-step:hover:not([disabled]) { background: var(--terrace); color: var(--chalk); }
+.pager-num.on {
+  background: var(--chalk);
+  border-color: var(--chalk);
+  color: var(--pitch);
+  font-weight: var(--weight-bold);
+}
+.pager-step[disabled] { opacity: 0.35; cursor: default; }
+.pager-gap { padding: 0 var(--space-1); color: var(--chalk-3); }
+.pager-num:focus-visible,
+.pager-step:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+@media (max-width: 480px) {
+  /* The numbers are the part worth keeping at this width; Newer and Older are
+     one tap of scrolling away from the same place. */
+  .pager-step { padding-inline: var(--space-3); font-size: var(--text-xs); }
+  .pager-nums { gap: 3px; }
+  .pager-num { min-width: 38px; padding-inline: var(--space-2); }
+}
+
+/* "How it went" was sitting on top of the sentence above it. */
+.with-side .side-head { margin-top: var(--space-4); }

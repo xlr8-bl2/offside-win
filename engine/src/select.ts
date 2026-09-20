@@ -313,6 +313,24 @@ export function setAsideFor(candidate: Candidate, factors: Factor[], drivers: Fa
  *    side; showing both is padding the count, not adding an opinion.
  *  - A hard cap per fixture, so a lopsided game cannot fill the board alone.
  */
+/**
+ * The floor a fixture is judged at.
+ *
+ * Marquee fixtures drop to a lower bar rather than going unanswered. See
+ * config.confident.marqueeFloor for why that is not a lower standard: the call
+ * is marked as a lean and the page says so.
+ */
+export function floorForRank(rank: number): number {
+  return rank <= config.confident.marqueeRank
+    ? config.confident.marqueeFloor
+    : config.confident.floor;
+}
+
+/** Whether a published call cleared the normal bar or only the marquee one. */
+export function isLean(c: Candidate): boolean {
+  return c.model_prob < config.confident.floor;
+}
+
 export function selectConfident(candidates: Candidate[], floor = config.confident.floor): Candidate[] {
   const eligible = candidates
     .filter(

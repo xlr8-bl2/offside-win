@@ -278,6 +278,25 @@ export const config = {
      * look like padding.
      */
     minOdds: num('CONF_MIN_ODDS', 1.1),
+    /**
+     * The floor for a fixture people came to the site for.
+     *
+     * A picks product with nothing on the Madrid derby is not a picks product.
+     * The board was silent on the biggest game of the weekend often enough to
+     * be the first thing anyone noticed, because an 80% bar is a high bar and
+     * the games with the most attention are also the most evenly matched --
+     * which is exactly why they are worth watching and exactly why they do not
+     * produce 80% calls.
+     *
+     * So a marquee fixture drops to this floor rather than passing. It is not
+     * a lower standard dressed up: the call is published with `lean: true` and
+     * the page says out loud that it is the best read on a close game rather
+     * than a strong call, which is the true statement and the only one worth
+     * making.
+     */
+    marqueeFloor: num('CONF_MARQUEE_FLOOR', 0.62),
+    /** League rank at or below which a fixture counts as marquee. */
+    marqueeRank: num('CONF_MARQUEE_RANK', 2),
   },
 
   selection: {
