@@ -682,7 +682,10 @@ function rowHTML(f) {
     <div class="row-when">
       ${state.kind === 'upcoming'
         ? `<span class="row-time">${esc(time)}</span><span class="row-day">${esc(day)}</span>`
-        : `<span class="row-time">${liveBadge(state)}</span><span class="row-day">${esc(time)}</span>`}
+        // On a match in progress the bare time reads as the clock -- "LIVE
+        // 12:00" looks like the twelfth minute of the second half. It is the
+        // kick-off, so it says so, in the shorthand every football page uses.
+        : `<span class="row-time">${liveBadge(state)}</span><span class="row-day">ko ${esc(time)}</span>`}
     </div>
 
     <div class="row-teams">
@@ -942,7 +945,7 @@ async function viewBoard(params = new URLSearchParams()) {
         <div class="seg" role="group" aria-label="When">
           ${WHEN.map((w) => `
             <button type="button" data-when="${w.id}"${state.when === w.id ? ' class="on"' : ''}
-              ${counts[w.id] ? '' : 'disabled'}>${esc(w.label)}<i>${counts[w.id]}</i></button>`).join('')}
+              ${counts[w.id] ? '' : 'disabled'}>${esc(w.label)} <i>${counts[w.id]}</i></button>`).join('')}
         </div>
         <select id="hours-filter" aria-label="Time window">
           ${[24, 48, 72, 120, 240].map((h) => `<option value="${h}"${h === state.hours ? ' selected' : ''}>Next ${h}h</option>`).join('')}
@@ -2541,11 +2544,10 @@ function cookieNotice() {
   el.className = 'cookie';
   el.id = 'cookie-notice';
   el.innerHTML = `
-    <p>We use one item of storage to remember this choice. Optional analytics load
-       only if you accept — decline and nothing is loaded at all.
-       <a href="#/legal/cookies">Cookie policy</a></p>
-    <button class="btn btn-ghost" data-consent="declined">Decline</button>
-    <button class="btn btn-primary" data-consent="accepted">Accept</button>`;
+    <p>One item of storage remembers this choice. Analytics load only if you
+       accept. <a href="#/legal/cookies">Cookie policy</a></p>
+    <button class="btn btn-ghost btn-sm" data-consent="declined">Decline</button>
+    <button class="btn btn-primary btn-sm" data-consent="accepted">Accept</button>`;
   el.addEventListener('click', (e) => {
     const v = e.target?.dataset?.consent;
     if (v) applyConsent(v);

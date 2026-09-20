@@ -2110,18 +2110,23 @@
   right: var(--space-5);
   bottom: calc(var(--space-5) + env(safe-area-inset-bottom, 0px));
   z-index: var(--z-overlay);
-  width: min(420px, calc(100vw - var(--space-8)));
+  width: min(400px, calc(100vw - var(--space-8)));
   display: flex;
   align-items: center;
-  gap: var(--space-5);
+  /* It is the first thing on the site anybody sees and it is not the product,
+     so it takes as little of a phone screen as it can while still being a
+     real choice: one sentence, two small buttons, tight padding. It was three
+     lines of text and two full-size buttons, which is a fifth of the viewport
+     spent on a notice about one localStorage key. */
+  gap: var(--space-3) var(--space-4);
   flex-wrap: wrap;
-  padding: var(--space-6);
+  padding: var(--space-4) var(--space-5);
   background: var(--terrace);
   border: var(--border) solid var(--rule);
   border-radius: var(--radius-lg);
   box-shadow: var(--elev-3);
 }
-.cookie p { flex: 1 1 100%; margin: 0; font-size: var(--text-sm); line-height: var(--leading-snug); color: var(--chalk-2); }
+.cookie p { flex: 1 1 100%; margin: 0; font-size: var(--text-xs); line-height: var(--leading-snug); color: var(--chalk-2); }
 .cookie a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }
 
 /* ===================================================== reduced motion */
