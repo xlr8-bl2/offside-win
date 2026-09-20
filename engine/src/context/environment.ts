@@ -252,7 +252,7 @@ function venueFactor(ctx: FixtureContext): Factor {
       tier: 6,
       note:
         `Played at a neutral venue, so ${ctx.home.team_name}'s fitted home advantage is removed ` +
-        `from the model rather than applied.`,
+        `from the reading rather than applied.`,
       evidence: { neutral_ground: true, home_adv_removed: ctx.model.params.home_adv },
       claims: [
         {

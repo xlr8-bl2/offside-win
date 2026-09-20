@@ -294,7 +294,7 @@ function finishingFactor(
       id: `style.finishing.${which}`,
       section: '§2.1',
       tier: 5,
-      note: `No xG on record for ${side.team_name}'s recent matches, so finishing cannot be compared to chances.`,
+      note: `No chance data on record for ${side.team_name}'s recent matches, so finishing cannot be compared to chances.`,
       evidence: { matches: style.matches },
     });
   }

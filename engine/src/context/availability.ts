@@ -329,7 +329,7 @@ function rotationFactor(ctx: FixtureContext): Factor {
     section: '§3.1',
     tier: 1,
     note:
-      `Lineup is predicted rather than confirmed, at ${Math.round(confidence * 100)}% confidence` +
+      `Nobody has named a side yet, so this eleven is a projection` +
       (isCup ? ' in a cup tie, where rotation is likeliest.' : '.'),
     evidence: {
       lineup_status: 'predicted',
