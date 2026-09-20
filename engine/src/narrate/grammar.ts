@@ -977,38 +977,45 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
   // an *under 3.5* call — a sentence arguing the opposite of the bet.
   match_shape: [
     (c) => {
+      only(c.evidence.is_total !== 0);
       const t = n(c.evidence.total);
       return `This reads as ${goalShape(t)}, and the call follows from the shape of the game rather than from either side.`;
     },
     (c) => {
+      only(c.evidence.is_total !== 0);
       const f = n(c.evidence.xg_home);
       const a = n(c.evidence.xg_away);
       return `${goalsWord(f)} looks right for ${s(c.evidence.home)} and ${goalsWord(a)} for ${s(c.evidence.away)} — neither runs away with it, and the total is what matters here.`;
     },
     (c) => {
+      only(c.evidence.is_total !== 0);
       const t = n(c.evidence.total);
       const line = n(c.evidence.line);
       only(Math.abs(t - line) >= 0.2);
       return `${cap(goalShape(t))}, which lands ${t > line ? 'the right side of' : 'under'} the line this is priced on.`;
     },
     (c, rng) => {
+      only(c.evidence.is_total !== 0);
       const t = n(c.evidence.total);
       only(t < 2.4);
       return `A ${intensity(c.magnitude, rng)} one-sided game that still looks like ${goalShape(t)}, and the total is the bet.`;
     },
     (c) => {
+      only(c.evidence.is_total !== 0);
       const f = n(c.evidence.xg_home);
       const a = n(c.evidence.xg_away);
       only(f + a < 2.4);
       return `Neither attack looks like doing much damage, so the goals market is the surer read here.`;
     },
     (c) => {
+      only(c.evidence.is_total !== 0);
       const f = n(c.evidence.xg_home);
       const a = n(c.evidence.xg_away);
       only(f + a >= 2.8);
       return `Both ends look busy — enough traffic between them that the goals market is the clearer read here.`;
     },
     (c) => {
+      only(c.evidence.is_total !== 0);
       const f = n(c.evidence.xg_home);
       const a = n(c.evidence.xg_away);
       only(f + a >= 2.8);
