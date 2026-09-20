@@ -565,13 +565,28 @@ function playedHTML(picks, { showOdds = false } = {}) {
     ${picks.map((x) => {
       const won = x.result === 'WON' || x.result === 'HALF_WON';
       const lost = x.result === 'LOST' || x.result === 'HALF_LOST';
-      const badge = showOdds ? dec(x.odds) : won ? 'Won' : lost ? 'Lost' : 'Void';
+      /*
+       * The score goes in the middle, where a fixture list puts it.
+       *
+       * This row used to print "Won" or "Lost" between the two clubs and
+       * nothing else, because there was no score to print -- which meant the
+       * most prominent block on the home page showed eight results without
+       * saying what any of them were, and asked a reader to take the mark on
+       * trust. The mark moves to a tag beside the kick-off; the scoreline
+       * takes the place it has on every other football page ever made.
+       */
+      const hasScore = Number.isInteger(x.home_goals) && Number.isInteger(x.away_goals);
+      const mark = won ? 'Landed' : lost ? 'Missed' : 'Void';
       return `
       <a class="played-row" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
-        <div class="played-meta"><span>${esc(kickoffLabel(x.kickoff))}</span></div>
+        <div class="played-meta">
+          <span>${esc(kickoffLabel(x.kickoff))}</span>
+          <span class="mark ${won ? 'won' : lost ? 'lost' : 'back'}">${esc(showOdds ? dec(x.odds) : mark)}</span>
+        </div>
         <div class="played-tie">
           <span class="played-side">${crest(x.home_team ?? '', 'sm', x.home_team_id)}<span>${esc(x.home_team ?? '')}</span></span>
-          <span class="played-score ${won ? 'w' : lost ? 'l' : ''}">${esc(badge)}</span>
+          <span class="played-score ${won ? 'w' : lost ? 'l' : ''}">${
+            hasScore ? `${esc(x.home_goals)}–${esc(x.away_goals)}` : 'FT'}</span>
           <span class="played-side away">${crest(x.away_team ?? '', 'sm', x.away_team_id)}<span>${esc(x.away_team ?? '')}</span></span>
         </div>
       </a>`;
