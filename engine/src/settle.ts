@@ -221,6 +221,18 @@ export async function runSettle(): Promise<SettleReport> {
       };
     }
 
+    // The scoreline the grade was made against, written back onto the fixture
+    // so the results page can print it beside the mark. Settlement is the
+    // authoritative source: the slate writes a running score every quarter of
+    // an hour and stops caring once a match falls out of its window, and a
+    // half-time score left behind as final would make every page that reads it
+    // quietly wrong.
+    await exec('UPDATE fixture SET home_goals = ?, away_goals = ? WHERE id = ?', [
+      row.home_goals,
+      row.away_goals,
+      id,
+    ]);
+
     scores.set(id, {
       homeGoals: row.home_goals!,
       awayGoals: row.away_goals!,

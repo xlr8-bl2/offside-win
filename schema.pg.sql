@@ -192,6 +192,31 @@ CREATE INDEX IF NOT EXISTS fixture_day_rank ON fixture((kickoff / 86400), rank, 
 ALTER TABLE fixture ADD COLUMN IF NOT EXISTS board_free_json  text;
 ALTER TABLE fixture ADD COLUMN IF NOT EXISTS bundle_free_json text;
 
+-- The final score.
+--
+-- Everything on this site that looks backwards needed it and nothing had it.
+-- The board could say FT but not what happened; the results page marked a pick
+-- won or lost and could not print the scoreline that decided it, so a reader
+-- was asked to take our word for the grade. That is the one thing a record
+-- publishing its own losses cannot afford to ask for.
+--
+-- Written from two places on purpose. The slate sets it every quarter of an
+-- hour for anything inside its lookback window, which is what makes a match
+-- read as played within minutes of finishing. Settlement sets it again from
+-- the score it graded against, which reaches further back and is the version
+-- that is authoritative -- a pick and the scoreline beside it can then never
+-- disagree, because they came from the same number.
+ALTER TABLE fixture ADD COLUMN IF NOT EXISTS home_goals integer;
+ALTER TABLE fixture ADD COLUMN IF NOT EXISTS away_goals integer;
+
+-- The provider's team ids, which are also the keys to its image service:
+-- /img/team/{id}/ returns the real crest. They were on the board card and
+-- nowhere a SQL query could reach them, so every page built from `pick` rather
+-- than from the card -- the whole results record -- drew generated monograms
+-- beside clubs whose badge we already had.
+ALTER TABLE fixture ADD COLUMN IF NOT EXISTS home_team_id bigint;
+ALTER TABLE fixture ADD COLUMN IF NOT EXISTS away_team_id bigint;
+
 CREATE TABLE IF NOT EXISTS pick (
   id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   fixture_id   bigint NOT NULL,
@@ -620,7 +645,12 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
                SELECT pk.id, pk.fixture_id, pk.kickoff, pk.market, pk.outcome, pk.line, pk.kind,
                       pk.model_prob, pk.book_prob, pk.edge, pk.odds, pk.bookmaker, pk.kelly,
                       pk.confidence, pk.provisional, pk.narrative, pk.result, pk.pnl,
-                      f.home_team, f.away_team
+                      f.home_team, f.away_team,
+                      -- The scoreline that decided the grade. Without it the
+                      -- results page asks the reader to trust the mark.
+                      f.home_goals, f.away_goals, f.status, f.league_id,
+                      -- And the ids the crests are served by.
+                      f.home_team_id, f.away_team_id
                FROM pick pk LEFT JOIN fixture f ON f.id = pk.fixture_id
                -- Settled picks stay public forever, membership or not: the
                -- results page is the only honest marketing this product has and
