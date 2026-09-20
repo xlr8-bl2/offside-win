@@ -779,7 +779,7 @@ async function viewHome() {
       ? await getJSON(`/api/fixture/${state.hero.fixture_id}`).catch(() => null)
       : null;
   } catch (err) {
-    app.innerHTML = heroHTML(null, []) + `<div class="wrap section"><div class="empty">${esc(err.message)}</div></div>`;
+    return errorState(err);
     return;
   }
   const fixtures = board.fixtures ?? [];
@@ -887,7 +887,7 @@ async function viewBoard(params = new URLSearchParams()) {
   </div>`;
   let board;
   try { board = await loadBoard(); } catch (err) {
-    app.innerHTML = `<div class="wrap section"><div class="empty">${esc(err.message)}</div></div>`;
+    return errorState(err);
     return;
   }
   const fixtures = board.fixtures ?? [];
@@ -1670,7 +1670,7 @@ async function viewResults() {
       getJSON('/api/picks?limit=20&settled=false').catch(() => ({ picks: [] })),
     ]);
   } catch (err) {
-    app.innerHTML = `<div class="wrap section"><div class="empty">${esc(err.message)}</div></div>`;
+    return errorState(err);
     return;
   }
 
@@ -1701,6 +1701,21 @@ async function viewResults() {
    */
   const n = Number(summary.n ?? 0);
   const wins = Number(summary.wins ?? 0);
+  /*
+   * Refunds over the whole record rather than over this page's fetch.
+   *
+   * `pick_summary` does not carry them, so they are estimated from the rate
+   * seen in the picks we do hold and stated as a count rather than implied to
+   * be exact. When the summary starts carrying `pushes` this becomes a read.
+   */
+  // The average price the record was struck at, which is the number the strike
+  // rate cannot be read without.
+  const avgOdds = typeof summary.avg_odds === 'number' && summary.avg_odds > 1
+    ? summary.avg_odds : null;
+  const seen = picks.length;
+  const seenRefunds = picks.filter((x) => x.result === 'VOID' || x.result === 'PUSH').length;
+  const refunds = seen > 0 ? Math.round((seenRefunds / seen) * n) : 0;
+  const graded = Math.max(1, n - refunds);
 
   /*
    * The strike rate, said out loud.
@@ -1716,7 +1731,10 @@ async function viewResults() {
    * "86% of our picks won" and stopping there would be the single most
    * misleading true sentence available to us.
    */
-  const rate = n > 0 ? Math.round((wins / n) * 100) : null;
+  // Over the picks that were actually graded, which is how the bar below has
+  // always counted them. It was over every pick including the refunds, so the
+  // same page gave a refund two different meanings six lines apart.
+  const rate = n > 0 ? Math.round((wins / graded) * 100) : null;
   const headline = n === 0
     ? 'Nothing has finished yet. The first results land as today\'s games do.'
     : `${wins} of the last ${n} picks won. That is ${[8, 11, 18].includes(rate) || (rate >= 80 && rate < 90) ? 'an' : 'a'} ${rate}% strike rate.`;
@@ -1752,20 +1770,45 @@ async function viewResults() {
     </div>
 
     ${n === 0 ? `<p class="record-sub">${esc(headline)}</p>` : `
+      <!--
+        Four numbers over one denominator.
+        Three of these came from the all-time summary and the fourth was
+        counted from the hundred and twenty picks this page happened to fetch,
+        so they described different records and did not add up: 208 + 49 + 4
+        against a total of 257. A strip that reads as a partition has to be
+        one. Refunds are carved out of the total first, and the rate is over
+        what was actually graded -- which is also how the bar six lines below
+        has always treated them, and the two disagreeing was the third time
+        this page has contradicted itself about the same thing.
+      -->
       <div class="record-strip">
         ${stat(wins, 'won', 'won')}
-        ${stat(n - wins, 'did not', 'lost')}
-        ${stat(`${rate}%`, 'strike rate')}
-        ${stat(voided, 'stake back')}
+        ${stat(Math.max(0, n - wins - refunds), 'did not', 'lost')}
+        ${stat(refunds, 'stake back')}
+        ${stat(`${rate}%`, 'of those graded')}
       </div>
       ${formBarHTML(won, voided, lost, ['won', 'stake back', 'lost'],
-        `The ${settled.length + voided} most recent, in order. The rate above covers all ${n}.`)}
-      <!-- Not a restatement of the strip above it. The numbers say what
-           happened; this says what they are and are not evidence of, which is
-           the only thing worth adding underneath them. -->
-      <p class="record-sub">Every call we have published, settled against the
-        real result. Each one below says how close it came and, where we have
-        the price history, whether the market agreed with us by kick-off.</p>
+        `The ${settled.length + voided} most recent, in order. The figures above cover all ${n}.`)}
+      <!--
+        What the numbers above are and are not evidence of.
+
+        It used to restate the paragraph two elements above it ("every pick we
+        have published, marked against the real result" / "every call we have
+        published, settled against the real result") and then promise two
+        things per card that appear on almost none of them -- the market's
+        move, which needs price history no settled pick carries yet.
+
+        What belongs here is the counterweight the strike rate has to be read
+        with. A rule in this file says the rate "never appears on its own",
+        and since the profit figure came off the page nothing had replaced it.
+        These are calls struck at about 1.15, so most of them winning is what
+        that price is for, not a result on top of it.
+      -->
+      <p class="record-sub">${avgOdds
+        ? `Struck at around ${dec(avgOdds)} on average, so most of them landing
+           is what that price already expects. Winning most is not the same as
+           being ahead.`
+        : 'Winning most of them is not the same as being ahead — these are short prices.'}</p>
       ${n > 0 && n < 100
         ? `<p class="record-note">That is ${n} results. It is not enough to tell a good run
              from a good model, and we will say so until it is.</p>`
@@ -1822,12 +1865,33 @@ async function viewResults() {
     const PER = 20;
     const pages = Math.max(1, Math.ceil(ordered.length / PER));
 
+    /*
+     * A matchday's record is the matchday's, not the page's.
+     *
+     * The heading tallied whatever slice of twenty had landed on this page, so
+     * one Saturday appeared on five pages with five different records -- "17 of
+     * 19", "14 of 19", "18 of 19", "12 of 18" -- and a single card spilling
+     * over a boundary got its own heading reading "0 of 1 landed. Not one.
+     * Here it is anyway." about a day that went 77 of 95. A reader who paged
+     * twice caught the site telling two stories about one afternoon.
+     */
+    const dayTotals = new Map();
+    for (const g of groupByDay(ordered)) {
+      const key = new Date(g.at * 1000).toDateString();
+      const graded = g.list.filter((x) => x.result !== 'VOID' && x.result !== 'PUSH');
+      dayTotals.set(key, {
+        won: graded.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length,
+        graded: graded.length,
+      });
+    }
+
     const paint = (page) => {
       const p = Math.min(Math.max(1, page), pages);
       const host = document.getElementById('recap');
       if (!host) return;
       host.innerHTML =
-        groupByDay(ordered.slice((p - 1) * PER, p * PER)).map(dayHTML).join('') +
+        groupByDay(ordered.slice((p - 1) * PER, p * PER))
+          .map((g) => dayHTML(g, dayTotals.get(new Date(g.at * 1000).toDateString()))).join('') +
         pagerHTML(p, pages, 'Results pages');
       for (const b of host.querySelectorAll('[data-page]')) {
         b.onclick = (e) => {
@@ -1920,9 +1984,19 @@ function groupByDay(picks) {
     .map((g) => ({ at: g.at, list: [...g.list].sort((a, b) => a.kickoff - b.kickoff) }));
 }
 
-function dayHTML(g) {
-  const won = g.list.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
-  const graded = g.list.filter((x) => x.result !== 'VOID' && x.result !== 'PUSH').length;
+/**
+ * One matchday.
+ *
+ * `total` is the whole day's record, which is not the same as this page's
+ * share of it -- see the comment where it is built. When a day is split over
+ * pages the heading says so rather than quietly re-describing the day from
+ * twenty of its picks.
+ */
+function dayHTML(g, total) {
+  const onPage = g.list.filter((x) => x.result !== 'VOID' && x.result !== 'PUSH').length;
+  const won = total?.won ?? g.list.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
+  const graded = total?.graded ?? onPage;
+  const part = graded > onPage;
   const label = new Date(g.at * 1000)
     .toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 
@@ -1930,9 +2004,9 @@ function dayHTML(g) {
   <section class="recap-day">
     <div class="recap-head">
       <h3>${esc(unshout(label))}</h3>
-      <span class="recap-tally">${won} of ${graded} landed</span>
+      <span class="recap-tally">${won} of ${graded} landed${part ? ' that day' : ''}</span>
     </div>
-    ${graded ? `<p class="hand recap-say">${esc(dayVerdict(won, graded))}</p>` : ''}
+    ${graded && !part ? `<p class="hand recap-say">${esc(dayVerdict(won, graded))}</p>` : ''}
     ${g.list.map(recapCardHTML).join('')}
   </section>`;
 }
@@ -1957,7 +2031,10 @@ function postMortemHTML(x) {
   if (!pm || !pm.line) return '';
 
   const facts = [];
-  if (typeof pm.swing === 'number') {
+  // A refunded bet has no cushion and no shortfall -- it landed on the line --
+  // so the chip said "1 goal to spare" directly under "the stake came back",
+  // which cannot both be true. Three-way field, two-way branch.
+  if (typeof pm.swing === 'number' && pm.landed !== 'refunded') {
     facts.push(pm.swing === 0
       ? 'finished on the line'
       : `${pm.swing} goal${pm.swing === 1 ? '' : 's'} ${pm.landed === 'missed' ? 'short' : 'to spare'}`);
@@ -1991,10 +2068,31 @@ function recapCardHTML(x) {
     market: x.market, outcome: x.outcome, line: x.line,
     home: x.home_team, away: x.away_team, odds: x.odds,
   });
-  const tone = RESULT_TONE[x.result] ?? 'back';
   const hg = x.home_goals;
   const ag = x.away_goals;
   const hasScore = Number.isInteger(hg) && Number.isInteger(ag);
+
+  /*
+   * A mark the scoreline contradicts is not a mark.
+   *
+   * `recap()` already refuses to describe a result whose grade and score
+   * disagree, which was half a guard: the sentence vanished and the green
+   * LANDED stayed, so the rows where we were most likely to be wrong were the
+   * ones that looked most curated. Six picks in two hundred were doing this,
+   * five of them flattering -- including one 1-1 carrying "either team to win:
+   * landed" and "home or draw: missed" a few cards apart.
+   *
+   * The engine re-grades these now (engine/src/settle.ts, regradeSettled), so
+   * this should never fire. It stays because "should never" is not a thing to
+   * put a green tick behind.
+   */
+  const fromScore = hasScore
+    ? didItLand({ market: x.market, outcome: x.outcome, line: x.line, homeGoals: hg, awayGoals: ag })
+    : null;
+  const fromGrade = RESULT_TONE[x.result] ?? 'back';
+  const disputed = fromScore !== null && fromScore !== fromGrade
+    && fromScore !== 'part' && fromGrade !== 'part';
+  const tone = disputed ? 'back' : fromGrade;
   const said = recap({
     market: x.market, outcome: x.outcome, line: x.line, result: x.result,
     homeGoals: hg, awayGoals: ag, home: x.home_team, away: x.away_team,
@@ -2011,7 +2109,7 @@ function recapCardHTML(x) {
     <div class="recap-body">
       <p class="recap-call">We said <b>${esc(d.name)}</b>${x.odds ? ` at ${dec(x.odds)}` : ''}.</p>
       ${said ? `<p class="recap-what">${esc(said)}</p>` : ''}
-      ${postMortemHTML(x)}
+      ${disputed ? '' : postMortemHTML(x)}
       ${(() => {
         /*
          * The argument we made before kick-off, shown back against what
@@ -2035,7 +2133,8 @@ function recapCardHTML(x) {
         </details>`;
       })()}
     </div>
-    <span class="mark ${esc(tone)}">${esc(RESULT_WORD[x.result] ?? 'Void')}</span>
+    <span class="mark ${esc(tone)}"${disputed ? ' title="The score and the grade disagree; this one is being re-checked."' : ''}>${
+      disputed ? 'Re-checking' : esc(RESULT_WORD[x.result] ?? 'Void')}</span>
   </article>`;
 }
 
@@ -2568,6 +2667,37 @@ function cookieNotice() {
   document.body.appendChild(el);
 }
 
+/**
+ * A page whose data did not arrive.
+ *
+ * All four of these printed `err.message` straight onto the page, so a reader
+ * met "database error (502)" or "Failed to fetch" -- our words for what went
+ * wrong, in a box with no way out and no way to try again. Neither tells them
+ * anything they can act on, and the second one is not even about us: it is
+ * what a browser says when the phone has lost signal, which is the far more
+ * common case and the one where retrying actually works.
+ *
+ * So it distinguishes the two, and the button is the point of the whole thing.
+ */
+function errorState(err) {
+  const raw = String(err?.message ?? '');
+  const offline = /failed to fetch|networkerror|load failed/i.test(raw) || navigator.onLine === false;
+  app.innerHTML = `
+  <div class="wrap section">
+    <div class="page-head">
+      <h1 class="display xl">${offline ? 'No connection' : 'The board is not answering'}</h1>
+      <p class="page-sub">${offline
+        ? 'Your device cannot reach us at the moment. The picks are still there; this is between your phone and the internet.'
+        : 'Something at our end is not serving the data right now. It is usually brief.'}</p>
+    </div>
+    <div class="cta-row">
+      <button type="button" class="btn btn-primary" id="retry">Try again</button>
+      <a class="btn btn-ghost" href="#/results">The record</a>
+    </div>
+  </div>`;
+  document.getElementById('retry').onclick = () => route();
+}
+
 /** An address that is not one of ours. Say so, and offer the two ways out. */
 function notFound(name) {
   app.innerHTML = `
@@ -2615,7 +2745,7 @@ async function route() {
      */
     return notFound(name);
   } catch (err) {
-    app.innerHTML = `<div class="wrap section"><div class="empty">${esc(err.message ?? 'Something went wrong.')}</div></div>`;
+    errorState(err);
   }
 }
 
