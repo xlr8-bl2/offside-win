@@ -155,3 +155,56 @@ test('true counts stay integer', () => {
   assert.match(sql, /CREATE TABLE IF NOT EXISTS referee_rate \([\s\S]*?matches\s+bigint NOT NULL/);
   assert.match(sql, /CREATE TABLE IF NOT EXISTS rating_meta \([\s\S]*?n_matches\s+bigint NOT NULL/);
 });
+
+test('a played match is not behind the wall', () => {
+  // `get_picks` already publishes every settled call to everyone. A fixture or
+  // board card that kept the same call walled after the match had been played
+  // hid the evidence and sold the promise, and contradicted the results page
+  // about the very same selection. Both serving functions take the full copy
+  // once a final score exists.
+  for (const fn of ['get_board', 'get_fixture']) {
+    const body = sql.slice(sql.indexOf(`CREATE OR REPLACE FUNCTION ${fn}(`));
+    assert.match(
+      body.slice(0, body.indexOf('$fn$;')),
+      /OR \(f\.home_goals IS NOT NULL AND f\.away_goals IS NOT NULL\)/,
+      `${fn}: still walls a match that has been played`,
+    );
+  }
+});
+
+test('get_fixture overlays the score the way get_board does', () => {
+  // The bundle is written before kick-off and never carries a result, so
+  // everything the fixture page says about tense, about whether a price can
+  // still be taken, and about whether the call came in hangs off this overlay.
+  const body = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION get_fixture('));
+  assert.match(
+    body.slice(0, body.indexOf('$fn$;')),
+    /jsonb_build_object\(\s*'score', jsonb_build_array\(f\.home_goals, f\.away_goals\),\s*'status', 'finished'\)/,
+  );
+});
+
+// ------------------------------------------------- what the slate may rewrite
+
+const slate = readFileSync(new URL('../src/slate.ts', import.meta.url), 'utf8');
+
+test('the slate freezes a write-up at kick-off', () => {
+  // The slate reaches back over played matches to collect their final scores,
+  // and used to re-run the analysis over them on the way past. Prices have
+  // moved and the line-ups are known by then, so the new selection is often a
+  // different one -- which is how a fixture page came to say "we did not call
+  // this one" about a match whose call is published, and won, on /results.
+  //
+  // Facts arriving keep updating. Opinions stop.
+  const upsert = slate.slice(slate.indexOf("'ON CONFLICT (id) DO UPDATE SET '"));
+  const clause = upsert.slice(0, upsert.indexOf('},'));
+  for (const col of ['board_json', 'bundle_json', 'board_free_json', 'bundle_free_json']) {
+    assert.match(
+      clause,
+      new RegExp(`${col} = CASE WHEN fixture\\.kickoff <= excluded\\.computed_at`),
+      `${col}: a played match's write-up can still be rewritten`,
+    );
+  }
+  for (const col of ['home_goals', 'away_goals', 'status']) {
+    assert.match(clause, new RegExp(`${col} = excluded\\.${col}`), `${col}: stops updating after kick-off`);
+  }
+});

@@ -306,6 +306,11 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   border-radius: var(--radius);
   background: rgba(247, 244, 237, 0.05);
 }
+/* Above the burger breakpoint the header button already says this, so the nav
+   would otherwise carry it twice. Declared here, before the media query that
+   shows it, because both rules have the same specificity and the later one
+   would win whatever the width. */
+.nav a.nav-only-menu { display: none; }
 .nav a {
   padding: var(--space-2) var(--space-5);
   border-radius: var(--radius-sm);
@@ -415,6 +420,8 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   .nav a.on { color: var(--floodlight-hi); }
   .burger { display: flex; }
   .live { display: none; }
+  /* Only in the menu, and only where there is a menu. */
+  .nav a.nav-only-menu { display: block; color: var(--floodlight-hi); }
 }
 @media (max-width: 560px) {
   .top-right .btn-primary { display: none; }
@@ -499,6 +506,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .btn-danger:hover { border-color: var(--lost); background: rgba(203, 49, 49, 0.1); }
 
 .btn-sm { min-height: 34px; padding: var(--space-2) var(--space-5); font-size: var(--text-xs); }
+
 .btn-lg { min-height: 46px; padding: var(--space-4) var(--space-7); font-size: var(--text-md); }
 
 .btn-google {

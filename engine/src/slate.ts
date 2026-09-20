@@ -671,7 +671,43 @@ export async function runSlate(): Promise<SlateReport> {
         'board_free_json', 'bundle_free_json', 'computed_at',
       ],
       fixtureRows,
-      { conflictTarget: 'id' },
+      {
+        /*
+         * What we said about a match is frozen at kick-off, exactly as a
+         * settled pick is.
+         *
+         * The slate reaches back over matches that have already been played --
+         * it has to, because that is how the final score and status arrive --
+         * and it was re-running the whole analysis over them and overwriting
+         * the write-up with a fresh one. Prices have moved by then and the
+         * line-ups are known, so the new selection is frequently a different
+         * one, and the fixture page ended up contradicting the results page:
+         * "we did not call this one" over a match whose call is published, won,
+         * on /results. A record that rewrites itself after the fact is not a
+         * record.
+         *
+         * So the four write-up columns stop updating the moment the match
+         * kicks off. Everything the match itself produces -- the score, the
+         * status, the confirmed team names -- keeps updating, because those are
+         * facts arriving rather than opinions being revised.
+         */
+        onConflict:
+          'ON CONFLICT (id) DO UPDATE SET ' +
+          'league_id = excluded.league_id, kickoff = excluded.kickoff, ' +
+          'home_team = excluded.home_team, away_team = excluded.away_team, ' +
+          'status = excluded.status, provisional = excluded.provisional, ' +
+          'home_goals = excluded.home_goals, away_goals = excluded.away_goals, ' +
+          'home_team_id = excluded.home_team_id, away_team_id = excluded.away_team_id, ' +
+          'rank = excluded.rank, computed_at = excluded.computed_at, ' +
+          'board_json = CASE WHEN fixture.kickoff <= excluded.computed_at ' +
+          'THEN fixture.board_json ELSE excluded.board_json END, ' +
+          'bundle_json = CASE WHEN fixture.kickoff <= excluded.computed_at ' +
+          'THEN fixture.bundle_json ELSE excluded.bundle_json END, ' +
+          'board_free_json = CASE WHEN fixture.kickoff <= excluded.computed_at ' +
+          'THEN fixture.board_free_json ELSE excluded.board_free_json END, ' +
+          'bundle_free_json = CASE WHEN fixture.kickoff <= excluded.computed_at ' +
+          'THEN fixture.bundle_free_json ELSE excluded.bundle_free_json END',
+      },
     );
   }
 
