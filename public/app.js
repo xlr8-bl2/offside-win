@@ -2022,39 +2022,72 @@ function recapCardHTML(x) {
 
 // ---------------------------------------------------------------- leagues
 
+/*
+ * Every competition on the board, as a list rather than as forty-four cards.
+ *
+ * What was here spent two hundred and seventy-five vertical pixels per league
+ * to say "Premier League, eight games, two calls", so the page was seven
+ * thousand pixels long -- twelve screens to read a list of forty-four names.
+ * It also set the league name in the muted colour and the counts in white,
+ * which is the hierarchy exactly backwards: the name is the thing being
+ * scanned for and the counts are the detail beside it.
+ *
+ * And a competition we have a call in looked identical to one we have nothing
+ * in, on a page whose whole purpose is finding the calls. They lead now, and
+ * the rest follow under their own heading rather than being mixed in.
+ */
 async function viewLeagues() {
-  app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
+  app.innerHTML = `<div class="wrap section dense">
+    <div class="rows">${'<div class="skeleton skeleton-row"></div>'.repeat(8)}</div>
+  </div>`;
   const board = state.board ?? (await loadBoard());
   const fixtures = board.fixtures ?? [];
+
   const byLeague = new Map();
   for (const f of fixtures) {
     const k = f.league_id ?? f.league;
-    const e = byLeague.get(k) ?? { name: f.league ?? '', id: f.league_id, n: 0, picks: 0, rank: f.rank ?? 6 };
+    const e = byLeague.get(k) ?? { name: f.league ?? '', id: f.league_id, n: 0, picks: 0, live: 0, rank: f.rank ?? 6 };
     e.n++;
     e.rank = Math.min(e.rank, f.rank ?? 6);
-    if (f.top_pick) e.picks++;
+    if (f.top_pick || f.locked) e.picks++;
+    if (matchState(f).kind === 'live') e.live++;
     byLeague.set(k, e);
   }
-  const rows = [...byLeague.values()].sort((a, b) => (a.rank ?? 6) - (b.rank ?? 6) || b.n - a.n);
+
+  const all = [...byLeague.values()].sort((a, b) => (a.rank ?? 6) - (b.rank ?? 6) || b.picks - a.picks || b.n - a.n);
+  const withCalls = all.filter((e) => e.picks > 0);
+  const without = all.filter((e) => e.picks === 0);
+  const totalCalls = all.reduce((t, e) => t + e.picks, 0);
+
+  const row = (e) => `
+    <a class="lg" href="${esc(boardHash(state.hours, e.name))}">
+      ${crest(e.name, 'sm', e.id, 'league')}
+      <span class="lg-name">${esc(e.name)}</span>
+      ${e.live ? `<span class="lg-live"><i></i>${e.live}</span>` : ''}
+      <span class="lg-games">${e.n} ${e.n === 1 ? 'game' : 'games'}</span>
+      <span class="lg-calls${e.picks ? ' on' : ''}">${e.picks ? `${e.picks} ${e.picks === 1 ? 'call' : 'calls'}` : '—'}</span>
+    </a>`;
 
   app.innerHTML = `
-  <div class="wrap section">
-    <div class="section-head"><div>
-      <h2 class="display">Leagues</h2>
-      <p>${rows.length} leagues in play right now, from 88 covered.</p>
-    </div></div>
-    <div class="cards">
-      ${rows.map((e) => `
-        <a class="card" href="${esc(boardHash(state.hours, e.name))}">
-          <div class="card-top"><span class="card-league">${crest(e.name, 'md', e.id, 'league')}<span>${esc(e.name)}</span></span></div>
-          <div class="also">
-            <span class="also-call">${e.n} <b>games</b></span>
-            <span class="also-call">${e.picks} <b>calls</b></span>
-          </div>
-        </a>`).join('')}
+  <div class="wrap section dense">
+    <div class="page-head">
+      <h1 class="display xl">Leagues</h1>
+      <p class="page-sub">${all.length} ${all.length === 1 ? 'competition' : 'competitions'} on the board right now,
+        out of 88 we cover. ${totalCalls
+          ? `${totalCalls} ${totalCalls === 1 ? 'call' : 'calls'} between them.`
+          : 'No calls anywhere on it at the moment.'}</p>
     </div>
+
+    ${withCalls.length ? `
+      <h2 class="side-head">Where the calls are</h2>
+      <div class="lg-list">${withCalls.map(row).join('')}</div>` : ''}
+
+    ${without.length ? `
+      <h2 class="side-head">Nothing called in these${withCalls.length ? ', yet' : ''}</h2>
+      <div class="lg-list muted">${without.map(row).join('')}</div>` : ''}
   </div>`;
 }
+
 
 
 // ------------------------------------------------- membership: the pages
