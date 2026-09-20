@@ -49,7 +49,15 @@ function kickoffLabel(epoch) {
   if (new Date(now.getTime() + 864e5).toDateString() === d.toDateString()) return `Tomorrow ${time}`;
   return `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} ${time}`;
 }
-const isSoon = (epoch) => epoch && epoch * 1000 - Date.now() < 6 * 3600e3;
+// Kick-off is within six hours and has not happened yet. The second half of
+// that was missing, so every match already played counted as "soon" -- a
+// game from last Tuesday wore the same urgent chip as one kicking off at
+// eight tonight.
+const isSoon = (epoch) => {
+  if (!epoch) return false;
+  const ms = epoch * 1000 - Date.now();
+  return ms > 0 && ms < 6 * 3600e3;
+};
 
 /**
  * What state a match is actually in.
@@ -233,6 +241,13 @@ const state = {
    * want every finished game, or only the finished ones we called.
    */
   when: 'upcoming',
+  /*
+   * Whether the reader got here by navigating inside the app, rather than by
+   * landing on a deep link. It is what a Back button needs and what
+   * `history.length` cannot tell you: a tab that has been anywhere at all has
+   * a history length above one, so Back walked people off the site.
+   */
+  cameFromInApp: false,
 };
 
 /**
@@ -1104,15 +1119,28 @@ function lockedHTML(fixture = null) {
   </div>`;
 }
 
-function verdictHTML(v, home, away, fixture = null) {
+/**
+ * One published call.
+ *
+ * `when` carries whether the match has been played and the scoreline if it
+ * has. That is the difference between a page offering something and a page
+ * reporting something, and almost every line below turns on it: a price that
+ * can no longer be taken is history, not an offer; "backing this returns" is
+ * a promise about a game that is over; and the one thing a reader wants from
+ * a finished match -- did it come in -- was nowhere on the page at all.
+ */
+function verdictHTML(v, home, away, fixture = null, when = {}) {
+  const played = !!when.played;
+  const hg = when.hg ?? null;
+  const ag = when.ag ?? null;
+
   // A free copy keeps the narrative and drops the selection, so a verdict can
-  // arrive with everything except the thing being sold.
+  // arrive with everything except the thing being sold. The wall itself is
+  // rendered once by the caller, however many of these there are.
   if (!v.candidate) {
-    return `
-    <div class="verdict">
-      ${v.narrative ? `<p class="narrative">${esc(v.narrative)}</p>` : ''}
-      ${lockedHTML(fixture)}
-    </div>`;
+    return v.narrative
+      ? `<div class="verdict"><p class="narrative">${esc(v.narrative)}</p></div>`
+      : '';
   }
 
   const c = v.candidate;
@@ -1123,22 +1151,45 @@ function verdictHTML(v, home, away, fixture = null) {
     home, away, odds,
   });
 
+  // Derived here rather than stored: the bundle is written before kick-off, so
+  // it cannot carry a result. The scoreline can, and `didItLand` is the same
+  // reading the results page uses. Corners and cards return null -- they settle
+  // from numbers this page never receives -- and a null says nothing rather
+  // than guessing.
+  const landed = played && hg !== null && ag !== null
+    ? didItLand({ market: c.market, outcome: c.outcome, line: c.line, homeGoals: hg, awayGoals: ag })
+    : null;
+  const VERDICT_WORD = { won: 'Landed', lost: 'Did not land', part: 'Half back', back: 'Stake back' };
+  const story = landed
+    ? recap({ market: c.market, outcome: c.outcome, line: c.line, home, away,
+              homeGoals: hg, awayGoals: ag,
+              result: landed === 'won' ? 'WON' : landed === 'lost' ? 'LOST'
+                : landed === 'part' ? 'HALF_WON' : 'PUSH' })
+    : null;
+
   return `
-  <div class="verdict">
+  <div class="verdict${landed ? ` settled ${landed}` : ''}">
     <div class="verdict-head">
       <span class="sel">${esc(d.name)}</span>
-      <span class="price">${dec(odds)}</span>
+      ${landed
+        ? `<span class="mark ${landed}">${esc(VERDICT_WORD[landed] ?? '')}</span>`
+        : `<span class="price">${dec(odds)}</span>`}
     </div>
-    <p class="wins">${esc(d.wins)}</p>
+    ${landed
+      ? `<p class="wins">${esc(story ?? d.wins)}</p>`
+      : `<p class="wins">${esc(d.wins)}</p>`}
     <p class="narrative">${esc(v.narrative)}</p>
+    ${played ? `<p class="aside">Written before kick-off, and left as it was.</p>` : ''}
     <div class="verdict-meta">
-      ${p ? (p.local
-        ? `<span>Best price at <b>${esc(p.book)}</b> in ${esc(COUNTRY_NAMES[country()] ?? 'your country')}</span>`
-        : `<span class="warnish">No book in ${esc(COUNTRY_NAMES[country()] ?? 'your country')} is quoting this. ` +
-          `The ${dec(p.odds)} above is ${esc(p.book)}'s.</span>`) : ''}
-      <span>${esc(d.returns)}</span>
+      ${played
+        ? `<span>We put it up at ${dec(c.odds)}${c.bookmaker ? ` with ${esc(c.bookmaker)}` : ''}.</span>`
+        : `${p ? (p.local
+            ? `<span>Best price at <b>${esc(p.book)}</b> in ${esc(COUNTRY_NAMES[country()] ?? 'your country')}</span>`
+            : `<span class="warnish">No book in ${esc(COUNTRY_NAMES[country()] ?? 'your country')} is quoting this. ` +
+              `The ${dec(p.odds)} above is ${esc(p.book)}'s.</span>`) : ''}
+           <span>${esc(d.returns)}</span>`}
     </div>
-    ${p && p.local && p.count > 1 ? `
+    ${!played && p && p.local && p.count > 1 ? `
       <details class="settles">
         <summary>${p.count} book${p.count === 1 ? '' : 's'} where you are</summary>
         <table class="tbl settle-tbl"><tbody>
@@ -1148,7 +1199,7 @@ function verdictHTML(v, home, away, fixture = null) {
       </details>` : ''}
     ${d.outcomes?.length ? `
       <details class="settles">
-        <summary>How this settles</summary>
+        <summary>${played ? 'How it would have settled' : 'How this settles'}</summary>
         <table class="tbl settle-tbl"><tbody>
           ${d.outcomes.map((r) => `<tr><td>${esc(r.label)}</td><td class="num ${r.result.startsWith('half') ? 'part' : r.result}">${esc(r.effect)}</td></tr>`).join('')}
         </tbody></table>
@@ -1537,6 +1588,24 @@ async function viewFixture(id) {
   const verdicts = f.verdicts ?? [];
   const { reads, rest } = readsFor(f, verdicts);
 
+  /*
+   * Whether this match has been played, and by how much.
+   *
+   * Everything below reads off these three. Without them the page had one
+   * voice for every fixture: a kick-off time in the future tense, a price
+   * described as available, a call described as a call. On a match that
+   * finished two days ago all three were false, and the page had no way of
+   * knowing -- the bundle was written before kick-off, so it said the game was
+   * to come and carried no score. `get_fixture` now overlays the score column
+   * the way the board already did, which is what makes this possible at all.
+   */
+  const st = matchState(f);
+  const played = st.kind === 'ft';
+  const sc = Array.isArray(f.score) && f.score.length === 2
+    && f.score[0] !== null && f.score[1] !== null ? f.score : null;
+  const hg = sc ? Number(sc[0]) : null;
+  const ag = sc ? Number(sc[1]) : null;
+
   // The provider hands back round labels already joined with a middle dot
   // ("Regular season · Matchday 4"), which is the meta-string tell arriving
   // from outside. Split it back into its parts and let the one join rule below
@@ -1547,17 +1616,30 @@ async function viewFixture(id) {
     f.neutral ? 'neutral ground' : null,
   ].filter(Boolean);
 
+  /*
+   * A locked verdict says nothing about itself, so two of them say the same
+   * nothing twice. The wall was rendering once per call -- the same paragraph
+   * and the same button, stacked -- on every fixture carrying more than one.
+   * One wall, and it already names the count.
+   */
+  const anyLocked = verdicts.some((v) => !v.candidate);
+
+  const callHead = verdicts.length
+    ? (played ? 'What we called' : verdicts.length > 1 ? 'The calls' : 'The call')
+    : (played ? 'We did not call this one' : 'No call');
+
   const overview = `
     <div class="grid-2">
       <div>
         <div class="panel">
-          <p class="panel-head">${verdicts.length ? 'The call' : 'No call'}</p>
+          <p class="panel-head">${callHead}</p>
           ${verdicts.length
-            ? verdicts.map((v) => verdictHTML(v, f.home, f.away, f)).join('')
+            ? verdicts.map((v) => verdictHTML(v, f.home, f.away, f, { played, hg, ag })).join('')
+              + (anyLocked ? lockedHTML(f) : '')
             : `<p class="narrative">${esc(f.pass ?? 'Nothing here is worth a call. The price looks about right.')}</p>`}
         </div>
         ${reads.length ? `<div class="panel">
-          <p class="panel-head">${verdicts.length ? 'What made the call' : 'What stood out'}</p>
+          <p class="panel-head">${verdicts.length ? (played ? 'What made us call it' : 'What made the call') : 'What stood out'}</p>
           <div class="reads">${reads.map((r) => `<div class="read"><b>${esc(r.label)}</b><p>${esc(r.note)}</p></div>`).join('')}</div>
           ${rest.length ? `
             <details class="more-reads">
@@ -1567,20 +1649,20 @@ async function viewFixture(id) {
         </div>` : ''}
       </div>
       <div>
-        <div class="panel">
-          <p class="panel-head">How we see it</p>
+        ${[p.HOME, p.DRAW, p.AWAY].some((x) => typeof x === 'number') ? `<div class="panel">
+          <p class="panel-head">How we ${played ? 'saw' : 'see'} it</p>
           <div class="bars">${bar(f.home, p.HOME)}${bar('Draw', p.DRAW)}${bar(f.away, p.AWAY)}</div>
           <div class="numbers">
             <!-- "goals expected 3.33" was expected goals with the label filed
                  off: a banned term, a number no supporter says out loud, and on
                  the page a reader lands on from an advert. What the total is
                  actually being used to say is whether the game looks open. -->
-            <span>${((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0)) >= 3.1 ? 'goals look likely'
-                   : ((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0)) <= 2.1 ? 'this one looks tight'
-                   : 'an even game on paper'}</span>
-            ${f.provisional ? `<span class="tag prov">line-ups not final</span>` : ''}
+            <span>${((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0)) >= 3.1 ? (played ? 'we had goals in it' : 'goals look likely')
+                   : ((f.lambda?.[0] ?? 0) + (f.lambda?.[1] ?? 0)) <= 2.1 ? (played ? 'we had it tight' : 'this one looks tight')
+                   : (played ? 'we had it even on paper' : 'an even game on paper')}</span>
+            ${f.provisional && !played ? `<span class="tag prov">line-ups not final</span>` : ''}
           </div>
-        </div>
+        </div>` : ''}
         ${formPanel(f.form, f.home, f.away)}
         ${f.venue_id ? `<div class="panel venue" data-shot="yes">
           <p class="panel-head">The ground</p>
@@ -1608,16 +1690,17 @@ async function viewFixture(id) {
       ${backHTML('Back to the board')}
       <div class="hero-copy">
         <span class="timechip${isSoon(f.kickoff) ? ' soon' : ''}">${esc(kickoffLabel(f.kickoff))}</span>
-        <div class="fx-stack">
+        ${st.kind === 'upcoming' ? '' : liveBadge(st)}
+        <div class="fx-stack${sc ? ' scored' : ''}">
           <span class="fx-line">
             ${crest(f.home, 'md', f.home_id)}
             <span class="name">${esc(f.home)}</span>
-            ${formChips(f.form?.home)}
+            ${sc ? `<span class="gf${hg > ag ? ' win' : ''}">${hg}</span>` : formChips(f.form?.home)}
           </span>
           <span class="fx-line">
             ${crest(f.away, 'md', f.away_id)}
             <span class="name">${esc(f.away)}</span>
-            ${formChips(f.form?.away)}
+            ${sc ? `<span class="gf${ag > hg ? ' win' : ''}">${ag}</span>` : formChips(f.form?.away)}
           </span>
         </div>
         <p class="hero-blurb">${esc([f.league, ...meta.slice(1)].filter(Boolean).join(', '))}</p>
@@ -1633,8 +1716,16 @@ async function viewFixture(id) {
     ${TABS.map(([k, , html], i) => `<div class="tabpane" data-pane="${k}"${i === 0 ? '' : ' hidden'}>${html}</div>`).join('')}
   </div>`;
 
+  /*
+   * `history.length > 1` is true of a tab that has been anywhere at all, so on
+   * a fixture opened straight from a link -- which is how a shared call
+   * arrives -- "Back to the board" walked the reader off the site, usually
+   * back to whatever they were reading before. Go back only when the previous
+   * entry is somewhere on this site; otherwise go to the board, which is what
+   * the button says it does.
+   */
   app.querySelector('.back').onclick = () => {
-    if (history.length > 1) history.back(); else location.hash = '#/board';
+    if (state.cameFromInApp) history.back(); else location.hash = '#/board';
   };
   for (const t of app.querySelectorAll('.tab')) {
     t.onclick = () => {
@@ -2647,7 +2738,31 @@ function readConsent() {
 function applyConsent(value) {
   try { localStorage.setItem(CONSENT_KEY, value); } catch { /* private mode: ask again next visit */ }
   document.getElementById('cookie-notice')?.remove();
+  document.body.style.paddingBottom = '';
   // Analytics would be loaded here, and only here, when value === 'accepted'.
+}
+
+/*
+ * Keep the page out from under the notice.
+ *
+ * On a wide screen the notice floats bottom-right, where it can still sit over
+ * the last thing in the footer, so its height is reserved at the foot of the
+ * document. Measured rather than guessed, because it wraps to two or three
+ * lines depending on width.
+ *
+ * On a phone it does not float at all -- see `.cookie` in components.css --
+ * so there is nothing to reserve and the style is cleared. That is the actual
+ * fix for the pricing page, where a floating notice sat on top of the button
+ * that takes the money: `elementFromPoint` on Buy returned the notice, so the
+ * tap went to the notice and nothing happened. A buyer with a card out,
+ * tapping a dead target.
+ */
+function reserveForNotice() {
+  const el = document.getElementById('cookie-notice');
+  if (!el) { document.body.style.paddingBottom = ''; return; }
+  if (getComputedStyle(el).position !== 'fixed') { document.body.style.paddingBottom = ''; return; }
+  const gap = el.getBoundingClientRect().height + 24;
+  document.body.style.paddingBottom = `${Math.ceil(gap)}px`;
 }
 
 function cookieNotice() {
@@ -2664,7 +2779,16 @@ function cookieNotice() {
     const v = e.target?.dataset?.consent;
     if (v) applyConsent(v);
   });
-  document.body.appendChild(el);
+  /*
+   * In the document, above the page, rather than appended to the end of the
+   * body. Where it floats (wide screens) the position in the DOM makes no
+   * difference; where it does not (phones) it has to be in the flow, and it
+   * has to be somewhere a reader will actually see it. Directly under the
+   * header is both.
+   */
+  document.body.insertBefore(el, app);
+  reserveForNotice();
+  addEventListener('resize', reserveForNotice);
 }
 
 /**
@@ -2716,9 +2840,14 @@ function notFound(name) {
 
 // ---------------------------------------------------------------- routing
 
+let routed = 0;
+
 async function route() {
   const { parts, params } = parseHash();
   const name = parts[0] || 'home';
+  // Set after the first render, so the first route of a session -- the deep
+  // link itself -- does not count as somewhere to go back to.
+  state.cameFromInApp = routed++ > 0;
   clearInterval(state.tick);
   for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.route === name);
   document.getElementById('nav').classList.remove('open');

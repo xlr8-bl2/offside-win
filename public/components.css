@@ -1600,6 +1600,48 @@
 .fx-top .fx-line .chips { margin-left: var(--space-2); }
 .fx-top .hero-blurb { margin-bottom: 0; }
 
+/* The scoreline, where the form chips sit on a match still to come.
+ *
+ * It takes the right-hand edge rather than trailing the name, so the two
+ * numbers line up under each other and read as a score instead of as two
+ * facts. Tabular figures for the same reason. The losing side's number is
+ * dimmed rather than the winner's being coloured: on a photograph, one bright
+ * number beside one dim one says who won without needing a legend. */
+.fx-stack.scored .fx-line { flex-wrap: nowrap; }
+.fx-stack.scored .fx-line .name { flex: 1 1 auto; }
+.fx-line .gf {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--display);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-hero);
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  font-variation-settings: 'wdth' var(--condensed);
+  color: var(--chalk-3);
+}
+.fx-line .gf.win { color: var(--chalk); }
+
+/* A settled call is reported, not offered. The left rule is the whole signal:
+   it colours the block without recolouring the prose inside it, which still
+   has to be read as ordinary text. */
+.verdict.settled { border-left: 2px solid var(--hairline); padding-left: var(--space-5); }
+.verdict.settled.won  { border-left-color: var(--won); }
+.verdict.settled.lost { border-left-color: var(--lost); }
+.verdict.settled.part,
+.verdict.settled.back { border-left-color: var(--void); }
+.verdict-head .mark { flex: none; margin-left: auto; }
+
+/* Set apart from the prose it qualifies, because it is about the prose rather
+   than about the match: a narrative written in the future tense on a game
+   that has been played needs saying so, not rewriting. */
+.verdict .aside {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-xs);
+  color: var(--chalk-3);
+  font-style: italic;
+}
+
 .grid-2 { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
 @media (max-width: 980px) { .grid-2 { grid-template-columns: minmax(0, 1fr); } }
 
@@ -2128,6 +2170,32 @@
 }
 .cookie p { flex: 1 1 100%; margin: 0; font-size: var(--text-xs); line-height: var(--leading-snug); color: var(--chalk-2); }
 .cookie a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }
+
+/*
+ * On a phone it stops floating.
+ *
+ * A fixed card at the bottom of a 390px viewport is sitting on top of roughly
+ * an eighth of the page, and the page decides what is underneath it. On the
+ * pricing page that was the button that takes the money, and the tap went to
+ * the notice instead: nothing a reader could see was wrong, and nothing they
+ * did worked. Reserving space at the foot of the document does not fix it
+ * either, because the thing being covered is in the middle of the page with a
+ * footer below it.
+ *
+ * So on a narrow screen it is an ordinary bar in the flow, directly under the
+ * header, where it pushes the page down instead of covering it. Same words,
+ * same two buttons, and it cannot be on top of anything because it is not on
+ * top of anything.
+ */
+@media (max-width: 700px) {
+  .cookie {
+    position: static;
+    width: auto;
+    margin: 0 var(--space-4) var(--space-4);
+    border-radius: var(--radius-md);
+    box-shadow: none;
+  }
+}
 
 /* ===================================================== reduced motion */
 

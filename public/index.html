@@ -57,6 +57,15 @@
       <a href="#/board" data-route="board">Picks</a>
       <a href="#/leagues" data-route="leagues">Leagues</a>
       <a href="#/results" data-route="results">Results</a>
+      <!--
+        Membership, in the menu, because on a phone there was no route to it at
+        all: the header's primary button is hidden under 560px, the menu had
+        four links and none of them was this one, and the footer had none
+        either. A buyer on a phone could not reach the page that takes their
+        money. It is hidden above the burger breakpoint, where the button in
+        the header already says it.
+      -->
+      <a href="#/pricing" data-route="pricing" class="nav-only-menu">Membership</a>
     </nav>
     <!--
       The plan state, in the header, on every page.
@@ -98,12 +107,18 @@
         <a href="#/board">Today's board</a>
         <a href="#/leagues">By league</a>
         <a href="#/results">Results</a>
+        <a href="#/pricing">Membership</a>
       </div>
       <div class="foot-col">
+        <!-- Every one of these used to be a bare #/board, so four links went to
+             the same unfiltered page and the headings were decoration. The
+             board reads `league` from the query string, so they can just say
+             what they mean. -->
         <h4>Competitions</h4>
-        <a href="#/board">Champions League</a>
-        <a href="#/board">Premier League</a>
-        <a href="#/board">La Liga</a>
+        <a href="#/board?league=Premier%20League">Premier League</a>
+        <a href="#/board?league=La%20Liga">La Liga</a>
+        <a href="#/board?league=Serie%20A">Serie A</a>
+        <a href="#/board?league=Bundesliga">Bundesliga</a>
         <a href="#/leagues">All 88 leagues</a>
       </div>
       <div class="foot-col">
