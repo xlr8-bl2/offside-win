@@ -598,36 +598,19 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .foot-stats div span { font-size: var(--text-xs); color: var(--chalk-3); }
 
 /*
- * The country control.
+ * Where we think the reader is.
  *
- * It sits in the footer because it is a setting, not a filter -- nobody comes
- * to the site to choose a country. But it is stated rather than buried, since
- * a reader looking at a price with an unfamiliar book beside it needs to be
- * able to see why, and fix it.
+ * Stated, not asked. Nobody arrives at a football site wanting to pick a
+ * country out of a list of forty, and a control that has to be used before
+ * the page is right is a page that is wrong by default. The device already
+ * knows, so this is a sentence rather than a form.
  */
 .region-pick {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
   margin-top: var(--space-6);
   font-size: var(--text-xs);
   color: var(--chalk-3);
 }
-.region-pick select {
-  appearance: none;
-  padding: var(--space-2) var(--space-6) var(--space-2) var(--space-3);
-  background: var(--terrace)
-    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238d94a3' stroke-width='1.5'/></svg>")
-    no-repeat right var(--space-3) center;
-  border: var(--border) solid var(--rule-firm);
-  border-radius: var(--radius-sm);
-  color: var(--chalk);
-  font: inherit;
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.region-pick select:hover { border-color: var(--chalk-3); }
-.region-pick select:focus-visible { outline: 2px solid var(--floodlight); outline-offset: 2px; }
+.region-pick b { color: var(--chalk-2); font-weight: var(--weight-medium); }
 
 .foot-note {
   margin: 0;

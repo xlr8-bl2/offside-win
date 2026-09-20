@@ -143,6 +143,11 @@ for (const width of WIDTHS) {
         el.tagName.toLowerCase() + (el.className && typeof el.className === 'string'
           ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '');
       for (const parent of app?.querySelectorAll('*') ?? []) {
+        // Shapes inside an <svg> overlap each other by design -- a centre
+        // circle sits on a halfway line sits inside a touchline rectangle --
+        // so they are drawings, not layout. The <svg> element itself is still
+        // checked against its siblings.
+        if (parent.closest('svg')) continue;
         const kids = [...parent.children].filter((k) => {
           const cs = getComputedStyle(k);
           if (cs.position !== 'static' && cs.position !== 'relative') return false;

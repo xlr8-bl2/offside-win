@@ -23,9 +23,15 @@ import type { Candidate, Factor, MarketFamily } from './types.ts';
  */
 
 async function loadCalibration(): Promise<CalibrationMap> {
-  const rows = await dbSelect<{ market_family: MarketFamily; n: number; shrink: number }>(
-    'SELECT market_family, n, shrink FROM calibration',
-  );
+  // mean_model_p and mean_actual come with it now: the confident floor reads
+  // them to make a family that has been overclaiming earn its place again.
+  const rows = await dbSelect<{
+    market_family: MarketFamily;
+    n: number;
+    shrink: number;
+    mean_model_p: number | null;
+    mean_actual: number | null;
+  }>('SELECT market_family, n, shrink, mean_model_p, mean_actual FROM calibration');
   return new Map(rows.map((r) => [r.market_family, r as CalibrationRow]));
 }
 
@@ -259,7 +265,11 @@ export async function runSlate(): Promise<SlateReport> {
         // Champions League and the big five drop to the marquee floor; the call
         // then carries `lean` and the page frames it as a read on a tight game
         // rather than a strong call.
-        return selectConfident(theirCands, floorForRank(leagueRank(analysis.league_id))).map((candidate) => {
+        return selectConfident(
+          theirCands,
+          floorForRank(leagueRank(analysis.league_id)),
+          calibration,
+        ).map((candidate) => {
           const drivers = driversFor(candidate, factors);
           return {
             kind: 'CONFIDENT' as const,
