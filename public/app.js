@@ -11,6 +11,7 @@
  */
 
 import { describe as market } from './js/lib/markets.js';
+import { COUNTRY_NAMES, country, countryIsGuess, countryOptions, localPrice, setCountry } from './js/lib/books.js';
 import { authHeaders, completeSignIn, currentUser, signInWithEmail, signInWithGoogle, signOut } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
@@ -565,9 +566,12 @@ function playedHTML(picks, { showOdds = false } = {}) {
  */
 function rowHTML(f) {
   const pick = f.top_pick;
+  // The price a reader here can actually get on, which is rarely the best
+  // price in the world — see js/lib/books.js.
+  const p = pick && localPrice(pick.prices ?? [{ slug: '', book: pick.bookmaker, odds: pick.odds }]);
   const d = pick && market({
     market: pick.market, outcome: pick.outcome, line: pick.line,
-    home: f.home, away: f.away, odds: pick.odds,
+    home: f.home, away: f.away, odds: p ? p.odds : pick.odds,
   });
   const k = new Date(f.kickoff * 1000);
   // 24-hour: "11:00 PM" wraps in the column, and a board is read the way a
@@ -597,9 +601,9 @@ function rowHTML(f) {
     </div>
 
     <div class="row-price">
-      ${pick ? `
-        <span class="odds-tile"><span class="odds">${dec(pick.odds)}</span></span>
-        ${pick.bookmaker ? `<span class="odds-book">${esc(pick.bookmaker)}</span>` : ''}`
+      ${pick && p ? `
+        <span class="odds-tile${p.local ? '' : ' away'}"><span class="odds">${dec(p.odds)}</span></span>
+        <span class="odds-book">${p.local ? esc(p.book) : `no ${esc(country())} book`}</span>`
         : f.locked ? `<span class="odds-tile locked"><span class="odds-locked" aria-hidden="true">••</span></span>
                       <span class="odds-book">members</span>` : ''}
     </div>
@@ -808,6 +812,17 @@ async function viewBoard(params = new URLSearchParams()) {
           <option value="">All leagues</option>
           ${leagues.map((l) => `<option${l === state.leagueName ? ' selected' : ''}>${esc(l)}</option>`).join('')}
         </select>
+        <!--
+          Where the reader is. It belongs beside the other filters because it
+          changes what the right-hand column says on every row: the price is
+          the best one at a book they can actually open, and which books those
+          are is the one thing about this board that is about them rather than
+          about the football.
+        -->
+        <select id="country-filter" class="filter-wide" aria-label="Show prices for books in">
+          ${countryOptions().map((c) =>
+            `<option value="${esc(c)}"${c === country() ? ' selected' : ''}>Prices in ${esc(COUNTRY_NAMES[c] ?? c)}</option>`).join('')}
+        </select>
       </div>
     </div>
     <div class="rows" id="grid"></div>
@@ -890,6 +905,14 @@ async function viewBoard(params = new URLSearchParams()) {
     history.replaceState(null, '', boardHash());
     paint();
   };
+  // The country is not in the URL: it is a property of the reader, not of the
+  // board, and a shared link should open with the recipient's books on it and
+  // not the sender's.
+  document.getElementById('country-filter').onchange = (e) => {
+    setCountry(e.target.value);
+    renderRegion();
+    paint();
+  };
   paint();
 }
 
@@ -953,23 +976,36 @@ function verdictHTML(v, home, away, fixture = null) {
   }
 
   const c = v.candidate;
+  const p = localPrice(c.prices ?? [{ slug: '', book: c.bookmaker, odds: c.odds }]);
+  const odds = p ? p.odds : c.odds;
   const d = market({
     market: c.market, outcome: c.outcome, line: c.line,
-    home, away, odds: c.odds,
+    home, away, odds,
   });
 
   return `
   <div class="verdict">
     <div class="verdict-head">
       <span class="sel">${esc(d.name)}</span>
-      <span class="price">${dec(c.odds)}</span>
+      <span class="price">${dec(odds)}</span>
     </div>
     <p class="wins">${esc(d.wins)}</p>
     <p class="narrative">${esc(v.narrative)}</p>
     <div class="verdict-meta">
-      ${c.bookmaker ? `<span>Best price at <b>${esc(c.bookmaker)}</b></span>` : ''}
+      ${p ? (p.local
+        ? `<span>Best price at <b>${esc(p.book)}</b> in ${esc(COUNTRY_NAMES[country()] ?? 'your country')}</span>`
+        : `<span class="warnish">No book in ${esc(COUNTRY_NAMES[country()] ?? 'your country')} is quoting this. ` +
+          `The ${dec(p.odds)} above is ${esc(p.book)}'s.</span>`) : ''}
       <span>${esc(d.returns)}</span>
     </div>
+    ${p && p.local && p.count > 1 ? `
+      <details class="settles">
+        <summary>${p.count} book${p.count === 1 ? '' : 's'} where you are</summary>
+        <table class="tbl settle-tbl"><tbody>
+          ${(c.prices ?? []).filter((q) => localPrice([q]).local).sort((a, b) => b.odds - a.odds)
+            .map((q) => `<tr><td>${esc(q.book)}</td><td class="num">${dec(q.odds)}</td></tr>`).join('')}
+        </tbody></table>
+      </details>` : ''}
     ${d.outcomes?.length ? `
       <details class="settles">
         <summary>How this settles</summary>
@@ -2012,6 +2048,38 @@ async function headerAuth() {
   }
 }
 
+/**
+ * The country control.
+ *
+ * Prices are only useful attached to a book somebody can open an account with,
+ * and which books those are is decided by where the reader is sitting. We work
+ * that out from the device's timezone, which is right most of the time and
+ * quietly wrong the rest — a phone bought abroad, a VPN, a traveller.
+ *
+ * So the guess is stated out loud rather than applied silently. A reader who
+ * sees the wrong country can fix it in one tap, and the fix sticks.
+ */
+function renderRegion() {
+  const host = document.getElementById('region-pick');
+  if (!host) return;
+  const here = country();
+  host.innerHTML = `
+    <label for="region-select">${countryIsGuess() ? 'Prices shown for' : 'Showing prices for'}</label>
+    <select id="region-select">
+      ${countryOptions().map((c) =>
+        `<option value="${esc(c)}"${c === here ? ' selected' : ''}>${esc(COUNTRY_NAMES[c] ?? c)}</option>`).join('')}
+    </select>`;
+  host.querySelector('#region-select').onchange = (e) => {
+    setCountry(e.target.value);
+    const onBoard = document.getElementById('country-filter');
+    if (onBoard) onBoard.value = e.target.value;
+    // Every price on the page was resolved against the old country, so the
+    // whole view is stale — not just the prices, since a call with no local
+    // book reads differently from one with six.
+    route();
+  };
+}
+
 async function health() {
   try {
     const h = await getJSON('/api/health');
@@ -2030,6 +2098,8 @@ document.getElementById('burger').onclick = (e) => {
 };
 
 window.addEventListener('hashchange', route);
+
+renderRegion();
 
 /**
  * Boot.

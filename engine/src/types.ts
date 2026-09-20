@@ -272,6 +272,13 @@ export interface Quote {
   updated_at: number;
 }
 
+/** One book's price for one outcome. */
+export interface BookPrice {
+  slug: string;
+  book: string;
+  odds: number;
+}
+
 /** A market as the book collectively prices it, after removing the margin. */
 export interface BookMarket {
   market: MarketCode;
@@ -280,6 +287,17 @@ export interface BookMarket {
   fair: Map<Outcome, number>;
   /** Outcome -> best available decimal odds, and who is offering them. */
   best: Map<Outcome, { odds: number; bookmaker: string }>;
+  /**
+   * Outcome -> every book's price for it, best first.
+   *
+   * `best` is the best price anywhere, which is what the model is entitled to
+   * see. It is not what a reader can get: the sharpest number on most markets
+   * belongs to a book that will not take an account from where they are
+   * sitting. Carrying the whole list lets the page resolve the price against
+   * the reader's own country instead of publishing one global number and
+   * hoping.
+   */
+  quotes: Map<Outcome, BookPrice[]>;
   /** Sum of raw implied probabilities; 1.08 means an 8% margin. */
   overround: number;
   /** Which de-vig produced `fair`. Shin unless it failed to converge. */
@@ -312,6 +330,12 @@ export interface Candidate {
   shrunk_edge: number;
   odds: number;
   bookmaker: string;
+  /**
+   * Every book quoting this exact outcome, best price first. The page picks
+   * from it by the reader's country; `odds`/`bookmaker` above are the best
+   * anywhere and are what the edge was measured against.
+   */
+  prices: BookPrice[];
   kelly: number;
   confidence: number;
   family: MarketFamily;

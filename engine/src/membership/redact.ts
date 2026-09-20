@@ -65,7 +65,7 @@ export const PAID_KEYS: ReadonlySet<string> = new Set([
   // what it is a call on
   'market', 'markets', 'outcome', 'line',
   // what it pays, and who pays it
-  'odds', 'odds_1x2', 'bookmaker', 'best', 'book',
+  'odds', 'odds_1x2', 'bookmaker', 'best', 'book', 'prices',
   // the sizing, which implies the call even without naming it
   'kelly', 'edge', 'shrunk_edge',
 ]);

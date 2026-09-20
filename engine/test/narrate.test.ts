@@ -28,7 +28,8 @@ function candidate(over: Partial<Candidate> = {}): Candidate {
   return {
     market: 'over_under_25', outcome: 'under', line: 2.5, push: null,
     model_prob: 0.58, book_prob: 0.52, edge: 0.06, shrunk_edge: 0.051,
-    odds: 2.05, bookmaker: 'Pinnacle', kelly: 0.02, confidence: 0.7, family: 'goals',
+    odds: 2.05, bookmaker: 'Pinnacle', prices: [{ slug: 'pinnacle', book: 'Pinnacle', odds: 2.05 }],
+    kelly: 0.02, confidence: 0.7, family: 'goals',
     ...over,
   };
 }
