@@ -662,8 +662,9 @@
 .played-row:hover { background: var(--terrace); }
 .played-meta {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--space-3);
-  flex-wrap: wrap;
   margin-bottom: var(--space-3);
   font-size: var(--text-2xs);
   color: var(--chalk-3);
@@ -690,8 +691,12 @@
   letter-spacing: 0.06em;
   white-space: nowrap;
 }
-.played-score.w { background: rgba(61, 180, 104, 0.16); color: var(--won); }
-.played-score.l { background: rgba(203, 49, 49, 0.16); color: var(--lost); }
+/* The scoreline stays neutral. The mark beside the kick-off already says
+   whether it went our way, and colouring the score as well says it twice --
+   in a colour that means something else on a scoreboard. */
+.played-score { background: var(--terrace); color: var(--chalk); }
+.played-score.w,
+.played-score.l { background: var(--terrace); color: var(--chalk); }
 
 /* ================================================================ squad */
 
