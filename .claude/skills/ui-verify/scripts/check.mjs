@@ -17,8 +17,27 @@ const ROUTES = process.argv.slice(2).length ? process.argv.slice(2) : ['#/home',
 // Routes whose decimals are settled history rather than the thing being sold.
 const PUBLIC_PRICES = /^#\/results/;
 
-// Words the vocabulary rule bans outright, in either view.
-const BANNED = ['expected goals', 'points a game', 'confidence', ' edge', 'xG', 'per match'];
+/*
+ * The vocabulary rule, from the one place it is written down.
+ *
+ * This file used to keep a hand-typed list of six terms while
+ * engine/src/vocabulary.ts defined forty, which meant the check passed pages
+ * carrying "our numbers", "de-vig", "§7.3" and "CLV" -- a checker enforcing a
+ * sixth of the rule it claims to enforce, and quietly training everyone to
+ * believe the other thirty-four were covered.
+ *
+ * public/js/lib/vocabulary.js is the browser's copy of that list, held to the
+ * engine's character for character by engine/test/vocabulary-agreement.test.ts.
+ * It is a plain ES module, so this can just import it.
+ */
+const { BANNED } = await import(
+  new URL('../../../../public/js/lib/vocabulary.js', import.meta.url)
+);
+
+/** Every banned term on the page, not just the first -- fixing one should not
+ *  be how you discover the next. */
+const findAllBanned = (text) =>
+  [...new Set(BANNED.map((p) => p.exec(text)?.[0]).filter(Boolean))];
 
 /**
  * Whether a decimal on the page is a problem depends on who is looking.
@@ -155,6 +174,10 @@ for (const width of WIDTHS) {
         overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         unresolved: [...new Set(unresolved)],
         decimals: [...new Set(text.match(/\b\d+\.\d{1,2}\b/g) ?? [])].slice(0, 5),
+        // As rendered, not lowercased: a third of the banned patterns are
+        // case-sensitive on purpose -- CONFIDENT, xG, CLV, P/L are our filing
+        // system shouting, and "confident" in a sentence is not.
+        text,
         lowerText: text.toLowerCase(),
       };
     });
@@ -173,7 +196,7 @@ for (const width of WIDTHS) {
     if (free && !PUBLIC_PRICES.test(route) && r.decimals.length) {
       say(`a price reached a free reader: ${r.decimals.join(', ')}`);
     }
-    for (const w of BANNED) if (r.lowerText.includes(w.toLowerCase())) say(`banned term "${w.trim()}"`);
+    for (const term of findAllBanned(r.text ?? r.lowerText)) say(`banned term "${term}"`);
     if (errors.length) say(`console: ${errors.slice(0, 3).join(' | ')}`);
 
     if (width === WIDTHS[0]) {

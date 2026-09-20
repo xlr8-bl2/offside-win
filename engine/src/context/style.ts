@@ -315,10 +315,20 @@ function finishingFactor(
     id: `style.finishing.${which}`,
     section: '§2.1',
     tier: 5,
-    note:
-      `${side.team_name} have been ${gap > 0 ? 'outscoring' : 'underscoring'} their expected goals by ` +
-      `${Math.abs(gap).toFixed(2)} per match over ${style.matches} games — a gap that historically ` +
-      `closes rather than holds.`,
+    // Said in goals rather than in the rate behind it. "Underscoring their
+    // expected goals by 0.28 per match" is a sentence from a spreadsheet; the
+    // same fact is "seven fewer than the chances they made", which is a thing
+    // a supporter says and a whole number either way.
+    note: (() => {
+      const swing = Math.round(Math.abs(gap) * style.matches);
+      if (swing < 1) {
+        return `${side.team_name} have scored about what the chances they made were worth, across ${style.matches} games.`;
+      }
+      return (
+        `${side.team_name} have scored ${swing} ${gap > 0 ? 'more' : 'fewer'} than the chances ` +
+        `they made over ${style.matches} games — a gap that usually closes rather than holds.`
+      );
+    })(),
     evidence: {
       goals_minus_xg_per_match: Number(gap.toFixed(2)),
       matches: style.matches,

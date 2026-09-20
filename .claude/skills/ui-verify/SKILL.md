@@ -50,10 +50,30 @@ does. **Never disable certificate verification to get around this.**
 - sibling elements overlapping each other, including behind tabs
 - `var()` references that resolve to nothing
 - decimals on the page (the vocabulary rule bans spreadsheet numbers)
-- banned terms
+- **every** banned term, imported from `public/js/lib/vocabulary.js` rather
+  than a list typed into the checker. That list is the browser's copy of
+  `engine/src/vocabulary.ts` and `engine/test/vocabulary-agreement.test.ts`
+  holds the two character for character, so there is now one definition of the
+  rule and three consumers of it. The checker used to carry six terms of forty
+  and passed pages saying "our numbers", "de-vig", "§7.3" and "CLV".
 - console errors, ignoring the sandbox's own TLS failures
 
 Widths and routes are arguments: `WIDTHS=1440,390,320 node ... '#/account'`.
+
+## The one finding that is expected
+
+`#/fixture/...` reports `Expected goals` and `probability`, and will until
+`GEMINI_API_KEY` is set. They come from the stored narrative, which the
+template grammar in `engine/src/narrate/grammar.ts` writes in the private
+vocabulary from end to end -- `match_shape` and `confidence_case` are the worst
+of it. That is the writer's job to replace, not a page bug, and the same fact
+is why the free tier has no written analysis. Every other route is clean under
+the full rule.
+
+Factor notes are a different case and are ours to fix in code: three of them
+(finishing, referee tendency, and the sample-size suffix in `ledger.ts`) were
+rewritten in plain English rather than gated, because they are our sentences
+and not generated prose.
 
 ## Seeing what a signed-out reader sees
 
