@@ -79,10 +79,20 @@ function matchState(f) {
   if (status === 'postponed' || status === 'cancelled' || status === 'canceled') {
     return { kind: 'off', label: 'Postponed', short: 'OFF' };
   }
-  const started = f?.kickoff && f.kickoff * 1000 < Date.now();
-  // Feed says not started, clock says otherwise. Say "under way" rather than
-  // inventing a half we cannot see.
-  if (started) return { kind: 'live', label: 'Under way', short: 'LIVE' };
+  const since = f?.kickoff ? Date.now() / 1000 - f.kickoff : -1;
+  /*
+   * The feed says not started and the clock disagrees.
+   *
+   * Inside a few hours that means the match is on and the status has not
+   * caught up, so it reads as under way. Past that it means the card is stale
+   * -- the board reaches a day back and the slate only rewrites the last six
+   * hours -- and no football match lasts three hours. Without the second case
+   * a game that finished yesterday afternoon sat on the board flashing LIVE
+   * indefinitely, which is the most confident a page can be while being
+   * completely wrong.
+   */
+  if (since > 3 * 3600) return { kind: 'ft', label: 'Full time', short: 'FT' };
+  if (since > 0) return { kind: 'live', label: 'Under way', short: 'LIVE' };
   return { kind: 'upcoming', label: '', short: '' };
 }
 
