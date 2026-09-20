@@ -172,6 +172,33 @@ export interface SettleReport {
  * Bounded per run because it walks the whole back record, and it is idempotent
  * because it only ever touches rows with no post-mortem on them.
  */
+/**
+ * Final scores for fixtures nothing else was going to fill in.
+ *
+ * `fixture.home_goals` was written from two places and both of them have a
+ * blind spot. The slate only touches what is inside its window, and settlement
+ * only looks at fixtures carrying an unsettled pick -- so a match we passed on
+ * went to full time and kept an empty scoreline forever. On the board's Played
+ * tab that is a row saying a game has finished and refusing to say how.
+ *
+ * The scores are already in `match`, put there by the nightly history job, so
+ * this is a join rather than a fetch: no provider requests, and it only ever
+ * touches rows that have none.
+ */
+export async function backfillScores(): Promise<void> {
+  await exec(
+    `UPDATE fixture SET
+       home_goals = (SELECT m.home_goals FROM match m WHERE m.id = fixture.id),
+       away_goals = (SELECT m.away_goals FROM match m WHERE m.id = fixture.id)
+     WHERE fixture.home_goals IS NULL
+       AND EXISTS (
+         SELECT 1 FROM match m
+         WHERE m.id = fixture.id AND m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL
+       )`,
+    [],
+  );
+}
+
 export async function backfillPostMortems(limit = 400): Promise<number> {
   const rows = await select<{
     id: number;
@@ -246,6 +273,7 @@ export async function runSettle(): Promise<SettleReport> {
   const report: SettleReport = { considered: pending.length, settled: 0, unresolved: 0, pnl: 0, backfilled: 0 };
   if (pending.length === 0) {
     console.log('Nothing to settle.');
+    await backfillScores();
     report.backfilled = await backfillPostMortems();
     await kvSetJSON('settle:last_run', { at: now, ...report });
     return report;
@@ -394,6 +422,7 @@ export async function runSettle(): Promise<SettleReport> {
     );
   }
 
+  await backfillScores();
   report.backfilled = await backfillPostMortems();
   await refreshCalibration();
   await kvSetJSON('settle:last_run', { at: now, ...report });
