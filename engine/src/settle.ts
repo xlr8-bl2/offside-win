@@ -158,6 +158,8 @@ export interface SettleReport {
   pnl: number;
   /** Older picks given a post-mortem after the fact. */
   backfilled: number;
+  /** Settled picks whose mark no longer matched the final score. */
+  regraded: number;
 }
 
 /**
@@ -197,6 +199,97 @@ export async function backfillScores(): Promise<void> {
        )`,
     [],
   );
+}
+
+/**
+ * Re-grade settled picks whose mark no longer matches the score.
+ *
+ * A pick is graded once, against whatever score was available three hours
+ * after kick-off, and until now nothing ever looked at it again. The
+ * authoritative final score arrives later -- the nightly history job writes it
+ * to `match`, and it is the one the fixture column and the whole results page
+ * are drawn from. When the two disagree, the page shows a green LANDED over a
+ * scoreline that says the opposite.
+ *
+ * It was six picks in two hundred when this was written, five of them in our
+ * favour, and that is the worst possible direction for the error to run on the
+ * one page whose entire job is being believed. Two of them were the same 1-1:
+ * "either team to win" marked landed and "home or draw" marked missed, a few
+ * cards apart, both exactly backwards.
+ *
+ * So the grade follows the score rather than the other way round. This runs
+ * every settlement, it is idempotent, and it moves the headline against us as
+ * often as not -- which is the point.
+ */
+export async function regradeSettled(limit = 500): Promise<number> {
+  const rows = await select<{
+    id: number;
+    market: MarketCode;
+    outcome: Outcome;
+    line: number | null;
+    odds: number;
+    result: Result;
+    home_goals: number;
+    away_goals: number;
+    opening_odds: number | null;
+    closing_odds: number | null;
+    evidence_json: string | null;
+  }>(
+    `SELECT p.id, p.market, p.outcome, p.line, p.odds, p.result,
+            p.opening_odds, p.closing_odds, p.evidence_json,
+            f.home_goals, f.away_goals
+     FROM pick p JOIN fixture f ON f.id = p.fixture_id
+     WHERE p.settled_at IS NOT NULL
+       AND p.result IS NOT NULL
+       AND f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
+     ORDER BY p.kickoff DESC LIMIT ?`,
+    [limit],
+  );
+
+  let fixed = 0;
+  for (const r of rows) {
+    const graded = settleSelection(r.market, r.outcome, r.line, r.odds, {
+      homeGoals: r.home_goals,
+      awayGoals: r.away_goals,
+      homeCorners: null,
+      awayCorners: null,
+      reds: null,
+    });
+    // No grade from goals alone: corners and cards keep the mark they have.
+    if (!graded || graded.result === r.result) continue;
+
+    let expected: { home?: number; away?: number } = {};
+    try {
+      expected = (JSON.parse(r.evidence_json ?? '{}') as { expected?: typeof expected }).expected ?? {};
+    } catch { /* an older shape, or none */ }
+
+    const pm = postMortem({
+      market: r.market,
+      outcome: r.outcome,
+      line: r.line,
+      result: graded.result,
+      homeGoals: r.home_goals,
+      awayGoals: r.away_goals,
+      expectedHome: expected.home ?? null,
+      expectedAway: expected.away ?? null,
+      openingOdds: r.opening_odds,
+      closingOdds: r.closing_odds,
+    });
+
+    await exec('UPDATE pick SET result = ?, pnl = ?, postmortem_json = ? WHERE id = ?', [
+      graded.result,
+      graded.pnl,
+      JSON.stringify(pm),
+      r.id,
+    ]);
+    console.log(
+      `  re-graded pick ${r.id}: ${r.market} ${r.outcome} at ${r.home_goals}-${r.away_goals} ` +
+        `was ${r.result}, is ${graded.result}`,
+    );
+    fixed++;
+  }
+  if (fixed) console.log(`Re-graded ${fixed} picks against the final score.`);
+  return fixed;
 }
 
 export async function backfillPostMortems(limit = 400): Promise<number> {
@@ -270,10 +363,11 @@ export async function runSettle(): Promise<SettleReport> {
     [cutoff],
   );
 
-  const report: SettleReport = { considered: pending.length, settled: 0, unresolved: 0, pnl: 0, backfilled: 0 };
+  const report: SettleReport = { considered: pending.length, settled: 0, unresolved: 0, pnl: 0, backfilled: 0, regraded: 0 };
   if (pending.length === 0) {
     console.log('Nothing to settle.');
     await backfillScores();
+    report.regraded = await regradeSettled();
     report.backfilled = await backfillPostMortems();
     await kvSetJSON('settle:last_run', { at: now, ...report });
     return report;
@@ -423,6 +517,7 @@ export async function runSettle(): Promise<SettleReport> {
   }
 
   await backfillScores();
+  report.regraded = await regradeSettled();
   report.backfilled = await backfillPostMortems();
   await refreshCalibration();
   await kvSetJSON('settle:last_run', { at: now, ...report });
