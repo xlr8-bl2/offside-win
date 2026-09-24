@@ -156,6 +156,11 @@ for (const width of WIDTHS) {
         const kids = [...parent.children].filter((k) => {
           const cs = getComputedStyle(k);
           if (cs.position !== 'static' && cs.position !== 'relative') return false;
+          // An inline element that wraps onto a second line reports a
+          // bounding box spanning both lines' full width, so two <b>s in one
+          // paragraph "overlap" by the width of the column. That is text
+          // flowing, not layout failing; only boxes are measured.
+          if (cs.display === 'inline') return false;
           // A negative margin is an instruction to overlap — stacked crests,
           // a pulled-up panel. Overlap the author asked for is not a finding;
           // overlap from content bursting out of its track is.

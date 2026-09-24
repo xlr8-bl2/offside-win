@@ -209,6 +209,18 @@ ALTER TABLE fixture ADD COLUMN IF NOT EXISTS bundle_free_json text;
 ALTER TABLE fixture ADD COLUMN IF NOT EXISTS home_goals integer;
 ALTER TABLE fixture ADD COLUMN IF NOT EXISTS away_goals integer;
 
+-- The running score, while the match is on.
+--
+-- It used to travel only inside board_json, and board_json is frozen at
+-- kick-off -- so the one moment a live score exists was the one moment the
+-- card could not carry it, and no page ever showed one. These two columns
+-- update on every slate pass like the status does, and the serving functions
+-- lay them over the frozen card under their own name, so nothing can mistake
+-- a first-half score for a result. Null once the match is over, when
+-- home_goals and away_goals take over.
+ALTER TABLE fixture ADD COLUMN IF NOT EXISTS live_home integer;
+ALTER TABLE fixture ADD COLUMN IF NOT EXISTS live_away integer;
+
 -- The provider's team ids, which are also the keys to its image service:
 -- /img/team/{id}/ returns the real crest. They were on the board card and
 -- nowhere a SQL query could reach them, so every page built from `pick` rather
@@ -797,6 +809,14 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
              -- the column costs nothing here and means the scoreline is
              -- whatever settlement last wrote, however old the card is.
              || CASE WHEN f.id = free_fixture_id() THEN '{"free_call": true}'::jsonb ELSE '{}'::jsonb END
+             -- The status and the running score come from the columns too:
+             -- the card froze at kick-off saying the match had not started,
+             -- and these are the only two things that can say otherwise
+             -- before the final score lands.
+             || jsonb_build_object('status', f.status)
+             || CASE WHEN f.home_goals IS NULL AND f.live_home IS NOT NULL AND f.live_away IS NOT NULL
+                     THEN jsonb_build_object('live_score', jsonb_build_array(f.live_home, f.live_away))
+                     ELSE '{}'::jsonb END
              || CASE WHEN f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
                      THEN jsonb_build_object(
                             'score', jsonb_build_array(f.home_goals, f.away_goals),
@@ -848,6 +868,10 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
            -- tense, about whether a price is still live, and about whether a
            -- call landed hangs off these two keys, so they come from the
            -- columns settlement writes rather than from the frozen card.
+           || jsonb_build_object('status', f.status)
+           || CASE WHEN f.home_goals IS NULL AND f.live_home IS NOT NULL AND f.live_away IS NOT NULL
+                   THEN jsonb_build_object('live_score', jsonb_build_array(f.live_home, f.live_away))
+                   ELSE '{}'::jsonb END
            || CASE WHEN f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
                    THEN jsonb_build_object(
                           'score', jsonb_build_array(f.home_goals, f.away_goals),

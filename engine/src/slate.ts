@@ -639,6 +639,10 @@ export async function runSlate(): Promise<SlateReport> {
         // `pick` joined to `fixture` and cannot see inside board_json.
         home_goals: homeGoals ?? null,
         away_goals: awayGoals ?? null,
+        // The running score, as columns, because the card it also sits on is
+        // frozen from kick-off and these are not.
+        live_home: liveScore?.[0] ?? null,
+        live_away: liveScore?.[1] ?? null,
         home_team_id: analysis.home_team_id,
         away_team_id: analysis.away_team_id,
         // Also a column, not just a field inside board_json, because the board
@@ -753,7 +757,8 @@ export async function runSlate(): Promise<SlateReport> {
       'fixture',
       [
         'id', 'league_id', 'kickoff', 'home_team', 'away_team', 'status',
-        'provisional', 'home_goals', 'away_goals', 'home_team_id', 'away_team_id',
+        'provisional', 'home_goals', 'away_goals', 'live_home', 'live_away',
+        'home_team_id', 'away_team_id',
         'rank', 'board_json', 'bundle_json',
         'board_free_json', 'bundle_free_json', 'computed_at',
       ],
@@ -784,6 +789,7 @@ export async function runSlate(): Promise<SlateReport> {
           'home_team = excluded.home_team, away_team = excluded.away_team, ' +
           'status = excluded.status, provisional = excluded.provisional, ' +
           'home_goals = excluded.home_goals, away_goals = excluded.away_goals, ' +
+          'live_home = excluded.live_home, live_away = excluded.live_away, ' +
           'home_team_id = excluded.home_team_id, away_team_id = excluded.away_team_id, ' +
           'rank = excluded.rank, computed_at = excluded.computed_at, ' +
           'board_json = CASE WHEN fixture.kickoff <= excluded.computed_at ' +

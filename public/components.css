@@ -1615,6 +1615,11 @@
  * same kick-off chip — just less height, because the page below it is the point.
  */
 .fx-top .hero-inner { min-height: clamp(280px, 34vw, 380px); padding-block: var(--space-6) var(--space-8); }
+/* The fixture hero has no match centre, so its copy column can be wider than
+   the front page's 340px: a long name beside a goal tally needs the room, and
+   "Netherlands 1" was breaking in half without it. */
+.fx-top .hero-inner { grid-template-columns: minmax(0, 1fr) minmax(340px, 520px); }
+.fx-top .hero-copy { max-width: none; }
 .fx-top .back { align-self: flex-start; margin-bottom: auto; }
 .fx-top .fx-line .chips { margin-left: var(--space-2); }
 .fx-top .hero-blurb { margin-bottom: 0; }
@@ -1627,7 +1632,10 @@
  * dimmed rather than the winner's being coloured: on a photograph, one bright
  * number beside one dim one says who won without needing a legend. */
 .fx-stack.scored .fx-line { flex-wrap: nowrap; }
-.fx-stack.scored .fx-line .name { flex: 1 1 auto; }
+/* A size down beside a score, so "Netherlands" fits on one line next to its
+   goal tally instead of breaking in half. The unscored line keeps the full
+   hero size; it has the whole width to itself. */
+.fx-stack.scored .fx-line .name { flex: 1 1 auto; font-size: clamp(1.75rem, 3.2vw, 3rem); }
 .fx-line .gf {
   flex: none;
   margin-left: auto;
@@ -3077,3 +3085,99 @@
 /* The record's numbers, in the scoreboard face. */
 .record-strip .stat b { font-family: var(--display); font-weight: var(--weight-black); font-size: var(--text-board); line-height: 1; letter-spacing: var(--tracking-num); }
 .record-strip .stat.won b { color: var(--won); }
+
+/* ============================================================ live tracker */
+
+/*
+ * How a call stands while the match is on.
+ *
+ * Two words and a dot. "On track" in the won green, because that is what it
+ * would be if the whistle went now; "Not yet" in amber rather than red, because
+ * a call behind at the hour is pending, not lost, and a page that turned red at
+ * every goal against would be shouting at people for ninety minutes.
+ */
+.track {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-black);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+.track i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; animation: ping 2.6s var(--ease-in-out) infinite; }
+.track.on  { color: var(--won);    background: color-mix(in srgb, var(--won) 14%, transparent); }
+.track.off { color: var(--sodium); background: color-mix(in srgb, var(--sodium) 14%, transparent); }
+.row-price .track { justify-self: end; }
+.track-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin: var(--space-3) 0 0; font-size: var(--text-sm); color: var(--chalk-2); }
+.side-meta .track { margin-left: auto; }
+
+/* The slots the front page redraws in place. Invisible in the layout. */
+[data-live] { display: contents; }
+
+/* ============================================================= today strip */
+
+/*
+ * Today so far, under the masthead: calls up, on now, landed, missed, the run.
+ * Counts in the scoreboard face, each a link to the rows it counts. Same
+ * construction as the record strip, one size down, because it is a glance
+ * rather than a page.
+ */
+.today-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: var(--border);
+  margin: var(--space-6) 0 0;
+  background: var(--rule-firm);
+  border: var(--border) solid var(--rule-firm);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.today-strip .stat {
+  display: block;
+  padding: var(--space-4) var(--space-5);
+  background: var(--stand);
+  color: inherit;
+  text-decoration: none;
+}
+.today-strip .stat:hover { background: var(--terrace); }
+.today-strip .stat b {
+  display: block;
+  font-family: var(--display);
+  font-variation-settings: 'wdth' var(--condensed);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-black);
+  font-size: var(--text-2xl);
+  letter-spacing: var(--tracking-num);
+  line-height: 1;
+}
+.today-strip .stat span { display: block; margin-top: var(--space-2); font-size: var(--text-xs); color: var(--chalk-3); }
+.today-strip .stat.won b  { color: var(--won); }
+.today-strip .stat.live b { color: var(--lost); }
+.today-strip .stat.run b  { color: var(--floodlight-hi); }
+/* Two across on a phone, and an odd last cell takes the whole row rather
+   than leaving a grey block beside it. */
+@media (max-width: 560px) {
+  .today-strip { grid-template-columns: repeat(2, 1fr); }
+  .today-strip .stat:last-child:nth-child(odd) { grid-column: span 2; }
+}
+
+/* ============================================================== slip clock */
+
+.slip-lock { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-3) 0 0; font-size: var(--text-xs); color: var(--chalk-3); }
+.slip-lock b { color: var(--sodium); font-variant-numeric: tabular-nums; }
+.slip-lock b.live { color: var(--lost); }
+.slip-lock.live { color: var(--chalk-2); }
+.slip-lock.live i { width: 6px; height: 6px; border-radius: 50%; background: var(--lost); flex: none; animation: ping 1.8s var(--ease-in-out) infinite; }
+.slip-state { display: inline-flex; align-items: center; gap: var(--space-3); }
+.slip-state .mark { padding: 2px var(--space-2); }
+
+/* The live block's meta line: league, score, and how the call stands. The
+   league gives way first; the score and the mark never wrap. */
+.side-league { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-meta b { white-space: nowrap; }
+.side-meta .track { flex: none; }
