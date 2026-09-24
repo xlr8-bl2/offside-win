@@ -1,3 +1,4 @@
+import { settleSlips } from './slip.ts';
 import { bsdOrNull, num } from './bsd.ts';
 import { postMortem } from './postmortem.ts';
 import { isQuarterLine } from './price.ts';
@@ -160,6 +161,7 @@ export interface SettleReport {
   backfilled: number;
   /** Settled picks whose mark no longer matched the final score. */
   regraded: number;
+  slips?: number;
 }
 
 /**
@@ -368,6 +370,7 @@ export async function runSettle(): Promise<SettleReport> {
     console.log('Nothing to settle.');
     await backfillScores();
     report.regraded = await regradeSettled();
+    report.slips = await settleSlips();
     report.backfilled = await backfillPostMortems();
     await kvSetJSON('settle:last_run', { at: now, ...report });
     return report;
@@ -518,6 +521,7 @@ export async function runSettle(): Promise<SettleReport> {
 
   await backfillScores();
   report.regraded = await regradeSettled();
+  report.slips = await settleSlips();
   report.backfilled = await backfillPostMortems();
   await refreshCalibration();
   await kvSetJSON('settle:last_run', { at: now, ...report });
