@@ -13,13 +13,13 @@ on:
       command:
         description: 'Engine command to run against Postgres'
         type: choice
-        options: [migrate, history, ratings, slate, settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players', grant]
+        options: [migrate, history, ratings, slate, settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players', grant, plans]
         default: migrate
       arg:
         # Free text for the commands that take one. `grant` reads an email and
         # an optional second word: "you@example.com", "you@example.com 30",
         # "you@example.com off".
-        description: 'Argument for the command (grant: "email [days|off]")'
+        description: 'Argument for the command (grant: "email [days|off]"; plans: "id <checkout url | price in pence>")'
         type: string
         default: ''
       leagues:
