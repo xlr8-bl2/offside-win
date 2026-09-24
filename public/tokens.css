@@ -182,6 +182,9 @@
   --text-4xl: clamp(2.5rem, 4.2vw, 3.5rem);
   /* The matchup on a masthead, and nothing else on the site. */
   --text-hero: clamp(2.25rem, 4.4vw, 3.75rem);
+  /* The scoreboard: a scoreline, total odds, a strike count. The one size on
+     the site that is meant to be read from the back of the stand. */
+  --text-board: clamp(3rem, 7vw, 5rem);
 
   --leading-tight:  1.02;
   --leading-snug:   1.3;

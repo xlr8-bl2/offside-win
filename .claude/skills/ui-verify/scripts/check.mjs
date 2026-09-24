@@ -90,7 +90,12 @@ for (const width of WIDTHS) {
 
     const r = await page.evaluate(() => {
       const app = document.getElementById('app');
-      const text = app?.textContent ?? '';
+      // Prices meant for everyone -- the free call's odds, a plan's price in
+      // pounds, the wall's "from £3.49" -- are marked data-public-price and
+      // left out of the leak check, which is about paid calls only.
+      const scan = app ? app.cloneNode(true) : null;
+      for (const el of scan?.querySelectorAll('[data-public-price]') ?? []) el.remove();
+      const text = scan?.textContent ?? '';
       const cs = getComputedStyle(document.documentElement);
 
       // A var() that resolves to nothing invalidates the whole declaration

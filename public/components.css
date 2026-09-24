@@ -2857,3 +2857,223 @@
   font-weight: var(--weight-bold);
   text-align: center;
 }
+
+/* ================================================================ ticker */
+
+/* One line that moves. Under the header on the front page only. */
+.ticker {
+  overflow: hidden;
+  border-bottom: var(--border) solid var(--hairline);
+  background: var(--stand);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent);
+}
+.ticker-track {
+  display: flex;
+  width: max-content;
+  animation: ticker calc(var(--tick-n, 8) * 4.5s) linear infinite;
+}
+.ticker-track > span { display: contents; }
+.ticker:hover .ticker-track { animation-play-state: paused; }
+.tick {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-6);
+  border-right: var(--border) solid var(--hairline);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--chalk-2);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.tick i { width: 6px; height: 6px; border-radius: 50%; background: var(--chalk-3); flex: none; }
+.tick.live i { background: var(--lost); animation: ping 2.6s var(--ease-in-out) infinite; }
+.tick.won i { background: var(--won); }
+.tick.lost i { background: var(--lost); }
+.tick.next i { background: var(--sodium); }
+.tick:hover { color: var(--chalk); }
+@keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) {
+  .ticker { overflow-x: auto; mask-image: none; -webkit-mask-image: none; }
+  .ticker-track { animation: none; }
+  .ticker-track > span { display: none; }
+}
+
+/* ============================================================ free call */
+
+/* The masthead's call, in the scoreboard face. */
+.freecall { margin: var(--space-5) 0 var(--space-6); }
+.freecall-tag,
+.plan-tagline {
+  display: inline-block;
+  padding: 3px var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--sodium);
+  color: var(--pitch);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
+}
+.freecall-sel {
+  margin: var(--space-3) 0 0;
+  font-family: var(--display);
+  font-weight: var(--weight-black);
+  font-size: var(--text-3xl);
+  letter-spacing: var(--tracking-3xl);
+  line-height: var(--leading-tight);
+  color: var(--chalk);
+  text-shadow: 0 1px 12px rgba(10, 10, 12, 0.9);
+}
+.freecall-meta { margin: var(--space-2) 0 0; font-size: var(--text-md); color: var(--chalk-2); }
+.freecall-meta b { color: var(--sodium); font-variant-numeric: tabular-nums; }
+.freecall .hero-blurb { margin-top: var(--space-4); }
+
+/* The same call, as a line on the pricing page. */
+.freecall-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+  margin: 0 0 var(--space-8);
+  padding: var(--space-4) var(--space-5);
+  border: var(--border) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--stand);
+  font-size: var(--text-sm);
+  color: var(--chalk-2);
+}
+.freecall-line b { color: var(--chalk); }
+.freecall-line:hover { border-color: var(--sodium); }
+
+/* ================================================================= plans */
+
+.plans {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-5);
+  margin-bottom: var(--space-9);
+  align-items: stretch;
+}
+@media (max-width: 860px) { .plans { grid-template-columns: minmax(0, 1fr); } }
+.plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-7);
+  border: var(--border) solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--stand);
+}
+.plan-main { background: var(--terrace); border-color: var(--floodlight); box-shadow: var(--elev-2); }
+.plan h2 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-xl);
+  letter-spacing: var(--tracking-xl);
+}
+.plan .plan-price { margin: var(--space-2) 0 0; display: flex; align-items: baseline; gap: var(--space-3); }
+.plan .plan-price b {
+  font-family: var(--display);
+  font-weight: var(--weight-black);
+  font-size: var(--text-board);
+  line-height: 1;
+  letter-spacing: var(--tracking-num);
+  color: var(--chalk);
+}
+.plan .plan-price span { font-size: var(--text-sm); color: var(--chalk-3); }
+.plan-per { margin: 0; font-size: var(--text-xs); color: var(--sodium); }
+.plan-blurb { margin: 0 0 var(--space-4); flex: 1; font-size: var(--text-sm); line-height: var(--leading-normal); color: var(--chalk-2); }
+.plan .btn { width: 100%; justify-content: center; }
+
+.tiers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+  margin-bottom: var(--space-9);
+}
+@media (max-width: 700px) { .tiers { grid-template-columns: minmax(0, 1fr); } }
+.tier { padding: var(--space-6) var(--space-7); border: var(--border) solid var(--hairline); border-radius: var(--radius); }
+.tier-paid { border-color: var(--floodlight-dim); background: var(--stand); }
+.tier h3 { margin: 0 0 var(--space-4); font-size: var(--text-sm); font-weight: var(--weight-bold); color: var(--chalk-2); }
+.tier .ticks b { color: var(--chalk); }
+
+/* ============================================================= turnstile */
+
+.turnstile-aside { margin: 0 0 var(--space-2); font-size: var(--text-xl); color: var(--sodium); }
+.btn-google { gap: var(--space-3); }
+.btn-google svg { width: 18px; height: 18px; flex: none; }
+.sent { display: grid; gap: var(--space-3); }
+.sent-head {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-2xl);
+  letter-spacing: var(--tracking-2xl);
+}
+.sent p { margin: 0; font-size: var(--text-md); line-height: var(--leading-normal); color: var(--chalk-2); }
+.sent b { color: var(--chalk); overflow-wrap: anywhere; }
+.linklike {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--chalk-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font: inherit;
+  cursor: pointer;
+}
+.linklike:disabled { color: var(--chalk-3); text-decoration: none; cursor: default; }
+
+/* ================================================================ ticket */
+
+/* The membership as a ticket: a main part and a stub, torn along a dashed
+   rule. The stub carries whatever there is to do about it. */
+.ticket {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: var(--space-5);
+  border: var(--border) solid var(--floodlight);
+  border-radius: var(--radius-lg);
+  background: var(--terrace);
+  overflow: hidden;
+}
+.ticket.off { border-color: var(--rule); background: var(--stand); }
+.ticket-main { display: grid; gap: var(--space-2); padding: var(--space-7); }
+.ticket-kind {
+  font-family: var(--display);
+  font-weight: var(--weight-black);
+  font-size: var(--text-3xl);
+  letter-spacing: var(--tracking-3xl);
+  line-height: var(--leading-tight);
+}
+.ticket-who { font-size: var(--text-sm); color: var(--chalk-3); overflow-wrap: anywhere; }
+.ticket-until { font-size: var(--text-md); color: var(--chalk-2); }
+.ticket-until b { color: var(--chalk); }
+.ticket-stub {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-3);
+  min-width: 180px;
+  padding: var(--space-6);
+  border-left: 2px dashed var(--rule);
+  font-size: var(--text-xs);
+  color: var(--chalk-3);
+}
+@media (max-width: 560px) {
+  .ticket { grid-template-columns: minmax(0, 1fr); }
+  .ticket-stub { border-left: 0; border-top: 2px dashed var(--rule); }
+}
+
+/* ============================================================ form guide */
+
+.formline { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-5); margin: var(--space-5) 0 var(--space-6); }
+.chips.big { gap: 4px; flex-wrap: wrap; }
+.chips.big .chip { width: 24px; height: 24px; font-size: 11px; border-radius: 4px; }
+.formline-note { font-size: var(--text-xs); color: var(--chalk-3); }
+.formline-note b { color: var(--won); }
+
+/* The record's numbers, in the scoreboard face. */
+.record-strip .stat b { font-family: var(--display); font-weight: var(--weight-black); font-size: var(--text-board); line-height: 1; letter-spacing: var(--tracking-num); }
+.record-strip .stat.won b { color: var(--won); }
