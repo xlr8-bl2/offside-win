@@ -5,6 +5,8 @@ import { analyseFixture } from './context/index.ts';
 import { checkComparisonEntitlement, gatherFixture } from './context/gather.ts';
 import { RepetitionLedger, narrate, narrateConfident, narratePass } from './narrate/compose.ts';
 import { chooseHero, type HeroCandidate } from './feature.ts';
+import { chooseFreeCall } from './free.ts';
+import { writeMissingReports } from './report.ts';
 import { pubFacts } from './narrate/facts.ts';
 import { geminiWriter } from './narrate/gemini.ts';
 import { write, type Writer } from './narrate/write.ts';
@@ -257,6 +259,8 @@ export async function runSlate(): Promise<SlateReport> {
 
   const fixtureRows: Array<Record<string, unknown>> = [];
   const pickRows: Array<Record<string, unknown>> = [];
+  // Matches this pass saw finished, so their reports can be written below.
+  const finishedIds: number[] = [];
   // The confident calls each fixture carries as of this run, for fixtures
   // that have not kicked off. See the withdrawal after the pick upsert.
   const standing = new Map<number, Array<{ market: string; outcome: string; line: number | null }>>();
@@ -456,6 +460,7 @@ export async function runSlate(): Promise<SlateReport> {
        * the honest state for a game still being played.
        */
       const finished = /finish|ended|\bft\b|after|aet|\bap\b/i.test(String(event['status'] ?? ''));
+      if (finished && num(event['id']) !== undefined) finishedIds.push(num(event['id'])!);
       const homeGoals = finished ? num(event['home_score']) : undefined;
       const awayGoals = finished ? num(event['away_score']) : undefined;
       // The running score is still worth showing -- a board that says LIVE and
@@ -643,6 +648,7 @@ export async function runSlate(): Promise<SlateReport> {
         // frozen from kick-off and these are not.
         live_home: liveScore?.[0] ?? null,
         live_away: liveScore?.[1] ?? null,
+        live_minute: liveScore ? (num(event['current_minute']) ?? null) : null,
         home_team_id: analysis.home_team_id,
         away_team_id: analysis.away_team_id,
         // Also a column, not just a field inside board_json, because the board
@@ -757,7 +763,7 @@ export async function runSlate(): Promise<SlateReport> {
       'fixture',
       [
         'id', 'league_id', 'kickoff', 'home_team', 'away_team', 'status',
-        'provisional', 'home_goals', 'away_goals', 'live_home', 'live_away',
+        'provisional', 'home_goals', 'away_goals', 'live_home', 'live_away', 'live_minute',
         'home_team_id', 'away_team_id',
         'rank', 'board_json', 'bundle_json',
         'board_free_json', 'bundle_free_json', 'computed_at',
@@ -789,7 +795,7 @@ export async function runSlate(): Promise<SlateReport> {
           'home_team = excluded.home_team, away_team = excluded.away_team, ' +
           'status = excluded.status, provisional = excluded.provisional, ' +
           'home_goals = excluded.home_goals, away_goals = excluded.away_goals, ' +
-          'live_home = excluded.live_home, live_away = excluded.live_away, ' +
+          'live_home = excluded.live_home, live_away = excluded.live_away, live_minute = excluded.live_minute, ' +
           'home_team_id = excluded.home_team_id, away_team_id = excluded.away_team_id, ' +
           'rank = excluded.rank, computed_at = excluded.computed_at, ' +
           'board_json = CASE WHEN fixture.kickoff <= excluded.computed_at ' +
@@ -802,6 +808,14 @@ export async function runSlate(): Promise<SlateReport> {
           'THEN fixture.bundle_free_json ELSE excluded.bundle_free_json END',
       },
     );
+  }
+
+  // The match report for anything that finished since the last pass: written
+  // once, on the first pass after full time, so the fixture page has the
+  // scorers and the ratings within a quarter of an hour of the whistle.
+  if (finishedIds.length > 0) {
+    const reports = await writeMissingReports({ ids: finishedIds, limit: 40 });
+    if (reports) console.log(`  wrote ${reports} match report${reports === 1 ? '' : 's'}`);
   }
 
   if (pickRows.length > 0) {
@@ -883,6 +897,12 @@ export async function runSlate(): Promise<SlateReport> {
     // leading the front page. The page has a masthead for this case.
     await kvSetJSON('hero:today', null);
   }
+
+  // The one call a day everyone can read: the strongest open call, not the
+  // headline fixture's. See free.ts for how it locks.
+  const free = await chooseFreeCall(now);
+  if (free) console.log(`  free call: fixture ${free.fixture_id}, kicks off ${new Date(free.kickoff * 1000).toISOString()}`);
+  else console.log('  free call: none open');
 
   await kvSetJSON('narrate:ledger', ledger.snapshot());
   await kvSetJSON('slate:last_run', { at: now, ...report });
