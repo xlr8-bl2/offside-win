@@ -208,3 +208,14 @@ test('the slate freezes a write-up at kick-off', () => {
     assert.match(clause, new RegExp(`${col} = excluded\\.${col}`), `${col}: stops updating after kick-off`);
   }
 });
+
+test('the fixture page and the board read calls from the record', () => {
+  // A match showed "Landed" on the results page and "no call was made" on its
+  // own page, because the page read a write-up that had been rewritten after
+  // the match while the results page read the pick table. Both serving
+  // functions now carry the pick table's view of the fixture.
+  const fx = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION get_fixture('));
+  assert.match(fx.slice(0, fx.indexOf('$fn$;')), /'published'[\s\S]*FROM pick pk[\s\S]*pk\.kind = 'CONFIDENT'/);
+  const bd = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION get_board('));
+  assert.match(bd.slice(0, bd.indexOf('$fn$;')), /'called'[\s\S]*FROM pick pk[\s\S]*pk\.kind = 'CONFIDENT'/);
+});

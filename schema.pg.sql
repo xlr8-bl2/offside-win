@@ -649,7 +649,18 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
              || CASE WHEN f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
                      THEN jsonb_build_object(
                             'score', jsonb_build_array(f.home_goals, f.away_goals),
-                            'status', 'finished')
+                            'status', 'finished',
+                            -- A played match's call comes from the record, the
+                            -- same row the results page and the fixture page
+                            -- read, so the three cannot disagree about whether
+                            -- a call was made or how it went.
+                            'called', (
+                              SELECT jsonb_build_object(
+                                       'market', pk.market, 'outcome', pk.outcome, 'line', pk.line,
+                                       'odds', pk.odds, 'bookmaker', pk.bookmaker, 'result', pk.result)
+                              FROM pick pk
+                              WHERE pk.fixture_id = f.id AND pk.kind = 'CONFIDENT'
+                              ORDER BY pk.model_prob DESC LIMIT 1))
                      ELSE '{}'::jsonb END
            )::json AS card,
            f.kickoff, f.rank
@@ -690,6 +701,28 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
                           'score', jsonb_build_array(f.home_goals, f.away_goals),
                           'status', 'finished')
                    ELSE '{}'::jsonb END
+           -- The calls, from the record rather than from the write-up.
+           --
+           -- The write-up is a snapshot, and before the freeze at kick-off it
+           -- was rewritten by every slate that passed over the match -- so for
+           -- a stretch of fixtures it says "no call" while the pick table, and
+           -- therefore the results page and the board, say a call was made and
+           -- how it went. The pick table is the record; the page reads it.
+           -- Same visibility rule as get_picks: settled calls are public, open
+           -- ones need a membership.
+           || jsonb_build_object('published', coalesce((
+                SELECT jsonb_agg(jsonb_build_object(
+                         'market', pk.market, 'outcome', pk.outcome, 'line', pk.line,
+                         'odds', pk.odds, 'bookmaker', pk.bookmaker,
+                         'model_prob', pk.model_prob, 'narrative', pk.narrative,
+                         'result', pk.result, 'settled', pk.settled_at IS NOT NULL,
+                         'postmortem', try_json(pk.postmortem_json))
+                       ORDER BY pk.model_prob DESC)
+                FROM pick pk
+                WHERE pk.fixture_id = f.id AND pk.kind = 'CONFIDENT'
+                  AND (pk.settled_at IS NOT NULL OR has_membership()
+                       OR (f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL))
+              ), '[]'::jsonb))
          )::json
   FROM fixture f WHERE f.id = p_id;
 $fn$;
