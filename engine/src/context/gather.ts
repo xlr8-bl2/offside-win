@@ -271,7 +271,13 @@ export function parseManagerCareer(
 
 export function parseScorers(raw: unknown): ScorerRow[] | null {
   const rec = asRecord(raw);
-  const list = asArray(rec?.['results'] ?? rec?.['players'] ?? rec?.['top'] ?? raw);
+  // The top-scorers endpoint returns { league_id, team_id, season, stat,
+  // label, leaders: [...] }. Only results/players/top were read, so every
+  // list parsed as empty and every absent player's share of the goals read
+  // as zero -- which is how the page came to say that absences including
+  // Hakimi and Sadiq were players "none of whom register in the league's
+  // scoring records". Confirmed with `npm run probe:players`.
+  const list = asArray(rec?.['leaders'] ?? rec?.['results'] ?? rec?.['players'] ?? rec?.['top'] ?? raw);
   if (!list) return null;
   const out: ScorerRow[] = [];
   for (const r of list) {
@@ -280,8 +286,8 @@ export function parseScorers(raw: unknown): ScorerRow[] | null {
     if (id === undefined) continue;
     out.push({
       player_id: id,
-      name: str(row?.['name'] ?? pickStr(row, 'player.name')) ?? `#${id}`,
-      goals: num(row?.['goals'] ?? row?.['value'] ?? row?.['total']) ?? 0,
+      name: str(row?.['name'] ?? row?.['player_name'] ?? pickStr(row, 'player.name')) ?? `#${id}`,
+      goals: num(row?.['goals'] ?? row?.['value'] ?? row?.['total'] ?? row?.['count']) ?? 0,
       assists: num(row?.['assists']) ?? 0,
     });
   }
