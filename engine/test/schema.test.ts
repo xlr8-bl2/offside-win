@@ -23,6 +23,9 @@ test('postgres schema declares tables', () => {
 // cannot be undone by accident.
 const PRIVATE = new Set(['payment', 'payment_method']);
 
+// Tables with paid content in them, readable only through a serving function.
+const SERVED = new Set(['fixture', 'pick', 'kv']);
+
 // The anon key is public. RLS plus a SELECT-only grant is the only thing
 // standing between it and write access, so a table added without both is a hole
 // that no amount of careful reading reliably catches.
@@ -38,6 +41,17 @@ for (const t of tables) {
         new RegExp(`GRANT[^;]*ON ${t} TO anon`, 'i'),
         `${t}: is meant to be private but grants something to anon`,
       );
+      return;
+    }
+
+    // The paid tables are read only through the serving functions. A direct
+    // SELECT grant on any of them hands every open call to anyone holding the
+    // public key, which ships to every browser -- confirmed against production
+    // (thirty-two open calls from /rest/v1/pick) before this rule existed.
+    if (SERVED.has(t)) {
+      assert.doesNotMatch(sql, new RegExp(`GRANT SELECT ON ${t} TO`), `${t}: holds paid content and grants a direct read`);
+      assert.doesNotMatch(sql, new RegExp(`CREATE POLICY \\w+ ON ${t} FOR SELECT`), `${t}: a read policy on a paid table`);
+      assert.match(sql, new RegExp(`REVOKE ALL ON ${t} FROM anon, authenticated`), `${t}: default privileges not revoked`);
       return;
     }
 
@@ -109,14 +123,26 @@ test('migrate() sends whole statements, function bodies included', () => {
 // call, so the absence of a grant is asserted instead.
 const PRIVATE_FUNCTIONS = new Set(['record_payment', 'revoke_membership']);
 
-// The Worker's entire read path. SECURITY DEFINER here would run these as the
-// owner and hand the public anon key whatever the owner can see, which is the
-// one way a read-only surface becomes a data leak.
+// The Worker's read path. The serving functions over the paid tables run as
+// their owner, because those tables grant the public roles nothing -- so each
+// one IS the wall, and every one that returns calls must apply it. Anything
+// else runs as the caller: SECURITY DEFINER on a function that does not
+// filter is the one way a read-only surface becomes a data leak.
+const DEFINER = new Set(['get_board', 'get_fixture', 'get_picks', 'get_model', 'get_hero', 'get_health']);
+const WALLED = new Set(['get_board', 'get_fixture', 'get_picks']);
 for (const fn of [...sql.matchAll(/CREATE OR REPLACE FUNCTION (\w+)\(/g)].map((m) => m[1]!)) {
-  test(`${fn} runs as the caller${PRIVATE_FUNCTIONS.has(fn) ? ' and is not callable by anon' : ' and is callable by anon'}`, () => {
+  test(`${fn} ${DEFINER.has(fn) ? 'runs as owner behind the wall' : 'runs as the caller'}${PRIVATE_FUNCTIONS.has(fn) ? ' and is not callable by anon' : ' and is callable by anon'}`, () => {
     const body = sql.slice(sql.indexOf(`CREATE OR REPLACE FUNCTION ${fn}(`));
     const decl = body.slice(0, body.indexOf('$fn$'));
-    assert.doesNotMatch(decl, /SECURITY\s+DEFINER/i, `${fn}: SECURITY DEFINER bypasses RLS`);
+    if (DEFINER.has(fn)) {
+      assert.match(decl, /SECURITY\s+DEFINER/i, `${fn}: reads a table that grants the caller nothing`);
+      if (WALLED.has(fn)) {
+        const whole = body.slice(0, body.indexOf('$fn$;'));
+        assert.match(whole, /has_membership\(\)/, `${fn}: returns calls as owner without checking membership`);
+      }
+    } else {
+      assert.doesNotMatch(decl, /SECURITY\s+DEFINER/i, `${fn}: SECURITY DEFINER bypasses RLS`);
+    }
     assert.match(decl, /SET search_path = public/, `${fn}: unpinned search_path`);
 
     if (PRIVATE_FUNCTIONS.has(fn)) {
