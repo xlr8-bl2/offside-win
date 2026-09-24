@@ -280,14 +280,59 @@ function boardHash(hours = state.hours, league = state.leagueName) {
   const q = new URLSearchParams();
   if (Number(hours) !== 72) q.set('hours', String(hours));
   if (league) q.set('league', league);
-  if (state.show === 'all') q.set('show', 'all');
   if (state.when !== 'upcoming') q.set('when', state.when);
   const s = q.toString();
   return s ? `#/board?${s}` : '#/board';
 }
 
+/**
+ * Whether a card carries a call. The one definition every page uses.
+ *
+ * The board is a list of calls. A match we have nothing to say about is not
+ * on it -- it was, as a one-line "Passed", two hundred times down a page about
+ * picks -- and it is still reachable from its league and from search engines,
+ * just not presented as though it were part of the product.
+ */
+const hasCall = (f) => Boolean(f?.top_pick || f?.locked);
+
 async function loadBoard() {
   state.board = await getJSON(`/api/board?hours=${state.hours}`);
+  /*
+   * A played match's call is whatever the record says it was.
+   *
+   * The card's own `top_pick` is from the write-up, which for a stretch of
+   * fixtures was rewritten after the match; `called` is the pick table, the
+   * same row the results page and the fixture page read. Where they differ the
+   * record wins, including when the record says no call was made -- that is
+   * how a match came to show "Landed" on one page and "no call" on the next.
+   */
+  /*
+   * One row per match.
+   *
+   * The feed lists some matches twice under two ids -- Stuttgart v Heidenheim,
+   * Lustenau v Bregenz, and Thame v Exmouth once each way round -- and the
+   * board printed both. Same two clubs, kicking off within a few hours of each
+   * other, is the same match; the copy carrying a call is kept, otherwise the
+   * first.
+   */
+  const norm = (t) => String(t ?? '').toLowerCase().normalize('NFD').replace(/[^a-z0-9]/g, '');
+  const kept = [];
+  for (const f of state.board.fixtures ?? []) {
+    const pair = [norm(f.home), norm(f.away)].sort().join('|');
+    const twin = kept.find((k) => k._pair === pair && Math.abs((k.kickoff ?? 0) - (f.kickoff ?? 0)) < 4 * 3600);
+    if (!twin) { f._pair = pair; kept.push(f); continue; }
+    const score = (x) => (x.top_pick || x.locked || x.called ? 2 : 0) + (Array.isArray(x.score) ? 1 : 0);
+    if (score(f) > score(twin)) { f._pair = pair; kept[kept.indexOf(twin)] = f; }
+  }
+  state.board.fixtures = kept;
+
+  for (const f of state.board.fixtures ?? []) {
+    if (!Array.isArray(f.score)) continue;
+    f.locked = false;
+    f.top_pick = f.called
+      ? { ...f.called, prices: [{ slug: '', book: f.called.bookmaker, odds: f.called.odds }] }
+      : null;
+  }
   return state.board;
 }
 
@@ -704,9 +749,12 @@ function rowHTML(f) {
   // a goalless first half became a result.
   const running = !played && Array.isArray(f.live_score) && f.live_score.length === 2 ? f.live_score : null;
   const shown = score ?? running;
+  // The stored grade where the record has one -- it is what the results page
+  // prints -- and the scoreline only for a call not graded yet.
+  const GRADE = { WON: 'won', LOST: 'lost', HALF_WON: 'part', HALF_LOST: 'part', PUSH: 'back', VOID: 'back' };
   const landed = played && pick
-    ? didItLand({ market: pick.market, outcome: pick.outcome, line: pick.line,
-                  homeGoals: score[0], awayGoals: score[1] })
+    ? (GRADE[pick.result] ?? didItLand({ market: pick.market, outcome: pick.outcome, line: pick.line,
+                                          homeGoals: score[0], awayGoals: score[1] }))
     : null;
   const MARK = { won: 'Landed', lost: 'Missed', back: 'Refunded', part: 'Half back' };
 
@@ -868,7 +916,7 @@ async function viewHome() {
 
   app.innerHTML =
     heroHTML(state.hero, state.heroVenue, state.heroDetail) +
-    nextRailHTML(fixtures.filter((f) => f.id !== state.hero?.fixture_id)) +
+    nextRailHTML(fixtures.filter((f) => hasCall(f) && f.id !== state.hero?.fixture_id)) +
     `<div class="wrap section dense">
        <div class="with-side">
          <div class="stack" style="gap:var(--space-9)">
@@ -945,7 +993,6 @@ async function viewBoard(params = new URLSearchParams()) {
   if ([24, 48, 72, 120, 240].includes(hours)) state.hours = hours;
   else if (params.has('hours')) state.hours = 72;
   if (params.has('league')) state.leagueName = params.get('league');
-  if (params.has('show')) state.show = params.get('show') === 'all' ? 'all' : 'calls';
   if (params.has('when')) {
     const w = params.get('when');
     state.when = WHEN.some((x) => x.id === w) ? w : 'upcoming';
@@ -959,7 +1006,8 @@ async function viewBoard(params = new URLSearchParams()) {
     return errorState(err);
     return;
   }
-  const fixtures = board.fixtures ?? [];
+  // Calls only. See hasCall.
+  const fixtures = (board.fixtures ?? []).filter(hasCall);
   const leagues = [...new Set(fixtures.map((f) => f.league).filter(Boolean))].sort();
 
   /*
@@ -1015,8 +1063,7 @@ async function viewBoard(params = new URLSearchParams()) {
   if (!params.has('when')) {
     const holds = (when) => fixtures.filter((f) =>
       whenOf(f) === when
-      && (!state.leagueName || f.league === state.leagueName)
-      && (state.show !== 'calls' || f.top_pick || f.locked)).length;
+      && (!state.leagueName || f.league === state.leagueName)).length;
     const order = ['upcoming', 'live', 'played'];
     state.when = order.find(holds)
       ?? order.find((w) => counts[w])
@@ -1061,11 +1108,6 @@ async function viewBoard(params = new URLSearchParams()) {
         </select>
       </div>
     </div>
-    <p class="board-toggle">
-      <button type="button" id="calls-toggle">${state.show === 'calls'
-        ? 'Showing only games we have a call on — show every game'
-        : 'Showing every game — show only the ones we have a call on'}</button>
-    </p>
     <div class="rows" id="grid"></div>
     ${capped ? `<p class="board-foot">That is everything the board carries today.
       A longer window will not add to it until more fixtures are published.</p>` : ''}
@@ -1090,48 +1132,36 @@ async function viewBoard(params = new URLSearchParams()) {
    * and the tense follows the tab.
    */
   const ledeFor = (inTab) => {
-    // Counted before the "only games we have a call on" filter, because "18
-    // calls across 18 games" is not a sentence anybody needs.
-    const called = inTab.filter((f) => f.top_pick || f.locked);
-    const games = `${inTab.length} game${inTab.length === 1 ? '' : 's'}`;
-    const calls = called.length === 1 ? 'one call' : `${called.length} calls`;
+    // Every row is a call now, so this counts calls and nothing else.
+    const n = inTab.length;
+    const calls = n === 1 ? 'One call' : `${n} calls`;
     const where = state.leagueName ? ` in ${state.leagueName}` : '';
+    if (!n) return '';
 
-    if (!inTab.length) return state.leagueName ? `Nothing${where} in this part of the board.` : '';
-
-    // "1 game ... one call among them" is not a sentence. One of anything is
-    // an it.
-    const them = inTab.length === 1 ? 'it' : 'them';
-    if (state.when === 'live') {
-      return `${games}${where} being played right now, ${
-        called.length ? `${calls} among ${them}` : `no call on ${inTab.length === 1 ? 'it' : 'any of them'}`}.`;
-    }
+    if (state.when === 'live') return `${calls}${where} on matches being played right now.`;
 
     if (state.when === 'played') {
-      // How many of them came in, worked out the same way the results page
-      // does it rather than from a stored mark, because the board card carries
-      // the selection and the score and nothing else.
+      // Counted from the record's grade, the same one the results page prints.
+      const GRADE = { WON: 'won', HALF_WON: 'won', LOST: 'lost', HALF_LOST: 'lost' };
       let landed = 0;
       let judged = 0;
-      for (const f of called) {
+      for (const f of inTab) {
         const pk = f.top_pick;
-        if (!pk || !Array.isArray(f.score)) continue;
-        const r = didItLand({
-          market: pk.market, outcome: pk.outcome, line: pk.line,
-          homeGoals: f.score[0], awayGoals: f.score[1],
-        });
-        if (!r) continue;
+        if (!pk) continue;
+        const r = GRADE[pk.result] ?? (Array.isArray(f.score)
+          ? didItLand({ market: pk.market, outcome: pk.outcome, line: pk.line,
+                        homeGoals: f.score[0], awayGoals: f.score[1] })
+          : null);
+        if (r !== 'won' && r !== 'lost') continue;
         judged++;
         if (r === 'won') landed++;
       }
-      const record = judged ? ` ${landed} of ${judged} landed.` : '';
-      return `${games}${where} already played, ${
-        called.length ? `${calls} among ${them}.` : `no call on ${inTab.length === 1 ? 'it' : 'any of them'}.`}${record}`;
+      return `${calls}${where} on matches already played.${judged ? ` ${landed} of ${judged} landed.` : ''}`;
     }
 
     const next = inTab.map((f) => f.kickoff).filter(Boolean);
     const last = next.length ? Math.max(...next) : null;
-    return `${calls} across ${games}${where} still to play.${
+    return `${calls}${where} on matches still to play.${
       last ? ` The last of them kicks off ${dayLabel(last).toLowerCase()}.` : ''}`;
   };
 
@@ -1140,7 +1170,7 @@ async function viewBoard(params = new URLSearchParams()) {
     if (state.leagueName) inTab = inTab.filter((f) => f.league === state.leagueName);
     document.getElementById('board-lede').textContent = ledeFor(inTab);
 
-    const shown = state.show === 'calls' ? inTab.filter((f) => f.top_pick || f.locked) : inTab;
+    const shown = inTab;
 
     /*
      * Live, then to come, then done.
@@ -1182,12 +1212,17 @@ async function viewBoard(params = new URLSearchParams()) {
               </h3>
               ${g.list.map(rowHTML).join('')}
             </section>`).join('')
-        : state.show === 'calls'
-          ? `<div class="empty-state"><b>No calls here</b>
-               <span>We would rather say nothing than pad the board. Every game
-               is one tap away.</span></div>`
-          : `<div class="empty-state"><b>Nothing here</b>
-               <span>No games in this part of the board right now.</span></div>`;
+        : fixtures.length
+          ? `<div class="empty-state"><b>No calls here yet</b>
+               <span>We only put a match on the board when we have something to say
+               about it. Try another tab or league above.</span></div>`
+          // Nothing called anywhere. Say so once, and point at the record
+          // rather than at three greyed-out tabs.
+          : `<div class="empty-state"><b>No open calls right now</b>
+               <span>Calls go up through the day as team news lands and prices
+               settle. Every call we have made so far, and how it went, is on the
+               results page.</span>
+               <a class="btn btn-primary" href="#/results">See the results</a></div>`;
   };
 
   for (const b of app.querySelectorAll('.seg button')) {
@@ -1198,14 +1233,6 @@ async function viewBoard(params = new URLSearchParams()) {
       paint();
     };
   }
-  document.getElementById('calls-toggle').onclick = (e) => {
-    state.show = state.show === 'calls' ? 'all' : 'calls';
-    e.currentTarget.textContent = state.show === 'calls'
-      ? 'Showing only games we have a call on — show every game'
-      : 'Showing every game — show only the ones we have a call on';
-    history.replaceState(null, '', boardHash());
-    paint();
-  };
   // A longer window needs the board fetched again, so it goes through the
   // router. A league is a filter over what is already here, so it repaints in
   // place and only rewrites the address -- replaceState does not fire
@@ -1344,9 +1371,13 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
   // reading the results page uses. Corners and cards return null -- they settle
   // from numbers this page never receives -- and a null says nothing rather
   // than guessing.
-  const landed = played && hg !== null && ag !== null
+  // The stored grade first, because it is the one the results page prints;
+  // the scoreline only where the record has not graded it yet.
+  const GRADE = { WON: 'won', LOST: 'lost', HALF_WON: 'part', HALF_LOST: 'part', PUSH: 'back', VOID: 'back' };
+  const stored = v.record?.result ? GRADE[v.record.result] ?? null : null;
+  const landed = stored ?? (played && hg !== null && ag !== null
     ? didItLand({ market: c.market, outcome: c.outcome, line: c.line, homeGoals: hg, awayGoals: ag })
-    : null;
+    : null);
   const VERDICT_WORD = { won: 'Landed', lost: 'Did not land', part: 'Half back', back: 'Stake back' };
   const story = landed
     ? recap({ market: c.market, outcome: c.outcome, line: c.line, home, away,
@@ -1772,8 +1803,54 @@ async function viewFixture(id, params = new URLSearchParams()) {
     return;
   }
 
-  const p = f.odds_1x2 ?? {};
-  const verdicts = f.verdicts ?? [];
+  /*
+   * Whose numbers these are.
+   *
+   * `odds_1x2` is the bookmakers' fair price with their margin taken out, and
+   * the panel printed it under "How we see it" -- so a match we had at 62%
+   * was shown at the market's 73%, beside a line saying we had it even. Ours
+   * come from `markets`; the market's are still worth showing, but labelled as
+   * theirs.
+   */
+  const ours = (f.markets ?? []).find((m) => m.market === '1x2' && m.model && Object.keys(m.model).length)?.model;
+  const p = ours ?? f.odds_1x2 ?? {};
+  const whose = ours ? 'ours' : 'market';
+  /*
+   * The calls on this page are the calls in the record.
+   *
+   * The results page and the board read the pick table; this page used to read
+   * only the write-up, which older slate runs rewrote after the match had been
+   * played. So a reader could tap a "Landed" on the results page and arrive at
+   * "We did not call this one". `published` is the pick table's view of this
+   * fixture, and whenever it has anything in it, it decides what is shown --
+   * the write-up only supplies the argument for a call it agrees with.
+   */
+  const recorded = Array.isArray(f.published) ? f.published : [];
+  const same = (a, b) => a.market === b.market && String(a.outcome) === String(b.outcome)
+    && (a.line ?? null) === (b.line ?? null);
+  const written = (f.verdicts ?? []).filter((v) => v.candidate);
+  const verdicts = recorded.length
+    ? recorded.map((pk) => {
+        const v = written.find((w) => same(w.candidate, pk));
+        return v
+          ? { ...v, record: pk }
+          : {
+              candidate: {
+                market: pk.market, outcome: pk.outcome, line: pk.line,
+                odds: pk.odds, bookmaker: pk.bookmaker, model_prob: pk.model_prob,
+                prices: [{ slug: '', book: pk.bookmaker, odds: pk.odds }],
+              },
+              narrative: pk.narrative,
+              record: pk,
+            };
+      })
+    // Nothing recorded. On a played match that means nothing was called, and
+    // the page must agree with the results page even if an old write-up says
+    // otherwise. Before kick-off it may just mean the reader is not a member,
+    // so the write-up's locked verdicts stand.
+    : (Number.isInteger(f.score?.[0]) || String(f.status) === 'finished')
+      ? []
+      : (f.verdicts ?? []);
   const { reads, rest } = readsFor(f, verdicts);
 
   /*
@@ -1838,7 +1915,9 @@ async function viewFixture(id, params = new URLSearchParams()) {
       </div>
       <div>
         ${[p.HOME, p.DRAW, p.AWAY].some((x) => typeof x === 'number') ? `<div class="panel">
-          <p class="panel-head">How we ${played ? 'saw' : 'see'} it</p>
+          <p class="panel-head">${whose === 'ours'
+            ? `How we ${played ? 'saw' : 'see'} it`
+            : `What the bookmakers ${played ? 'made' : 'make'} of it`}</p>
           <div class="bars">${bar(f.home, p.HOME)}${bar('Draw', p.DRAW)}${bar(f.away, p.AWAY)}</div>
           <div class="numbers">
             <!-- "goals expected 3.33" was expected goals with the label filed
