@@ -74,3 +74,17 @@ test('a mid-table side in September is mid-table, not something dramatic', () =>
   const s = classifySide(t[9]!, t, 32, 38);
   assert.ok(['mid_table', 'unknown'].includes(s.state), `invented stakes in September: ${s.state}`);
 });
+
+test('a group stage is not read as a league table', async () => {
+  // The Nations League came back as fifty-four rows on nil points and read
+  // as a league said both sides were "safely mid-table with 105 games
+  // remaining". No side in any competition has 105 games left.
+  const { stakesFactors } = await import('../src/context/stakes.ts');
+  const rows: StandingRow[] = Array.from({ length: 54 }, (_, i) => ({ team_id: i + 1, position: i + 1, played: 0, points: 0, goal_diff: 0 }));
+  const side = (id: number, name: string) => ({ team_id: id, team_name: name, standing: rows[id - 1], recent: [], squad: null, scorers: null, manager: null, lastLineupIds: null, schedule: null });
+  const ctx = { home: side(9, 'Portugal'), away: side(12, 'Wales'), event: {}, standings: rows, seasonRounds: 106, round: 1, h2h: null } as any;
+  const table = stakesFactors(ctx).find((f) => f.id.startsWith('stakes.'));
+  assert.ok(table, 'no stakes factor at all');
+  assert.equal(table!.state, 'UNAVAILABLE');
+  assert.ok(!/games remaining|mid-table/.test(table!.note), table!.note);
+});

@@ -2082,9 +2082,15 @@ function storyFor(f) {
   }
 
   // Where they sit and how they are going.
+  //
+  // A table position only from a table that is one: a cup or a group stage
+  // comes back as one flat list (the Nations League as fifty-four rows on nil
+  // points), and "12th in the table" off that means nothing.
   const size = f.standings?.size;
+  const isLeague = size >= 6 && size <= 30
+    && ['home', 'away'].some((k) => (f.standings?.[k]?.played ?? 0) > 0 || (f.standings?.[k]?.points ?? 0) > 0);
   for (const side of ['home', 'away']) {
-    const pos = f.standings?.[side]?.position;
+    const pos = isLeague ? f.standings?.[side]?.position : null;
     const form = f.form?.[side];
     const bits = [];
     if (pos) {
@@ -2116,11 +2122,18 @@ function storyFor(f) {
     items.push({ label: 'Most likely to score', note: `${andList(names)}.`, weight: 85 });
   }
 
-  // The last meeting, as a result a supporter remembers.
+  // The last meeting, said the way a supporter remembers it: who won, where.
   const last = (f.h2h?.recent_matches ?? [])[0];
   if (last?.score) {
     const when = last.date ? new Date(last.date).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : null;
-    items.push({ label: 'Last time', note: `Finished ${last.score}${when ? `, ${when}` : ''}.`, weight: 50 });
+    const hs = Number(last.home_score);
+    const as = Number(last.away_score);
+    const named = last.home && last.away && Number.isInteger(hs) && Number.isInteger(as);
+    const said = !named ? `Finished ${last.score}`
+      : hs === as ? `${last.home} and ${last.away} drew ${last.score}`
+      : hs > as ? `${last.home} won ${last.score} at home`
+      : `${last.away} won ${as}-${hs} away`;
+    items.push({ label: 'Last time', note: `${said}${when ? `, ${when}` : ''}.`, weight: 50 });
   }
 
   // The manager, by name, when the feed has one.
@@ -2129,14 +2142,39 @@ function storyFor(f) {
     const name = e?.evidence?.manager;
     const games = e?.evidence?.matches_in_charge;
     if (name && name !== 'the manager' && typeof games === 'number' && games <= 10) {
-      items.push({ label: `In the dugout: ${team[side]}`, note: `${name} is ${saidN(games)} games into the job.`, weight: 60 });
+      const n = Math.max(0, Math.round(games));
+      items.push({
+        label: `In the dugout: ${team[side]}`,
+        note: n === 0 ? `${name} takes charge for the first time.` : `${name} has had ${saidN(n)} game${n === 1 ? '' : 's'} in charge.`,
+        weight: 60,
+      });
     }
   }
 
-  // The engine's own notes, only the specific kinds, and only if they pass.
-  const KEEP = /^(fatigue\.|fixture\.derby|fixture\.revenge|referee\.tendency|environment\.weather|stakes\.)/;
+  // The referee, as a tendency. The engine's note carries the counts ("81
+  // yellow cards in his last 20 games, where 79 would be usual"); a fan says
+  // he is card-happy or lets it go, and says nothing when he is neither.
+  const ref = ledger.find((x) => x.id === 'referee.tendency' && x.state === 'COMPUTED');
+  const ratio = Number(ref?.evidence?.yellow_ratio);
+  const refGames = Number(ref?.evidence?.matches);
+  if (Number.isFinite(ratio) && refGames >= 30) {
+    if (ratio >= 1.2) items.push({ label: 'The referee', note: 'Books more players than most.', weight: 48 });
+    else if (ratio <= 0.8) items.push({ label: 'The referee', note: 'Lets a lot go.', weight: 45 });
+  }
+
+  /*
+   * The engine's own notes, only where something is actually going on.
+   *
+   * A factor that looked and found nothing -- not a derby, nothing in the
+   * forecast, a routine trip, a normal week's rest -- records that at strength
+   * zero, and it used to be printed anyway: "Not a local derby." is a sentence
+   * about the absence of a fact. Anything under a fifth of full strength is
+   * the engine saying "nothing here", and nothing here is not shown.
+   */
+  const KEEP = /^(fatigue\.|fixture\.derby|fixture\.revenge|environment\.weather|stakes\.)/;
   for (const x of ledger) {
     if (x.state !== 'COMPUTED' || !KEEP.test(x.id) || !READ_LABEL[x.id]) continue;
+    if (!((x.strength ?? 0) >= 0.2)) continue;
     const note = cleanProse(x.note);
     if (note) items.push({ label: READ_LABEL[x.id], note, weight: 45 + Math.round((x.strength ?? 0) * 20) });
   }

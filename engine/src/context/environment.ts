@@ -144,7 +144,7 @@ function weatherFactor(ctx: FixtureContext): Factor {
       id: 'environment.weather',
       section: '§6.2',
       tier: 6,
-      note: 'Conditions are unremarkable — nothing here crosses the doctrine’s thresholds.',
+      note: 'Nothing in the forecast worth mentioning.',
       evidence,
       strength: 0,
     });
