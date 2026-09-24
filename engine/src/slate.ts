@@ -1,3 +1,4 @@
+import { chanceInWords, refreshSlip } from './slip.ts';
 import { bsdList, num, str, stats as bsdStats, toEpoch } from './bsd.ts';
 import { config } from './config.ts';
 import { analyseFixture } from './context/index.ts';
@@ -855,6 +856,10 @@ export async function runSlate(): Promise<SlateReport> {
     }
   }
   if (withdrawn) console.log(`  withdrew ${withdrawn} call${withdrawn === 1 ? '' : 's'} replaced before kick-off`);
+
+  // The bet slip follows the board until its first leg kicks off.
+  const slip = await refreshSlip();
+  if (slip) console.log(`  slip: ${slip.legs.length} legs at total odds of ${slip.odds.toFixed(2)}, ${chanceInWords(slip.chance)}`);
 
   // What the site leads with today. Written whether or not anything special is
   // on — a quiet Tuesday still needs a masthead, it just gets a quieter one.

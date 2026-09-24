@@ -229,8 +229,18 @@ export function describe({ market, outcome, line, home, away, odds, stake = purs
       const n = line ?? 0.5;
       const isOver = String(outcome).toLowerCase() === 'over';
       const need = isOver ? Math.ceil(n) : Math.floor(n);
+      // Said the way a fan says it: "two or more goals", "three goals or
+      // fewer". "More than 1.5 goals" is the bookmaker's spelling of the same
+      // thing, and nobody has ever watched half a goal.
+      const words = ['no', 'one', 'two', 'three', 'four', 'five', 'six'];
+      const say = (k) => words[k] ?? String(k);
+      const name = Number.isInteger(n)
+        ? `${OVER_UNDER[String(outcome).toLowerCase()]} ${n} goals`
+        : isOver
+          ? `${say(need).replace(/^./, (c) => c.toUpperCase())} or more goals`
+          : need === 0 ? 'No goals' : `${say(need).replace(/^./, (c) => c.toUpperCase())} goal${need === 1 ? '' : 's'} or fewer`;
       return out(
-        `${OVER_UNDER[String(outcome).toLowerCase()]} ${n} goals`,
+        name,
         `Total goals by both sides`,
         isOver
           ? `${need} goals or more in the match, either side.`
