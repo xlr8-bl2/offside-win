@@ -261,7 +261,7 @@ export function describe({ market, outcome, line, home, away, odds, stake = purs
     case 'btts': {
       const yes = String(outcome).toLowerCase() === 'yes';
       return out(
-        yes ? 'Both teams to score' : 'Both teams to score — no',
+        yes ? 'Both teams to score' : 'Both teams to score: no',
         yes ? 'Each side scores at least once' : 'At least one side fails to score',
         yes ? 'Both sides must score. 1-0 either way loses.' : 'One side must be kept out. 1-1 loses.',
       );
@@ -421,7 +421,7 @@ export function recap({ market, outcome, line, result, homeGoals, awayGoals, hom
       if (o === 'yes') {
         return won
           ? `Both scored, ${score}.`
-          : `${score} — ${hg === 0 && ag === 0 ? 'neither side scored' : `${hg === 0 ? H : A} never got going`}.`;
+          : `${score}, and ${hg === 0 && ag === 0 ? 'neither side scored' : `${hg === 0 ? H : A} never got going`}.`;
       }
       return both
         ? `${score}, and both of them found one.`

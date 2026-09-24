@@ -118,6 +118,7 @@ Hard rules for both:
 - Never write: confidence, probability, expected goals, xG, edge, value, model,
   our numbers, points per game, stake, units, bankroll, or any percentage.
 - Short sentences against longer ones. Talk to someone who watches football.
+- No dashes between clauses. Use a full stop, a comma or a colon instead.
 - No heading beyond the two labels, no sign-off.`;
 }
 
@@ -245,6 +246,12 @@ function tidy(s: string): string {
   return s
     .replace(/^["'`]+|["'`]+$/g, '')
     .replace(/^\**(preview|analysis|take)\**\s*:?\s*/i, '')
+    // The dash as universal connector is the surest sign of machine prose. A
+    // spaced dash between clauses becomes a comma; a dash inside a scoreline
+    // ("2-1") has no spaces round it and is left alone.
+    .replace(/\s*—\s*/g, ', ')
+    .replace(/\s+(?:–|-{1,2})\s+/g, ', ')
+    .replace(/,\s*,/g, ',')
     .replace(/\s+/g, ' ')
     .trim();
 }

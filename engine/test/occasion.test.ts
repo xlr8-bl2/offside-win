@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalise, namedFixture, stageOf, occasionOf } from '../src/occasion.ts';
+import { normalise, namedFixture, stageOf, occasionOf, statureOf } from '../src/occasion.ts';
 
 /**
  * The club names below are taken verbatim from a live board, spelling and all,
@@ -104,4 +104,19 @@ test('an ordinary fixture is named nothing rather than named badly', () => {
   const o = occasionOf({ home: 'Raków Częstochowa', away: 'Zagłębie Lubin', league_id: 34, rank: 5 });
   assert.equal(o.kicker, '');
   assert.equal(o.weight, 0);
+});
+
+test('stature: a national side or big club counts wherever it plays', () => {
+  assert.ok(statureOf('Portugal') > statureOf('Wales'), 'Portugal outrank Wales');
+  assert.ok(statureOf('Wales') > 0, 'Wales are still somebody');
+  assert.ok(statureOf('Real Madrid') > statureOf('Girona'), 'Real Madrid outrank Girona');
+  assert.equal(statureOf('Nashville SC'), 0, 'an MLS side carries no stature');
+  assert.equal(statureOf('Toronto FC'), 0);
+});
+
+test('stature matches whole words, not fragments', () => {
+  // "Wales" must not match "New South Wales"-style substrings inside another
+  // word, and a club that merely contains a country name is not that country.
+  assert.equal(statureOf('Walesby Town'), 0);
+  assert.ok(statureOf('Portugal U21') > 0, 'the U21s still carry the name');
 });
