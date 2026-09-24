@@ -239,3 +239,45 @@ test('checkout says so plainly when there is no processor configured yet', async
   assert.match((await res.json() as any).error, /not open yet/);
   assert.equal(sent.length, 0, 'it must not even check who is asking');
 });
+
+/* --------------------------------------------------------------------- Whop */
+
+test('with Whop live, checkout hands back the plan\'s own link with the email on it', async () => {
+  route = (url) => {
+    if (url.includes('/auth/v1/user')) return new Response(JSON.stringify({ id: 'user-1', email: 'a@b.c' }), { status: 200 });
+    if (url.includes('/rest/v1/plan')) return new Response(JSON.stringify([{ id: 'season', amount_minor: 4900, currency: 'GBP', days: 365, checkout_url: 'https://whop.com/checkout/plan_s' }]), { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+  const res = await checkout(post('/api/pay/checkout', { plan: 'season' }), { ...ENV, PAY_PROVIDER: 'whop', WHOP_WEBHOOK_SECRET: 'whsec_x' }, 'jwt');
+  assert.equal(res.status, 200);
+  const { link } = await res.json() as { link: string };
+  assert.equal(link, 'https://whop.com/checkout/plan_s?email=a%40b.c');
+  assert.ok(!find('/checkout/link'), 'Coinflow must not be called');
+});
+
+test('with Whop live, a valid membership grants an entitlement by email', async () => {
+  const body = JSON.stringify({ action: 'membership.went_valid', data: { id: 'mem_7', user: { email: 'Fan@Example.com' }, plan: { id: 'plan_m' }, renewal_period_end: 1_900_000_000 } });
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode('plain'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = [...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  route = (url) => {
+    if (url.includes('/rest/v1/plan')) return new Response(JSON.stringify([{ id: 'monthly', checkout_url: 'https://whop.com/checkout/plan_m' }]), { status: 200 });
+    if (url.includes('/rpc/record_entitlement')) return new Response(JSON.stringify({ applied: true, expires_at: 1_900_000_000 }), { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+  const req = new Request('https://offside.win/api/pay/webhook', { method: 'POST', body, headers: { 'x-whop-signature': sig } });
+  const res = await webhook(req, { ...ENV, PAY_PROVIDER: 'whop', WHOP_WEBHOOK_SECRET: 'plain' });
+  assert.equal(res.status, 200);
+  const call = find('/rpc/record_entitlement')!;
+  assert.ok(call, 'the entitlement was not recorded');
+  assert.equal(call.body.p_email, 'fan@example.com');
+  assert.equal(call.body.p_plan, 'monthly', 'the plan was not matched through its checkout link');
+  assert.equal(call.body.p_expires, 1_900_000_000);
+  assert.equal((call.headers as any).authorization, 'Bearer service-key-bypasses-rls');
+});
+
+test('with Whop live, an unsigned delivery is refused', async () => {
+  const req = new Request('https://offside.win/api/pay/webhook', { method: 'POST', body: '{"action":"membership.went_valid"}' });
+  const res = await webhook(req, { ...ENV, PAY_PROVIDER: 'whop', WHOP_WEBHOOK_SECRET: 'plain' });
+  assert.equal(res.status, 401);
+  assert.equal(sent.length, 0);
+});
