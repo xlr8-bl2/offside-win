@@ -320,7 +320,9 @@ export async function probePlayers(): Promise<void> {
       const ids = new Set(sq.map((p) => p.id));
       const names = new Set(sq.map((p) => nameKey(p.name)));
       console.log(`  ${which}: squad ${sq.length} (raw keys ${keys(sqRaw).join(',')}); scorers(team filter) ${sc.length} (raw keys ${keys(scRaw).join(',')}); league-wide ${(parseScorers(scAll) ?? []).length}`);
-      const firstSc = (() => { const r = scRaw as Record<string, unknown> | null; const l = (r?.['results'] ?? r?.['players'] ?? r?.['top'] ?? r) as unknown; return Array.isArray(l) ? l[0] : null; })();
+      const firstSc = (() => { const r = scRaw as Record<string, unknown> | null; const l = (r?.['leaders'] ?? r?.['results'] ?? r?.['players'] ?? r?.['top'] ?? r) as unknown; return Array.isArray(l) ? l[0] : null; })();
+      const scr = scRaw as Record<string, unknown> | null;
+      console.log(`    scorer stat: ${String(scr?.['stat'] ?? '?')}, leaders ${Array.isArray(scr?.['leaders']) ? (scr?.['leaders'] as unknown[]).length : 'none'}`);
       console.log(`    one scorer entry has keys: ${keys(firstSc).join(', ')}`);
       console.log(`    scorers in squad: by id ${sc.filter((s) => ids.has(s.player_id)).length}, by name ${sc.filter((s) => names.has(nameKey(s.name))).length}; with goals>0: ${sc.filter((s) => s.goals > 0).length}`);
       const absent = lu.unavailable.filter((u) => u.side === which);
