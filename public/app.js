@@ -517,7 +517,7 @@ function heroHTML(hero = null, venueIds = [], detail = null) {
            argument for it, and the thing that argues against it.</p>
         <div class="hero-cta">
           <a class="btn btn-primary" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">Read the analysis</a>
-          <a class="btn btn-ghost" href="#/board">All of today's picks</a>
+          <a class="btn btn-ghost" href="#/board">Today's calls</a>
         </div>
       </div>
       ${matchCentreHTML(hero, detail)}
