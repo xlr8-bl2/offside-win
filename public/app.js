@@ -636,14 +636,14 @@ function slipHTML(data) {
     <section class="panel slip">
       <p class="panel-head">Today's bet slip</p>
       <p class="slip-empty">No slip up yet. It goes up once there are enough strong calls on the
-        board to reach total odds of 2.00 without reaching for weaker ones.</p>
+        board to reach total odds of two without reaching for weaker ones.</p>
       ${record}
     </section>`;
   }
   const legs = Array.isArray(cur.legs) ? cur.legs : null;
   return `
   <section class="panel slip">
-    <p class="panel-head">Today's bet slip</p>
+    <p class="panel-head">Today's bet slip <a href="#/slip">Every slip</a></p>
     <div class="slip-total">
       <span class="slip-odds">${dec(cur.odds)}<small>total odds</small></span>
       <span class="slip-legs">${cur.legs_count} legs</span>
@@ -665,6 +665,42 @@ function slipHTML(data) {
       </div>`}
     ${record}
   </section>`;
+}
+
+/** The slip, and every settled slip before it. */
+async function viewSlip() {
+  app.innerHTML = '<div class="wrap section narrow"><div class="spinner">Loading…</div></div>';
+  let data;
+  try { data = await getJSON('/api/slip'); } catch (err) { return errorState(err); }
+  const tone = (r) => (r === 'WON' ? 'won' : r === 'LOST' ? 'lost' : 'back');
+  const recent = data?.recent ?? [];
+  app.innerHTML = `
+  <div class="wrap section narrow">
+    <div class="page-head">
+      <h1 class="display">The bet slip</h1>
+      <p class="page-sub">Our most likely calls, combined to total odds of between two and three:
+        the combination with the best chance of every leg landing. Every slip is graded,
+        and every one stays on this page afterwards, won or lost.</p>
+    </div>
+    ${slipHTML(data)}
+    ${recent.length ? `
+    <section class="panel side-block">
+      <p class="panel-head">Settled slips</p>
+      <div class="played">
+        ${recent.map((r) => `
+        <div class="played-row">
+          <div class="played-meta">
+            <span>${esc(kickoffLabel(r.first_kickoff))}, ${(r.legs ?? []).length} legs at ${oddsOf(r.odds)}</span>
+            <span class="mark ${tone(r.result)}">${esc(({ won: 'Landed', lost: 'Missed', back: 'Void' })[tone(r.result)])}</span>
+          </div>
+          <ul class="played-calls">${(r.legs ?? []).map((l) => {
+            const d = market({ market: l.market, outcome: l.outcome, line: l.line, home: l.home, away: l.away, odds: l.odds });
+            return `<li><span>${esc(l.home)} v ${esc(l.away)}: ${esc(d.name)}</span><span>${oddsTag(l.odds)}</span></li>`;
+          }).join('')}</ul>
+        </div>`).join('')}
+      </div>
+    </section>` : ''}
+  </div>`;
 }
 
 /** Called matches being played now, with the running score. */
@@ -2711,9 +2747,17 @@ function postMortemHTML(x) {
   // so the chip said "1 goal to spare" directly under "the stake came back",
   // which cannot both be true. Three-way field, two-way branch.
   if (typeof pm.swing === 'number' && pm.landed !== 'refunded') {
+    // `swing` is how many goals would have turned the result. For a miss that
+    // is how far short it was; for a call that landed it is one more than it
+    // had to spare -- a swing of one means the next goal would have beaten
+    // it. Printing the swing as the cushion put "1 goal to spare" under "nothing
+    // spare", on 49 of the last 200 settled calls.
+    const spare = pm.swing - 1;
     facts.push(pm.swing === 0
       ? 'finished on the line'
-      : `${pm.swing} goal${pm.swing === 1 ? '' : 's'} ${pm.landed === 'missed' ? 'short' : 'to spare'}`);
+      : pm.landed === 'missed'
+        ? `${pm.swing} goal${pm.swing === 1 ? '' : 's'} short`
+        : spare <= 0 ? 'nothing to spare' : `${spare} goal${spare === 1 ? '' : 's'} to spare`);
   }
   if (pm.shape) {
     facts.push(pm.shape === 'as we read it' ? 'the game we described' : `a ${pm.shape} game than we called`);
@@ -2726,7 +2770,7 @@ function postMortemHTML(x) {
 
   return `
   <div class="pm is-${esc(pm.landed)}">
-    <p class="pm-line">${esc(pm.line)}</p>
+    <p class="pm-line">${esc(String(pm.line).replace('One goal in it. Right, but there was nothing spare.', 'One goal the other way and it was gone. Right, with nothing to spare.'))}</p>
     ${facts.length ? `<p class="pm-facts">${facts.map((f) => `<span>${esc(f)}</span>`).join('')}</p>` : ''}
   </div>`;
 }
@@ -3584,6 +3628,7 @@ async function route() {
     if (name === 'leagues') return await viewLeagues();
     if (name === 'results') return await viewResults();
     if (name === 'pricing') return await viewPricing();
+    if (name === 'slip') return await viewSlip();
     if (name === 'signin') return await viewSignin();
     if (name === 'account') return await viewAccount();
     if (name === 'legal' && parts[1]) return viewLegal(parts[1]);

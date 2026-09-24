@@ -431,7 +431,12 @@ export async function runSlate(): Promise<SlateReport> {
       // said so it can be marked, the page wants only the calls we stand behind.
       const publishedVerdicts = confidentVerdicts;
 
-      const passNarrative = selection.passReason
+      // No pass note on a match we have called. The value selector passes
+      // independently of the confident calls, so 28 of 34 locked cards carried
+      // "Nothing to take on Netherlands v Germany ... the closest was double
+      // chance 1X at 1.47" -- a sentence that contradicts the card, and one
+      // that named a market and its odds to readers who had not paid.
+      const passNarrative = selection.passReason && publishedVerdicts.length === 0
         ? narratePass(selection.passReason, analysis.home_team, analysis.away_team, analysis.fixture_id)
         : null;
 
@@ -616,7 +621,7 @@ export async function runSlate(): Promise<SlateReport> {
           drivers: v.drivers.map(forStorage),
           set_aside: v.set_aside.map(forStorage),
         })),
-        pass_reason: selection.passReason,
+        pass_reason: publishedVerdicts.length ? null : selection.passReason,
         external: analysis.external,
         computed_at: analysis.computed_at,
       };
