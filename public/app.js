@@ -606,28 +606,143 @@ function promoHTML(user) {
  * depends on it being there. We have no newsroom, so this carries the thing a
  * reader came for instead — which is a better use of the column anyway.
  */
-function sideHTML(fixtures) {
-  const withCall = fixtures.filter((f) => f.top_pick).slice(0, 10);
-  if (!withCall.length) return '';
+/** How often, in words. Mirrors engine/src/slip.ts; a percentage is not said here. */
+function chanceInWords(chance) {
+  const tenths = Math.round(Number(chance) * 10);
+  if (!(tenths > 0)) return 'less than once in ten';
+  if (tenths >= 10) return 'almost every time';
+  return `about ${['', 'once', 'twice', 'three times', 'four times', 'five times', 'six times',
+    'seven times', 'eight times', 'nine times'][tenths]} in ten`;
+}
+
+/**
+ * Today's bet slip.
+ *
+ * Our most likely calls, combined to total odds between 2.00 and 3.00 -- the
+ * combination with the best chance of every leg landing (engine/src/slip.ts).
+ * A free reader sees the offer: how many legs, the total odds, how often a
+ * slip like it comes in, and the slip record. A member sees the legs.
+ *
+ * The chance sits next to the odds on purpose. Multiplying legs multiplies the
+ * risk, and a slip that hid that would be selling the odds rather than the
+ * reading.
+ */
+function slipHTML(data) {
+  const cur = data?.current;
+  const rec = data?.record;
+  const record = rec?.n ? `<p class="slip-record">Slips so far: <b>${rec.won} of ${rec.n}</b> landed.</p>` : '';
+  if (!cur) {
+    return `
+    <section class="panel slip">
+      <p class="panel-head">Today's bet slip</p>
+      <p class="slip-empty">No slip up yet. It goes up once there are enough strong calls on the
+        board to reach total odds of 2.00 without reaching for weaker ones.</p>
+      ${record}
+    </section>`;
+  }
+  const legs = Array.isArray(cur.legs) ? cur.legs : null;
   return `
-  <aside>
-    <h2 class="side-head">Live calls <a href="#/board">All</a></h2>
+  <section class="panel slip">
+    <p class="panel-head">Today's bet slip</p>
+    <div class="slip-total">
+      <span class="slip-odds">${dec(cur.odds)}<small>total odds</small></span>
+      <span class="slip-legs">${cur.legs_count} legs</span>
+    </div>
+    <p class="slip-chance">Our most likely calls, combined. A slip like this comes in
+      <b>${esc(chanceInWords(cur.chance))}</b>.</p>
+    ${legs ? `<ol class="slip-list">${legs.map((l) => {
+      const d = market({ market: l.market, outcome: l.outcome, line: l.line, home: l.home, away: l.away, odds: l.odds });
+      return `
+        <li><a href="#/fixture/${encodeURIComponent(l.fixture_id)}">
+          <span class="slip-tie">${esc(l.home)} v ${esc(l.away)}</span>
+          <span class="slip-sel">${esc(d.name)}</span>
+          <span class="slip-meta">${esc(kickoffLabel(l.kickoff))}<b>${oddsTag(l.odds)}</b></span>
+        </a></li>`;
+    }).join('')}</ol>`
+    : `<div class="slip-locked">
+        <p>The ${cur.legs_count} matches and the calls on them are for members.</p>
+        <a class="btn btn-accent" href="#/pricing">See what membership costs</a>
+      </div>`}
+    ${record}
+  </section>`;
+}
+
+/** Called matches being played now, with the running score. */
+function liveNowHTML(fixtures) {
+  const live = fixtures.filter((f) => hasCall(f) && matchState(f).kind === 'live').slice(0, 6);
+  if (!live.length) return '';
+  return `
+  <section class="panel side-block">
+    <p class="panel-head"><span class="live-badge"><i></i>LIVE</span> On now</p>
     <div class="side-list">
-      ${withCall.map((f) => {
-        const d = market({
-          market: f.top_pick.market, outcome: f.top_pick.outcome, line: f.top_pick.line,
-          home: f.home, away: f.away, odds: f.top_pick.odds,
-        });
+      ${live.map((f) => {
+        const sc = Array.isArray(f.live_score) ? f.live_score : null;
         return `
         <a class="side-item" href="#/fixture/${encodeURIComponent(f.id)}">
           <span class="side-thumb">${crest(f.home, 'sm', f.home_id)}${crest(f.away, 'sm', f.away_id)}</span>
           <span class="side-body">
-            <span class="side-sel">${esc(d.name)}</span>
-            <span class="side-meta">${esc(kickoffLabel(f.kickoff))}<b>${oddsTag(f.top_pick.odds)}</b></span>
+            <span class="side-sel">${esc(f.home)} v ${esc(f.away)}</span>
+            <span class="side-meta">${esc(f.league ?? '')}<b>${sc ? `${sc[0]}–${sc[1]}` : 'under way'}</b></span>
           </span>
         </a>`;
       }).join('')}
     </div>
+  </section>`;
+}
+
+/** Where today's calls are: each league with a count, one tap to its board. */
+function leaguesTodayHTML(fixtures) {
+  const ahead = fixtures.filter((f) => hasCall(f) && matchState(f).kind === 'upcoming');
+  if (!ahead.length) return '';
+  const by = new Map();
+  for (const f of ahead) {
+    const k = f.league ?? 'Other';
+    by.set(k, { n: (by.get(k)?.n ?? 0) + 1, id: f.league_id });
+  }
+  const rows = [...by.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 10);
+  return `
+  <section class="panel side-block">
+    <p class="panel-head">Where the calls are</p>
+    <div class="league-chips">
+      ${rows.map(([name, v]) => `
+        <a class="league-chip" href="#/board?league=${encodeURIComponent(name)}">
+          ${crest(name, 'xs', v.id, 'league')}<span>${esc(name)}</span><b>${v.n}</b>
+        </a>`).join('')}
+    </div>
+  </section>`;
+}
+
+/**
+ * The column beside the record. It used to render only when a reader could
+ * see calls, so for everyone not signed in it was a blank half of the page.
+ */
+function sideHTML(fixtures, slip) {
+  const withCall = fixtures.filter((f) => f.top_pick && matchState(f).kind === 'upcoming').slice(0, 8);
+  return `
+  <aside class="home-side">
+    ${slipHTML(slip)}
+    ${liveNowHTML(fixtures)}
+    ${leaguesTodayHTML(fixtures)}
+    ${withCall.length ? `
+    <section class="panel side-block">
+      <p class="panel-head">Open calls <a href="#/board">All</a></p>
+      <div class="side-list">
+        ${withCall.map((f) => {
+          const d = market({
+            market: f.top_pick.market, outcome: f.top_pick.outcome, line: f.top_pick.line,
+            home: f.home, away: f.away, odds: f.top_pick.odds,
+          });
+          return `
+          <a class="side-item" href="#/fixture/${encodeURIComponent(f.id)}">
+            <span class="side-thumb">${crest(f.home, 'sm', f.home_id)}${crest(f.away, 'sm', f.away_id)}</span>
+            <span class="side-body">
+              <span class="side-sel">${esc(d.name)}</span>
+              <span class="side-meta">${esc(kickoffLabel(f.kickoff))}<b>${oddsTag(f.top_pick.odds)}</b></span>
+            </span>
+          </a>`;
+        }).join('')}
+      </div>
+    </section>` : ''}
   </aside>`;
 }
 
@@ -673,35 +788,49 @@ function formBarHTML(w, d, l, labels = ['won', 'drawn', 'lost'], scope = '', ton
  */
 function playedHTML(picks, { showOdds = false } = {}) {
   if (!picks.length) return '';
+  /*
+   * One card per match, however many calls it carried.
+   *
+   * A match with two calls used to appear twice, one card saying "Landed" and
+   * the next "Missed" over the identical scoreline -- Criciuma 0-2 Operario,
+   * side by side. Each card was true and together they read as the page
+   * contradicting itself. The match is the unit a reader thinks in; the calls
+   * are listed inside it, each with its own mark.
+   */
+  const groups = new Map();
+  for (const x of picks) {
+    if (!groups.has(x.fixture_id)) groups.set(x.fixture_id, []);
+    groups.get(x.fixture_id).push(x);
+  }
+  const tone = (r) => (r === 'WON' || r === 'HALF_WON' ? 'won' : r === 'LOST' || r === 'HALF_LOST' ? 'lost' : 'back');
   return `
   <div class="played">
-    ${picks.map((x) => {
-      const won = x.result === 'WON' || x.result === 'HALF_WON';
-      const lost = x.result === 'LOST' || x.result === 'HALF_LOST';
-      /*
-       * The score goes in the middle, where a fixture list puts it.
-       *
-       * This row used to print "Won" or "Lost" between the two clubs and
-       * nothing else, because there was no score to print -- which meant the
-       * most prominent block on the home page showed eight results without
-       * saying what any of them were, and asked a reader to take the mark on
-       * trust. The mark moves to a tag beside the kick-off; the scoreline
-       * takes the place it has on every other football page ever made.
-       */
+    ${[...groups.values()].map((calls) => {
+      const x = calls[0];
+      const tones = calls.map((c) => tone(c.result));
+      const wins = tones.filter((t) => t === 'won').length;
+      const losses = tones.filter((t) => t === 'lost').length;
+      const overall = calls.length === 1 ? tones[0] : losses === 0 ? 'won' : wins === 0 ? 'lost' : 'back';
+      const mark = calls.length === 1
+        ? ({ won: 'Landed', lost: 'Missed', back: 'Void' })[tones[0]]
+        : `${wins} of ${calls.length} landed`;
       const hasScore = Number.isInteger(x.home_goals) && Number.isInteger(x.away_goals);
-      const mark = won ? 'Landed' : lost ? 'Missed' : 'Void';
       return `
       <a class="played-row" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
         <div class="played-meta">
           <span>${esc(kickoffLabel(x.kickoff))}</span>
-          <span class="mark ${won ? 'won' : lost ? 'lost' : 'back'}">${esc(showOdds ? oddsTag(x.odds) : mark)}</span>
+          <span class="mark ${overall}">${esc(showOdds && calls.length === 1 ? oddsTag(x.odds) : mark)}</span>
         </div>
         <div class="played-tie">
           <span class="played-side">${crest(x.home_team ?? '', 'sm', x.home_team_id)}<span>${esc(x.home_team ?? '')}</span></span>
-          <span class="played-score ${won ? 'w' : lost ? 'l' : ''}">${
+          <span class="played-score ${overall === 'won' ? 'w' : overall === 'lost' ? 'l' : ''}">${
             hasScore ? `${esc(x.home_goals)}–${esc(x.away_goals)}` : 'FT'}</span>
           <span class="played-side away">${crest(x.away_team ?? '', 'sm', x.away_team_id)}<span>${esc(x.away_team ?? '')}</span></span>
         </div>
+        ${calls.length > 1 ? `<ul class="played-calls">${calls.map((c, i) => {
+          const d = market({ market: c.market, outcome: c.outcome, line: c.line, home: c.home_team, away: c.away_team, odds: c.odds });
+          return `<li><span>${esc(d.name)}</span><span class="mark ${tones[i]}">${esc(({ won: 'Landed', lost: 'Missed', back: 'Void' })[tones[i]])}</span></li>`;
+        }).join('')}</ul>` : ''}
       </a>`;
     }).join('')}
   </div>`;
@@ -911,7 +1040,12 @@ async function viewHome() {
   const top = spread(withPicks, 8);
 
   let recent = [];
-  try { recent = (await getJSON('/api/picks?limit=40&settled=true')).picks ?? []; } catch { /* optional */ }
+  let slip = null;
+  // Both optional: a page with no slip and no record still has a board on it.
+  [recent, slip] = await Promise.all([
+    getJSON('/api/picks?limit=40&settled=true').then((r) => r.picks ?? []).catch(() => []),
+    getJSON('/api/slip').catch(() => null),
+  ]);
   const settled = recent.filter((x) => x.result && x.result !== 'VOID');
   const won = settled.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
   const lost = settled.filter((x) => x.result === 'LOST' || x.result === 'HALF_LOST').length;
@@ -938,7 +1072,7 @@ async function viewHome() {
              ${playedHTML(settled.slice(0, 8))}
            </div>
          </div>
-         ${sideHTML(top)}
+         ${sideHTML(fixtures, slip)}
        </div>
      </div>`;
 

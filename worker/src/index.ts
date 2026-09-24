@@ -135,6 +135,9 @@ export default {
       if (path === '/api/model') return await passthrough(env, 'get_model', {});
       if (path === '/api/hero') return await passthrough(env, 'get_hero', {});
       if (path === '/api/health') return await passthrough(env, 'get_health', {});
+      // The bet slip. The caller's token goes with it: the legs of an open
+      // slip are members-only, and get_slip decides that from the token.
+      if (path === '/api/slip') return await passthrough(env, 'get_slip', {}, jwt);
       return fail('not found', 404);
     } catch (err) {
       return fail(err instanceof Error ? err.message : 'internal error', 500);

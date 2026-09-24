@@ -179,6 +179,9 @@ for (const width of WIDTHS) {
         overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         unresolved: [...new Set(unresolved)],
         decimals: [...new Set(text.match(/\b\d+\.\d{1,2}\b/g) ?? [])].slice(0, 5),
+        // A finished match's page is history, like the results page: its
+        // calls are public once the match is over (get_fixture unwalls them).
+        finished: Boolean(document.querySelector('.fx-top .live-badge.done')),
         // As rendered, not lowercased: a third of the banned patterns are
         // case-sensitive on purpose -- CONFIDENT, xG, CLV, P/L are our filing
         // system shouting, and "confident" in a sentence is not.
@@ -198,7 +201,7 @@ for (const width of WIDTHS) {
     // marketing strategy. A price there is history, not the product. Without
     // this the checker reports the results page as a paywall leak on every
     // run, and a checker that cries wolf gets ignored.
-    if (free && !PUBLIC_PRICES.test(route) && r.decimals.length) {
+    if (free && !PUBLIC_PRICES.test(route) && !r.finished && r.decimals.length) {
       say(`a price reached a free reader: ${r.decimals.join(', ')}`);
     }
     for (const term of findAllBanned(r.text ?? r.lowerText)) say(`banned term "${term}"`);
