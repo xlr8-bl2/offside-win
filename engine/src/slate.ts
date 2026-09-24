@@ -328,6 +328,7 @@ export async function runSlate(): Promise<SlateReport> {
             }),
             drivers,
             set_aside: setAsideFor(candidate, factors, drivers),
+            why: null as string | null,
           };
         });
       })();
@@ -359,9 +360,12 @@ export async function runSlate(): Promise<SlateReport> {
         for (const v of confidentVerdicts) {
           // Written once per call, not once per run.
           const key = narrativeKey(analysis.fixture_id, v.candidate);
-          const cached = await kvGetJSON<string>(key);
-          if (cached) {
-            v.narrative = cached;
+          // Stored as { text, why } now; older entries are a bare string and
+          // are rewritten, since they have no members' paragraph.
+          const cached = await kvGetJSON<string | { text: string; why: string | null }>(key);
+          if (cached && typeof cached === 'object' && cached.text) {
+            v.narrative = cached.text;
+            v.why = cached.why ?? null;
             narrateReused++;
             continue;
           }
@@ -381,15 +385,28 @@ export async function runSlate(): Promise<SlateReport> {
                 away: (factors.find((f) => f.id === 'form.away')?.evidence ?? null) as Record<string, unknown> | null,
               },
               h2h: (ctx.h2h ?? null) as Record<string, unknown> | null,
-              lineups: ctx.lineups ? { status: ctx.lineups.status } : null,
+              // Everything with a name on it. The writer used to get the
+              // lineup *status* and nothing else, so it could say the sheets
+              // were confirmed and not who was on them.
+              lineups: ctx.lineups
+                ? { status: ctx.lineups.status, home: ctx.lineups.home, away: ctx.lineups.away }
+                : null,
+              standings: ctx.standings
+                ? { home: ctx.home.standing ?? null, away: ctx.away.standing ?? null, size: ctx.standings.length }
+                : null,
+              goalscorers: ((analysis.external as { polymarket?: { goalscorers?: unknown } } | null)
+                ?.polymarket?.goalscorers ?? null) as Array<{ player?: string; price?: number }> | null,
+              managers: { home: ctx.home.manager?.name ?? null, away: ctx.away.manager?.name ?? null },
             }),
+            odds: v.candidate.odds,
           }, writer);
 
           if (result.text) {
             v.narrative = result.text;
+            v.why = result.why ?? null;
             narrateWritten++;
             consecutiveErrors = 0;
-            await kvSetJSON(key, result.text, NARRATIVE_TTL);
+            await kvSetJSON(key, { text: result.text, why: v.why }, NARRATIVE_TTL);
           } else {
             for (const r of result.rejections) narrateRejections[r] = (narrateRejections[r] ?? 0) + 1;
             // A rejected draft is the writer working. A thrown request is the
@@ -592,6 +609,9 @@ export async function runSlate(): Promise<SlateReport> {
           candidate: candidateForStorage(v.candidate),
           lean: isLean(v.candidate),
           narrative: v.narrative,
+          // Members only: the argument for this call at its odds. The free
+          // copy drops it along with the candidate (membership/redact.ts).
+          why: v.why ?? null,
           drivers: v.drivers.map(forStorage),
           set_aside: v.set_aside.map(forStorage),
         })),
@@ -668,6 +688,7 @@ export async function runSlate(): Promise<SlateReport> {
           // the market with us or against us" after a loss.
           opening_odds: v.candidate.odds,
           narrative: v.narrative,
+          why: 'why' in v ? v.why : null,
           evidence_json: JSON.stringify({
             drivers: v.drivers.map(forStorage),
             set_aside: v.set_aside.map(forStorage),
@@ -780,7 +801,7 @@ export async function runSlate(): Promise<SlateReport> {
       [
         'fixture_id', 'kickoff', 'market', 'outcome', 'line', 'kind', 'model_prob',
         'book_prob', 'edge', 'shrunk_edge', 'odds', 'opening_odds', 'bookmaker', 'kelly',
-        'confidence', 'provisional', 'narrative', 'evidence_json', 'created_at',
+        'confidence', 'provisional', 'narrative', 'why', 'evidence_json', 'created_at',
       ],
       pickRows,
       {
@@ -793,7 +814,7 @@ export async function runSlate(): Promise<SlateReport> {
           'edge = excluded.edge, shrunk_edge = excluded.shrunk_edge, odds = excluded.odds, ' +
           'bookmaker = excluded.bookmaker, kelly = excluded.kelly, ' +
           'confidence = excluded.confidence, provisional = excluded.provisional, ' +
-          'narrative = excluded.narrative, evidence_json = excluded.evidence_json, ' +
+          'narrative = excluded.narrative, why = excluded.why, evidence_json = excluded.evidence_json, ' +
           // A rescheduled match moves its call with it; the results page was
           // printing the old date.
           'kickoff = excluded.kickoff, ' +

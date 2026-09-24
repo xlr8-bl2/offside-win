@@ -1217,6 +1217,21 @@
  * book name is replaced by "not here", so nobody goes looking for an account
  * they cannot open. The fixture page says which book it belongs to.
  */
+/* The word "odds" beside every price: the owner's rule is that a price is
+   never printed bare. Set small and quiet so the number still leads. */
+.odds-tile { gap: var(--space-2); }
+.odds-unit,
+.price small {
+  font-family: var(--body);
+  font-variation-settings: normal;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0;
+  color: var(--chalk-3);
+}
+.price small { margin-left: var(--space-2); }
+.row:hover .odds-tile .odds-unit { color: var(--chalk); }
+
 .odds-tile.away { background: transparent; border-style: dashed; }
 .odds-tile.away .odds { color: var(--chalk-3); }
 .row:hover .odds-tile.away { background: transparent; border-color: var(--chalk-3); }
@@ -1632,6 +1647,28 @@
 .verdict.settled.part,
 .verdict.settled.back { border-left-color: var(--void); }
 .verdict-head .mark { flex: none; margin-left: auto; }
+
+/* Why this call: the members' paragraph, the argument for this market at its
+   odds. A left rule in the accent sets it apart from the free preview above
+   without making it a second card. */
+.verdict .why {
+  margin-top: var(--space-5);
+  padding-left: var(--space-5);
+  border-left: 2px solid var(--floodlight);
+}
+.verdict .why-head {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--floodlight-hi);
+}
+.verdict .why p:last-child {
+  margin: 0;
+  max-width: 68ch;
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  color: var(--chalk);
+}
 
 /* Set apart from the prose it qualifies, because it is about the prose rather
    than about the match: a narrative written in the future tense on a game
@@ -2193,7 +2230,7 @@
     position: static;
     width: auto;
     margin: 0 var(--space-4) var(--space-4);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-sm);
     box-shadow: none;
   }
 }

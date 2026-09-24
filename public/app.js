@@ -21,6 +21,13 @@ const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pct = (v, dp = 0) => (typeof v === 'number' && isFinite(v) ? `${(v * 100).toFixed(dp)}%` : '—');
 const dec = (v) => (typeof v === 'number' && isFinite(v) ? v.toFixed(2) : '—');
+/*
+ * Odds, said as odds. The owner's rule: when mentioning odds, say the specific
+ * number and attach the word odds to it. A bare "at 1.29" reads as a price tag
+ * or a kick-off time; every price on the site goes through one of these two.
+ */
+const oddsOf = (v) => `odds of ${dec(v)}`;
+const oddsTag = (v) => `${dec(v)} odds`;
 
 /**
  * Every read goes through here, which is why the token goes on here.
@@ -616,7 +623,7 @@ function sideHTML(fixtures) {
           <span class="side-thumb">${crest(f.home, 'sm', f.home_id)}${crest(f.away, 'sm', f.away_id)}</span>
           <span class="side-body">
             <span class="side-sel">${esc(d.name)}</span>
-            <span class="side-meta">${esc(kickoffLabel(f.kickoff))}<b>${dec(f.top_pick.odds)}</b></span>
+            <span class="side-meta">${esc(kickoffLabel(f.kickoff))}<b>${oddsTag(f.top_pick.odds)}</b></span>
           </span>
         </a>`;
       }).join('')}
@@ -687,7 +694,7 @@ function playedHTML(picks, { showOdds = false } = {}) {
       <a class="played-row" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
         <div class="played-meta">
           <span>${esc(kickoffLabel(x.kickoff))}</span>
-          <span class="mark ${won ? 'won' : lost ? 'lost' : 'back'}">${esc(showOdds ? dec(x.odds) : mark)}</span>
+          <span class="mark ${won ? 'won' : lost ? 'lost' : 'back'}">${esc(showOdds ? oddsTag(x.odds) : mark)}</span>
         </div>
         <div class="played-tie">
           <span class="played-side">${crest(x.home_team ?? '', 'sm', x.home_team_id)}<span>${esc(x.home_team ?? '')}</span></span>
@@ -812,7 +819,7 @@ function rowHTML(f) {
       ${played
         ? (landed
             ? `<span class="mark ${esc(landed)}">${esc(MARK[landed])}</span>${
-                pick ? `<span class="odds-book">at ${dec(p ? p.odds : pick.odds)}</span>` : ''}`
+                pick ? `<span class="odds-book">at ${oddsOf(p ? p.odds : pick.odds)}</span>` : ''}`
             /*
              * Not "Full time" twice. The badge on the left of the row already
              * says the match is over; this column is for what the call did,
@@ -822,14 +829,14 @@ function rowHTML(f) {
              * fixture page, which has the numbers.
              */
             : pick
-              ? `<span class="odds-book">called at ${dec(p ? p.odds : pick.odds)}</span>`
+              ? `<span class="odds-book">called at ${oddsOf(p ? p.odds : pick.odds)}</span>`
               : f.locked
                 ? `<span class="row-locked-mark">
                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>
                      Members</span>`
                 : `<span class="row-pass">Passed</span>`)
         : pick && p ? `
-        <span class="odds-tile${p.local ? '' : ' away'}"><span class="odds">${dec(p.odds)}</span></span>
+        <span class="odds-tile${p.local ? '' : ' away'}"><span class="odds">${dec(p.odds)}</span><span class="odds-unit">odds</span></span>
         <span class="odds-book">${pick.lean ? 'lean · ' : ''}${p.local ? esc(p.book) : `no ${esc(country())} book`}</span>`
         : f.locked ? `<span class="row-locked-mark">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>
@@ -1359,6 +1366,21 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
   }
 
   const c = v.candidate;
+  /*
+   * The same gate the results page uses. Older write-ups were assembled from
+   * templates and read "The model reads this as a 2.63-goal match ... We make
+   * it 80% at 1.18" -- every banned term in one paragraph. The results page
+   * already withheld them; this page printed them raw. The call's own odds
+   * and line are the only figures a paragraph may carry.
+   */
+  const allowedFigures = [dec(c.odds), String(c.odds), c.line, String(c.line ?? '')];
+  // A paragraph that states the call's price is a template write-up: they all
+  // open "Double chance X2 at 1.31." and go on in the engine's voice ("the
+  // market has read it the same way"). The written preview never mentions
+  // odds -- that is what lets it be free -- so a bare price is the tell.
+  const templated = new RegExp(`\\b(?:at|priced)\\s+${dec(c.odds).replace('.', '\\.')}\\b`).test(String(v.narrative ?? ''));
+  const prose = templated ? null : cleanProse(v.narrative, allowedFigures);
+  const why = cleanProse(v.why ?? v.record?.why, allowedFigures);
   const p = localPrice(c.prices ?? [{ slug: '', book: c.bookmaker, odds: c.odds }]);
   const odds = p ? p.odds : c.odds;
   const d = market({
@@ -1392,26 +1414,27 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
       <span class="sel">${esc(d.name)}</span>
       ${landed
         ? `<span class="mark ${landed}">${esc(VERDICT_WORD[landed] ?? '')}</span>`
-        : `<span class="price">${dec(odds)}</span>`}
+        : `<span class="price">${dec(odds)}<small>odds</small></span>`}
     </div>
     ${landed
       ? `<p class="wins">${esc(story ?? d.wins)}</p>`
       : `<p class="wins">${esc(d.wins)}</p>`}
-    <p class="narrative">${esc(v.narrative)}</p>
-    ${played ? `<p class="aside">Written before kick-off, and left as it was.</p>` : ''}
+    ${prose ? `<p class="narrative">${esc(prose)}</p>` : ''}
+    ${why ? `<div class="why"><p class="why-head">Why this call</p><p>${esc(why)}</p></div>` : ''}
+    ${played && (prose || why) ? `<p class="aside">Written before kick-off, and left as it was.</p>` : ''}
     <div class="verdict-meta">
       ${played
-        ? `<span>We put it up at ${dec(c.odds)}${c.bookmaker ? ` with ${esc(bookName(c.bookmaker))}` : ''}.</span>`
+        ? `<span>We put it up at ${oddsOf(c.odds)}${c.bookmaker ? ` with ${esc(bookName(c.bookmaker))}` : ''}.</span>`
         : `${p ? (p.local
             ? `<span>Best price at <b>${esc(p.book)}</b> in ${esc(COUNTRY_NAMES[country()] ?? 'your country')}</span>`
             : `<span class="warnish">No book in ${esc(COUNTRY_NAMES[country()] ?? 'your country')} is quoting this. ` +
-              `The ${dec(p.odds)} above is ${esc(p.book)}'s.</span>`) : ''}
+              `The ${oddsOf(p.odds)} above are ${esc(p.book)}'s.</span>`) : ''}
            <span>${esc(d.returns)}</span>`}
     </div>
     ${!played && p && p.local && p.count > 1 ? `
       <details class="settles">
         <summary>${p.count} book${p.count === 1 ? '' : 's'} where you are</summary>
-        <table class="tbl settle-tbl"><tbody>
+        <table class="tbl settle-tbl"><thead><tr><th>Bookmaker</th><th class="num">Odds</th></tr></thead><tbody>
           ${(c.prices ?? []).filter((q) => localPrice([q]).local).sort((a, b) => b.odds - a.odds)
             .map((q) => `<tr><td>${esc(bookName(q.book, q.slug))}</td><td class="num">${dec(q.odds)}</td></tr>`).join('')}
         </tbody></table>
@@ -1747,6 +1770,140 @@ function standingsHTML(st, home, away, homeId, awayId) {
  * that drove it -- `verdict.drivers`, most dispositive first. That is the real
  * answer to "why this call", so it leads, and everything else folds away.
  */
+/*
+ * The case, built from the match rather than from the engine's notes.
+ *
+ * This section printed the ledger's own notes, and the owner's complaint about
+ * them was exact: "just a bunch of sentences", no player names, jargon. They
+ * were a headcount ("without 5 players, none of whom register in the league's
+ * scoring records" -- false, as it turned out, about lists with Hakimi on
+ * them), trading-desk labels ("Where the sharp money is", "The margin") and
+ * internal ideas ("the new-manager bounce window is live").
+ *
+ * Everything here is assembled from data the bundle already carries: who is
+ * out and where they play, who starts, where the sides sit, how they are
+ * going, who is likeliest to score, how the last meeting went. Names first.
+ * The engine's notes survive only where they say something specific and pass
+ * the same vocabulary gate as the prose.
+ */
+const WORD_N = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+const saidN = (n) => WORD_N[n] ?? String(n);
+const andList = (a) => (a.length <= 1 ? (a[0] ?? '') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`);
+const LINE_OF = { ATT: 'up front', MID: 'in midfield', DEF: 'at the back', GK: 'in goal' };
+const LINE_ORDER = ['up front', 'in midfield', 'at the back', 'in goal', ''];
+const injury = (r) => {
+  const t = String(r ?? '').toLowerCase().replace(/\s*injury$/, '').trim();
+  return t && !/^(unknown|other|undisclosed|n\/a|missing)$/.test(t) ? t : null;
+};
+
+function storyFor(f) {
+  const team = { home: f.home, away: f.away };
+  const items = [];
+  const ledger = f.ledger ?? [];
+
+  // Team news, by name and by line.
+  for (const side of ['home', 'away']) {
+    const e = ledger.find((x) => x.id === `availability.${side}.absences`);
+    const players = (e?.evidence?.players ?? []).filter((p) => p?.player);
+    if (players.length) {
+      const byLine = new Map();
+      for (const p of players) {
+        const where = LINE_OF[p.role] ?? '';
+        const why = injury(p.reason);
+        byLine.set(where, [...(byLine.get(where) ?? []), why ? `${p.player} (${why})` : p.player]);
+      }
+      const parts = [...byLine.entries()]
+        .sort((a, b) => LINE_ORDER.indexOf(a[0]) - LINE_ORDER.indexOf(b[0]))
+        .map(([where, names]) => `${andList(names.slice(0, 4))}${where ? ` ${where}` : ''}`);
+      items.push({ label: `Team news: ${team[side]}`, note: `Without ${andList(parts)}.`, weight: 100 });
+    } else if (ledger.some((x) => x.id === `availability.${side}.full_strength` && x.state === 'COMPUTED')) {
+      items.push({ label: `Team news: ${team[side]}`, note: 'Nobody reported missing.', weight: 40 });
+    }
+  }
+
+  // Who starts. Forwards and the keeper, because they are who a goals call or
+  // a clean-sheet call is really about.
+  const confirmed = f.lineups?.status === 'confirmed';
+  for (const side of ['home', 'away']) {
+    const xi = (f.lineups?.[side]?.players ?? []).filter((p) => p.starting && p.name);
+    if (xi.length < 9) continue;
+    const fwd = xi.filter((p) => p.position === 'F').map((p) => p.name);
+    const gk = xi.find((p) => p.position === 'G')?.name;
+    const shape = f.lineups?.[side]?.formation;
+    const bits = [];
+    if (fwd.length) bits.push(`${andList(fwd.slice(0, 3))} up front`);
+    if (gk) bits.push(`${gk} in goal`);
+    if (!bits.length) continue;
+    items.push({
+      label: `${confirmed ? 'Starting' : 'Expected to start'}: ${team[side]}`,
+      note: `${andList(bits)}${shape && /^\d(-\d){2,4}$/.test(shape) ? `, set up ${shape}` : ''}.`,
+      weight: 90,
+    });
+  }
+
+  // Where they sit and how they are going.
+  const size = f.standings?.size;
+  for (const side of ['home', 'away']) {
+    const pos = f.standings?.[side]?.position;
+    const form = f.form?.[side];
+    const bits = [];
+    if (pos) {
+      bits.push(size && pos === size ? 'bottom of the table'
+        : pos === 1 ? 'top of the table'
+        : size && pos > size - 3 ? `${ordinal(pos)}, in the bottom three`
+        : `${ordinal(pos)} in the table`);
+    }
+    if (form?.record && form?.matches) {
+      const [w = 0, d = 0, l = 0] = String(form.record).split('-').map((x) => parseInt(x, 10) || 0);
+      const m = saidN(form.matches);
+      const streak = String(form.streak ?? '');
+      const run = /(\d+)/.exec(streak)?.[1];
+      if (/^winless/.test(streak) && run >= 3) bits.push(`without a win in ${saidN(Number(run))}`);
+      else if (/^unbeaten/.test(streak) && run >= 3) bits.push(`unbeaten in ${saidN(Number(run))}`);
+      else if (/^won/.test(streak) && run >= 3) bits.push(`${saidN(Number(run))} wins in a row`);
+      else if (/^lost/.test(streak) && run >= 3) bits.push(`${saidN(Number(run))} defeats in a row`);
+      else bits.push(`won ${saidN(w)}, drawn ${saidN(d)}, lost ${saidN(l)} of the last ${m}`);
+      if (form.clean_sheets >= 3) bits.push(`${saidN(form.clean_sheets)} clean sheets in ${m}`);
+    }
+    if (bits.length) items.push({ label: `Form: ${team[side]}`, note: `${bits.join(', ').replace(/^./, (c) => c.toUpperCase())}.`, weight: 80 });
+  }
+
+  // Who is likeliest to score, as names. The market behind it stays ours.
+  const gs = (f.external?.polymarket?.goalscorers ?? []).filter((g) => g?.player);
+  if (gs.length) {
+    const sorted = gs.every((g) => typeof g.price === 'number') ? [...gs].sort((a, b) => b.price - a.price) : gs;
+    const names = [...new Set(sorted.map((g) => g.player))].slice(0, 3);
+    items.push({ label: 'Most likely to score', note: `${andList(names)}.`, weight: 85 });
+  }
+
+  // The last meeting, as a result a supporter remembers.
+  const last = (f.h2h?.recent_matches ?? [])[0];
+  if (last?.score) {
+    const when = last.date ? new Date(last.date).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : null;
+    items.push({ label: 'Last time', note: `Finished ${last.score}${when ? `, ${when}` : ''}.`, weight: 50 });
+  }
+
+  // The manager, by name, when the feed has one.
+  for (const side of ['home', 'away']) {
+    const e = ledger.find((x) => x.id.startsWith(`manager.${side}.`) && x.state === 'COMPUTED');
+    const name = e?.evidence?.manager;
+    const games = e?.evidence?.matches_in_charge;
+    if (name && name !== 'the manager' && typeof games === 'number' && games <= 10) {
+      items.push({ label: `In the dugout: ${team[side]}`, note: `${name} is ${saidN(games)} games into the job.`, weight: 60 });
+    }
+  }
+
+  // The engine's own notes, only the specific kinds, and only if they pass.
+  const KEEP = /^(fatigue\.|fixture\.derby|fixture\.revenge|referee\.tendency|environment\.weather|stakes\.)/;
+  for (const x of ledger) {
+    if (x.state !== 'COMPUTED' || !KEEP.test(x.id) || !READ_LABEL[x.id]) continue;
+    const note = cleanProse(x.note);
+    if (note) items.push({ label: READ_LABEL[x.id], note, weight: 45 + Math.round((x.strength ?? 0) * 20) });
+  }
+
+  return items.sort((a, b) => b.weight - a.weight);
+}
+
 function readsFor(f, verdicts) {
   const named = (x) =>
     x && x.state === 'COMPUTED' && READ_LABEL[x.id] && x.note
@@ -1851,7 +2008,10 @@ async function viewFixture(id, params = new URLSearchParams()) {
     : (Number.isInteger(f.score?.[0]) || String(f.status) === 'finished')
       ? []
       : (f.verdicts ?? []);
-  const { reads, rest } = readsFor(f, verdicts);
+  // What the page argues with: built from the match, names first. See storyFor.
+  const story = storyFor(f);
+  const reads = story.slice(0, 6);
+  const rest = story.slice(6);
 
   /*
    * Whether this match has been played, and by how much.
@@ -2184,8 +2344,8 @@ async function viewResults() {
         that price is for, not a result on top of it.
       -->
       <p class="record-sub">${avgOdds
-        ? `Struck at around ${dec(avgOdds)} on average, so most of them landing
-           is what that price already expects. Winning most is not the same as
+        ? `Called at average ${oddsOf(avgOdds)} or so, so most of them landing
+           is what those odds already expect. Winning most is not the same as
            being ahead.`
         : 'Winning most of them is not the same as being ahead — these are short prices.'}</p>
       ${n > 0 && n < 100
@@ -2212,7 +2372,7 @@ async function viewResults() {
               <span class="side-thumb">${crest(x.home_team ?? '', 'sm', x.home_team_id)}${crest(x.away_team ?? '', 'sm', x.away_team_id)}</span>
               <span class="side-body">
                 <span class="side-sel">${esc(d.name)}</span>
-                <span class="side-meta">${esc(kickoffLabel(x.kickoff))}<b>${dec(x.odds)}</b></span>
+                <span class="side-meta">${esc(kickoffLabel(x.kickoff))}<b>${oddsTag(x.odds)}</b></span>
               </span>
             </a>`;
           }).join('')}</div>`;
@@ -2423,8 +2583,8 @@ function postMortemHTML(x) {
   }
   if (pm.market && pm.opening_odds && pm.closing_odds) {
     facts.push(pm.market === 'held'
-      ? `price held at ${dec(pm.closing_odds)}`
-      : `${dec(pm.opening_odds)} to ${dec(pm.closing_odds)} by kick-off`);
+      ? `odds held at ${dec(pm.closing_odds)}`
+      : `odds moved from ${dec(pm.opening_odds)} to ${dec(pm.closing_odds)} by kick-off`);
   }
 
   return `
@@ -2486,7 +2646,7 @@ function recapCardHTML(x) {
         hasScore ? `<b class="row-goals${ag > hg ? ' won' : ''}">${esc(ag)}</b>` : ''}</span>
     </a>
     <div class="recap-body">
-      <p class="recap-call">We said <b>${esc(d.name)}</b>${x.odds ? ` at ${dec(x.odds)}` : ''}.</p>
+      <p class="recap-call">We said <b>${esc(d.name)}</b>${x.odds ? ` at ${oddsOf(x.odds)}` : ''}.</p>
       ${said ? `<p class="recap-what">${esc(said)}</p>` : ''}
       ${disputed ? '' : postMortemHTML(x)}
       ${(() => {
@@ -2503,7 +2663,12 @@ function recapCardHTML(x) {
          * the page fills itself as the writing improves, with nothing to
          * switch on.
          */
-        const why = cleanProse(x.narrative, [String(x.odds), dec(x.odds), String(x.line), x.line]);
+        // The members' "why" where the record has one; otherwise the
+        // preview, unless it is a template write-up (a bare price is the tell
+        // -- see verdictHTML).
+        const templated = new RegExp(`\\b(?:at|priced)\\s+${dec(x.odds).replace('.', '\\.')}\\b`).test(String(x.narrative ?? ''));
+        const allowed = [String(x.odds), dec(x.odds), String(x.line), x.line];
+        const why = cleanProse(x.why, allowed) ?? (templated ? null : cleanProse(x.narrative, allowed));
         if (!why) return '';
         return `
         <details class="recap-why">
