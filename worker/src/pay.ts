@@ -14,11 +14,19 @@
 
 import { createCheckoutLink, parseWebhook, type CoinflowConfig } from './coinflow.ts';
 import { verifyWebhook } from './webhook.ts';
+import { parseWhop, verifyWhop } from './whop.ts';
 
 export interface PayEnv {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_KEY?: string;
+  /**
+   * Which processor is live: 'whop' or 'coinflow'. Whop runs its own checkout
+   * and billing, so with it the checkout route hands back the plan's own
+   * checkout link and the webhook grants entitlements by email.
+   */
+  PAY_PROVIDER?: string;
+  WHOP_WEBHOOK_SECRET?: string;
   COINFLOW_API_KEY?: string;
   COINFLOW_WEBHOOK_SECRET?: string;
   COINFLOW_BASE_URL?: string;
@@ -59,8 +67,14 @@ async function rpcAsService(env: PayEnv, fn: string, args: Record<string, unknow
   try { return JSON.parse(text); } catch { return null; }
 }
 
+/** Which processor is live. Whop needs only its webhook secret; the checkout
+ *  links live on the plan rows. */
+export const provider = (env: PayEnv): 'whop' | 'coinflow' =>
+  (env.PAY_PROVIDER ?? '').toLowerCase() === 'whop' ? 'whop' : 'coinflow';
+
 /** Whether there is a processor to talk to at all. */
-export const paymentsConfigured = (env: PayEnv): boolean => Boolean(env.COINFLOW_API_KEY);
+export const paymentsConfigured = (env: PayEnv): boolean =>
+  provider(env) === 'whop' ? Boolean(env.WHOP_WEBHOOK_SECRET) : Boolean(env.COINFLOW_API_KEY);
 
 function coinflow(env: PayEnv): CoinflowConfig {
   if (!env.COINFLOW_API_KEY) throw new Error('payments are not configured');
@@ -117,12 +131,24 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
   } catch { /* an empty body means the default plan */ }
 
   const rows = await fetch(
-    new URL(`/rest/v1/plan?id=eq.${encodeURIComponent(planId)}&active=eq.1&select=id,amount_minor,currency,days`, env.SUPABASE_URL),
+    new URL(`/rest/v1/plan?id=eq.${encodeURIComponent(planId)}&active=eq.1&select=id,amount_minor,currency,days,checkout_url`, env.SUPABASE_URL),
     { headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_ANON_KEY}`, accept: 'application/json' } },
   );
   const plans = rows.ok ? await rows.json() as any[] : [];
   const plan = plans[0];
   if (!plan) return json({ error: 'That plan is not available.' }, 404);
+
+  if (provider(env) === 'whop') {
+    // Whop's own checkout for this plan. The email goes along so the buyer's
+    // Whop account and their account here share an address, which is what
+    // the entitlement is keyed on.
+    if (typeof plan.checkout_url !== 'string' || !plan.checkout_url) {
+      return json({ error: 'That plan has no checkout yet.' }, 503);
+    }
+    const link = new URL(plan.checkout_url);
+    if (user.email) link.searchParams.set('email', user.email);
+    return json({ link: link.toString() });
+  }
 
   const site = env.SITE_URL ?? new URL(request.url).origin;
   const link = await createCheckoutLink(coinflow(env), {
@@ -185,6 +211,7 @@ export async function renewal(request: Request, env: PayEnv, jwt: string | null)
  */
 export async function webhook(request: Request, env: PayEnv): Promise<Response> {
   const raw = await request.text();
+  if (provider(env) === 'whop') return whopWebhook(raw, request.headers, env);
 
   const verdict = await verifyWebhook(raw, request.headers, env.COINFLOW_WEBHOOK_SECRET ?? '');
   if (!verdict.ok) {
@@ -231,4 +258,61 @@ export async function webhook(request: Request, env: PayEnv): Promise<Response> 
 
   if (out && out.applied === false) console.error('coinflow: not applied —', out.reason, event.paymentId);
   return json({ ok: true, ...(out ?? {}) });
+}
+
+/* ------------------------------------------------------------ Whop's webhook */
+
+/**
+ * Whop tells us a membership went valid, went invalid, or a payment landed.
+ *
+ * The plan is worked out from the delivery's plan reference against our plan
+ * rows' checkout links, which carry Whop's plan ids; a delivery naming a plan
+ * we do not sell falls back to the monthly one rather than being dropped,
+ * because the money is real and a person is waiting.
+ */
+async function whopWebhook(raw: string, headers: Headers, env: PayEnv): Promise<Response> {
+  const verdict = await verifyWhop(raw, headers, env.WHOP_WEBHOOK_SECRET ?? '');
+  if (!verdict.ok) return json({ error: verdict.why }, 401);
+
+  let payload: unknown;
+  try { payload = JSON.parse(raw); } catch { return json({ error: 'not json' }, 400); }
+  const event = parseWhop(payload);
+  if (event.kind === 'ignore') return json({ ok: true, ignored: event.eventType, via: verdict.via });
+  if (!event.email) {
+    console.error('whop: event with no email', event.eventType, event.membershipId ?? event.paymentId);
+    return json({ ok: true, skipped: 'no email' });
+  }
+
+  if (event.kind === 'invalid') {
+    const out = await rpcAsService(env, 'revoke_entitlement', { p_email: event.email, p_status: event.eventType });
+    return json({ ok: true, ...(out ?? {}) });
+  }
+
+  const planId = await planForWhop(env, event.planRef);
+  const out = await rpcAsService(env, 'record_entitlement', {
+    p_source: 'whop',
+    // A payment id when there is one, else the membership id plus the period
+    // end, so each renewal is its own receipt and a retried delivery is not.
+    p_ref: event.paymentId ?? (event.membershipId ? `${event.membershipId}:${event.periodEnd ?? 'open'}` : null),
+    p_email: event.email,
+    p_plan: planId,
+    p_expires: event.periodEnd,
+    p_amount: event.amountMinor,
+    p_currency: event.currency ?? 'GBP',
+    p_raw: raw.slice(0, 20_000),
+  });
+  if (out && out.applied === false) console.error('whop: not applied —', out.reason, event.email);
+  return json({ ok: true, via: verdict.via, ...(out ?? {}) });
+}
+
+/** Our plan id for Whop's, matched on the checkout link the plan row carries. */
+async function planForWhop(env: PayEnv, planRef: string | null): Promise<string> {
+  if (!planRef) return 'monthly';
+  const res = await fetch(
+    new URL('/rest/v1/plan?active=eq.1&select=id,checkout_url', env.SUPABASE_URL),
+    { headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY ?? env.SUPABASE_ANON_KEY}`, accept: 'application/json' } },
+  );
+  const plans = res.ok ? await res.json() as Array<{ id: string; checkout_url: string | null }> : [];
+  const hit = plans.find((p) => typeof p.checkout_url === 'string' && p.checkout_url.includes(planRef));
+  return hit?.id ?? 'monthly';
 }
