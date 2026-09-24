@@ -12,6 +12,7 @@
   "scripts": {
     "probe": "npm -w engine run probe",
     "probe:players": "npm -w engine run probe:players",
+    "probe:report": "npm -w engine run probe:report",
     "history": "npm -w engine run history",
     "ratings": "npm -w engine run ratings",
     "slate": "npm -w engine run slate",

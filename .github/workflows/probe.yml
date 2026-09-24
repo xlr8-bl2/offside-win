@@ -20,6 +20,15 @@ name: probe
 # its file on the default branch. That is what this block is doing here. See HANDOFF.md.
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: >-
+          full (walk a fixture and sketch every feed) or report (one finished
+          match: every incident type, the post-match line-ups, the per-player
+          stats)
+        type: choice
+        options: [full, report]
+        default: full
 
 jobs:
   probe:
@@ -34,14 +43,16 @@ jobs:
       - name: Probe the provider
         env:
           BSD_API_KEY: ${{ secrets.BSD_API_KEY }}
-        run: npm run probe
+        run: npm run ${{ inputs.mode == 'report' && 'probe:report' || 'probe' }}
 
       # The probe runs as `npm -w engine run probe`, so npm sets the working
       # directory to the workspace root — engine/ — and `probe-output/` is
       # written there, not at the repo root. Reading it from the repo root finds
       # nothing and, because the loop skips silently and upload-artifact only
       # warns, the job still goes green while reporting absolutely nothing.
+      # The report mode prints straight to the log and writes no sketches.
       - name: Print inferred shapes
+        if: inputs.mode != 'report'
         run: |
           echo "Field names and types only — no payload values."
           shopt -s nullglob
@@ -62,6 +73,7 @@ jobs:
           fi
 
       - name: Endpoint availability
+        if: inputs.mode != 'report'
         run: |
           echo "Which endpoints this tier actually serves:"
           cat engine/probe-output/_summary.json | head -c 4000
@@ -70,6 +82,7 @@ jobs:
       # this repo is public, so artifacts are world-readable, and the whole
       # point of sketching is to publish field shapes without payload values.
       - uses: actions/upload-artifact@v4
+        if: inputs.mode != 'report'
         with:
           name: probe-output
           path: |
