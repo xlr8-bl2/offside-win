@@ -2174,7 +2174,11 @@ function storyFor(f) {
   const KEEP = /^(fatigue\.|fixture\.derby|fixture\.revenge|environment\.weather|stakes\.)/;
   for (const x of ledger) {
     if (x.state !== 'COMPUTED' || !KEEP.test(x.id) || !READ_LABEL[x.id]) continue;
-    if (!((x.strength ?? 0) >= 0.2)) continue;
+    if (!((x.strength ?? 0) > 0.2)) continue;
+    // A bundle written before the group-stage fix carries "105 games
+    // remaining" and is frozen if its match has been played; no side in any
+    // competition has more than 46 games left.
+    if (Number(x.evidence?.games_left) > 46) continue;
     const note = cleanProse(x.note);
     if (note) items.push({ label: READ_LABEL[x.id], note, weight: 45 + Math.round((x.strength ?? 0) * 20) });
   }
