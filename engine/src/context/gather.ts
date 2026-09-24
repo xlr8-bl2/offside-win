@@ -98,25 +98,33 @@ export function parseLineups(raw: unknown): LineupInfo {
   const unavailable: LineupInfo['unavailable'] = [];
   const un = rec?.['unavailable_players'];
   // Shipped either as a flat list or split by side; accept both.
-  const lists: unknown[] = [];
+  // Keep which half each entry came from. Flattening the split list and
+  // reading `team_id` off the entries -- which the provider does not set --
+  // left every absence unattributed, and the side check below then dropped
+  // them: Netherlands v Germany read "no absentees" on both sides with Frenkie
+  // de Jong, Mats Wieffer and Leon Goretzka listed as out.
+  const lists: Array<{ raw: unknown; side: 'home' | 'away' | null }> = [];
   const unRec = asRecord(un);
   if (unRec) {
-    for (const key of ['home', 'away', 'players', 'results']) {
+    for (const key of ['home', 'away', 'players', 'results'] as const) {
       const l = asArray(unRec[key]);
-      if (l) lists.push(...l);
+      const side = key === 'home' || key === 'away' ? key : null;
+      if (l) lists.push(...l.map((raw) => ({ raw, side })));
     }
   }
   const flat = asArray(un);
-  if (flat) lists.push(...flat);
+  if (flat) lists.push(...flat.map((raw) => ({ raw, side: null })));
 
-  for (const raw2 of lists) {
+  for (const { raw: raw2, side } of lists) {
     const p = asRecord(raw2);
     const id = num(p?.['id'] ?? p?.['player_id']);
     if (id === undefined) continue;
     unavailable.push({
       id,
       name: str(p?.['name'] ?? p?.['short_name']) ?? `#${id}`,
-      team_id: num(p?.['team_id']) ?? null,
+      team_id: num(p?.['team_id'] ?? pickNum(p, 'team.id')) ?? null,
+      side: side ?? (/^home$/i.test(str(p?.['side'] ?? p?.['team_side']) ?? '') ? 'home'
+        : /^away$/i.test(str(p?.['side'] ?? p?.['team_side']) ?? '') ? 'away' : null),
       reason:
         str(p?.['reason'] ?? p?.['injury_type'] ?? p?.['type'] ?? p?.['status'] ?? p?.['availability']) ??
         null,

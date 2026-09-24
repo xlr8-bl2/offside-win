@@ -67,9 +67,23 @@ both read it, and two lists drift.
 Four things, and nothing else:
 
 1. **The pick** — a plain sentence. *"Osasuna to win by two goals or more."*
-2. **The odds** — `2.35`
+2. **The odds** — always the exact number with the word *odds* attached:
+   **"odds of 2.35"**, "at odds of 1.29", "2.35 odds". Never a bare `2.35`,
+   never "at 2.35", never "priced 2.35". The owner's rule, stated plainly: when
+   mentioning odds, say the specific number and attach the word odds to it.
+   This applies to prose, UI labels, table cells and buttons alike.
 3. **The bookmaker** — *at 1xBet*
-4. **Why we're confident** — a paragraph in the voice above
+4. **Why this call** — a paragraph in the voice above that argues for *this
+   market on this match*, naming the players and the managers involved. Not a
+   form summary that then jumps to a bet.
+
+## Name the people
+
+A reader pays for what a free stats site does not give them: who is out, who
+is playing, who scores. Every argument names players where the data has them —
+the striker missing, the keeper back, the forward on a run. "Seattle are
+without five players" with no names is not analysis; "Seattle are without
+Morris and Rusnák, their two main scorers" is.
 
 ## Before and after
 
@@ -95,9 +109,11 @@ Meta both reject gambling-adjacent ads carrying profit claims, and UK ASA rules
 bite. The results page stays public and unfiltered, forever, including the
 losses.
 
-Results are said in money, not units: **"Of the last 171 picks, 104 won. £10 on
-every pick would have left you £69.90 down."** The sign is never softened. That
-page being believable is the entire marketing strategy.
+Results are said as counts, never units and never a staking P&L. The owner had
+a "£10 on every pick would have left you £X down" banner removed: it invents a
+staking plan nobody follows and presents it as the product's headline. Every
+settled pick, won and lost, stays published in full — that is the honesty, and
+nothing on the page may imply a profit either.
 
 ## Why the gate is not cosmetic
 
