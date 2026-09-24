@@ -13,7 +13,7 @@
 import { describe as market, didItLand, recap } from './js/lib/markets.js';
 import { COUNTRY_NAMES, bookName, cash, country, localPrice, purse } from './js/lib/books.js';
 import { cleanProse } from './js/lib/vocabulary.js';
-import { authHeaders, completeSignIn, currentUser, signInWithEmail, signInWithGoogle, signOut } from './js/lib/auth.js';
+import { authHeaders, completeSignIn, currentUser, setViewAs, signInWithEmail, signInWithGoogle, signOut, viewingAsFree } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
 
@@ -3474,6 +3474,73 @@ const LEGAL = {
   },
 };
 
+/**
+ * The owner's page.
+ *
+ * Not linked from anywhere; reached by typing the address. It shows who the
+ * browser is signed in as and what the API makes of that, and it carries the
+ * "view as" switch, so both sides of the wall can be checked from one account
+ * without a second browser or a second login.
+ */
+async function viewDev() {
+  const me = await currentUser({ real: true });
+  let account = null;
+  if (me) {
+    // Read as the real account, whatever the switch says.
+    try {
+      const s = await import('./js/lib/auth.js');
+      const on = s.viewingAsFree();
+      if (on) s.setViewAs('self');
+      try { account = await getJSON('/api/account'); } finally { if (on) s.setViewAs('free'); }
+    } catch { /* shown as unknown */ }
+  }
+  const m = account?.membership;
+  const active = m && m.expires_at * 1000 > Date.now();
+  const free = viewingAsFree();
+  app.innerHTML = `
+  <div class="wrap section narrow">
+    <div class="page-head">
+      <h1 class="display">Owner's panel</h1>
+      <p class="page-sub">What this browser is, and how the site is showing itself to it.</p>
+    </div>
+    <section class="panel">
+      <p class="panel-head">This browser</p>
+      <dl class="kv">
+        <dt>Signed in as</dt><dd>${me ? `${esc(me.email ?? '')} <span class="muted">${esc(me.id)}</span>` : 'nobody'}</dd>
+        <dt>Membership</dt><dd>${!me ? '—' : active
+          ? `active until ${esc(new Date(m.expires_at * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }))} (${esc(m.plan_id ?? '')})`
+          : 'none'}</dd>
+        <dt>Viewing as</dt><dd>${free ? 'a free reader' : 'yourself'}</dd>
+      </dl>
+    </section>
+    <section class="panel">
+      <p class="panel-head">View the site as</p>
+      <div class="seg" role="group" aria-label="View as">
+        <button type="button" data-view="self"${free ? '' : ' class="on"'}>Yourself</button>
+        <button type="button" data-view="free"${free ? ' class="on"' : ''}>A free reader</button>
+      </div>
+      <p class="muted small">"A free reader" sends every request without your token and renders every page
+        as it would for someone who has never signed in. It stays on in this browser until you switch it back;
+        the header shows a pill while it is on.</p>
+    </section>
+    <section class="panel">
+      <p class="panel-head">Give yourself a membership</p>
+      <p class="muted small">Run the <b>pg</b> workflow with command <b>grant</b> and your account's email in
+        <b>arg</b>. It comps a membership for ten years, without a payment, so the paid side can be checked
+        from this account.</p>
+    </section>
+  </div>`;
+  for (const b of app.querySelectorAll('[data-view]')) {
+    b.onclick = () => {
+      setViewAs(b.dataset.view);
+      state.member = null;
+      state.board = null;
+      viewDev();
+      headerAuth();
+    };
+  }
+}
+
 function viewLegal(which) {
   const page = LEGAL[which];
   if (!page) return notFound(`legal/${which}`);
@@ -3629,6 +3696,7 @@ async function route() {
     if (name === 'results') return await viewResults();
     if (name === 'pricing') return await viewPricing();
     if (name === 'slip') return await viewSlip();
+    if (name === 'dev') return await viewDev();
     if (name === 'signin') return await viewSignin();
     if (name === 'account') return await viewAccount();
     if (name === 'legal' && parts[1]) return viewLegal(parts[1]);
@@ -3673,6 +3741,22 @@ async function headerAuth() {
 
   const user = await currentUser();
   state.user = user;
+
+  // The "view as" pill. Loud on purpose: a preview switch that can be
+  // forgotten is a preview switch that gets forgotten.
+  let pill = document.getElementById('viewas-pill');
+  if (viewingAsFree()) {
+    if (!pill) {
+      pill = document.createElement('a');
+      pill.id = 'viewas-pill';
+      pill.className = 'viewas-pill';
+      pill.href = '#/dev';
+      document.body.prepend(pill);
+    }
+    pill.textContent = 'Viewing as a free reader — tap to switch back';
+  } else if (pill) {
+    pill.remove();
+  }
 
   /*
    * Membership from the account, not from the board.

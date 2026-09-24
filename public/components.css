@@ -2836,3 +2836,24 @@
 @media (max-width: 1040px) {
   .with-side > .home-side { order: -1; }
 }
+
+/* ============================================================ owner's page */
+
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-2) var(--space-5); margin: 0; font-size: var(--text-sm); }
+.kv dt { color: var(--chalk-3); }
+.kv dd { margin: 0; color: var(--chalk); overflow-wrap: anywhere; }
+.muted { color: var(--chalk-3); }
+.small { font-size: var(--text-xs); line-height: var(--leading-snug); }
+.panel .seg { display: inline-flex; margin-bottom: var(--space-4); }
+
+/* The "view as" pill. A full-width band at the very top, in the warning
+   colour, because a preview switch that can be forgotten is one that will be. */
+.viewas-pill {
+  display: block;
+  padding: var(--space-2) var(--space-4);
+  background: var(--warn);
+  color: var(--pitch);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  text-align: center;
+}

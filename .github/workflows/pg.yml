@@ -13,8 +13,15 @@ on:
       command:
         description: 'Engine command to run against Postgres'
         type: choice
-        options: [migrate, history, ratings, slate, settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players']
+        options: [migrate, history, ratings, slate, settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players', grant]
         default: migrate
+      arg:
+        # Free text for the commands that take one. `grant` reads an email and
+        # an optional second word: "you@example.com", "you@example.com 30",
+        # "you@example.com off".
+        description: 'Argument for the command (grant: "email [days|off]")'
+        type: string
+        default: ''
       leagues:
         # "all" rather than blank, because GitHub substitutes the default for an
         # empty input — so with a default set, blank can never mean everything.
@@ -69,4 +76,6 @@ jobs:
           SPORTRADAR_GETTY_KEY: ${{ secrets.SPORTRADAR_GETTY_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GRANT_EMAIL: ${{ inputs.arg && split(inputs.arg, ' ')[0] || '' }}
+          GRANT_ARG: ${{ inputs.arg && split(inputs.arg, ' ')[1] || '' }}
         run: npm run ${{ inputs.command }}
