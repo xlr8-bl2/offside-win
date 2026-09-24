@@ -207,7 +207,8 @@ test('a pass gets a real explanation rather than an empty state', () => {
     42,
   );
   assert.ok(text.includes('Everton') && text.includes('Fulham'));
-  assert.ok(text.includes('mispriced'));
+  // An explanation, in the reader's words rather than the engine's.
+  assert.ok(/about right, so there is nothing to take/.test(text), text);
 });
 
 test('a pick with no contextual claims says so rather than inventing one', () => {
@@ -238,5 +239,19 @@ test('seeded rng is deterministic and spreads across the unit interval', () => {
 test('every predicate in the grammar has at least two frames', () => {
   for (const [predicate, frames] of Object.entries(FRAMES)) {
     assert.ok(frames.length >= 2, `${predicate} has only ${frames.length} frame(s)`);
+  }
+});
+
+test('a pass is explained in plain words, never in the engine\'s', async () => {
+  const { plainPass } = await import('../src/narrate/compose.ts');
+  const technical = [
+    'Nothing is mispriced enough to call. The closest was double chance X2 at 2.15, where the edge of 20.5 points does not clear the 58.1 needed against a 109.1% margin.',
+    'Nothing is mispriced enough to call. The closest was 1x2 HOME at 1.40, where the model confidence of 17% is below the threshold.',
+    'Only 1 of the dispositive factors — availability, stakes and regime — could be computed for this fixture.',
+  ];
+  for (const t of technical) {
+    const out = plainPass(t);
+    assert.ok(!/\d/.test(out), `a number survived: ${out}`);
+    assert.ok(!/edge|margin|model|threshold|dispositive/i.test(out), `jargon survived: ${out}`);
   }
 });
