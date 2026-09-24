@@ -33,7 +33,16 @@ export interface LineupInfo {
   home: SideLineup | null;
   away: SideLineup | null;
   /** Players the provider says are out, with a reason where given. */
-  unavailable: Array<{ id: number; name: string; team_id: number | null; reason: string | null }>;
+  /**
+   * `side` is which half of the provider's split list the player came from.
+   * The provider sends `unavailable_players` as `{ home: [...], away: [...] }`
+   * with no team on the individual entries, so the key is the only thing that
+   * says whose player this is. It used to be flattened away.
+   */
+  unavailable: Array<{
+    id: number; name: string; team_id: number | null; reason: string | null;
+    side: 'home' | 'away' | null;
+  }>;
 }
 
 /** Where a team sits, and what that position is worth to them. */

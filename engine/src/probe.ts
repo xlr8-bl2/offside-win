@@ -274,3 +274,59 @@ export async function probe(): Promise<void> {
   console.log('  prediction.markets, prediction.recommendations');
   console.log('  event_stats.stats, event_stats.shotmap, event_stats.xg_per_minute');
 }
+
+/**
+ * Where the player-level data comes from, and whether it joins up.
+ *
+ * Prints structure and join counts, not payloads: key names, how many entries
+ * each list has, and how many of the absences and scorers can be attributed
+ * to a side and matched to a squad. That is what the analysis needs to name
+ * players, and it is safe to print from a public job.
+ *
+ *   npm run probe:players
+ */
+export async function probePlayers(): Promise<void> {
+  const { parseLineups, parseSquad, parseScorers } = await import('./context/gather.ts');
+  const { nameKey } = await import('./context/availability.ts');
+  const keys = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v as object) : Array.isArray(v) ? [`<array ${v.length}>`] : [typeof v]);
+  const from = new Date().toISOString().slice(0, 10);
+  const to = new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10);
+  const events = await bsdList<Record<string, unknown>>('/api/v2/events/', { date_from: from, date_to: to }, { limit: 200, max: 200 });
+  console.log(`${events.length} events in the next 3 days`);
+  let done = 0;
+  for (const e of events) {
+    if (done >= 4) break;
+    const id = Number(e.id);
+    const raw = await bsdOrNull(`/api/v2/events/${id}/lineups/`);
+    const un = (raw as Record<string, unknown> | null)?.['unavailable_players'];
+    if (!un) continue;
+    done++;
+    const lu = parseLineups(raw);
+    console.log(`\nevent ${id} (league ${e.league_id})`);
+    console.log(`  lineups keys: ${keys(raw).join(', ')}`);
+    console.log(`  unavailable_players shape: ${keys(un).join(', ')}`);
+    const first = Array.isArray(un) ? un[0] : Object.values(un as object).flat()[0];
+    console.log(`  one unavailable entry has keys: ${keys(first).join(', ')}`);
+    console.log(`  parsed: ${lu.unavailable.length} absent, side known for ${lu.unavailable.filter((u) => u.side).length}, team_id for ${lu.unavailable.filter((u) => u.team_id !== null).length}`);
+    for (const which of ['home', 'away'] as const) {
+      const teamId = Number(e[`${which}_team_id`]);
+      const [sqRaw, scRaw, scAll] = await Promise.all([
+        bsdOrNull(`/api/v2/teams/${teamId}/squad/`),
+        bsdOrNull(`/api/v2/leagues/${e.league_id}/top/scorers/`, { team_id: teamId, limit: 50 }),
+        bsdOrNull(`/api/v2/leagues/${e.league_id}/top/scorers/`, { limit: 50 }),
+      ]);
+      const sq = parseSquad(sqRaw) ?? [];
+      const sc = parseScorers(scRaw) ?? [];
+      const ids = new Set(sq.map((p) => p.id));
+      const names = new Set(sq.map((p) => nameKey(p.name)));
+      console.log(`  ${which}: squad ${sq.length} (raw keys ${keys(sqRaw).join(',')}); scorers(team filter) ${sc.length} (raw keys ${keys(scRaw).join(',')}); league-wide ${(parseScorers(scAll) ?? []).length}`);
+      const firstSc = (() => { const r = scRaw as Record<string, unknown> | null; const l = (r?.['results'] ?? r?.['players'] ?? r?.['top'] ?? r) as unknown; return Array.isArray(l) ? l[0] : null; })();
+      console.log(`    one scorer entry has keys: ${keys(firstSc).join(', ')}`);
+      console.log(`    scorers in squad: by id ${sc.filter((s) => ids.has(s.player_id)).length}, by name ${sc.filter((s) => names.has(nameKey(s.name))).length}; with goals>0: ${sc.filter((s) => s.goals > 0).length}`);
+      const absent = lu.unavailable.filter((u) => u.side === which);
+      const scIds = new Set(sc.map((s) => s.player_id));
+      const scNames = new Set(sc.map((s) => nameKey(s.name)));
+      console.log(`    absent on this side ${absent.length}; of those on the scorers list: by id ${absent.filter((u) => scIds.has(u.id)).length}, by name ${absent.filter((u) => scNames.has(nameKey(u.name))).length}`);
+    }
+  }
+}
