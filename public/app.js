@@ -472,6 +472,34 @@ function matchCentreHTML(hero, d) {
   </aside>`;
 }
 
+/**
+ * Today's free call, on the front page, for everyone.
+ *
+ * The headline fixture's call is the one call a day that is not behind the
+ * wall (free_fixture_id() in the schema). It goes on the masthead in the
+ * scoreboard face, with its odds and its book, because the free call is the
+ * product's best argument for itself: a reader watches it land and knows what
+ * the other forty look like. When the bundle has not caught up yet the block
+ * says what is coming rather than showing nothing.
+ */
+function freeCallHTML(hero, detail) {
+  const v = (detail?.published ?? []).find((x) => x?.market)
+    ?? (detail?.verdicts ?? []).find((x) => x?.candidate)?.candidate
+    ?? null;
+  if (!v) {
+    return `<p class="hero-blurb">${esc(hero.league ?? '')}${hero.league ? '. ' : ''}Today's free call goes
+      up on this match once the team news is in.</p>`;
+  }
+  const d = market({ market: v.market, outcome: v.outcome, line: v.line, home: hero.home, away: hero.away, odds: v.odds });
+  return `
+  <div class="freecall">
+    <span class="freecall-tag">Today's free call</span>
+    <p class="freecall-sel">${esc(d.name)}</p>
+    <p class="freecall-meta" data-public-price><b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
+    <p class="hero-blurb">Free for everyone today. Members get every other call the moment it goes up.</p>
+  </div>`;
+}
+
 function heroHTML(hero = null, venueIds = [], detail = null) {
   const queue = hero?.venue_id ? [hero.venue_id, ...venueIds] : [].concat(venueIds).filter(Boolean);
 
@@ -513,10 +541,9 @@ function heroHTML(hero = null, venueIds = [], detail = null) {
           <span class="fx-line">${crest(hero.home, 'md', hero.home_id)}<span class="name">${esc(hero.home)}</span></span>
           <span class="fx-line">${crest(hero.away, 'md', hero.away_id)}<span class="name">${esc(hero.away)}</span></span>
         </h1>
-        <p class="hero-blurb">${esc(hero.league ?? '')}${hero.league ? '. ' : ''}Our call on it, the
-           argument for it, and the thing that argues against it.</p>
+        ${freeCallHTML(hero, detail)}
         <div class="hero-cta">
-          <a class="btn btn-primary" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">Read the analysis</a>
+          <a class="btn btn-primary" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">Read why</a>
           <a class="btn btn-ghost" href="#/board">Today's calls</a>
         </div>
       </div>
@@ -667,6 +694,47 @@ function slipHTML(data) {
   </section>`;
 }
 
+/**
+ * The ticker: what is happening right now, in one line that moves.
+ *
+ * The thing every football site has and this one did not. Live scores on
+ * called matches, what landed and what missed today, and the next kick-offs.
+ * It scrolls because a ticker scrolls -- it is the one piece of motion on the
+ * page that is not answering a tap -- and it holds still for anyone who has
+ * asked the system for less motion, where it becomes a row that scrolls
+ * sideways by hand.
+ */
+function tickerHTML(fixtures, recent) {
+  const now = Date.now() / 1000;
+  const items = [];
+  const live = fixtures.filter((f) => hasCall(f) && matchState(f).kind === 'live');
+  for (const f of live.slice(0, 8)) {
+    const sc = Array.isArray(f.live_score) ? f.live_score : null;
+    items.push({ tone: 'live', href: `#/fixture/${f.id}`, text: `${f.home} ${sc ? `${sc[0]}–${sc[1]}` : 'v'} ${f.away}` });
+  }
+  const today = new Date().toDateString();
+  for (const x of (recent ?? []).filter((r) => new Date(r.kickoff * 1000).toDateString() === today).slice(0, 8)) {
+    const won = x.result === 'WON' || x.result === 'HALF_WON';
+    const lost = x.result === 'LOST' || x.result === 'HALF_LOST';
+    if (!won && !lost) continue;
+    const sc = Number.isInteger(x.home_goals) ? `${x.home_goals}–${x.away_goals}` : 'FT';
+    items.push({ tone: won ? 'won' : 'lost', href: `#/fixture/${x.fixture_id}`, text: `${won ? 'Landed' : 'Missed'}: ${x.home_team} ${sc} ${x.away_team}` });
+  }
+  const next = fixtures.filter((f) => hasCall(f) && f.kickoff > now).sort((a, b) => a.kickoff - b.kickoff).slice(0, 8);
+  for (const f of next) {
+    const t = new Date(f.kickoff * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+    items.push({ tone: 'next', href: `#/fixture/${f.id}`, text: `${esc(dayLabel(f.kickoff)) === 'Today' ? t : `${dayLabel(f.kickoff)} ${t}`} ${f.home} v ${f.away}` });
+  }
+  if (!items.length) return '';
+  const cell = (it) => `<a class="tick ${it.tone}" href="${it.href}"><i></i>${esc(it.text)}</a>`;
+  const track = items.map(cell).join('');
+  // Twice over, so the loop has no seam; the copy is hidden from readers.
+  return `
+  <div class="ticker" style="--tick-n:${items.length}">
+    <div class="ticker-track">${track}<span aria-hidden="true">${track}</span></div>
+  </div>`;
+}
+
 /** The slip, and every settled slip before it. */
 async function viewSlip() {
   app.innerHTML = '<div class="wrap section narrow"><div class="spinner">Loading…</div></div>';
@@ -768,12 +836,13 @@ function sideHTML(fixtures, slip) {
             market: f.top_pick.market, outcome: f.top_pick.outcome, line: f.top_pick.line,
             home: f.home, away: f.away, odds: f.top_pick.odds,
           });
+          // The free call is public by design, and says so.
           return `
-          <a class="side-item" href="#/fixture/${encodeURIComponent(f.id)}">
+          <a class="side-item" href="#/fixture/${encodeURIComponent(f.id)}"${f.free_call ? ' data-public-price' : ''}>
             <span class="side-thumb">${crest(f.home, 'sm', f.home_id)}${crest(f.away, 'sm', f.away_id)}</span>
             <span class="side-body">
-              <span class="side-sel">${esc(d.name)}</span>
-              <span class="side-meta">${esc(kickoffLabel(f.kickoff))}<b>${oddsTag(f.top_pick.odds)}</b></span>
+              <span class="side-sel">${esc(d.name)}${f.free_call ? ' <span class="freecall-tag">Free</span>' : ''}</span>
+              <span class="side-meta">${esc(kickoffLabel(f.kickoff))} <b>${oddsTag(f.top_pick.odds)}</b></span>
             </span>
           </a>`;
         }).join('')}
@@ -1092,6 +1161,7 @@ async function viewHome() {
   state.heroVenue = [...top, ...fixtures].map((f) => f.venue_id).filter(Boolean);
 
   app.innerHTML =
+    tickerHTML(fixtures, recent) +
     heroHTML(state.hero, state.heroVenue, state.heroDetail) +
     nextRailHTML(fixtures.filter((f) => hasCall(f) && f.id !== state.hero?.fixture_id)) +
     `<div class="wrap section dense">
@@ -1504,10 +1574,10 @@ function lockedHTML(fixture = null) {
   <div class="locked">
     <div class="locked-body">
       <b>${esc(head)}</b>
-      <p>Which market, which side, the price and the book offering it.
-         The reading of the match above stays free, always.</p>
+      <p>Which market, which side, the odds and the book offering it. The reading above
+         is free; one call a day is free too, on the front page. This one is for members.</p>
     </div>
-    <a class="btn btn-accent" href="#/pricing">See what membership costs</a>
+    <a class="btn btn-accent" href="#/pricing" data-public-price>From £3.49 for the weekend</a>
   </div>`;
 }
 
@@ -2494,11 +2564,12 @@ async function viewResults() {
         this page has contradicted itself about the same thing.
       -->
       <div class="record-strip">
-        ${stat(wins, 'won', 'won')}
-        ${stat(Math.max(0, n - wins - refunds), 'did not', 'lost')}
-        ${stat(refunds, 'stake back')}
+        ${stat(wins, 'landed', 'won')}
         ${stat(`${rate}%`, 'of those graded')}
+        ${stat(Math.max(0, n - wins - refunds), 'missed', 'lost')}
+        ${stat(refunds, 'stake back')}
       </div>
+      ${formStringHTML(settled)}
       ${formBarHTML(won, voided, lost, ['won', 'stake back', 'lost'],
         `The ${settled.length + voided} most recent, in order. The figures above cover all ${n}.`)}
       <!--
@@ -2719,8 +2790,38 @@ function dayHTML(g, total) {
       <span class="recap-tally">${won} of ${graded} landed${part ? ' that day' : ''}</span>
     </div>
     ${graded && !part ? `<p class="hand recap-say">${esc(dayVerdict(won, graded))}</p>` : ''}
-    ${g.list.map(recapCardHTML).join('')}
+    ${sortedForDay(g.list).map(recapCardHTML).join('')}
   </section>`;
+}
+
+/*
+ * Wins first inside a day, then the rest.
+ *
+ * Every call is still here, every loss in full. What changes is what a reader
+ * meets first on a day that went 17 of 19: the seventeen, and then the two,
+ * rather than a loss at the top because it happened to kick off latest. Kick-
+ * off order carries no information a reader wants on a results page; the
+ * result does.
+ */
+function sortedForDay(list) {
+  const rank = (x) => (x.result === 'WON' || x.result === 'HALF_WON' ? 0 : x.result === 'LOST' || x.result === 'HALF_LOST' ? 2 : 1);
+  return [...list].sort((a, b) => rank(a) - rank(b) || b.kickoff - a.kickoff);
+}
+
+/** The last run of results as a form string, newest on the right, the way a
+ *  form guide prints it. Refunds are left out: they are not a result. */
+function formStringHTML(settled, n = 20) {
+  const seq = [...settled].sort((a, b) => a.kickoff - b.kickoff)
+    .filter((x) => x.result === 'WON' || x.result === 'HALF_WON' || x.result === 'LOST' || x.result === 'HALF_LOST')
+    .slice(-n);
+  if (!seq.length) return '';
+  let run = 0;
+  for (let i = seq.length - 1; i >= 0 && (seq[i].result === 'WON' || seq[i].result === 'HALF_WON'); i--) run++;
+  return `
+  <div class="formline">
+    <span class="chips big">${seq.map((x) => `<i class="chip ${x.result === 'WON' || x.result === 'HALF_WON' ? 'w' : 'l'}">${x.result === 'WON' || x.result === 'HALF_WON' ? 'W' : 'L'}</i>`).join('')}</span>
+    <span class="formline-note">the last ${seq.length}, oldest first${run >= 3 ? ` — <b>${run} in a row</b>` : ''}</span>
+  </div>`;
 }
 
 
@@ -2991,18 +3092,29 @@ const takeIntent = () => {
   } catch { return null; }
 };
 
-async function startCheckout(plan = 'monthly') {
-  // A push, not a replace: pricing is somewhere a reader might reasonably want
-  // to go back to, unlike `#/account` signed out, which only ever bounces.
-  if (!(await currentUser())) { setIntent('buy'); location.hash = '#/signin'; return; }
-  const button = document.getElementById('buy');
+async function startCheckout(plan = 'monthly', row = null) {
+  const button = document.querySelector(`[data-buy="${plan}"]`) ?? document.getElementById('buy');
+  const was = button?.textContent;
   if (button) { button.disabled = true; button.textContent = 'Opening checkout…'; }
   try {
-    const { link } = await postJSON('/api/pay/checkout', { plan });
-    if (!link) throw new Error('The payment page could not be opened.');
-    location.href = link;
+    /*
+     * Signed in: through the Worker, which puts the account's email on the
+     * checkout so the membership finds it. Signed out: straight to the plan's
+     * own checkout, because a reader with a card out should not be sent to
+     * find their inbox first -- the pricing page tells them to sign in with
+     * the same email afterwards, and the entitlement waits for them.
+     */
+    if (await currentUser()) {
+      const { link } = await postJSON('/api/pay/checkout', { plan });
+      if (!link) throw new Error('The payment page could not be opened.');
+      location.href = link;
+      return;
+    }
+    if (row?.checkout_url) { location.href = row.checkout_url; return; }
+    setIntent('buy');
+    location.hash = '#/signin';
   } catch (err) {
-    if (button) { button.disabled = false; button.textContent = 'Become a member'; }
+    if (button) { button.disabled = false; button.textContent = was; }
     alert(err.message);
   }
 }
@@ -3026,72 +3138,102 @@ async function setRenewal(on) {
  * the only honest pitch and it is the one that survives an ad review.
  */
 async function viewPricing() {
-  const user = await currentUser();
+  app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
+  const [user, plans, hero] = await Promise.all([
+    currentUser(),
+    getJSON('/api/plans').catch(() => []),
+    getJSON('/api/hero').catch(() => null),
+  ]);
+  const money = (minor, cur) => new Intl.NumberFormat('en-GB', { style: 'currency', currency: cur || 'GBP', minimumFractionDigits: minor % 100 ? 2 : 0 }).format(minor / 100);
+  const byId = Object.fromEntries((plans ?? []).map((p) => [p.id, p]));
+  const order = ['matchday', 'monthly', 'season'].filter((id) => byId[id]);
+
+  /*
+   * What each plan is, in the reader's words.
+   *
+   * A matchday pass is one payment for a weekend and stops. The month and the
+   * season ticket renew until cancelled, because that is how the processor
+   * sells a subscription and a reader has to be told so before, not after.
+   */
+  const COPY = {
+    matchday: { blurb: 'A weekend of every call. One payment, seven days, and it stops.', renews: false, tag: null },
+    monthly:  { blurb: 'Every call, every day. Renews each month until you cancel.', renews: true, tag: 'Most take this' },
+    season:   { blurb: 'The whole season for less than half the monthly price.', renews: true, tag: 'Best value' },
+  };
+  const perMonth = (p) => p.days >= 300 ? money(Math.round(p.amount_minor / 12), p.currency) + ' a month' : null;
 
   app.innerHTML = `
   <div class="wrap section">
-    <div class="section-head">
-      <div>
-        <h1 class="display">Membership</h1>
-        <p>Every match we cover, read properly. The call is the part you pay for.</p>
-      </div>
+    <div class="page-head">
+      <h1 class="display xl">One call a day is free. Members get all of them.</h1>
+      <p class="page-sub">Every preview, every team sheet and the whole record stay free. Membership is
+        every open call the moment it goes up, the legs of the bet slip, and the reason behind each call.</p>
     </div>
 
-    <div class="pricing">
-      <div class="panel plan-free">
-        <h3 class="panel-head">Free, forever</h3>
-        <ul class="ticks">
-          <li>Every fixture across 88 leagues</li>
-          <li>The full write-up on each one</li>
-          <li>Form, team news, line-ups, head-to-head</li>
-          <li>The complete settled record, wins and losses alike</li>
-        </ul>
-      </div>
+    ${hero?.home ? `
+    <a class="freecall-line" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">
+      <span class="freecall-tag">Today's free call</span>
+      <b>${esc(hero.home)} v ${esc(hero.away)}</b>
+      <span>Read it, watch it land, then decide.</span>
+    </a>` : ''}
 
-      <div class="panel plan-paid">
-        <h3 class="panel-head">Member</h3>
-        <p class="plan-price"><b>£9</b><span>a month</span></p>
-        <ul class="ticks">
-          <li><b>The call itself</b> — which market and which side</li>
-          <li><b>The price</b>, and the bookmaker offering it</li>
-          <li>What has to happen for it to win, in plain English</li>
-          <li>Every open call, not just the ones on the front page</li>
-        </ul>
-        <button class="btn btn-accent btn-lg" id="buy">
-          ${user ? 'Become a member' : 'Sign in to join'}
-        </button>
-        <!--
-          What actually happens when the button is pressed, in the place a
-          reader looks before pressing it.
+    <div class="plans" data-public-price>
+      ${order.map((id) => {
+        const p = byId[id];
+        const c = COPY[id];
+        return `
+        <section class="plan${id === 'monthly' ? ' plan-main' : ''}">
+          ${c.tag ? `<span class="plan-tagline">${esc(c.tag)}</span>` : ''}
+          <h2>${esc(p.name)}</h2>
+          <p class="plan-price"><b>${esc(money(p.amount_minor, p.currency))}</b>
+            <span>${p.days === 7 ? 'for the week' : p.days >= 300 ? 'a year' : 'a month'}</span></p>
+          ${perMonth(p) ? `<p class="plan-per">${esc(perMonth(p))}</p>` : ''}
+          <p class="plan-blurb">${esc(c.blurb)}</p>
+          <button class="btn ${id === 'monthly' ? 'btn-accent' : 'btn-primary'} btn-lg" data-buy="${esc(id)}">
+            ${p.days === 7 ? 'Get the weekend' : p.days >= 300 ? 'Get the season' : 'Join for the month'}
+          </button>
+        </section>`;
+      }).join('')}
+    </div>
 
-          The page used to say only "thirty days, cancel whenever you like",
-          which leaves the one question anybody has about a monthly price
-          unanswered: does it come out again next month. It does not --
-          membership.auto_renew defaults to 0 and record_payment never sets
-          it, so a membership bought here is thirty days and then it stops.
-          Saying so is not a concession; a subscription nobody remembers
-          agreeing to is the thing people hate.
-        -->
-        <p class="plan-note"><b>One payment. Thirty days.</b> It does not renew by itself — you can
-          turn renewal on from your account if you want it to, and off again in one tap.</p>
-        <p class="plan-note">Changed your mind? Fourteen days, full refund, whatever you have
-          read. <a href="#/legal/refunds">How refunds work</a>.</p>
-      </div>
+    <div class="tiers">
+      <section class="tier">
+        <h3>Free, always</h3>
+        <ul class="ticks">
+          <li>One full call a day, with the reason — the headline match</li>
+          <li>Every preview: team news, who starts, who scores, the form</li>
+          <li>The bet slip's size, its total odds and its record</li>
+          <li>Every settled call, with why it landed or did not</li>
+        </ul>
+      </section>
+      <section class="tier tier-paid">
+        <h3>Members</h3>
+        <ul class="ticks">
+          <li><b>Every open call</b>, the moment it goes up — typically twenty to sixty a day</li>
+          <li><b>The bet slip's legs</b>, before the first one kicks off</li>
+          <li><b>Why this call</b> on every match: the argument for this market at these odds</li>
+          <li>The board's filters by league and by day</li>
+        </ul>
+      </section>
     </div>
 
     <div class="prose pricing-small">
-      <h2>What this is not</h2>
-      <p>It is not tipping and it is not advice to place a bet. We publish what we
-         think will happen and why, and we publish the record of how that has gone —
-         including when it has gone badly. Nothing here is a promise of profit, and
-         a high strike rate at short odds can still lose money.</p>
-      <p>18+. <a href="#/legal/responsible">Gambling can be a problem</a> — if it has
-         stopped being entertainment you can afford, that page is more use than any
-         call on this site.</p>
+      <p><b>Paying and signing in.</b> Payment is taken by Whop. Use the same email address there as you
+        use to sign in here — that is how your membership finds you. Nothing else is needed.</p>
+      <p><b>Changed your mind?</b> Fourteen days, full refund, whatever you have read.
+        <a href="#/legal/refunds">How refunds work</a>. Cancel a renewing plan from your Whop account in one tap;
+        you keep access to the end of what you paid for.</p>
+      <p>It is not tipping and it is not advice to place a bet. We publish what we think will happen and why,
+        and the record of how that has gone, including when it has gone badly.
+        <a href="#/results">The record is public</a> and always will be. Nothing here is a promise of profit.
+        18+. <a href="#/legal/responsible">If gambling has stopped being fun</a>, that page is more use than
+        any call on this site.</p>
     </div>
   </div>`;
 
-  document.getElementById('buy').onclick = () => startCheckout();
+  for (const b of app.querySelectorAll('[data-buy]')) {
+    b.onclick = () => startCheckout(b.dataset.buy, byId[b.dataset.buy]);
+  }
 }
 
 /** Sign in. One email box and one button, because that is the whole of it. */
@@ -3107,34 +3249,41 @@ async function viewSignin() {
   let intent = null;
   try { intent = localStorage.getItem(INTENT_KEY); } catch { /* private mode */ }
   const because = intent === 'buy'
-    ? 'Then we will take you straight back to membership.'
+    ? 'Sign in first and your membership will be waiting when you come back.'
     : intent === '#/account'
-      ? 'Your account lives behind this.'
-      : null;
+      ? 'Your account is behind this.'
+      : 'Your calls follow you, your slip is yours, and there is nothing to remember.';
 
   app.innerHTML = `
   <div class="wrap section narrow">
-    <div class="section-head"><div>
-      <h1 class="display">Sign in</h1>
-      <p>No password to remember or lose. We email you a link.${because ? ` ${esc(because)}` : ''}</p>
-    </div></div>
+    <div class="turnstile">
+      <div class="page-head">
+        <p class="hand turnstile-aside">in you come</p>
+        <h1 class="display xl">Sign in</h1>
+        <p class="page-sub">${esc(because)}</p>
+      </div>
 
-    ${problem ? `<p class="form-error">${esc(problem)}</p>` : ''}
+      ${problem ? `<p class="form-error">${esc(problem)}</p>` : ''}
 
-    <div class="panel signin">
-      <button class="btn btn-ghost btn-lg btn-google" id="google">Continue with Google</button>
-      <div class="or"><span>or</span></div>
-      <form id="magic" novalidate>
-        <label for="email">Your email address</label>
-        <input id="email" name="email" type="email" autocomplete="email"
-               inputmode="email" required placeholder="you@example.com">
-        <button class="btn btn-primary btn-lg" type="submit">Email me a link</button>
-      </form>
-      <p class="signin-note" id="note"></p>
+      <div class="panel signin" id="signin-panel">
+        <button class="btn btn-primary btn-lg btn-google" id="google">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.8 3-4.3 3-7.4z" fill="#4285F4"/><path d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853"/><path d="M6.4 14a6 6 0 0 1 0-3.9V7.5H3.1a10 10 0 0 0 0 9z" fill="#FBBC05"/><path d="M12 6c1.5 0 2.8.5 3.8 1.5l2.8-2.8A10 10 0 0 0 3.1 7.5l3.3 2.6C7.2 7.8 9.4 6 12 6z" fill="#EA4335"/></svg>
+          Continue with Google
+        </button>
+        <div class="or"><span>or by email</span></div>
+        <form id="magic" novalidate>
+          <label for="email">Email address</label>
+          <input id="email" name="email" type="email" autocomplete="email"
+                 inputmode="email" required placeholder="you@example.com">
+          <button class="btn btn-ghost btn-lg" type="submit">Email me a sign-in link</button>
+        </form>
+        <p class="signin-note" id="note"></p>
+      </div>
+
+      <p class="prose pricing-small">No password, ever. The link in the email signs you in on the device
+        you open it on. By signing in you agree to our <a href="#/legal/terms">terms</a> and
+        <a href="#/legal/privacy">privacy policy</a>.</p>
     </div>
-
-    <p class="prose pricing-small">By signing in you agree to our
-      <a href="#/legal/terms">terms</a> and <a href="#/legal/privacy">privacy policy</a>.</p>
   </div>`;
 
   const note = document.getElementById('note');
@@ -3146,24 +3295,14 @@ async function viewSignin() {
    * A reader who mistyped their email got "AuthApiError: Unable to validate
    * email address: invalid format", and one who asked twice in a minute got
    * "For security purposes, you can only request this after 47 seconds." Both
-   * are accurate and neither is addressed to a person. The cases we can name
-   * are named; anything we cannot is a sentence that at least says what to do
-   * next, with the original kept off the page.
+   * are accurate and neither is addressed to a person.
    */
   const humanise = (err) => {
     const raw = String(err?.message ?? '');
-    if (/rate ?limit|only request this after|too many/i.test(raw)) {
-      return 'That is one too many requests in a row. Give it a minute and try again.';
-    }
-    if (/invalid format|unable to validate email/i.test(raw)) {
-      return 'That does not look like an email address. Check it and try again.';
-    }
-    if (/signups? not allowed|disabled/i.test(raw)) {
-      return 'We cannot open new accounts by email at the moment. Try Google instead.';
-    }
-    if (/failed to fetch|network/i.test(raw) || navigator.onLine === false) {
-      return 'Your device cannot reach us at the moment. Check your connection and try again.';
-    }
+    if (/rate ?limit|only request this after|too many/i.test(raw)) return 'That is one too many in a row. Give it a minute and try again.';
+    if (/invalid format|unable to validate email/i.test(raw)) return 'That does not look like an email address. Check it and try again.';
+    if (/signups? not allowed|disabled/i.test(raw)) return 'We cannot open new accounts by email at the moment. Try Google instead.';
+    if (/failed to fetch|network/i.test(raw) || navigator.onLine === false) return 'Your device cannot reach us at the moment. Check your connection and try again.';
     if (/popup|window|closed/i.test(raw)) return 'The Google window closed before it finished. Try again.';
     return 'That did not work. Try again, or use the other button.';
   };
@@ -3182,13 +3321,36 @@ async function viewSignin() {
     say('Sending…');
     try {
       await signInWithEmail(email);
-      say(`Check ${email}. The link signs you straight in.`);
+      /*
+       * The sent state replaces the form. A form that stays on screen under
+       * "check your email" invites a second tap, a second email, and a rate
+       * limit; what a reader needs now is the address they typed, where to
+       * look, and one way to try again once the first link has had time.
+       */
+      document.getElementById('signin-panel').innerHTML = `
+        <div class="sent">
+          <p class="sent-head">Check your inbox</p>
+          <p>We sent a sign-in link to <b>${esc(email)}</b>. Tap it on this device and you are in.</p>
+          <p class="muted small">Not there in a minute? Look in spam, or
+            <button type="button" class="linklike" id="again" disabled>send another (<span id="wait">60</span>)</button>.</p>
+        </div>`;
+      let left = 60;
+      const again = document.getElementById('again');
+      const t = setInterval(() => {
+        left--;
+        const w = document.getElementById('wait');
+        if (w) w.textContent = String(left);
+        if (left <= 0) { clearInterval(t); if (again) { again.disabled = false; again.textContent = 'send another'; } }
+      }, 1000);
+      if (again) again.onclick = () => viewSignin();
     } catch (err) {
       say(humanise(err), true);
       button.disabled = false;
     }
   };
 }
+
+const PLAN_NAME = { matchday: 'Matchday pass', monthly: 'Monthly membership', season: 'Season ticket' };
 
 /** The account: what you have, what it costs, and how to stop it. */
 async function viewAccount() {
@@ -3212,23 +3374,31 @@ async function viewAccount() {
       <p>${esc(user.email ?? '')}</p>
     </div></div>
 
-    <div class="panel">
-      <h3 class="panel-head">Membership</h3>
-      ${active ? `
-        <p class="acct-state on">Active until <b>${esc(when(m.expires_at))}</b>.</p>
-        <p class="acct-line">${m.auto_renew
-          ? `It renews itself on that date${m.card_last4 ? ` using your ${esc(m.card_brand ?? 'card')} ending ${esc(m.card_last4)}` : ''}.`
-          : 'It will not renew itself — access simply stops on that date.'}</p>
-        ${m.auto_renew
-          ? `<button class="btn btn-quiet" id="cancel">Stop renewing</button>`
-          : `<button class="btn btn-primary" id="resume">Renew each month</button>`}
-      ` : `
-        <p class="acct-state off">You are not a member.</p>
-        <p class="acct-line">The reading of each match is free. The call, the price and
-           the bookmaker are not.</p>
-        <a class="btn btn-accent" href="#/pricing">See what it costs</a>
-      `}
-    </div>
+    <!--
+      The membership as a ticket: the plan, who it is for, and when it runs to.
+      A ticket is the shape a football person already knows a paid-for period
+      in, and it reads at a glance where "Active until 24 October" did not.
+    -->
+    <section class="ticket${active ? '' : ' off'}">
+      <div class="ticket-main">
+        <span class="ticket-kind">${active ? esc(PLAN_NAME[m.plan_id] ?? 'Membership') : 'No membership'}</span>
+        <span class="ticket-who">${esc(user.email ?? '')}</span>
+        ${active
+          ? `<span class="ticket-until">Valid until <b>${esc(when(m.expires_at))}</b></span>`
+          : `<span class="ticket-until" data-public-price>One call a day is free. The rest are from £3.49 for the weekend.</span>`}
+      </div>
+      <div class="ticket-stub">
+        ${active
+          ? (m.via === 'whop'
+              ? `<span>Renews through Whop</span><a class="btn btn-ghost btn-sm" href="https://whop.com/" target="_blank" rel="noopener">Manage on Whop</a>`
+              : m.card_brand === 'complimentary'
+                ? `<span>Complimentary</span>`
+                : m.auto_renew
+                  ? `<span>Renews ${m.card_last4 ? `on ${esc(m.card_brand ?? 'card')} ending ${esc(m.card_last4)}` : 'itself'}</span><button class="btn btn-quiet btn-sm" id="cancel">Stop renewing</button>`
+                  : `<span>Does not renew</span><button class="btn btn-primary btn-sm" id="resume">Renew each month</button>`)
+          : `<a class="btn btn-accent" href="#/pricing">See the plans</a>`}
+      </div>
+    </section>
 
     ${account.receipts?.length ? `
       <div class="panel">
@@ -3243,6 +3413,8 @@ async function viewAccount() {
 
     <div class="panel">
       <h3 class="panel-head">This browser</h3>
+      <p class="acct-line">Signing out here does not touch your membership. Sign back in with the same
+        email and it is still yours.</p>
       <button class="btn btn-ghost" id="out">Sign out</button>
     </div>
   </div>`;
@@ -3311,7 +3483,7 @@ const LEGAL = {
       </ul>
       <h2>Third parties</h2>
       <p>Two companies process data on our behalf, and only what they need to do their job.
-         <b>Supabase</b> stores the accounts and runs the sign-in. <b>Coinflow</b> takes the
+         <b>Supabase</b> stores the accounts and runs the sign-in. <b>Whop</b> takes the
          payments and holds the card details we never see. Both are bound by their own agreements
          with us and may not use your data for anything else.</p>
       <p>If you sign in with Google, Google is told that you signed in to this site. We are told
@@ -3375,12 +3547,13 @@ const LEGAL = {
       <p>Reading the site is free: every fixture, every write-up, the form, the team news and the
          full record of results. A membership adds the call itself — which market, which side, the
          price, and the bookmaker offering it.</p>
-      <p>A membership runs for thirty days from the day you pay. <b>It does not renew by
-         itself.</b> If you want it to, you can turn renewal on from your account page, and off
-         again the same way; while it is on we charge the same card on the day the membership runs
-         out, at the price shown on the membership page at that time, and we will tell you before
-         any price changes. Turning renewal off keeps the access you have already paid for until it
-         runs out.</p>
+      <p>Three plans. A <b>matchday pass</b> is one payment for seven days and does not renew.
+         The <b>monthly</b> membership and the <b>season ticket</b> renew at the end of each period,
+         at the price shown on the membership page when you bought, until you cancel — which you can
+         do in one tap from your account with our payment provider, keeping access to the end of the
+         period you have paid for. We will tell you before any price changes.</p>
+      <p>Payment is taken by Whop, which holds your card; we never see it. Your membership is tied
+         to the email address you pay with, so sign in here with the same address.</p>
       <p>This is digital content and your access starts the moment you pay. UK consumer law lets a
          seller ask you to give up the 14-day right to cancel in exchange for that. <b>We do not
          ask.</b> You keep the 14 days in full — see the refunds page — and there is nothing to
@@ -3402,10 +3575,10 @@ const LEGAL = {
          way most sellers of digital content do, in exchange for access starting immediately. We do
          not. Your access starts immediately anyway and the 14 days stand.</p>
       <h2>If you simply want to stop</h2>
-      <p>Nothing to do: a membership is thirty days and then it stops. If you turned renewal on,
-         turn it off on your account page — you keep what you have paid for until it runs out and
-         are not charged again. We do not refund part of a month already under way, and we do not
-         make you ask a person to leave.</p>
+      <p>A matchday pass simply stops. A monthly membership or a season ticket is cancelled in one
+         tap from your account with our payment provider — you keep what you have paid for until it
+         runs out and are not charged again. We do not refund part of a period already under way,
+         and we do not make you ask a person to leave.</p>
       <h2>What we will not refund</h2>
       <p><b>Losing bets.</b> Nothing here is advice to stake money and no call is a promise. Our
          record is published in full, wins and losses alike, so that is knowable before you pay
