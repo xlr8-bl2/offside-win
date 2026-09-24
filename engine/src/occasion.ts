@@ -160,6 +160,58 @@ export const COMPETITION: Record<number, { kicker: string; weight: number }> = {
   83: { kicker: 'Conference League night', weight: 30 },
 };
 
+/* ------------------------------------------------------------ stature */
+
+/**
+ * How big a club or a country is, on its own, whoever it is playing.
+ *
+ * Competition rank is not enough to pick a headline: Portugal v Wales and
+ * Liechtenstein v Lithuania are the same competition on the same night, and
+ * MLS outranked both because MLS is ranked and the Nations League is not. So
+ * the front page led with Nashville v Toronto two days away while Portugal
+ * were playing that evening. The names are what a fan reads.
+ *
+ * Weights are on the same scale as the competition weights above: a Champions
+ * League night is 220, so two of the biggest clubs on any night add up to
+ * about that. Matched on a normalised substring so "Man City", "Manchester
+ * City" and "Manchester City FC" are one club.
+ */
+const STATURE: Array<[string, number]> = [
+  // Clubs, the ones a casual fan anywhere has heard of.
+  ['real madrid', 200], ['barcelona', 200], ['manchester city', 180], ['man city', 180],
+  ['liverpool', 180], ['bayern', 180], ['manchester united', 170], ['man united', 170], ['man utd', 170],
+  ['arsenal', 170], ['paris saint', 170], ['psg', 170], ['chelsea', 160], ['juventus', 150],
+  ['inter milan', 150], ['internazionale', 150], ['ac milan', 150], ['atletico', 140], ['atlético', 140],
+  ['tottenham', 130], ['dortmund', 130], ['napoli', 130], ['inter miami', 120], ['ajax', 110],
+  ['benfica', 110], ['boca juniors', 110], ['river plate', 110], ['roma', 100], ['porto', 100],
+  ['flamengo', 100], ['leverkusen', 90], ['marseille', 90], ['celtic', 90], ['palmeiras', 90],
+  ['galatasaray', 80], ['fenerbah', 80], ['rangers', 80], ['sevilla', 80], ['lyon', 80],
+  ['newcastle', 80], ['aston villa', 70], ['al nassr', 80], ['al hilal', 80], ['lazio', 70],
+  ['leipzig', 70], ['sporting', 70], ['la galaxy', 60], ['everton', 60], ['west ham', 60],
+  // Countries.
+  ['brazil', 170], ['argentina', 170], ['france', 160], ['england', 160], ['spain', 160],
+  ['germany', 150], ['italy', 140], ['portugal', 140], ['netherlands', 130], ['belgium', 110],
+  ['croatia', 100], ['uruguay', 100], ['mexico', 90], ['colombia', 90], ['united states', 90],
+  ['usa', 90], ['morocco', 80], ['japan', 80], ['senegal', 70], ['nigeria', 70], ['denmark', 70],
+  ['switzerland', 70], ['türkiye', 70], ['turkey', 70], ['sweden', 60], ['poland', 60],
+  ['scotland', 60], ['wales', 60], ['austria', 60], ['serbia', 50], ['ghana', 50], ['egypt', 50],
+];
+
+const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+/** The stature of one side by name, or zero for a side nobody outside its town knows. */
+export function statureOf(name: string): number {
+  const n = ` ${norm(name)} `;
+  let best = 0;
+  for (const [key, w] of STATURE) {
+    const k = norm(key);
+    // Whole-word-ish: "roma" must not match "romania", "porto" must not match
+    // "portugal". Match at a word boundary on both sides.
+    if (new RegExp(`(^|[^a-z])${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z]|$)`).test(n)) best = Math.max(best, w);
+  }
+  return best;
+}
+
 /* ------------------------------------------------------------- the choice */
 
 export interface OccasionInput {

@@ -1,5 +1,5 @@
 import { leagueRank } from './slate.ts';
-import { occasionOf, COMPETITION } from './occasion.ts';
+import { occasionOf, statureOf, COMPETITION } from './occasion.ts';
 
 /**
  * What the site leads with today.
@@ -90,10 +90,15 @@ export function scoreCandidate(f: HeroCandidate, now: number): number {
     rank,
   }).weight;
 
-  // Today beats later this week: a masthead is about tonight.
+  // Who is playing, whoever they are playing for. See statureOf.
+  score += statureOf(f.home) + statureOf(f.away);
+
+  // Today beats later this week: a masthead is about tonight. A game two
+  // days out has to be a good deal bigger to lead over one this evening.
   const hoursOut = (f.kickoff - now) / 3600;
-  if (hoursOut >= 0 && hoursOut <= 12) score += 120;
+  if (hoursOut >= 0 && hoursOut <= 12) score += 150;
   else if (hoursOut > 12 && hoursOut <= 36) score += 60;
+  else if (hoursOut > 36) score -= 100;
   else if (hoursOut < 0) score -= 400; // already kicked off
 
   score += Math.round((f.confidence ?? 0) * 40);
