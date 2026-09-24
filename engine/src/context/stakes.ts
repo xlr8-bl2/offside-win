@@ -394,7 +394,7 @@ function revengeFactor(ctx: FixtureContext): Factor {
       id: 'fixture.revenge',
       section: '§5.3',
       tier: 2,
-      note: `The reverse fixture finished ${ourHomeConceded}-${ourHomeScored} — too close to carry a revenge motive.`,
+      note: `The reverse fixture finished ${ourHomeConceded}-${ourHomeScored}, too close to carry a revenge motive.`,
       evidence: { reverse_margin: margin },
       strength: 0,
     });

@@ -326,7 +326,7 @@ function finishingFactor(
       }
       return (
         `${side.team_name} have scored ${swing} ${gap > 0 ? 'more' : 'fewer'} than the chances ` +
-        `they made over ${style.matches} games — a gap that usually closes rather than holds.`
+        `they made over ${style.matches} games, a gap that usually closes rather than holds.`
       );
     })(),
     evidence: {
