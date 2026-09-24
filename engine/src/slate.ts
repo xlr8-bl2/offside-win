@@ -12,7 +12,7 @@ import { parsePrediction, providerMarkets } from './provider-model.ts';
 import { buildCandidates, driversFor, floorForRank, isLean, marketLabel, select, selectConfident, setAsideFor, type CalibrationMap } from './select.ts';
 import { dbStats, insertMany, kvGetJSON, kvSetJSON, pickConflictTarget, select as dbSelect } from './store.ts';
 import type { CalibrationRow } from './select.ts';
-import type { Candidate, Factor, MarketFamily } from './types.ts';
+import { MARKET_FAMILY, type Candidate, type Factor, type MarketFamily } from './types.ts';
 
 /**
  * The slate: price the next few days, publish the board.
@@ -23,8 +23,6 @@ import type { Candidate, Factor, MarketFamily } from './types.ts';
  */
 
 async function loadCalibration(): Promise<CalibrationMap> {
-  // mean_model_p and mean_actual come with it now: the confident floor reads
-  // them to make a family that has been overclaiming earn its place again.
   const rows = await dbSelect<{
     market_family: MarketFamily;
     n: number;
@@ -32,7 +30,49 @@ async function loadCalibration(): Promise<CalibrationMap> {
     mean_model_p: number | null;
     mean_actual: number | null;
   }>('SELECT market_family, n, shrink, mean_model_p, mean_actual FROM calibration');
-  return new Map(rows.map((r) => [r.market_family, r as CalibrationRow]));
+  const map = new Map(rows.map((r) => [r.market_family, { ...r } as CalibrationRow]));
+
+  /*
+   * The overclaim the confident floor charges is measured on published calls,
+   * not on everything the engine ever considered.
+   *
+   * The calibration table is built from every verdict -- value leans at 55%,
+   * handicaps nobody saw, the lot -- and those are far more overconfident than
+   * the calls that clear an 80% floor. Charging that family-wide gap to the
+   * floor made a result call need 93% before it could be published, which is
+   * above the price ceiling, so from the 22nd onwards the slate analysed a
+   * hundred and seventy fixtures a run and published nothing at all. Measured
+   * on the calls themselves, result calls had been claiming 82.8% and landing
+   * 81.4%: honest to within a point and a half, and being fined thirteen.
+   *
+   * `shrink` still comes from the full table -- it scales edges, which is a
+   * question about every candidate. Only the floor's penalty is re-based, and
+   * only where there are published calls to base it on; otherwise it keeps the
+   * family figure, which errs strict rather than loose.
+   */
+  const called = await dbSelect<{ market: string; model_prob: number; result: string }>(
+    `SELECT market, model_prob, result FROM pick
+     WHERE kind = 'CONFIDENT' AND settled_at IS NOT NULL
+       AND result IN ('WON', 'LOST', 'HALF_WON', 'HALF_LOST')`,
+  );
+  const acc = new Map<MarketFamily, { n: number; p: number; hit: number }>();
+  for (const c of called) {
+    const fam = MARKET_FAMILY[c.market as keyof typeof MARKET_FAMILY];
+    if (!fam) continue;
+    const a = acc.get(fam) ?? { n: 0, p: 0, hit: 0 };
+    a.n++;
+    a.p += c.model_prob;
+    a.hit += c.result === 'WON' ? 1 : c.result === 'HALF_WON' ? 0.5 : 0;
+    acc.set(fam, a);
+  }
+  for (const [fam, a] of acc) {
+    const row = map.get(fam);
+    if (!row) continue;
+    row.n = a.n;
+    row.mean_model_p = a.p / a.n;
+    row.mean_actual = a.hit / a.n;
+  }
+  return map;
 }
 
 /** Trim a factor for storage: the ledger is for reading, not for re-running. */
