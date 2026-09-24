@@ -80,11 +80,17 @@ export function collectAbsences(
   side: SideContext,
   lineups: LineupInfo,
   teamId: number,
+  which: 'home' | 'away' | null = null,
 ): Absence[] {
   const byId = new Map<number, Absence>();
   const squadById = new Map<number, SquadPlayer>((side.squad ?? []).map((p) => [p.id, p]));
 
-  const shares = goalShares(side.scorers);
+  const shares = goalShares(side.scorers, side.squad);
+  const byName = new Map<string, number>();
+  for (const sc of side.scorers ?? []) {
+    const share = shares.get(sc.player_id);
+    if (share !== undefined) byName.set(nameKey(sc.name), share);
+  }
 
   const push = (
     id: number,
@@ -93,7 +99,9 @@ export function collectAbsences(
     reason: string | null,
   ) => {
     if (byId.has(id)) return;
-    const share = shares.get(id);
+    // By id, then by name: the scorers list and the absence list come from
+    // different endpoints and do not always agree on the id.
+    const share = shares.get(id) ?? byName.get(nameKey(name));
     byId.set(id, {
       id,
       name,
@@ -107,9 +115,15 @@ export function collectAbsences(
 
   // The provider's own out-list for this fixture is the most specific source.
   for (const u of lineups.unavailable) {
-    if (u.team_id !== null && u.team_id !== teamId) continue;
-    // When the list is not split by side, fall back to squad membership.
-    if (u.team_id === null && !squadById.has(u.id)) continue;
+    // Attribution, most specific first: the half of the split list it came
+    // from, then a team id on the entry, then squad membership.
+    if (u.side && which) {
+      if (u.side !== which) continue;
+    } else if (u.team_id !== null) {
+      if (u.team_id !== teamId) continue;
+    } else if (!squadById.has(u.id)) {
+      continue;
+    }
     const sq = squadById.get(u.id);
     push(u.id, u.name, sq?.position ?? null, u.reason);
   }
@@ -124,13 +138,31 @@ export function collectAbsences(
   return [...byId.values()];
 }
 
-/** A player's share of their team's league goals. */
-function goalShares(scorers: ScorerRow[] | null): Map<number, number> {
+/** Accent- and case-blind, so "Tárrega" and "Tarrega" are one player. */
+export function nameKey(name: string): string {
+  return String(name ?? '').toLowerCase().normalize('NFD').replace(/[^a-z]/g, '');
+}
+
+/**
+ * A player's share of their team's league goals.
+ *
+ * Only this team's scorers count. The endpoint is asked for one team, but a
+ * league-wide list coming back would otherwise put every club's goals in the
+ * denominator and make the team's own top scorer look like a bit-part player.
+ * A scorer is this team's if the squad has them by id or by name; with no
+ * squad to check against, the list is taken as sent.
+ */
+function goalShares(scorers: ScorerRow[] | null, squad: SquadPlayer[] | null = null): Map<number, number> {
   const out = new Map<number, number>();
   if (!scorers || scorers.length === 0) return out;
-  const total = scorers.reduce((a, s) => a + s.goals, 0);
+  const ids = new Set((squad ?? []).map((p) => p.id));
+  const names = new Set((squad ?? []).map((p) => nameKey(p.name)));
+  const ours = squad && squad.length
+    ? scorers.filter((s) => ids.has(s.player_id) || names.has(nameKey(s.name)))
+    : scorers;
+  const total = ours.reduce((a, s) => a + s.goals, 0);
   if (total <= 0) return out;
-  for (const s of scorers) out.set(s.player_id, s.goals / total);
+  for (const s of ours) out.set(s.player_id, s.goals / total);
   return out;
 }
 
@@ -167,7 +199,7 @@ export function availabilityFactors(ctx: FixtureContext): Factor[] {
   for (const which of ['home', 'away'] as const) {
     const side = ctx[which];
     const other = which === 'home' ? 'away' : 'home';
-    const absences = collectAbsences(side, ctx.lineups, side.team_id);
+    const absences = collectAbsences(side, ctx.lineups, side.team_id, which);
 
     if (absences.length === 0) {
       out.push(

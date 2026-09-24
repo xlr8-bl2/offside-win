@@ -3,7 +3,7 @@ import { runBacktest } from './backtest.ts';
 import { stats as bsdStats } from './bsd.ts';
 import { config, requireEnv } from './config.ts';
 import { backfillHistory } from './history.ts';
-import { probe } from './probe.ts';
+import { probe, probePlayers } from './probe.ts';
 import { fitAllLeagues } from './ratings/fit.ts';
 import { syncTeamShots } from './images/sync.ts';
 import { coinflowCharger, renewDue } from './membership/renew.ts';
@@ -41,6 +41,11 @@ const commands: Record<string, () => Promise<unknown>> = {
   async probe() {
     if (!config.bsd.key) throw new Error('BSD_API_KEY is required to probe.');
     return probe();
+  },
+
+  async 'probe:players'() {
+    if (!config.bsd.key) throw new Error('BSD_API_KEY is required to probe.');
+    return probePlayers();
   },
 
   async migrate() {
