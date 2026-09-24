@@ -261,6 +261,22 @@ ALTER TABLE pick ADD COLUMN IF NOT EXISTS postmortem_json text;
 -- settled call still carries its argument once the fixture's write-up is gone.
 ALTER TABLE pick ADD COLUMN IF NOT EXISTS why text;
 
+-- The bet slip: the most likely calls on the board, combined to total odds
+-- between 2.00 and 3.00 (engine/src/slip.ts). Rebuilt each slate until its
+-- first leg kicks off, then frozen and graded like any call, so it has a
+-- record of its own.
+CREATE TABLE IF NOT EXISTS slip (
+  id            bigserial PRIMARY KEY,
+  created_at    bigint NOT NULL,
+  first_kickoff bigint NOT NULL,
+  legs_json     text NOT NULL,
+  odds          double precision NOT NULL,
+  chance        double precision NOT NULL,
+  result        text,
+  settled_at    bigint
+);
+CREATE INDEX IF NOT EXISTS slip_open ON slip(settled_at, first_kickoff);
+
 CREATE INDEX IF NOT EXISTS pick_fixture ON pick(fixture_id);
 CREATE INDEX IF NOT EXISTS pick_unsettled ON pick(settled_at, kickoff);
 CREATE INDEX IF NOT EXISTS pick_created ON pick(created_at);
@@ -893,6 +909,10 @@ DROP POLICY IF EXISTS pick_read ON pick;
 -- No direct reads. See "The paid tables are read through the functions" below.
 REVOKE ALL ON pick FROM anon, authenticated;
 
+ALTER TABLE slip ENABLE ROW LEVEL SECURITY;
+-- Same rule as pick: the legs of an open slip are the paid product.
+REVOKE ALL ON slip FROM anon, authenticated;
+
 ALTER TABLE calibration ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS calibration_read ON calibration;
 CREATE POLICY calibration_read ON calibration FOR SELECT TO anon USING (true);
@@ -973,6 +993,35 @@ REVOKE ALL ON pick_summary_by_kind FROM anon;
 -- The serving functions are the Worker's whole read path. EXECUTE only: they
 -- are SECURITY INVOKER, so each one still reads under the anon SELECT policies
 -- above and can reach nothing a direct select could not.
+-- The current slip and the slip record.
+--
+-- An open slip's legs need a membership; its size, total odds and chance do
+-- not, because those are the offer. A settled slip is public in full, like a
+-- settled call.
+CREATE OR REPLACE FUNCTION get_slip()
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  WITH m AS MATERIALIZED (SELECT has_membership() AS ok)
+  SELECT json_build_object(
+    'member', (SELECT ok FROM m),
+    'current', (
+      SELECT json_build_object(
+               'id', s.id, 'odds', s.odds, 'chance', s.chance,
+               'first_kickoff', s.first_kickoff,
+               'legs_count', json_array_length(s.legs_json::json),
+               'legs', CASE WHEN (SELECT ok FROM m) THEN s.legs_json::json ELSE NULL END)
+      FROM slip s WHERE s.settled_at IS NULL
+      ORDER BY s.created_at DESC LIMIT 1),
+    'recent', coalesce((
+      SELECT json_agg(r ORDER BY r.first_kickoff DESC) FROM (
+        SELECT s.id, s.odds, s.chance, s.result, s.first_kickoff, s.legs_json::json AS legs
+        FROM slip s WHERE s.settled_at IS NOT NULL
+        ORDER BY s.first_kickoff DESC LIMIT 10) r), '[]'::json),
+    'record', (
+      SELECT json_build_object('n', count(*), 'won', count(*) FILTER (WHERE result = 'WON'))
+      FROM slip WHERE settled_at IS NOT NULL AND result IN ('WON', 'LOST'))
+  );
+$fn$;
+
 -- The paid tables are read through the functions, never directly.
 --
 -- fixture, pick and kv used to carry a policy letting the public key SELECT
@@ -999,6 +1048,7 @@ GRANT EXECUTE ON FUNCTION get_picks(integer, text) TO anon;
 GRANT EXECUTE ON FUNCTION get_model() TO anon;
 GRANT EXECUTE ON FUNCTION get_hero() TO anon;
 GRANT EXECUTE ON FUNCTION get_health() TO anon;
+GRANT EXECUTE ON FUNCTION get_slip() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint), get_fixture(bigint), get_picks(integer, text),
   get_model(), get_hero(), get_health(), get_account(), has_membership(), try_json(text) TO authenticated;
 
