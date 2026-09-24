@@ -756,7 +756,10 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
            'picks', coalesce((
              SELECT json_agg(row_to_json(p) ORDER BY p.kickoff DESC)
              FROM (
-               SELECT pk.id, pk.fixture_id, pk.kickoff, pk.market, pk.outcome, pk.line, pk.kind,
+               -- The fixture's kick-off, not the one saved with the call: a
+               -- rescheduled match kept its old date on the results page
+               -- while its own page had the new one.
+               SELECT pk.id, pk.fixture_id, coalesce(f.kickoff, pk.kickoff) AS kickoff, pk.market, pk.outcome, pk.line, pk.kind,
                       pk.model_prob, pk.book_prob, pk.edge, pk.odds, pk.bookmaker, pk.kelly,
                       pk.confidence, pk.provisional, pk.narrative, pk.result, pk.pnl,
                       f.home_team, f.away_team,
