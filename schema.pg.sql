@@ -220,6 +220,15 @@ ALTER TABLE fixture ADD COLUMN IF NOT EXISTS away_goals integer;
 -- home_goals and away_goals take over.
 ALTER TABLE fixture ADD COLUMN IF NOT EXISTS live_home integer;
 ALTER TABLE fixture ADD COLUMN IF NOT EXISTS live_away integer;
+-- And the minute, so a live row can say 61' rather than just LIVE.
+ALTER TABLE fixture ADD COLUMN IF NOT EXISTS live_minute integer;
+
+-- The match report, once there is one: goals with minutes and assists, cards,
+-- substitutions, player ratings, team totals and the confirmed team sheets.
+-- Written once per finished match by engine/src/report.ts, in its own column
+-- because the write-up beside it is frozen at kick-off. A finished match is
+-- public, so the serving functions hand it to everyone.
+ALTER TABLE fixture ADD COLUMN IF NOT EXISTS report_json text;
 
 -- The provider's team ids, which are also the keys to its image service:
 -- /img/team/{id}/ returns the real crest. They were on the board card and
@@ -490,6 +499,17 @@ EXCEPTION WHEN others THEN
 END;
 $fn$;
 
+-- The goals out of a match report, for a row that has room for the scorers
+-- and not for the whole report. Null when there is no report or no goals.
+CREATE OR REPLACE FUNCTION report_goals(raw text)
+RETURNS jsonb LANGUAGE sql IMMUTABLE PARALLEL SAFE SET search_path = public AS $fn$
+  SELECT CASE WHEN raw IS NULL THEN NULL ELSE (
+    SELECT jsonb_agg(e ORDER BY (e->>'minute')::numeric NULLS FIRST, (e->>'added')::numeric NULLS FIRST)
+    FROM jsonb_array_elements(coalesce(try_json(raw)::jsonb->'events', '[]'::jsonb)) e
+    WHERE e->>'t' = 'goal'
+  ) END;
+$fn$;
+
 -- The picks page needs one aggregate row. Settled, non-void picks only: a void
 -- bet is a stake returned, so counting it would dilute the strike rate with
 -- results that were never in play. HALF_WON is an Asian-handicap half-win and
@@ -567,9 +587,15 @@ $fn$;
 -- and the one that converts, because a reader who has watched a free call
 -- land knows what the paid ones look like. chooseHero() only picks a called
 -- fixture, so this is never empty on a day with calls.
+-- The free call is the strongest open call of the day, chosen by the slate
+-- (engine/src/free.ts) and kept under free:today. The headline fixture is the
+-- fallback for a database the new slate has not written yet.
 CREATE OR REPLACE FUNCTION free_fixture_id()
 RETURNS bigint LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
-  SELECT (try_json(v)->>'fixture_id')::bigint FROM kv WHERE k = 'hero:today';
+  SELECT coalesce(
+    (SELECT (try_json(v)->>'fixture_id')::bigint FROM kv WHERE k = 'free:today'),
+    (SELECT (try_json(v)->>'fixture_id')::bigint FROM kv WHERE k = 'hero:today')
+  );
 $fn$;
 
 -- ------------------------------------------------------------ the writes
@@ -815,7 +841,8 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
              -- before the final score lands.
              || jsonb_build_object('status', f.status)
              || CASE WHEN f.home_goals IS NULL AND f.live_home IS NOT NULL AND f.live_away IS NOT NULL
-                     THEN jsonb_build_object('live_score', jsonb_build_array(f.live_home, f.live_away))
+                     THEN jsonb_build_object('live_score', jsonb_build_array(f.live_home, f.live_away),
+                                             'live_minute', f.live_minute)
                      ELSE '{}'::jsonb END
              || CASE WHEN f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
                      THEN jsonb_build_object(
@@ -831,7 +858,11 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
                                        'odds', pk.odds, 'bookmaker', pk.bookmaker, 'result', pk.result)
                               FROM pick pk
                               WHERE pk.fixture_id = f.id AND pk.kind = 'CONFIDENT'
-                              ORDER BY pk.model_prob DESC LIMIT 1))
+                              ORDER BY pk.model_prob DESC LIMIT 1),
+                            -- Who scored, for the row. The whole report is
+                            -- on the fixture page; the board carries only
+                            -- the goals.
+                            'goals', report_goals(f.report_json))
                      ELSE '{}'::jsonb END
            )::json AS card,
            f.kickoff, f.rank
@@ -870,12 +901,17 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
            -- columns settlement writes rather than from the frozen card.
            || jsonb_build_object('status', f.status)
            || CASE WHEN f.home_goals IS NULL AND f.live_home IS NOT NULL AND f.live_away IS NOT NULL
-                   THEN jsonb_build_object('live_score', jsonb_build_array(f.live_home, f.live_away))
+                   THEN jsonb_build_object('live_score', jsonb_build_array(f.live_home, f.live_away),
+                                           'live_minute', f.live_minute)
                    ELSE '{}'::jsonb END
            || CASE WHEN f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
                    THEN jsonb_build_object(
                           'score', jsonb_build_array(f.home_goals, f.away_goals),
                           'status', 'finished')
+                   ELSE '{}'::jsonb END
+           -- What happened, once it has. See report_json above.
+           || CASE WHEN f.report_json IS NOT NULL
+                   THEN jsonb_build_object('report', try_json(f.report_json)::jsonb)
                    ELSE '{}'::jsonb END
            || CASE WHEN f.id = free_fixture_id() THEN '{"free_call": true}'::jsonb ELSE '{}'::jsonb END
            -- The calls, from the record rather than from the write-up.
@@ -932,7 +968,9 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
                       pk.postmortem_json, pk.opening_odds, pk.closing_odds,
                       -- The members' paragraph. Settled calls are public, so
                       -- their argument is too.
-                      pk.why
+                      pk.why,
+                      -- Who scored and when, for the results sheet.
+                      report_goals(f.report_json) AS goals
                FROM pick pk LEFT JOIN fixture f ON f.id = pk.fixture_id
                -- Settled picks stay public forever, membership or not: the
                -- results page is the only honest marketing this product has and
@@ -982,14 +1020,25 @@ $fn$;
 -- and the threshold belongs next to the query that decides it.
 -- What the site leads with. An override set by hand wins over the daily pick,
 -- so a hand-made graphic can go up for a final without a deploy.
+-- The masthead, with the id of today's free call beside it. The two used to be
+-- the same fixture; now the front page leads with the biggest game and hands
+-- out the strongest call, and needs to know both. A day with no headline
+-- still answers with the free call's id, so the page checks for fixture_id
+-- rather than for null.
 CREATE OR REPLACE FUNCTION get_hero()
 RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
-  SELECT coalesce(
-    (SELECT try_json(v) FROM kv WHERE k = 'hero:override'
-       AND (expires_at IS NULL OR expires_at > floor(extract(epoch FROM now())))),
-    (SELECT try_json(v) FROM kv WHERE k = 'hero:today'),
-    'null'::json
-  );
+  SELECT (
+    CASE WHEN jsonb_typeof(h.hero) = 'object' THEN h.hero ELSE '{}'::jsonb END
+    || jsonb_build_object('free_fixture_id', free_fixture_id())
+  )::json
+  FROM (
+    SELECT coalesce(
+      (SELECT try_json(v)::jsonb FROM kv WHERE k = 'hero:override'
+         AND (expires_at IS NULL OR expires_at > floor(extract(epoch FROM now())))),
+      (SELECT try_json(v)::jsonb FROM kv WHERE k = 'hero:today'),
+      'null'::jsonb
+    ) AS hero
+  ) h;
 $fn$;
 
 CREATE OR REPLACE FUNCTION get_health()
@@ -1216,6 +1265,7 @@ $fn$;
 -- `authenticated`) calling them as invoker would have seen empty tables.
 -- Every definer function pins search_path, which is what makes it safe.
 GRANT EXECUTE ON FUNCTION try_json(text) TO anon;
+GRANT EXECUTE ON FUNCTION report_goals(text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION has_membership() TO anon;
 GRANT EXECUTE ON FUNCTION get_account() TO anon;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint) TO anon;

@@ -62,7 +62,10 @@ function parseLineupSide(raw: unknown): SideLineup | null {
   if (!list) return null;
 
   const players: LineupPlayer[] = [];
-  for (const p of list) {
+  // The bench travels under its own key. It was never read, so the line-ups
+  // tab showed eleven names a side and no substitutes at all.
+  const bench = asArray(rec['substitutes']) ?? [];
+  for (const [p, onBench] of [...list.map((p) => [p, false] as const), ...bench.map((p) => [p, true] as const)]) {
     const pr = asRecord(p);
     const id = num(pr?.['id'] ?? pr?.['player_id']);
     if (id === undefined) continue;
@@ -72,7 +75,7 @@ function parseLineupSide(raw: unknown): SideLineup | null {
       position: str(pr?.['position']) ?? null,
       // Absent "substitute" markers mean a flat XI list; treat those as starters.
       starting:
-        pr?.['substitute'] === true || pr?.['is_substitute'] === true || pr?.['starting'] === false
+        onBench || pr?.['substitute'] === true || pr?.['is_substitute'] === true || pr?.['starting'] === false
           ? false
           : true,
       ai_score: num(pr?.['ai_score']) ?? null,
