@@ -144,8 +144,10 @@ export function freeBoard(board: Obj): Obj {
   // freeBundle.
   const confident = Array.isArray(board['confident']) ? board['confident'].length : 0;
   const calls = board['top_pick'] ? Math.max(1, confident) : 0;
+  // A locked card never carries a pass note: it contradicts the lock, and the
+  // note names the nearest market and its odds.
   return scrub({
-    ...omit(board, ['top_pick', 'confident', 'odds_1x2']),
+    ...omit(board, ['top_pick', 'confident', 'odds_1x2', ...(calls ? ['pass'] : [])]),
     ...lockState(calls),
   }) as Obj;
 }
@@ -177,8 +179,9 @@ export function freeBundle(bundle: Obj): Obj {
       })
     : [];
 
-  const rest = omit(bundle, ['top_pick', 'confident', 'odds_1x2', 'markets', 'candidates', 'verdicts']);
   const calls = Array.isArray(bundle['verdicts']) ? bundle['verdicts'].length : 0;
+  const rest = omit(bundle, ['top_pick', 'confident', 'odds_1x2', 'markets', 'candidates', 'verdicts',
+    ...(calls ? ['pass', 'pass_reason'] : [])]);
 
   return scrub({
     ...rest,

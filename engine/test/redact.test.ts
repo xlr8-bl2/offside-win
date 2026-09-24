@@ -233,3 +233,13 @@ test('the members-only "why this call" never reaches the free copy', () => {
   assert.ok(!free.includes('odds of 1.29'), 'the why leaked into the free copy');
   assert.ok(!free.includes('"why"'), 'the why key survived');
 });
+
+test('a locked card carries no pass note', () => {
+  // The note names the nearest market and its odds, and on a called match it
+  // contradicts the lock.
+  const board = { ...BOARD, top_pick: { market: 'btts', odds: 1.5 }, pass: 'the closest was double chance 1X at 1.47' };
+  assert.ok(!JSON.stringify(freeBoard(board)).includes('1.47'));
+  const bundle = { ...BUNDLE, pass: 'the closest was double chance 1X at 1.47', pass_reason: 'x at 1.47',
+    verdicts: [{ candidate: { market: 'btts' }, narrative: 'n', drivers: [], set_aside: [] }] };
+  assert.ok(!JSON.stringify(freeBundle(bundle)).includes('1.47'));
+});
