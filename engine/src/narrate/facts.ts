@@ -39,13 +39,22 @@ interface LedgerEntry {
   evidence?: Record<string, unknown>;
 }
 
+interface LineupPlayer { name?: string; position?: string | null; starting?: boolean }
+interface LineupSide { formation?: string | null; players?: LineupPlayer[] }
+
 interface Bundle {
   home: string;
   away: string;
   ledger?: LedgerEntry[];
   form?: { home?: Record<string, unknown> | null; away?: Record<string, unknown> | null } | null;
   h2h?: Record<string, unknown> | null;
-  lineups?: { status?: string } | null;
+  lineups?: { status?: string; home?: LineupSide | null; away?: LineupSide | null } | null;
+  /** League table rows for the two sides, as the bundle carries them. */
+  standings?: { home?: { position?: number } | null; away?: { position?: number } | null; size?: number } | null;
+  /** The players the prediction market fancies to score, most fancied first. */
+  goalscorers?: Array<{ player?: string; price?: number }> | null;
+  /** Managers by name, when the feed has them. */
+  managers?: { home?: string | null; away?: string | null } | null;
 }
 
 const WORD = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
@@ -129,11 +138,41 @@ function formFacts(ev: Record<string, unknown> | null | undefined, team: string,
 
 /* ----------------------------------------------------------- availability */
 
+const ROLE: Record<string, string> = { DEF: 'at the back', MID: 'in midfield', ATT: 'up front', GK: 'in goal' };
+
+/** "A, B and C". */
+function list(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
 function absenceFacts(ev: Record<string, unknown>, team: string, side: 'home' | 'away'): PubFact[] {
   const players = Array.isArray(ev['players']) ? ev['players'] as Record<string, unknown>[] : [];
   const count = num(ev['count']) ?? players.length;
   const out: PubFact[] = [];
   if (!count) return out;
+
+  /*
+   * Everyone who is out, by name and by where they play.
+   *
+   * It used to name one player and then say "missing four players", which is
+   * a headcount, not team news. Grouped by line so the sentence says what the
+   * absences do to the side: "without Mendy and Bombito at the back, and
+   * Abergel in midfield".
+   */
+  const byLine = new Map<string, string[]>();
+  for (const p of players) {
+    const name = str(p['player']);
+    if (!name) continue;
+    const where = ROLE[String(p['role'] ?? '')] ?? '';
+    byLine.set(where, [...(byLine.get(where) ?? []), name]);
+  }
+  const clauses = [...byLine.entries()]
+    .sort((a, b) => (a[0] === 'up front' ? -1 : b[0] === 'up front' ? 1 : 0))
+    .map(([where, names]) => `${list(names.slice(0, 3))}${where ? ` ${where}` : ''}`);
+  if (clauses.length) {
+    out.push({ text: `${team} are without ${list(clauses.slice(0, 3))}`, side, weight: 90 });
+  }
 
   // A named player out is worth more than a headcount, so it leads.
   const named = players
@@ -157,8 +196,8 @@ function absenceFacts(ev: Record<string, unknown>, team: string, side: 'home' | 
     });
   }
 
-  if (count >= 3) {
-    out.push({ text: `${team} are missing ${n(count)} players`, side, weight: 60 });
+  if (count >= 4) {
+    out.push({ text: `${team} are missing ${n(count)} players in all`, side, weight: 55 });
   }
 
   const share = num(ev['combined_goal_share']) ?? 0;
@@ -273,6 +312,96 @@ function h2hFacts(h2h: Record<string, unknown> | null | undefined, home: string,
   return out;
 }
 
+/* ------------------------------------------------------------ the people */
+
+const ORD = (v: number): string => {
+  const t = v % 100;
+  if (t >= 11 && t <= 13) return `${v}th`;
+  return `${v}${({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[v % 10] ?? 'th'}`;
+};
+
+/** Where they sit. A league position is a number every supporter says. */
+function tableFacts(b: Bundle): PubFact[] {
+  const out: PubFact[] = [];
+  const size = num(b.standings?.size);
+  for (const [side, team] of [['home', b.home], ['away', b.away]] as const) {
+    const pos = num(b.standings?.[side]?.position);
+    if (!pos) continue;
+    const where = size && pos === size ? 'bottom of the table'
+      : pos === 1 ? 'top of the table'
+      : size && pos > size - 3 ? `${ORD(pos)}, in the bottom three`
+      : `${ORD(pos)} in the table`;
+    out.push({ text: `${team} are ${where}`, side, weight: pos === 1 || (size && pos > size - 3) ? 78 : 55 });
+  }
+  return out;
+}
+
+/**
+ * Who is playing.
+ *
+ * The forwards and the keeper, named, because those are the players an
+ * argument about goals or clean sheets is really about. "Expected to start"
+ * when the sheet is predicted rather than confirmed -- the difference matters
+ * and a reader should be told which one they are getting.
+ */
+function lineupFacts(b: Bundle): PubFact[] {
+  const out: PubFact[] = [];
+  const confirmed = b.lineups?.status === 'confirmed';
+  const verb = confirmed ? 'start' : 'are expected to start';
+  const verb1 = confirmed ? 'starts' : 'is expected to start';
+  for (const [side, team] of [['home', b.home], ['away', b.away]] as const) {
+    const s = b.lineups?.[side];
+    const xi = (s?.players ?? []).filter((p) => p.starting && p.name);
+    if (xi.length < 9) continue;
+    const fwd = xi.filter((p) => p.position === 'F').map((p) => p.name!);
+    if (fwd.length === 1) out.push({ text: `${fwd[0]} ${verb1} up front for ${team}`, side, weight: 72 });
+    else if (fwd.length > 1) out.push({ text: `${list(fwd.slice(0, 3))} ${verb} up front for ${team}`, side, weight: 72 });
+    const gk = xi.find((p) => p.position === 'G')?.name;
+    if (gk) out.push({ text: `${gk} ${verb1} in goal for ${team}`, side, weight: 40 });
+    const shape = str(s?.formation);
+    if (shape && /^\d(-\d){2,4}$/.test(shape)) out.push({ text: `${team} line up ${shape}`, side, weight: 35 });
+  }
+  return out;
+}
+
+/**
+ * Who is likeliest to score, as a name and never as the price.
+ *
+ * The prediction market's goalscorer book is the best single read of who the
+ * dangerous players are this weekend, and it is the sort of thing a pundit
+ * knows without looking up. The number behind it is ours to keep.
+ */
+function scorerFacts(b: Bundle): PubFact[] {
+  const list0 = (b.goalscorers ?? [])
+    .filter((g) => str(g.player) && num(g.price) !== null)
+    .sort((a, c) => (c.price ?? 0) - (a.price ?? 0));
+  if (!list0.length) return [];
+  // Attribute a scorer to a side through the team sheets where possible.
+  const sideOf = (name: string): 'home' | 'away' | null => {
+    for (const side of ['home', 'away'] as const) {
+      if ((b.lineups?.[side]?.players ?? []).some((p) => p.name === name)) return side;
+    }
+    return null;
+  };
+  const out: PubFact[] = [];
+  const top = list0.slice(0, 2).map((g) => g.player!);
+  const who = top.map((name) => {
+    const side = sideOf(name);
+    return side ? `${name} for ${side === 'home' ? b.home : b.away}` : name;
+  });
+  out.push({ text: `the players most fancied to score are ${list(who)}`, side: 'match', weight: 76 });
+  return out;
+}
+
+function managerNameFacts(b: Bundle): PubFact[] {
+  const out: PubFact[] = [];
+  for (const [side, team] of [['home', b.home], ['away', b.away]] as const) {
+    const name = str(b.managers?.[side]);
+    if (name && name !== 'the manager') out.push({ text: `${name} manages ${team}`, side, weight: 30 });
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ entry */
 
 /**
@@ -308,6 +437,10 @@ export function pubFacts(bundle: Bundle): PubFact[] {
   }
 
   out.push(...h2hFacts(bundle.h2h, home, away));
+  out.push(...tableFacts(bundle));
+  out.push(...lineupFacts(bundle));
+  out.push(...scorerFacts(bundle));
+  out.push(...managerNameFacts(bundle));
 
   if (bundle.lineups?.status === 'confirmed') {
     out.push({ text: 'the team sheets are confirmed', side: 'match', weight: 20 });

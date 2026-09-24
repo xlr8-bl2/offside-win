@@ -257,6 +257,9 @@ ALTER TABLE pick ADD COLUMN IF NOT EXISTS opening_odds double precision;
 -- Nullable because every pick settled before this existed has none, and a page
 -- that demands it would show nothing for the whole back record.
 ALTER TABLE pick ADD COLUMN IF NOT EXISTS postmortem_json text;
+-- Why this call, at its odds: the members' paragraph. Kept on the record so a
+-- settled call still carries its argument once the fixture's write-up is gone.
+ALTER TABLE pick ADD COLUMN IF NOT EXISTS why text;
 
 CREATE INDEX IF NOT EXISTS pick_fixture ON pick(fixture_id);
 CREATE INDEX IF NOT EXISTS pick_unsettled ON pick(settled_at, kickoff);
@@ -714,7 +717,7 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
                 SELECT jsonb_agg(jsonb_build_object(
                          'market', pk.market, 'outcome', pk.outcome, 'line', pk.line,
                          'odds', pk.odds, 'bookmaker', pk.bookmaker,
-                         'model_prob', pk.model_prob, 'narrative', pk.narrative,
+                         'model_prob', pk.model_prob, 'narrative', pk.narrative, 'why', pk.why,
                          'result', pk.result, 'settled', pk.settled_at IS NOT NULL,
                          'postmortem', try_json(pk.postmortem_json))
                        ORDER BY pk.model_prob DESC)
@@ -748,7 +751,10 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
                       f.home_team_id, f.away_team_id,
                       -- What the result says about the call, and what the
                       -- market did between our saying it and kick-off.
-                      pk.postmortem_json, pk.opening_odds, pk.closing_odds
+                      pk.postmortem_json, pk.opening_odds, pk.closing_odds,
+                      -- The members' paragraph. Settled calls are public, so
+                      -- their argument is too.
+                      pk.why
                FROM pick pk LEFT JOIN fixture f ON f.id = pk.fixture_id
                -- Settled picks stay public forever, membership or not: the
                -- results page is the only honest marketing this product has and
