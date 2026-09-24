@@ -61,6 +61,8 @@ export interface HeroCandidate {
   round_label?: string | null;
   star_home?: number | null;
   star_away?: number | null;
+  /** Whether a call was published on it. The masthead only leads with one that has. */
+  called?: boolean;
 }
 
 /**
@@ -99,7 +101,16 @@ export function scoreCandidate(f: HeroCandidate, now: number): number {
 }
 
 export function chooseHero(fixtures: HeroCandidate[], now = Math.floor(Date.now() / 1000)): HeroPick | null {
-  const live = fixtures.filter((f) => f.kickoff > now - 2 * 3600);
+  /*
+   * A called fixture, or nothing.
+   *
+   * The masthead says "Our call on it, the argument for it", and it was
+   * choosing on prominence alone -- so the front page led with Rivers United v
+   * Kun Khalifat, a match we had passed on, under a sentence promising a call.
+   * A candidate without `called` set is treated as called, so older callers
+   * and tests keep their behaviour; the slate always sets it.
+   */
+  const live = fixtures.filter((f) => f.kickoff > now - 2 * 3600 && f.called !== false);
   if (live.length === 0) return null;
 
   const best = live.reduce((a, b) => (scoreCandidate(b, now) > scoreCandidate(a, now) ? b : a));

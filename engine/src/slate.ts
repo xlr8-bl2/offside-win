@@ -10,7 +10,7 @@ import { write, type Writer } from './narrate/write.ts';
 import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
 import { buildCandidates, driversFor, floorForRank, isLean, marketLabel, select, selectConfident, setAsideFor, type CalibrationMap } from './select.ts';
-import { dbStats, insertMany, kvGetJSON, kvSetJSON, pickConflictTarget, select as dbSelect } from './store.ts';
+import { dbStats, exec as dbExec, insertMany, kvGetJSON, kvSetJSON, pickConflictTarget, select as dbSelect } from './store.ts';
 import type { CalibrationRow } from './select.ts';
 import { MARKET_FAMILY, type Candidate, type Factor, type MarketFamily } from './types.ts';
 
@@ -256,6 +256,9 @@ export async function runSlate(): Promise<SlateReport> {
 
   const fixtureRows: Array<Record<string, unknown>> = [];
   const pickRows: Array<Record<string, unknown>> = [];
+  // The confident calls each fixture carries as of this run, for fixtures
+  // that have not kicked off. See the withdrawal after the pick upsert.
+  const standing = new Map<number, Array<{ market: string; outcome: string; line: number | null }>>();
   const heroCandidates: HeroCandidate[] = [];
 
   for (const event of candidates) {
@@ -625,7 +628,23 @@ export async function runSlate(): Promise<SlateReport> {
         computed_at: analysis.computed_at,
       });
 
-      for (const v of allVerdicts) {
+      /*
+       * Nothing is added to the record once the match has started.
+       *
+       * The slate reaches back over matches already under way and finished --
+       * that is how scores arrive -- and it was upserting picks for them as it
+       * went. A call that first appears after kick-off is a call made with the
+       * answer in view, and settlement would grade it like any other. The
+       * fixture's write-up was frozen at kick-off for the same reason; the
+       * record needed it more.
+       */
+      const started = analysis.kickoff <= Math.floor(Date.now() / 1000);
+      if (!started) {
+        standing.set(analysis.fixture_id, confidentVerdicts.map((v) => ({
+          market: v.candidate.market, outcome: v.candidate.outcome, line: v.candidate.line ?? null,
+        })));
+      }
+      for (const v of started ? [] : allVerdicts) {
         pickRows.push({
           fixture_id: analysis.fixture_id,
           kickoff: analysis.kickoff,
@@ -689,6 +708,7 @@ export async function runSlate(): Promise<SlateReport> {
         round_label: str(event['round_label']) || null,
         star_home: bestStarter('home'),
         star_away: bestStarter('away'),
+        called: confidentVerdicts.length > 0,
       });
 
       report.analysed++;
@@ -774,6 +794,9 @@ export async function runSlate(): Promise<SlateReport> {
           'bookmaker = excluded.bookmaker, kelly = excluded.kelly, ' +
           'confidence = excluded.confidence, provisional = excluded.provisional, ' +
           'narrative = excluded.narrative, evidence_json = excluded.evidence_json, ' +
+          // A rescheduled match moves its call with it; the results page was
+          // printing the old date.
+          'kickoff = excluded.kickoff, ' +
           // Deliberately NOT opening_odds: it is set once, on the insert that
           // first published the call, and never again. The last price this
           // loop writes before the match starts is the closing one.
@@ -783,12 +806,45 @@ export async function runSlate(): Promise<SlateReport> {
     );
   }
 
+  /*
+   * One standing call per fixture, and a replaced one is withdrawn.
+   *
+   * A later run before kick-off can change its mind -- team news lands, the
+   * price moves -- and publish a different call on the same match. The old
+   * pick row was never removed, so both stayed in the record and both were
+   * graded: Inter Miami 2-2 San Diego carries "1X, landed" and "12, missed"
+   * side by side, which is two calls that cover each other and reads to any
+   * punter as padding the strike rate. Before kick-off nothing is known about
+   * the result, so withdrawing a call the engine no longer stands behind is
+   * honest; after kick-off nothing is touched (see `started` above).
+   */
+  let withdrawn = 0;
+  for (const [fixtureId, keep] of standing) {
+    const rows = await dbSelect<{ id: number; market: string; outcome: string; line: number | null }>(
+      `SELECT id, market, outcome, line FROM pick
+       WHERE fixture_id = ? AND kind = 'CONFIDENT' AND settled_at IS NULL AND kickoff > ?`,
+      [fixtureId, now],
+    );
+    for (const r of rows) {
+      const kept = keep.some((k) => k.market === r.market && String(k.outcome) === String(r.outcome)
+        && (k.line ?? null) === (r.line ?? null));
+      if (kept) continue;
+      await dbExec('DELETE FROM pick WHERE id = ?', [r.id]);
+      withdrawn++;
+    }
+  }
+  if (withdrawn) console.log(`  withdrew ${withdrawn} call${withdrawn === 1 ? '' : 's'} replaced before kick-off`);
+
   // What the site leads with today. Written whether or not anything special is
   // on — a quiet Tuesday still needs a masthead, it just gets a quieter one.
   const hero = chooseHero(heroCandidates);
   if (hero) {
     await kvSetJSON('hero:today', hero);
     console.log(`  hero: ${hero.kicker} — ${hero.headline} (${hero.reason})`);
+  } else {
+    // No called fixture ahead: clear it, rather than leave yesterday's match
+    // leading the front page. The page has a masthead for this case.
+    await kvSetJSON('hero:today', null);
   }
 
   await kvSetJSON('narrate:ledger', ledger.snapshot());
