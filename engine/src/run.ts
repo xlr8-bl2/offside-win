@@ -4,7 +4,7 @@ import { stats as bsdStats } from './bsd.ts';
 import { config, requireEnv } from './config.ts';
 import { backfillHistory } from './history.ts';
 import { probe, probePlayers } from './probe.ts';
-import { grant } from './grant.ts';
+import { grant, plans } from './grant.ts';
 import { fitAllLeagues } from './ratings/fit.ts';
 import { syncTeamShots } from './images/sync.ts';
 import { coinflowCharger, renewDue } from './membership/renew.ts';
@@ -135,6 +135,13 @@ const commands: Record<string, () => Promise<unknown>> = {
     requireEnv();
     await ensureSchema();
     return runSettle();
+  },
+
+  async plans() {
+    requireEnv({ provider: false });
+    await ensureSchema();
+    const [id, value] = process.argv.slice(3);
+    return plans(id ?? (process.env['GRANT_EMAIL'] || undefined), value ?? (process.env['GRANT_ARG'] || undefined));
   },
 
   async grant() {
