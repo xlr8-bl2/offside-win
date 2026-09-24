@@ -332,3 +332,110 @@ export async function probePlayers(): Promise<void> {
     }
   }
 }
+
+/**
+ * What a finished match looks like, feed by feed.
+ *
+ * The fixture-scoped probe above sketches the first element of each list,
+ * which for the incidents feed is always the "FT" period marker -- so the
+ * shapes of a goal, a card and a substitution were never printed, and the
+ * match report the site wants to draw (who scored, when, from whose pass, who
+ * came on, how each player was rated) had nothing to be built against. This
+ * takes a recent finished match from a top league and prints one example of
+ * every incident type, one starter and one substitute from the post-match
+ * line-ups, one row of the per-player stats, and the event's own record.
+ * Field names and short strings only, as everywhere in this file.
+ *
+ *   npm run probe:report
+ */
+export async function probeReport(): Promise<void> {
+  if (!config.bsd.key) throw new Error('BSD_API_KEY is required to probe.');
+  mkdirSync(OUT, { recursive: true });
+
+  const deep = (v: unknown): unknown => JSON.parse(JSON.stringify(sketchDeep(v, 0)));
+  function sketchDeep(v: unknown, depth: number): unknown {
+    if (v === null) return 'null';
+    if (Array.isArray(v)) {
+      if (v.length === 0) return ['<empty>'];
+      if (depth >= 7) return [`<array of ${v.length}>`];
+      return [sketchDeep(v[0], depth + 1), `…${v.length} items`];
+    }
+    if (typeof v === 'object') {
+      if (depth >= 7) return '<object>';
+      const out: Record<string, unknown> = {};
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = sketchDeep(val, depth + 1);
+      return out;
+    }
+    if (typeof v === 'string') return v.length <= 40 ? `string(${JSON.stringify(v)})` : 'string';
+    return typeof v;
+  }
+  const show = (label: string, v: unknown) => {
+    console.log(`\n=== ${label}\n${JSON.stringify(deep(v), null, 2).slice(0, 5000)}`);
+  };
+
+  // A finished match from the last four days, top-flight where possible, that
+  // actually has incidents on it.
+  const finished = await bsdList<Record<string, unknown>>(
+    '/api/v2/events/',
+    {
+      date_from: new Date(Date.now() - 4 * 864e5).toISOString().slice(0, 10),
+      date_to: new Date(Date.now() - 0 * 864e5).toISOString().slice(0, 10),
+    },
+    { limit: 200, max: 600 },
+  );
+  const done = finished
+    .filter((e) => e.home_score != null && /finish/i.test(String(e.status ?? '')))
+    .sort((a, b) => Number(config.leagueRank[Number(a.league_id)] ?? 6) - Number(config.leagueRank[Number(b.league_id)] ?? 6));
+  console.log(`${finished.length} events in the window, ${done.length} finished`);
+
+  for (const ev of done.slice(0, 6)) {
+    const id = Number(ev.id);
+    const inc = await bsdRaw<Record<string, unknown>>(`/api/v2/events/${id}/incidents/`);
+    const list = inc.ok ? (inc.data['incidents'] as unknown[] | undefined) ?? [] : [];
+    if (!list.length) { console.log(`  ${id}: no incidents, trying the next`); continue; }
+    console.log(`\nFinished match ${id}: ${String(ev.home_team)} v ${String(ev.away_team)} (league ${String(ev.league_id)}), ${list.length} incidents`);
+    show('finished_event', ev);
+
+    // One example per incident type, so a goal, a card and a substitution
+    // each show their own fields.
+    const byType = new Map<string, unknown>();
+    for (const raw of list) {
+      const r = raw as Record<string, unknown>;
+      const t = String(r['type'] ?? r['incident_type'] ?? r['kind'] ?? '?');
+      const sub = String(r['incident_class'] ?? r['class'] ?? r['detail'] ?? r['card'] ?? '');
+      const key = sub ? `${t}/${sub}` : t;
+      if (!byType.has(key)) byType.set(key, raw);
+    }
+    console.log(`  incident types: ${[...byType.keys()].join(', ')}`);
+    for (const [key, ex] of byType) show(`incident ${key}`, ex);
+
+    const lineups = await bsdRaw<Record<string, unknown>>(`/api/v2/events/${id}/lineups/`);
+    if (lineups.ok) {
+      const home = (lineups.data['lineups'] as Record<string, Record<string, unknown>> | undefined)?.['home'];
+      show('finished_lineups_root', { ...lineups.data, lineups: '<see below>' });
+      show('finished_lineups_home_player0', (home?.['players'] as unknown[] | undefined)?.[0] ?? null);
+      show('finished_lineups_home_substitute0', (home?.['substitutes'] as unknown[] | undefined)?.[0] ?? null);
+      show('finished_lineups_home_keys', Object.keys(home ?? {}));
+    } else {
+      console.log(`  lineups: ${lineups.status} ${lineups.reason}`);
+    }
+
+    const ps = await bsdRaw<Record<string, unknown>>(`/api/v2/events/${id}/player-stats/`);
+    if (ps.ok) {
+      const rows = (ps.data['player_stats'] as unknown[] | undefined) ?? (ps.data['results'] as unknown[] | undefined) ?? [];
+      show('finished_player_stats_root', { ...ps.data, player_stats: `<${rows.length} rows>` });
+      show('finished_player_stats_row0', rows[0] ?? null);
+    } else {
+      console.log(`  player-stats: ${ps.status} ${ps.reason}`);
+    }
+
+    const stats = await bsdRaw<Record<string, unknown>>(`/api/v2/events/${id}/stats/`);
+    if (stats.ok) {
+      const st = stats.data['stats'] as Record<string, unknown> | undefined;
+      show('finished_stats_keys', Object.keys(st ?? {}));
+      const home = (st?.['home'] as Record<string, unknown> | undefined) ?? {};
+      show('finished_stats_home_keys', Object.keys(home));
+    }
+    break;
+  }
+}
