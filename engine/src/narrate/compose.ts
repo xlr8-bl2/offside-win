@@ -324,7 +324,30 @@ export function narratePass(reason: string, homeTeam: string, awayTeam: string, 
     `${homeTeam} v ${awayTeam} is one to leave alone.`,
     `Nothing to take on ${homeTeam} against ${awayTeam}.`,
   ];
-  return `${choose(openers, rng).item} ${reason}`;
+  return `${choose(openers, rng).item} ${plainPass(reason)}`;
+}
+
+/**
+ * Why there is no call, said the way a reader would say it.
+ *
+ * The engine's reason is written for us -- "edge of 20.5 points does not
+ * clear the 58.1 needed against a 109.1% margin", "model confidence of 17% is
+ * below the threshold" -- and it was printed under every match we passed on.
+ * It stays in the run log, where it is useful. The page gets the gist.
+ */
+export function plainPass(reason: string): string {
+  const r = reason.toLowerCase();
+  if (/no market is priced/.test(r)) return 'No bookmaker is pricing it yet.';
+  if (/dispositive|not enough context/.test(r)) {
+    return 'There is not enough known yet about who is playing to say anything worth saying.';
+  }
+  if (/pull against each other/.test(r)) {
+    return 'The team news and the form point different ways, and we would rather not guess.';
+  }
+  if (/too short/.test(r)) return 'The one outcome we like is priced too short to be worth taking.';
+  if (/beyond where/.test(r)) return 'The only angle is a long shot, and long shots are not what we do.';
+  if (/confidence .* threshold/.test(r)) return 'It is too close to call with any conviction.';
+  return 'The bookmakers have this one about right, so there is nothing to take.';
 }
 
 function capitalise(s: string): string {

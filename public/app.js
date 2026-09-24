@@ -2195,7 +2195,10 @@ async function viewFixture(id, params = new URLSearchParams()) {
           ${verdicts.length
             ? verdicts.map((v) => verdictHTML(v, f.home, f.away, f, { played, hg, ag })).join('')
               + (anyLocked ? lockedHTML(f) : '')
-            : `<p class="narrative">${esc(f.pass ?? 'Nothing here is worth a call. The price looks about right.')}</p>`}
+            // Older pass notes were written for us ("the 58.1 needed against a
+            // 109.1% margin"); the gate withholds those and the plain line
+            // stands in.
+            : `<p class="narrative">${esc(cleanProse(f.pass) ?? 'Nothing here is worth a call. The bookmakers have it about right.')}</p>`}
         </div>
         ${reads.length ? `<div class="panel">
           <p class="panel-head">${verdicts.length ? (played ? 'What made us call it' : 'What made the call') : 'What stood out'}</p>
