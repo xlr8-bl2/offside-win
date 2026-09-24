@@ -18,6 +18,7 @@
     "poster:preview": "npm -w engine run poster:preview",
     "settle": "npm -w engine run settle",
     "grant": "npm -w engine run grant --",
+    "plans": "npm -w engine run plans --",
     "backtest": "npm -w engine run backtest",
     "migrate": "npm -w engine run migrate",
     "test": "npm -w engine test && npm -w worker test",

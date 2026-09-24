@@ -43,3 +43,29 @@ export async function grant(email: string, arg: string | undefined): Promise<voi
   );
   console.log(`Membership for ${target}: ${days} days, complimentary.`);
 }
+
+/**
+ * Attach a checkout link to a plan, or change a price, from the pg workflow.
+ *
+ *   npm run plans -- matchday https://whop.com/checkout/plan_xxx
+ *   npm run plans -- season 4900
+ *   npm run plans                                  (list what is for sale)
+ */
+export async function plans(id: string | undefined, value: string | undefined): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  if (id && value) {
+    if (/^https?:\/\//.test(value)) {
+      await exec('UPDATE plan SET checkout_url = ?, updated_at = ? WHERE id = ?', [value, now, id]);
+    } else if (/^\d+$/.test(value)) {
+      await exec('UPDATE plan SET amount_minor = ?, updated_at = ? WHERE id = ?', [Number(value), now, id]);
+    } else {
+      throw new Error('plans takes a plan id and either a checkout URL or a price in pence: "season https://whop.com/checkout/plan_x" or "season 4900"');
+    }
+  }
+  const rows = await select<{ id: string; name: string; days: number; amount_minor: number; currency: string; checkout_url: string | null }>(
+    'SELECT id, name, days, amount_minor, currency, checkout_url FROM plan WHERE active = 1 ORDER BY sort',
+  );
+  for (const r of rows) {
+    console.log(`${r.id.padEnd(9)} ${r.name.padEnd(14)} ${String(r.days).padStart(3)} days  ${(r.amount_minor / 100).toFixed(2)} ${r.currency}  ${r.checkout_url ?? '(no checkout link yet)'}`);
+  }
+}
