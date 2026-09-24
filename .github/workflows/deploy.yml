@@ -82,9 +82,10 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           COINFLOW_API_KEY: ${{ secrets.COINFLOW_API_KEY }}
           COINFLOW_WEBHOOK_SECRET: ${{ secrets.COINFLOW_WEBHOOK_SECRET }}
+          WHOP_WEBHOOK_SECRET: ${{ secrets.WHOP_WEBHOOK_SECRET }}
         run: |
           set -uo pipefail
-          for name in SUPABASE_SERVICE_KEY COINFLOW_API_KEY COINFLOW_WEBHOOK_SECRET; do
+          for name in SUPABASE_SERVICE_KEY COINFLOW_API_KEY COINFLOW_WEBHOOK_SECRET WHOP_WEBHOOK_SECRET; do
             value="${!name:-}"
             if [ -z "$value" ]; then
               echo "$name is not set - skipping (payments stay switched off)"

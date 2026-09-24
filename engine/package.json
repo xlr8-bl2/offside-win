@@ -8,6 +8,7 @@
     "ratings": "tsx src/run.ts ratings",
     "slate": "tsx src/run.ts slate",
     "settle": "tsx src/run.ts settle",
+    "grant": "tsx src/run.ts grant",
     "backtest": "tsx src/run.ts backtest",
     "migrate": "tsx src/run.ts migrate",
     "test": "tsx --test test/*.test.ts",

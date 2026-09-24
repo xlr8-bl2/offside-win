@@ -343,8 +343,38 @@ CREATE TABLE IF NOT EXISTS plan (
 -- The amount is in minor units -- pence, not pounds -- because a price in
 -- floating point is a rounding error with a customer attached to it.
 INSERT INTO plan (id, name, days, amount_minor, currency, active, sort, updated_at)
-VALUES ('monthly', 'Monthly', 30, 900, 'GBP', 1, 0, floor(extract(epoch FROM now()))::bigint)
+VALUES ('monthly', 'Monthly', 30, 900, 'GBP', 1, 1, floor(extract(epoch FROM now()))::bigint)
 ON CONFLICT (id) DO NOTHING;
+
+-- Three plans, in football terms: a matchday pass for a weekend, a month, and
+-- a season ticket. The weekly one is the impulse buy and the season ticket is
+-- the anchor that makes the month look cheap; both are rows, so a price is an
+-- UPDATE and not a deploy. `checkout_url` is the processor's own checkout link
+-- for the plan (Whop issues one per pricing plan), read by the Worker's
+-- checkout route when the provider is Whop.
+ALTER TABLE plan ADD COLUMN IF NOT EXISTS checkout_url text;
+INSERT INTO plan (id, name, days, amount_minor, currency, active, sort, updated_at)
+VALUES ('matchday', 'Matchday pass', 7, 349, 'GBP', 1, 0, floor(extract(epoch FROM now()))::bigint),
+       ('season',   'Season ticket', 365, 4900, 'GBP', 1, 2, floor(extract(epoch FROM now()))::bigint)
+ON CONFLICT (id) DO NOTHING;
+
+-- An entitlement by email, for a processor that runs its own accounts.
+--
+-- Whop takes the payment on its own site under whatever email the buyer uses
+-- there, and tells us by webhook. There may be no account here yet, so the
+-- grant is keyed on the email and has_membership() honours it through
+-- auth.email() once that person signs in. It is the paid product, so it is
+-- locked like `pick` and read only through the functions.
+CREATE TABLE IF NOT EXISTS entitlement (
+  email        text PRIMARY KEY,
+  plan_id      text NOT NULL,
+  expires_at   bigint NOT NULL,
+  source       text NOT NULL,
+  source_ref   text,
+  status       text NOT NULL DEFAULT 'active',
+  created_at   bigint NOT NULL,
+  updated_at   bigint NOT NULL
+);
 
 -- The entitlement, and the only one of these four a browser ever reads. It
 -- carries the card's brand and last four so the account page can say "Visa
@@ -505,12 +535,29 @@ CREATE OR REPLACE VIEW pick_summary_by_kind AS
 -- that call it: a LANGUAGE sql body is parsed at creation, and migrate() sends
 -- statements in file order.
 CREATE OR REPLACE FUNCTION has_membership()
-RETURNS boolean LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   SELECT EXISTS (
     SELECT 1 FROM membership m
     WHERE m.user_id = auth.uid()
       AND m.expires_at > floor(extract(epoch FROM now()))::bigint
+  ) OR EXISTS (
+    SELECT 1 FROM entitlement e
+    WHERE auth.email() IS NOT NULL
+      AND lower(e.email) = lower(auth.email())
+      AND e.status = 'active'
+      AND e.expires_at > floor(extract(epoch FROM now()))::bigint
   );
+$fn$;
+
+-- The free call of the day: the headline fixture's call is public.
+--
+-- One call a day, in full, with the reason -- the oldest hook in this trade
+-- and the one that converts, because a reader who has watched a free call
+-- land knows what the paid ones look like. chooseHero() only picks a called
+-- fixture, so this is never empty on a day with calls.
+CREATE OR REPLACE FUNCTION free_fixture_id()
+RETURNS bigint LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  SELECT (try_json(v)->>'fixture_id')::bigint FROM kv WHERE k = 'hero:today';
 $fn$;
 
 -- ------------------------------------------------------------ the writes
@@ -588,6 +635,74 @@ BEGIN
 END;
 $fn$;
 
+-- Grant or extend an entitlement by email. Called by the Whop webhook route
+-- as the service role; idempotent on (source, source_ref) through `payment`.
+CREATE OR REPLACE FUNCTION record_entitlement(
+  p_source text, p_ref text, p_email text, p_plan text, p_expires bigint,
+  p_amount bigint, p_currency text, p_raw text
+) RETURNS json LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = public AS $fn$
+DECLARE
+  v_now   bigint := floor(extract(epoch FROM now()))::bigint;
+  v_days  integer;
+  v_until bigint;
+  v_rows  integer;
+  v_user  uuid;
+BEGIN
+  IF p_email IS NULL OR p_email = '' THEN
+    RETURN json_build_object('applied', false, 'reason', 'no email');
+  END IF;
+  SELECT days INTO v_days FROM plan WHERE id = p_plan;
+  IF v_days IS NULL THEN
+    RETURN json_build_object('applied', false, 'reason', 'unknown plan');
+  END IF;
+
+  -- A retried delivery is a no-op whether or not the buyer has an account
+  -- here yet: the reference is remembered on the entitlement itself. Whop
+  -- retries a webhook it has not had a 200 for, and each retry must not be
+  -- another month.
+  IF p_ref IS NOT NULL AND EXISTS (
+    SELECT 1 FROM entitlement WHERE lower(email) = lower(p_email) AND source_ref = p_ref
+  ) THEN
+    RETURN json_build_object('applied', false, 'reason', 'already recorded');
+  END IF;
+
+  -- The receipt, for the account page, when there is an account to hang it on.
+  SELECT id INTO v_user FROM auth.users WHERE lower(email) = lower(p_email) LIMIT 1;
+  IF p_ref IS NOT NULL AND v_user IS NOT NULL THEN
+    INSERT INTO payment (provider, provider_ref, user_id, plan_id, amount_minor, currency, status, raw_json, created_at)
+    VALUES (p_source, p_ref, v_user, p_plan, coalesce(p_amount, 0), coalesce(p_currency, 'GBP'), 'succeeded', p_raw, v_now)
+    ON CONFLICT (provider, provider_ref) DO NOTHING;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    IF v_rows = 0 THEN
+      RETURN json_build_object('applied', false, 'reason', 'already recorded');
+    END IF;
+  END IF;
+
+  -- The processor's own period end when it sent one; otherwise the plan's
+  -- length from now, or from the current expiry if that is later.
+  v_until := coalesce(p_expires, greatest(v_now, coalesce((SELECT expires_at FROM entitlement WHERE lower(email) = lower(p_email)), v_now)) + v_days * 86400);
+  INSERT INTO entitlement (email, plan_id, expires_at, source, source_ref, status, created_at, updated_at)
+  VALUES (lower(p_email), p_plan, v_until, p_source, p_ref, 'active', v_now, v_now)
+  ON CONFLICT (email) DO UPDATE SET
+    plan_id = excluded.plan_id, expires_at = greatest(entitlement.expires_at, excluded.expires_at),
+    source = excluded.source, source_ref = coalesce(excluded.source_ref, entitlement.source_ref),
+    status = 'active', updated_at = v_now;
+  RETURN json_build_object('applied', true, 'expires_at', v_until);
+END;
+$fn$;
+
+-- End an entitlement: the processor says the membership is no longer valid.
+CREATE OR REPLACE FUNCTION revoke_entitlement(p_email text, p_status text)
+RETURNS json LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = public AS $fn$
+DECLARE v_now bigint := floor(extract(epoch FROM now()))::bigint; v_rows integer;
+BEGIN
+  UPDATE entitlement SET status = coalesce(p_status, 'ended'), expires_at = least(expires_at, v_now), updated_at = v_now
+  WHERE lower(email) = lower(p_email);
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  RETURN json_build_object('applied', v_rows > 0);
+END;
+$fn$;
+
 -- End a membership that was charged back or refunded.
 --
 -- Without this the product is free to anyone willing to dispute nine pounds.
@@ -621,13 +736,28 @@ $fn$;
 -- to the caller inside the view. An anonymous caller gets nulls and an empty
 -- list rather than an error -- the page redirects to sign-in on its own.
 CREATE OR REPLACE FUNCTION get_account()
-RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   SELECT json_build_object(
-           'membership', (
-             SELECT to_json(m) FROM (
-               SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4
-               FROM membership WHERE user_id = auth.uid()
-             ) m
+           'email', auth.email(),
+           -- The card-based membership, or the email entitlement from a
+           -- processor that runs its own accounts, whichever is live longer.
+           'membership', coalesce(
+             (SELECT to_json(m) FROM (
+                SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4, 'card' AS via
+                FROM membership WHERE user_id = auth.uid()
+                  AND expires_at > floor(extract(epoch FROM now()))::bigint
+              ) m),
+             (SELECT to_json(e) FROM (
+                SELECT plan_id, expires_at, 0 AS auto_renew, NULL::bigint AS cancelled_at,
+                       source AS card_brand, NULL::text AS card_last4, source AS via
+                FROM entitlement
+                WHERE auth.email() IS NOT NULL AND lower(email) = lower(auth.email()) AND status = 'active'
+                  AND expires_at > floor(extract(epoch FROM now()))::bigint
+              ) e),
+             (SELECT to_json(m) FROM (
+                SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4, 'card' AS via
+                FROM membership WHERE user_id = auth.uid()
+              ) m)
            ),
            'receipts', coalesce((
              SELECT json_agg(r) FROM (
@@ -655,6 +785,7 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
              -- sold the promise.
              (CASE WHEN (SELECT ok FROM m)
                      OR (f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL)
+                     OR f.id = free_fixture_id()
                    THEN f.board_json
                    ELSE coalesce(f.board_free_json, f.board_json) END)::jsonb
              -- The score comes from the column, not from the card.
@@ -665,6 +796,7 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
              -- score, and a status saying it had not kicked off. Overlaying
              -- the column costs nothing here and means the scoreline is
              -- whatever settlement last wrote, however old the card is.
+             || CASE WHEN f.id = free_fixture_id() THEN '{"free_call": true}'::jsonb ELSE '{}'::jsonb END
              || CASE WHEN f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
                      THEN jsonb_build_object(
                             'score', jsonb_build_array(f.home_goals, f.away_goals),
@@ -706,6 +838,7 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
            -- cannot make this judgement -- the serving function can.
            (CASE WHEN has_membership()
                    OR (f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL)
+                   OR f.id = free_fixture_id()
                  THEN f.bundle_json
                  ELSE coalesce(f.bundle_free_json, f.bundle_json) END)::jsonb
            -- Same overlay as get_board, and for the same reason. The bundle is
@@ -720,6 +853,7 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
                           'score', jsonb_build_array(f.home_goals, f.away_goals),
                           'status', 'finished')
                    ELSE '{}'::jsonb END
+           || CASE WHEN f.id = free_fixture_id() THEN '{"free_call": true}'::jsonb ELSE '{}'::jsonb END
            -- The calls, from the record rather than from the write-up.
            --
            -- The write-up is a snapshot, and before the freeze at kick-off it
@@ -740,7 +874,8 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
                 FROM pick pk
                 WHERE pk.fixture_id = f.id AND pk.kind = 'CONFIDENT'
                   AND (pk.settled_at IS NOT NULL OR has_membership()
-                       OR (f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL))
+                       OR (f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL)
+                       OR f.id = free_fixture_id())
               ), '[]'::jsonb))
          )::json
   FROM fixture f WHERE f.id = p_id;
@@ -780,7 +915,7 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
                -- gating it would defeat the point of publishing losses. Open
                -- picks are the thing being sold, so they need a membership.
                WHERE pk.kind = 'CONFIDENT'
-                 AND (pk.settled_at IS NOT NULL OR has_membership())
+                 AND (pk.settled_at IS NOT NULL OR has_membership() OR pk.fixture_id = free_fixture_id())
                  AND ((p_settled = 'true'  AND pk.settled_at IS NOT NULL)
                    OR (p_settled = 'false' AND pk.settled_at IS NULL)
                    OR (p_settled IS DISTINCT FROM 'true' AND p_settled IS DISTINCT FROM 'false'))
@@ -916,6 +1051,10 @@ ALTER TABLE slip ENABLE ROW LEVEL SECURITY;
 -- Same rule as pick: the legs of an open slip are the paid product.
 REVOKE ALL ON slip FROM anon, authenticated;
 
+ALTER TABLE entitlement ENABLE ROW LEVEL SECURITY;
+-- Who has paid is nobody's business but theirs; read through get_account.
+REVOKE ALL ON entitlement FROM anon, authenticated;
+
 ALTER TABLE calibration ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS calibration_read ON calibration;
 CREATE POLICY calibration_read ON calibration FOR SELECT TO anon USING (true);
@@ -996,6 +1135,16 @@ REVOKE ALL ON pick_summary_by_kind FROM anon;
 -- The serving functions are the Worker's whole read path. EXECUTE only: they
 -- are SECURITY INVOKER, so each one still reads under the anon SELECT policies
 -- above and can reach nothing a direct select could not.
+-- What is for sale. The pricing page prints these rather than hardcoding a
+-- price, so a change is an UPDATE. The checkout link travels with each plan.
+CREATE OR REPLACE FUNCTION get_plans()
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  SELECT coalesce(json_agg(json_build_object(
+           'id', id, 'name', name, 'days', days, 'amount_minor', amount_minor,
+           'currency', currency, 'checkout_url', checkout_url) ORDER BY sort), '[]'::json)
+  FROM plan WHERE active = 1;
+$fn$;
+
 -- The current slip and the slip record.
 --
 -- An open slip's legs need a membership; its size, total odds and chance do
@@ -1052,6 +1201,8 @@ GRANT EXECUTE ON FUNCTION get_model() TO anon;
 GRANT EXECUTE ON FUNCTION get_hero() TO anon;
 GRANT EXECUTE ON FUNCTION get_health() TO anon;
 GRANT EXECUTE ON FUNCTION get_slip() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_plans() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION free_fixture_id() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint), get_fixture(bigint), get_picks(integer, text),
   get_model(), get_hero(), get_health(), get_account(), has_membership(), try_json(text) TO authenticated;
 

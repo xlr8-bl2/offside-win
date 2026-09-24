@@ -103,7 +103,29 @@ export async function session() {
 }
 
 /** Convenience for the views: who is signed in, in the two fields they use. */
-export async function currentUser() {
+/*
+ * The owner's "view as" switch.
+ *
+ * Set from #/dev and kept in this browser only. While it is on, every read
+ * goes out without a token and every view renders as it would for someone
+ * who has never signed in -- which is the only honest way to check the free
+ * side of a paywall from an account that is behind it. #/dev reads the real
+ * session through `real: true`, and the header shows a pill so it is never
+ * left on by accident.
+ */
+const VIEW_AS_KEY = 'ow.viewas';
+export function viewingAsFree() {
+  try { return localStorage.getItem(VIEW_AS_KEY) === 'free'; } catch { return false; }
+}
+export function setViewAs(mode) {
+  try {
+    if (mode === 'free') localStorage.setItem(VIEW_AS_KEY, 'free');
+    else localStorage.removeItem(VIEW_AS_KEY);
+  } catch { /* private mode */ }
+}
+
+export async function currentUser({ real = false } = {}) {
+  if (!real && viewingAsFree()) return null;
   const s = await session();
   return s ? { id: s.user.id, email: s.user.email } : null;
 }
@@ -116,6 +138,7 @@ export async function currentUser() {
  * worst case is a request that looks anonymous, which is exactly what it is.
  */
 export async function authHeaders() {
+  if (viewingAsFree()) return {};
   const s = await session();
   return s?.access_token ? { authorization: `Bearer ${s.access_token}` } : {};
 }
