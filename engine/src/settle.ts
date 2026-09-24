@@ -2,6 +2,7 @@ import { settleSlips } from './slip.ts';
 import { bsdOrNull, num } from './bsd.ts';
 import { postMortem } from './postmortem.ts';
 import { isQuarterLine } from './price.ts';
+import { writeMissingReports } from './report.ts';
 import { exec, insertMany, kvSetJSON, select } from './store.ts';
 import { MARKET_FAMILY } from './types.ts';
 import type { MarketCode, MarketFamily, Outcome } from './types.ts';
@@ -159,6 +160,8 @@ export interface SettleReport {
   pnl: number;
   /** Older picks given a post-mortem after the fact. */
   backfilled: number;
+  /** Match reports written for recently finished fixtures that had none. */
+  reports: number;
   /** Settled picks whose mark no longer matched the final score. */
   regraded: number;
   slips?: number;
@@ -365,13 +368,14 @@ export async function runSettle(): Promise<SettleReport> {
     [cutoff],
   );
 
-  const report: SettleReport = { considered: pending.length, settled: 0, unresolved: 0, pnl: 0, backfilled: 0, regraded: 0 };
+  const report: SettleReport = { considered: pending.length, settled: 0, unresolved: 0, pnl: 0, backfilled: 0, regraded: 0, reports: 0 };
   if (pending.length === 0) {
     console.log('Nothing to settle.');
     await backfillScores();
     report.regraded = await regradeSettled();
     report.slips = await settleSlips();
     report.backfilled = await backfillPostMortems();
+    report.reports = await writeMissingReports({ sinceDays: 7, limit: 60 });
     await kvSetJSON('settle:last_run', { at: now, ...report });
     return report;
   }
@@ -523,6 +527,9 @@ export async function runSettle(): Promise<SettleReport> {
   report.regraded = await regradeSettled();
   report.slips = await settleSlips();
   report.backfilled = await backfillPostMortems();
+  // Reports for whatever finished outside the slate's window, most recent
+  // first, a page's worth per hour.
+  report.reports = await writeMissingReports({ sinceDays: 7, limit: 60 });
   await refreshCalibration();
   await kvSetJSON('settle:last_run', { at: now, ...report });
 

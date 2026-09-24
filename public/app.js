@@ -502,28 +502,48 @@ function matchCentreHTML(hero, d) {
  * the other forty look like. When the bundle has not caught up yet the block
  * says what is coming rather than showing nothing.
  */
-function freeCallHTML(hero, detail) {
-  const v = (detail?.published ?? []).find((x) => x?.market)
-    ?? (detail?.verdicts ?? []).find((x) => x?.candidate)?.candidate
-    ?? null;
-  if (!v) {
-    return `<p class="hero-blurb">${esc(hero.league ?? '')}${hero.league ? '. ' : ''}Today's free call goes
-      up on this match once the team news is in.</p>`;
+/*
+ * The free call is the strongest open call of the day (engine/src/free.ts),
+ * which is not always the headline match. `free` is that fixture's board row,
+ * unwalled by free_fixture_id() so its call is on it for everyone; when it is
+ * a different match from the masthead the tie and the kick-off are named and
+ * the block links to it. `detail` is the masthead's own bundle, the fallback
+ * for a board that has not caught up.
+ */
+function freeCallHTML(hero, detail, free = null) {
+  const isHero = free && hero && Number(free.id) === Number(hero.fixture_id);
+  let v = free?.top_pick ?? null;
+  let tie = free;
+  if (!v && (!free || isHero) && hero) {
+    v = (detail?.published ?? []).find((x) => x?.market)
+      ?? (detail?.verdicts ?? []).find((x) => x?.candidate)?.candidate
+      ?? null;
+    tie = hero ? { id: hero.fixture_id, home: hero.home, away: hero.away, kickoff: hero.kickoff } : null;
   }
-  const d = market({ market: v.market, outcome: v.outcome, line: v.line, home: hero.home, away: hero.away, odds: v.odds });
+  if (!v || !tie) {
+    return hero
+      ? `<p class="hero-blurb">${esc(hero.league ?? '')}${hero.league ? '. ' : ''}Today's free call goes
+      up once the calls are in.</p>`
+      : '';
+  }
+  const d = market({ market: v.market, outcome: v.outcome, line: v.line, home: tie.home, away: tie.away, odds: v.odds });
+  const elsewhere = !hero || Number(tie.id) !== Number(hero.fixture_id);
   return `
   <div class="freecall">
     <span class="freecall-tag">Today's free call</span>
-    <p class="freecall-sel">${esc(d.name)}</p>
+    ${elsewhere ? `<a class="freecall-tie" href="#/fixture/${encodeURIComponent(tie.id)}">${crest(tie.home, 'xs', tie.home_id)}${esc(tie.home)} v ${crest(tie.away, 'xs', tie.away_id)}${esc(tie.away)}<span>${esc(kickoffLabel(tie.kickoff))}</span></a>` : ''}
+    <p class="freecall-sel">${elsewhere ? `<a href="#/fixture/${encodeURIComponent(tie.id)}">${esc(d.name)}</a>` : esc(d.name)}</p>
     <p class="freecall-meta" data-public-price><b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
-    <p class="hero-blurb">Free for everyone today. Members get every other call the moment it goes up.</p>
+    <p class="hero-blurb">The call we are surest of today, free for everyone. Members get every other call the moment it goes up.</p>
   </div>`;
 }
 
-function heroHTML(hero = null, venueIds = [], detail = null) {
+function heroHTML(hero = null, venueIds = [], detail = null, free = null) {
   const queue = hero?.venue_id ? [hero.venue_id, ...venueIds] : [].concat(venueIds).filter(Boolean);
 
-  if (!hero) {
+  // A hero answer without a fixture is the day with no headline; the free
+  // call, if there is one, still goes on the masthead.
+  if (!hero?.fixture_id) {
     return `
     <section class="hero" data-shot="${queue.length ? 'yes' : 'none'}">
       <div class="hero-media">${venueShot(queue, '', true)}</div>
@@ -532,6 +552,7 @@ function heroHTML(hero = null, venueIds = [], detail = null) {
           <h1 class="display">The picks for the biggest games.</h1>
           <p class="hero-blurb">Every call comes with the reason behind it. And the reason
              not to like it. Eighty-eight competitions, updated through the day.</p>
+          ${freeCallHTML(null, null, free)}
           <div class="hero-cta">
             <a class="btn btn-primary" href="#/board">Today's picks</a>
             <a class="btn btn-ghost" href="#/results">See the results</a>
@@ -561,7 +582,7 @@ function heroHTML(hero = null, venueIds = [], detail = null) {
           <span class="fx-line">${crest(hero.home, 'md', hero.home_id)}<span class="name">${esc(hero.home)}</span></span>
           <span class="fx-line">${crest(hero.away, 'md', hero.away_id)}<span class="name">${esc(hero.away)}</span></span>
         </h1>
-        ${freeCallHTML(hero, detail)}
+        ${freeCallHTML(hero, detail, free)}
         <div class="hero-cta">
           <a class="btn btn-primary" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">Read why</a>
           <a class="btn btn-ghost" href="#/board">Today's calls</a>
@@ -845,7 +866,8 @@ function liveNowHTML(fixtures) {
           <span class="side-thumb">${crest(f.home, 'sm', f.home_id)}${crest(f.away, 'sm', f.away_id)}</span>
           <span class="side-body">
             <span class="side-sel">${esc(f.home)} v ${esc(f.away)}</span>
-            <span class="side-meta"><span class="side-league">${esc(f.league ?? '')}</span><b>${sc ? `${sc[0]}–${sc[1]}` : 'under way'}</b>${trackHTML(liveTrack(f.top_pick, f))}</span>
+            <span class="side-meta"><span class="side-league">${esc(f.league ?? '')}</span><b>${sc ? `${sc[0]}–${sc[1]}` : 'under way'}</b>${
+              f.live_minute != null ? `<span class="minute">${esc(f.live_minute)}'</span>` : ''}${trackHTML(liveTrack(f.top_pick, f))}</span>
           </span>
         </a>`;
       }).join('')}
@@ -993,6 +1015,7 @@ function playedHTML(picks, { showOdds = false } = {}) {
             hasScore ? `${esc(x.home_goals)}–${esc(x.away_goals)}` : 'FT'}</span>
           <span class="played-side away">${crest(x.away_team ?? '', 'sm', x.away_team_id)}<span>${esc(x.away_team ?? '')}</span></span>
         </div>
+        ${scorersHTML(x.goals, 'scorers played-scorers')}
         ${calls.length > 1 ? `<ul class="played-calls">${calls.map((c, i) => {
           const d = market({ market: c.market, outcome: c.outcome, line: c.line, home: c.home_team, away: c.away_team, odds: c.odds });
           return `<li><span>${esc(d.name)}</span><span class="mark ${tones[i]}">${esc(({ won: 'Landed', lost: 'Missed', back: 'Void' })[tones[i]])}</span></li>`;
@@ -1092,7 +1115,9 @@ function rowHTML(f) {
         // "ko 16:30" alone cannot tell yesterday's game from this
         // afternoon's.
         : `<span class="row-time">${liveBadge(state)}</span><span class="row-day">${
-            day === 'Today' ? '' : `${esc(day)} · `}ko ${esc(time)}</span>`}
+            state.kind === 'live' && f.live_minute != null
+              ? `<span class="minute">${esc(f.live_minute)}'</span>`
+              : `${day === 'Today' ? '' : `${esc(day)} · `}ko ${esc(time)}`}</span>`}
     </div>
 
     <div class="row-teams">
@@ -1226,9 +1251,11 @@ async function viewHome() {
   state.heroVenue = [...top, ...fixtures].map((f) => f.venue_id).filter(Boolean);
 
   const rail = () => fixtures.filter((f) => hasCall(f) && f.id !== state.hero?.fixture_id);
+  // The free call's row, flagged by the board itself.
+  const freeFx = fixtures.find((f) => f.free_call && f.top_pick) ?? null;
   app.innerHTML =
     `<div data-live="ticker">${tickerHTML(fixtures, recent)}</div>` +
-    heroHTML(state.hero, state.heroVenue, state.heroDetail) +
+    heroHTML(state.hero, state.heroVenue, state.heroDetail, freeFx) +
     `<div data-live="today">${todayStripHTML(fixtures, recent)}</div>` +
     `<div data-live="rail">${nextRailHTML(rail())}</div>` +
     `<div class="wrap section dense">
@@ -1901,21 +1928,33 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
  */
 const POSITION = { G: 'Goalkeeper', D: 'Defender', M: 'Midfielder', F: 'Forward' };
 
-function squadHTML(lineups, home, away) {
+function squadHTML(lineups, home, away, report = null) {
   const side = (label, s) => {
     const players = (s?.players ?? []).filter((x) => x?.name);
     if (!players.length) return '';
+    // Starters first, then the bench, each in the order the sheet lists them.
+    const ordered = [...players.filter((x) => x.starting !== false), ...players.filter((x) => x.starting === false)];
+    const row = (x) => {
+      const m = playerMarks(report, x.id);
+      // After the match the last column says what the player did: the
+      // rating, the goals and cards, and when a substitute came on. An
+      // unused substitute says so. Before it, the column only marks the bench.
+      const tail = report
+        ? `${m.html}${m.rating != null ? `<b class="rating ${ratingClass(m.rating)}">${Number(m.rating).toFixed(1)}</b>`
+            : x.starting === false && !m.on ? '<span class="unused">unused</span>' : ''}`
+        : (x.starting === false ? 'sub' : '');
+      return `
+          <div class="squad-row${x.starting === false ? ' bench' : ''}">
+            ${crest(x.name, 'sm', x.id, 'player')}
+            <span class="name">${esc(x.name)}${x.captain ? ' <small>(c)</small>' : ''}</span>
+            <span class="pos">${esc(POSITION[x.position] ?? x.position ?? '')}</span>
+            <span class="no">${tail}</span>
+          </div>`;
+    };
     return `
     <div class="panel">
       <p class="panel-head">${esc(label)}${s.formation ? ` <span>${esc(s.formation)}</span>` : ''}</p>
-      <div class="squad">
-        ${players.map((x) => `
-          <div class="squad-row">
-            <span class="name">${esc(x.name)}</span>
-            <span class="pos">${esc(POSITION[x.position] ?? x.position ?? '')}</span>
-            <span class="no">${x.starting === false ? 'sub' : ''}</span>
-          </div>`).join('')}
-      </div>
+      <div class="squad">${ordered.map(row).join('')}</div>
     </div>`;
   };
   const both = side(home, lineups?.home) + side(away, lineups?.away);
@@ -1960,7 +1999,7 @@ function surname(full) {
  * makes it read as a pitch rather than as a green panel, and they cost one
  * inline SVG.
  */
-function pitchHTML(lineups, home, away, homeId, awayId) {
+function pitchHTML(lineups, home, away, homeId, awayId, report = null) {
   if (!lineups?.home?.players?.length || !lineups?.away?.players?.length) return '';
 
   const rowsFor = (side) => {
@@ -1989,11 +2028,18 @@ function pitchHTML(lineups, home, away, homeId, awayId) {
     return rated.reduce((a, b) => (b.ai_score > a.ai_score ? b : a)).id;
   };
 
-  const player = (p, keyMan) => `
-    <div class="pp${p.id === keyMan ? ' key' : ''}" title="${esc(p.name)}">
+  // After the match each chip carries what the player did: goals, assists,
+  // cards, the minute they went off, and the rating in the corner.
+  const player = (p, keyMan) => {
+    const m = playerMarks(report, p.id);
+    return `
+    <div class="pp${p.id === keyMan ? ' key' : ''}${m.rating != null ? ' rated' : ''}" title="${esc(p.name)}">
       ${crest(p.name, 'md', p.id, 'player')}
+      ${m.rating != null ? `<b class="pp-rating ${ratingClass(m.rating)}">${Number(m.rating).toFixed(1)}</b>` : ''}
+      ${m.html}
       <span class="pp-name">${esc(surname(p.name))}</span>
     </div>`;
+  };
 
   const sideHTML = (side, atTop) => {
     const keyMan = keyManOf(side);
@@ -2044,8 +2090,144 @@ function pitchHTML(lineups, home, away, homeId, awayId) {
     </div>
 
     ${out.length
-      ? `<div class="outlist"><b>Unavailable</b>${out.map((u) => `<span class="also-call">${esc(u.name)}${u.reason ? ` (${esc(u.reason)})` : ''}</span>`).join('')}</div>`
+      ? `<div class="outlist"><b>Unavailable</b>${out.map((u) => `
+          <span class="also-call out-chip">${crest(u.name, 'sm', u.id, 'player')}<span class="out-name">${esc(u.name)}${
+            u.reason ? `<small>${esc(unshout(u.reason))}</small>` : ''}</span></span>`).join('')}</div>`
       : ''}
+  </div>`;
+}
+
+// ---------------------------------------------------------- match report
+
+/** "45+2'" from an event's minute and added time. */
+const minuteOf = (e) => (e?.minute == null ? '' : `${e.minute}${e.added ? `+${e.added}` : ''}'`);
+
+/** One side's scorers and minutes: "Barrenetxea 12', Soler 45+2' (pen)". */
+function scorersText(goals, side) {
+  const own = (goals ?? []).filter((g) => g && g.side === side);
+  if (!own.length) return '';
+  return own.map((g) => {
+    const tag = /own/i.test(g.kind ?? '') ? ' (og)' : /pen/i.test(g.kind ?? '') ? ' (pen)' : '';
+    return `${surname(g.player ?? '')} ${minuteOf(g)}${tag}`.trim();
+  }).join(', ');
+}
+
+/** Two lines of scorers, home then away, for a compact row. Empty when none. */
+function scorersHTML(goals, cls = 'scorers') {
+  const h = scorersText(goals, 'home');
+  const a = scorersText(goals, 'away');
+  if (!h && !a) return '';
+  return `<div class="${cls}"><span>${esc(h)}</span><span>${esc(a)}</span></div>`;
+}
+
+const EV_ICON = {
+  goal: '<i class="ev-ico ico-goal" aria-hidden="true"></i>',
+  own: '<i class="ev-ico ico-goal ico-own" aria-hidden="true"></i>',
+  yellow: '<i class="ev-ico ico-card c-yellow" aria-hidden="true"></i>',
+  second_yellow: '<i class="ev-ico ico-card c-second" aria-hidden="true"></i>',
+  red: '<i class="ev-ico ico-card c-red" aria-hidden="true"></i>',
+  sub: '<i class="ev-ico ico-sub" aria-hidden="true"></i>',
+};
+
+/** How a rating reads: the colour says it before the number does. */
+const ratingClass = (r) => (r >= 8 ? 'top' : r >= 7 ? 'good' : r < 6 ? 'poor' : '');
+
+/**
+ * What one player did, from the report: goals, assists, cards, when they
+ * came on or off, and the rating. Drawn on the pitch chip and the squad row.
+ */
+function playerMarks(report, id) {
+  if (!report) return { html: '', rating: null, line: null, on: null, off: null };
+  const pid = Number(id);
+  const line = (report.players ?? []).find((p) => Number(p.id) === pid) ?? null;
+  const evs = report.events ?? [];
+  const mine = (e) => Number(e.player_id) === pid;
+  const goals = evs.filter((e) => e.t === 'goal' && mine(e) && !/own/i.test(e.kind ?? '')).length;
+  const own = evs.filter((e) => e.t === 'goal' && mine(e) && /own/i.test(e.kind ?? '')).length;
+  const cards = evs.filter((e) => e.t === 'card' && mine(e)).map((e) => e.card);
+  const off = evs.find((e) => e.t === 'sub' && Number(e.out_id) === pid) ?? null;
+  const on = evs.find((e) => e.t === 'sub' && Number(e.in_id) === pid) ?? null;
+  const bits = [];
+  for (let i = 0; i < Math.max(goals, line?.goals ?? 0); i++) bits.push(EV_ICON.goal);
+  for (let i = 0; i < own; i++) bits.push(EV_ICON.own);
+  const assists = line?.assists ?? 0;
+  if (assists > 0) bits.push(`<i class="pp-assist" title="${assists} assist${assists === 1 ? '' : 's'}">${assists > 1 ? assists : ''}A</i>`);
+  if (cards.includes('red')) bits.push(EV_ICON.red);
+  else if (cards.includes('second_yellow')) bits.push(EV_ICON.second_yellow);
+  else if (cards.includes('yellow')) bits.push(EV_ICON.yellow);
+  if (off) bits.push(`<i class="pp-sub off" title="off ${esc(minuteOf(off))}">${esc(minuteOf(off))}</i>`);
+  if (on) bits.push(`<i class="pp-sub on" title="on ${esc(minuteOf(on))}">${esc(minuteOf(on))}</i>`);
+  return {
+    html: bits.length ? `<span class="pp-marks">${bits.join('')}</span>` : '',
+    rating: typeof line?.rating === 'number' ? line.rating : null,
+    line, on, off,
+  };
+}
+
+/**
+ * The match report: what happened, in the order it happened.
+ *
+ * Goals with the scorer, the minute and the assist, cards with the reason,
+ * substitutions, then the team numbers a fan looks at after the whistle and
+ * the highlights where the provider has them. Home events sit left, away
+ * events right, the way a timeline is drawn everywhere. Nothing here is
+ * ours: every line is a fact from the match, which is why the page can carry
+ * it for everyone.
+ */
+function reportHTML(f) {
+  const r = f?.report;
+  if (!r) return '';
+  const events = (r.events ?? []).filter((e) => e && (e.t === 'goal' || e.t === 'card' || e.t === 'sub'));
+  const st = r.stats;
+  const hl = (r.highlights ?? []).find((h) => h?.url) ?? null;
+  if (!events.length && !st && !hl) return '';
+
+  const line = (e) => {
+    if (e.t === 'goal') {
+      const kind = /own/i.test(e.kind ?? '') ? '<small>own goal</small>' : /pen/i.test(e.kind ?? '') ? '<small>penalty</small>' : '';
+      return `${/own/i.test(e.kind ?? '') ? EV_ICON.own : EV_ICON.goal}<b>${esc(e.player ?? 'Goal')}</b>${kind}${
+        e.assist ? `<small>assist ${esc(e.assist)}</small>` : ''}${
+        e.score ? `<em>${esc(e.score[0])}–${esc(e.score[1])}</em>` : ''}`;
+    }
+    if (e.t === 'card') {
+      return `${EV_ICON[e.card] ?? EV_ICON.yellow}<b>${esc(e.player ?? '')}</b>${
+        e.reason ? `<small>${esc(unshout(e.reason).toLowerCase())}</small>` : ''}`;
+    }
+    return `${EV_ICON.sub}<b>${esc(e.in ?? '')}</b><small>for ${esc(e.out ?? '')}</small>`;
+  };
+  const timeline = events.length ? `
+    <div class="rep-heads"><span>${esc(f.home)}</span><span>${esc(f.away)}</span></div>
+    <div class="timeline">
+      ${events.map((e) => `<div class="ev ${e.side === 'away' ? 'away' : 'home'} is-${e.t}">
+          <span class="ev-min">${esc(minuteOf(e))}</span><span class="ev-body">${line(e)}</span></div>`).join('')}
+    </div>` : '';
+
+  const pct = (v) => `${Math.round(v)}%`;
+  const rows = st ? [
+    ['Possession', st.home?.possession, st.away?.possession, pct],
+    ['Shots', st.home?.shots, st.away?.shots],
+    ['On target', st.home?.on_target, st.away?.on_target],
+    ['Big chances', st.home?.big_chances, st.away?.big_chances],
+    ['Corners', st.home?.corners, st.away?.corners],
+    ['Fouls', st.home?.fouls, st.away?.fouls],
+    ['Yellow cards', st.home?.yellow, st.away?.yellow],
+    ['Offsides', st.home?.offsides, st.away?.offsides],
+    ['Saves', st.home?.saves, st.away?.saves],
+  ].filter(([, h, a]) => h != null && a != null) : [];
+  const numbers = rows.length ? `
+    <div class="rep-numbers">
+      <div class="rep-heads"><span>${esc(f.home)}</span><span>${esc(f.away)}</span></div>
+      ${rows.map(([l, h, a, fmt]) => statBar(l, h, a, fmt)).join('')}
+    </div>` : '';
+
+  return `
+  <div class="panel report">
+    <p class="panel-head">Match report${r.ht ? ` <span>half time ${esc(r.ht[0])}–${esc(r.ht[1])}</span>` : ''}</p>
+    ${timeline}
+    ${numbers}
+    ${hl ? `<a class="rep-highlights" href="${esc(hl.url)}" target="_blank" rel="noopener noreferrer">${
+      hl.thumbnail ? `<img src="${esc(hl.thumbnail)}" alt="" loading="lazy" decoding="async">` : ''}<span>Watch the highlights</span></a>` : ''}
+    ${r.attendance ? `<p class="rep-att">Attendance ${Number(r.attendance).toLocaleString()}</p>` : ''}
   </div>`;
 }
 
@@ -2538,9 +2720,20 @@ async function viewFixture(id, params = new URLSearchParams()) {
     ? (played ? 'What we called' : verdicts.length > 1 ? 'The calls' : 'The call')
     : (played ? 'We did not call this one' : 'No call');
 
+  /*
+   * After the match the confirmed sheets in the report, with the bench and
+   * the shirt numbers, replace a predicted line-up written before kick-off.
+   * The absences stay: they are still who was missing.
+   */
+  const sheet = played && f.report?.lineups?.home?.players?.length && f.report?.lineups?.away?.players?.length
+    ? { status: 'confirmed', home: f.report.lineups.home, away: f.report.lineups.away, unavailable: f.lineups?.unavailable ?? [] }
+    : f.lineups;
+  const report = played ? f.report ?? null : null;
+
   const overview = `
     <div class="grid-2">
       <div>
+        ${reportHTML(f)}
         <div class="panel">
           <p class="panel-head">${callHead}</p>
           ${verdicts.length
@@ -2592,8 +2785,8 @@ async function viewFixture(id, params = new URLSearchParams()) {
   const TABS = [
     ['overview', 'Overview', overview],
     ['lineups', 'Line-ups',
-      pitchHTML(f.lineups, f.home, f.away, f.home_id, f.away_id)
-      + squadHTML(f.lineups, f.home, f.away)],
+      pitchHTML(sheet, f.home, f.away, f.home_id, f.away_id, report)
+      + squadHTML(sheet, f.home, f.away, report)],
     ['h2h', 'Head to head', h2hHTML(f.h2h, f.home, f.away)],
     ['table', 'Table', standingsHTML(f.standings, f.home, f.away, f.home_id, f.away_id)],
   ].filter(([, , html]) => html);
@@ -2616,7 +2809,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
       ${backHTML('Back to the board')}
       <div class="hero-copy">
         <span class="timechip${isSoon(f.kickoff) ? ' soon' : ''}">${esc(kickoffLabel(f.kickoff))}</span>
-        ${st.kind === 'upcoming' ? '' : liveBadge(st)}
+        ${st.kind === 'upcoming' ? '' : liveBadge(st)}${st.kind === 'live' && f.live_minute != null ? `<span class="minute">${esc(f.live_minute)}'</span>` : ''}
         <h1 class="fx-stack${shown ? ' scored' : ''}">
           <span class="fx-line">
             ${crest(f.home, 'md', f.home_id)}
@@ -3190,6 +3383,7 @@ function recapCardHTML(x) {
         hasScore ? `<b class="row-goals${hg > ag ? ' won' : ''}">${esc(hg)}</b>` : ''}</span>
       <span class="recap-side">${crest(x.away_team ?? '', 'sm', x.away_team_id)}<span>${esc(x.away_team ?? '')}</span>${
         hasScore ? `<b class="row-goals${ag > hg ? ' won' : ''}">${esc(ag)}</b>` : ''}</span>
+      ${scorersHTML(x.goals)}
     </a>
     <div class="recap-body">
       <p class="recap-call">We said <b>${esc(d.name)}</b>${x.odds ? ` at ${oddsOf(x.odds)}` : ''}.</p>
@@ -3464,7 +3658,7 @@ async function viewPricing() {
       <section class="tier">
         <h3>Free, always</h3>
         <ul class="ticks">
-          <li>One full call a day, with the reason: the headline match</li>
+          <li>One full call a day, with the reason: the call we are surest of</li>
           <li>Every preview: team news, who starts, who scores, the form</li>
           <li>The bet slip's size, its total odds and its record</li>
           <li>Every settled call, with why it landed or did not</li>
