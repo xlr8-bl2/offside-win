@@ -226,7 +226,7 @@ function verdict(pm: Omit<PostMortem, 'line'>): string {
   if (swing !== null && swing <= 1) {
     return market === 'moved away'
       ? 'It came in by a goal, with the market drifting against us the whole way. Right, and closer than it should have been.'
-      : 'One goal in it. Right, but there was nothing spare.';
+      : 'One goal the other way and it was gone. Right, with nothing to spare.';
   }
   if (shape === 'as we read it') {
     return market === 'came to us'
