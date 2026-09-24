@@ -100,7 +100,7 @@ function sideFatigue(ctx: FixtureContext, which: 'home' | 'away'): Factor {
       id: `fatigue.${which}`,
       section: '§2.8',
       tier: 4,
-      note: `${side.team_name} come in on ${rest.toFixed(1)} days' rest with a normal schedule behind them.`,
+      note: `${side.team_name} come in on ${Math.round(rest)} days' rest, with nothing unusual in the schedule behind them.`,
       evidence: { ...profile, days_rest: Number(rest.toFixed(1)) },
       strength: 0.1,
     });
