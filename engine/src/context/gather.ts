@@ -259,7 +259,10 @@ export function parseManagerCareer(
   const tenureDays = current.date_from !== null ? (asOf - current.date_from) / 86400 : null;
   return {
     id: id ?? 0,
-    name: str(rec?.['name']) ?? null,
+    // The career endpoint is not consistent about where the name lives, and
+    // reading only `name` left every manager as "the manager" on the page.
+    name: str(rec?.['name'] ?? rec?.['manager_name'] ?? rec?.['full_name'] ?? rec?.['short_name'])
+      ?? pickStr(rec, 'manager.name') ?? pickStr(rec, 'manager.full_name') ?? null,
     current,
     matchesInCharge: current.matches,
     tenureDays,
@@ -295,20 +298,31 @@ async function sideContext(
   kickoff: number,
   standings: StandingRow[] | null,
 ): Promise<SideContext> {
-  const [squadRaw, scorersRaw, careerRaw, recent, schedule] = await Promise.all([
+  const [squadRaw, scorersRaw, careerRaw, recent, schedule, managerRaw] = await Promise.all([
     bsdOrNull(`/api/v2/teams/${teamId}/squad/`),
     bsdOrNull(`/api/v2/leagues/${leagueId}/top/scorers/`, { team_id: teamId, limit: 50 }),
     coachId ? bsdOrNull(`/api/v2/managers/${coachId}/career/`) : Promise.resolve(null),
     loadRecentMatches(teamId, kickoff),
     loadSchedule(teamId, kickoff),
+    // The manager's own record, for the name. The career endpoint does not
+    // reliably carry it, and a manager who is only ever "the manager" is the
+    // difference between analysis and a template.
+    coachId ? bsdOrNull(`/api/v2/managers/${coachId}/`) : Promise.resolve(null),
   ]);
+  const mRec = asRecord(managerRaw);
+  const managerName = str(mRec?.['name'] ?? mRec?.['full_name'] ?? mRec?.['short_name']) ?? null;
+  const career = careerRaw ? parseManagerCareer(careerRaw, teamId, kickoff) : null;
 
   return {
     team_id: teamId,
     team_name: teamName,
     squad: parseSquad(squadRaw),
     scorers: parseScorers(scorersRaw),
-    manager: careerRaw ? parseManagerCareer(careerRaw, teamId, kickoff) : null,
+    manager: career
+      ? { ...career, name: career.name ?? managerName }
+      : coachId && managerName
+        ? { id: coachId, name: managerName, current: null, matchesInCharge: null, tenureDays: null }
+        : null,
     standing: standings?.find((s) => s.team_id === teamId) ?? null,
     recent,
     lastLineupIds: null,
