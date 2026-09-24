@@ -282,8 +282,8 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 
 .brand-text {
   font-family: var(--display);
-  font-weight: var(--weight-bold);
-  font-size: var(--text-md);
+  font-weight: var(--weight-black);
+  font-size: var(--text-xl);
   letter-spacing: var(--tracking-md);
   font-variation-settings: 'wdth' var(--condensed);
 }

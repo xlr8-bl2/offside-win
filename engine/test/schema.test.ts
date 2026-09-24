@@ -24,7 +24,7 @@ test('postgres schema declares tables', () => {
 const PRIVATE = new Set(['payment', 'payment_method']);
 
 // Tables with paid content in them, readable only through a serving function.
-const SERVED = new Set(['fixture', 'pick', 'kv', 'slip']);
+const SERVED = new Set(['fixture', 'pick', 'kv', 'slip', 'entitlement']);
 
 // The anon key is public. RLS plus a SELECT-only grant is the only thing
 // standing between it and write access, so a table added without both is a hole
@@ -121,14 +121,14 @@ test('migrate() sends whole statements, function bodies included', () => {
 // even a mistaken grant would run them as anon, which has no write privilege on
 // either table -- but "it would fail anyway" is not a reason to hand out the
 // call, so the absence of a grant is asserted instead.
-const PRIVATE_FUNCTIONS = new Set(['record_payment', 'revoke_membership']);
+const PRIVATE_FUNCTIONS = new Set(['record_payment', 'revoke_membership', 'record_entitlement', 'revoke_entitlement']);
 
 // The Worker's read path. The serving functions over the paid tables run as
 // their owner, because those tables grant the public roles nothing -- so each
 // one IS the wall, and every one that returns calls must apply it. Anything
 // else runs as the caller: SECURITY DEFINER on a function that does not
 // filter is the one way a read-only surface becomes a data leak.
-const DEFINER = new Set(['get_board', 'get_fixture', 'get_picks', 'get_model', 'get_hero', 'get_health', 'get_slip']);
+const DEFINER = new Set(['get_board', 'get_fixture', 'get_picks', 'get_model', 'get_hero', 'get_health', 'get_slip', 'get_plans', 'get_account', 'has_membership', 'free_fixture_id']);
 const WALLED = new Set(['get_board', 'get_fixture', 'get_picks', 'get_slip']);
 for (const fn of [...sql.matchAll(/CREATE OR REPLACE FUNCTION (\w+)\(/g)].map((m) => m[1]!)) {
   test(`${fn} ${DEFINER.has(fn) ? 'runs as owner behind the wall' : 'runs as the caller'}${PRIVATE_FUNCTIONS.has(fn) ? ' and is not callable by anon' : ' and is callable by anon'}`, () => {

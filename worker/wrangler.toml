@@ -31,3 +31,9 @@ COINFLOW_BASE_URL = "https://api-sandbox.coinflow.cash"
 COINFLOW_WALLET = ""
 COINFLOW_BLOCKCHAIN = "solana"
 SITE_URL = "https://offside-win.ashleymbaht.workers.dev"
+
+# Which processor takes the money. "whop": Whop runs the checkout and the
+# billing on its own site and tells us by webhook; each plan's checkout link
+# lives on its `plan` row. "coinflow": the card-and-USDC path above. The only
+# secret Whop needs is WHOP_WEBHOOK_SECRET, pushed by deploy.yml.
+PAY_PROVIDER = "whop"
