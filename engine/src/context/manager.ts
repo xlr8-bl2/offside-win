@@ -139,7 +139,7 @@ function sideManagerFactor(side: SideContext, which: 'home' | 'away'): Factor {
       section: '§1.1',
       tier: 3,
       note:
-        `${Name} is ${games} games into the job at ${side.team_name} — past the bounce window, ` +
+        `${Name} is ${games} games into the job at ${side.team_name}, past the bounce window, ` +
         `where an early lift usually fades back toward the side's real level` +
         (appointmentDelta !== null
           ? `. The appointment has moved the club ${appointmentDelta >= 0 ? '+' : ''}${appointmentDelta.toFixed(2)} points per match.`
@@ -159,7 +159,7 @@ function sideManagerFactor(side: SideContext, which: 'home' | 'away'): Factor {
       section: '§1.3',
       tier: 3,
       note:
-        `${Name} has been at ${side.team_name} for ${Math.round(days / 365)} years and ${games} matches — ` +
+        `${Name} has been at ${side.team_name} for ${Math.round(days / 365)} years and ${games} matches: ` +
         `a settled regime with a large, stable sample behind it.`,
       evidence,
       claims: [
@@ -181,7 +181,7 @@ function sideManagerFactor(side: SideContext, which: 'home' | 'away'): Factor {
     id: `manager.${which}.established`,
     section: '§1.1',
     tier: 3,
-    note: `${Name} has ${games} matches in charge at ${side.team_name} — long enough that the side plays the way he wants it to.`,
+    note: `${Name} has ${games} matches in charge at ${side.team_name}, long enough that the side plays the way he wants it to.`,
     evidence,
     strength: 0.1,
   });

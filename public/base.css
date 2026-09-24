@@ -681,3 +681,27 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   margin: -1px; padding: 0; overflow: hidden;
   clip-path: inset(50%); white-space: nowrap;
 }
+
+/*
+ * Today's tally, in the header: how many calls landed and missed so far. It
+ * is the one number a returning reader wants on every page, and it is a link
+ * to the record. Hidden until there is something to count.
+ */
+.tally {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px var(--space-3);
+  border: var(--border) solid var(--hairline);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--chalk-3);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.tally b { font-weight: var(--weight-black); color: var(--chalk); }
+.tally b.won { color: var(--won); }
+.tally b.live { color: var(--lost); }
+.tally:hover { color: var(--chalk-2); border-color: var(--rule); }
+@media (max-width: 400px) { .tally { display: none; } }

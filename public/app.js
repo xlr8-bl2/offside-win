@@ -302,6 +302,26 @@ function boardHash(hours = state.hours, league = state.leagueName) {
  */
 const hasCall = (f) => Boolean(f?.top_pick || f?.locked);
 
+/**
+ * How a call is doing while the match is on.
+ *
+ * The same grader the board runs on a finished match, run on the running
+ * score: a call that would land if the whistle went now is "on track", one
+ * that would not is "not yet". Neither is a verdict -- a match is not over at
+ * the hour -- so the words say so, and "not yet" is amber, the colour of a
+ * thing still pending, rather than the red of a loss. Markets the score cannot
+ * grade (corners, cards, a level handicap) get nothing.
+ */
+function liveTrack(pick, f) {
+  if (!pick || !f || matchState(f).kind !== 'live') return null;
+  const ls = Array.isArray(f.live_score) && f.live_score.length === 2 ? f.live_score : null;
+  if (!ls) return null;
+  const r = didItLand({ market: pick.market, outcome: pick.outcome, line: pick.line, homeGoals: ls[0], awayGoals: ls[1] });
+  if (r !== 'won' && r !== 'lost') return null;
+  return { on: r === 'won', score: `${ls[0]}–${ls[1]}` };
+}
+const trackHTML = (t) => (t ? `<span class="track ${t.on ? 'on' : 'off'}"><i></i>${t.on ? 'On track' : 'Not yet'}</span>` : '');
+
 async function loadBoard() {
   state.board = await getJSON(`/api/board?hours=${state.hours}`);
   /*
@@ -620,7 +640,7 @@ function promoHTML(user) {
   <section class="promo">
     <p class="hand promo-aside">nobody else prints the losses</p>
     <h2>Every call, every competition.</h2>
-    <p>The analysis is free and stays free. Membership is the call itself — which market,
+    <p>The analysis is free and stays free. Membership is the call itself: which market,
        which side, the price and the book offering it.</p>
     <a class="btn btn-light" href="#/pricing">${user ? 'See what membership costs' : 'Become a member'}</a>
   </section>`;
@@ -654,7 +674,7 @@ function chanceInWords(chance) {
  * risk, and a slip that hid that would be selling the odds rather than the
  * reading.
  */
-function slipHTML(data) {
+function slipHTML(data, fixtures = []) {
   const cur = data?.current;
   const rec = data?.record;
   const record = rec?.n ? `<p class="slip-record">Slips so far: <b>${rec.won} of ${rec.n}</b> landed.</p>` : '';
@@ -668,6 +688,38 @@ function slipHTML(data) {
     </section>`;
   }
   const legs = Array.isArray(cur.legs) ? cur.legs : null;
+  /*
+   * The slip follows the board until its first leg kicks off, then it is a
+   * record. Saying when that is, and counting down to it, is the difference
+   * between "a slip" and "the slip, and you have forty minutes".
+   */
+  const first = Number(cur.first_kickoff) || 0;
+  const lock = !first ? ''
+    : first <= Date.now() / 1000
+      ? `<p class="slip-lock live"><i></i>Locked. The first leg is under way.</p>`
+      : `<p class="slip-lock">Locks in <b data-countdown="${first}" data-done="a moment">—</b></p>`;
+  /*
+   * Each leg, as it stands. The board rows carry the running score and, once
+   * a match is over, the record's grade, so a member watching the slip sees
+   * every leg move: on track, not yet, landed, missed.
+   */
+  const byId = new Map(fixtures.map((f) => [Number(f.id), f]));
+  const GRADE = { WON: 'won', LOST: 'lost', HALF_WON: 'part', HALF_LOST: 'part', PUSH: 'back', VOID: 'back' };
+  const MARK = { won: 'Landed', lost: 'Missed', back: 'Void', part: 'Half' };
+  const legState = (l) => {
+    const f = byId.get(Number(l.fixture_id));
+    if (!f) return '';
+    const st = matchState(f);
+    const score = Array.isArray(f.score) && f.score.length === 2 ? f.score : null;
+    if (st.kind === 'ft' && score) {
+      const same = f.called && f.called.market === l.market && String(f.called.outcome) === String(l.outcome);
+      const r = (same && GRADE[f.called.result])
+        ?? didItLand({ market: l.market, outcome: l.outcome, line: l.line, homeGoals: score[0], awayGoals: score[1] });
+      return r ? `<span class="mark ${r}">${MARK[r]}</span>` : liveBadge(st);
+    }
+    if (st.kind === 'live') return trackHTML(liveTrack(l, f)) || liveBadge(st);
+    return '';
+  };
   return `
   <section class="panel slip">
     <p class="panel-head">Today's bet slip <a href="#/slip">Every slip</a></p>
@@ -677,13 +729,14 @@ function slipHTML(data) {
     </div>
     <p class="slip-chance">Our most likely calls, combined. A slip like this comes in
       <b>${esc(chanceInWords(cur.chance))}</b>.</p>
+    ${lock}
     ${legs ? `<ol class="slip-list">${legs.map((l) => {
       const d = market({ market: l.market, outcome: l.outcome, line: l.line, home: l.home, away: l.away, odds: l.odds });
       return `
         <li><a href="#/fixture/${encodeURIComponent(l.fixture_id)}">
           <span class="slip-tie">${esc(l.home)} v ${esc(l.away)}</span>
           <span class="slip-sel">${esc(d.name)}</span>
-          <span class="slip-meta">${esc(kickoffLabel(l.kickoff))}<b>${oddsTag(l.odds)}</b></span>
+          <span class="slip-meta">${esc(kickoffLabel(l.kickoff))}<span class="slip-state">${legState(l)}<b>${oddsTag(l.odds)}</b></span></span>
         </a></li>`;
     }).join('')}</ol>`
     : `<div class="slip-locked">
@@ -710,7 +763,9 @@ function tickerHTML(fixtures, recent) {
   const live = fixtures.filter((f) => hasCall(f) && matchState(f).kind === 'live');
   for (const f of live.slice(0, 8)) {
     const sc = Array.isArray(f.live_score) ? f.live_score : null;
-    items.push({ tone: 'live', href: `#/fixture/${f.id}`, text: `${f.home} ${sc ? `${sc[0]}–${sc[1]}` : 'v'} ${f.away}` });
+    const t = liveTrack(f.top_pick, f);
+    items.push({ tone: 'live', href: `#/fixture/${f.id}`,
+      text: `${t ? (t.on ? 'On track: ' : 'Not yet: ') : ''}${f.home} ${sc ? `${sc[0]}–${sc[1]}` : 'v'} ${f.away}` });
   }
   const today = new Date().toDateString();
   for (const x of (recent ?? []).filter((r) => new Date(r.kickoff * 1000).toDateString() === today).slice(0, 8)) {
@@ -739,7 +794,10 @@ function tickerHTML(fixtures, recent) {
 async function viewSlip() {
   app.innerHTML = '<div class="wrap section narrow"><div class="spinner">Loading…</div></div>';
   let data;
-  try { data = await getJSON('/api/slip'); } catch (err) { return errorState(err); }
+  let board = null;
+  // The board rides along so each leg can show how its match stands.
+  try { [data, board] = await Promise.all([getJSON('/api/slip'), loadBoard().catch(() => null)]); }
+  catch (err) { return errorState(err); }
   const tone = (r) => (r === 'WON' ? 'won' : r === 'LOST' ? 'lost' : 'back');
   const recent = data?.recent ?? [];
   app.innerHTML = `
@@ -750,7 +808,7 @@ async function viewSlip() {
         the combination with the best chance of every leg landing. Every slip is graded,
         and every one stays on this page afterwards, won or lost.</p>
     </div>
-    ${slipHTML(data)}
+    ${slipHTML(data, board?.fixtures ?? [])}
     ${recent.length ? `
     <section class="panel side-block">
       <p class="panel-head">Settled slips</p>
@@ -769,6 +827,7 @@ async function viewSlip() {
       </div>
     </section>` : ''}
   </div>`;
+  tickCountdowns();
 }
 
 /** Called matches being played now, with the running score. */
@@ -786,7 +845,7 @@ function liveNowHTML(fixtures) {
           <span class="side-thumb">${crest(f.home, 'sm', f.home_id)}${crest(f.away, 'sm', f.away_id)}</span>
           <span class="side-body">
             <span class="side-sel">${esc(f.home)} v ${esc(f.away)}</span>
-            <span class="side-meta">${esc(f.league ?? '')}<b>${sc ? `${sc[0]}–${sc[1]}` : 'under way'}</b></span>
+            <span class="side-meta"><span class="side-league">${esc(f.league ?? '')}</span><b>${sc ? `${sc[0]}–${sc[1]}` : 'under way'}</b>${trackHTML(liveTrack(f.top_pick, f))}</span>
           </span>
         </a>`;
       }).join('')}
@@ -822,10 +881,12 @@ function leaguesTodayHTML(fixtures) {
  */
 function sideHTML(fixtures, slip) {
   const withCall = fixtures.filter((f) => f.top_pick && matchState(f).kind === 'upcoming').slice(0, 8);
+  // The blocks that move while a match is on sit in named slots, so the
+  // front page's refresh can redraw them in place without touching the rest.
   return `
   <aside class="home-side">
-    ${slipHTML(slip)}
-    ${liveNowHTML(fixtures)}
+    <div data-live="slip">${slipHTML(slip, fixtures)}</div>
+    <div data-live="live">${liveNowHTML(fixtures)}</div>
     ${leaguesTodayHTML(fixtures)}
     ${withCall.length ? `
     <section class="panel side-block">
@@ -990,6 +1051,8 @@ function rowHTML(f) {
   // a goalless first half became a result.
   const running = !played && Array.isArray(f.live_score) && f.live_score.length === 2 ? f.live_score : null;
   const shown = score ?? running;
+  // And while it is on, how the call is doing against that score.
+  const track = liveTrack(pick, f);
   // The stored grade where the record has one -- it is what the results page
   // prints -- and the scoreline only for a call not graded yet.
   const GRADE = { WON: 'won', LOST: 'lost', HALF_WON: 'part', HALF_LOST: 'part', PUSH: 'back', VOID: 'back' };
@@ -1069,6 +1132,8 @@ function rowHTML(f) {
                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>
                      Members</span>`
                 : `<span class="row-pass">Passed</span>`)
+        : pick && p && track ? `
+        ${trackHTML(track)}<span class="odds-book">at ${oddsOf(p.odds)}</span>`
         : pick && p ? `
         <span class="odds-tile${p.local ? '' : ' away'}"><span class="odds">${dec(p.odds)}</span><span class="odds-unit">odds</span></span>
         <span class="odds-book">${pick.lean ? 'lean · ' : ''}${p.local ? esc(p.book) : `no ${esc(country())} book`}</span>`
@@ -1160,10 +1225,12 @@ async function viewHome() {
   // stadium with a real fixture in it tonight.
   state.heroVenue = [...top, ...fixtures].map((f) => f.venue_id).filter(Boolean);
 
+  const rail = () => fixtures.filter((f) => hasCall(f) && f.id !== state.hero?.fixture_id);
   app.innerHTML =
-    tickerHTML(fixtures, recent) +
+    `<div data-live="ticker">${tickerHTML(fixtures, recent)}</div>` +
     heroHTML(state.hero, state.heroVenue, state.heroDetail) +
-    nextRailHTML(fixtures.filter((f) => hasCall(f) && f.id !== state.hero?.fixture_id)) +
+    `<div data-live="today">${todayStripHTML(fixtures, recent)}</div>` +
+    `<div data-live="rail">${nextRailHTML(rail())}</div>` +
     `<div class="wrap section dense">
        <div class="with-side">
          <div class="stack" style="gap:var(--space-9)">
@@ -1182,7 +1249,135 @@ async function viewHome() {
        </div>
      </div>`;
 
+  paintTally(fixtures, recent);
   tickCountdowns();
+
+  /*
+   * The front page, kept alive while there is something to keep up with.
+   *
+   * A called match being played, or one kicking off inside the hour, means
+   * the ticker, the strip, the rail, the slip and the live block are all about
+   * to change. They are redrawn in place once a minute -- the edge caches the
+   * board for that long, so anything faster gets the same bytes -- and only
+   * while the tab is being looked at. The hero and the record stay as they
+   * are; nothing about them moves during a match.
+   */
+  const busy = () => {
+    const now = Date.now() / 1000;
+    return fixtures.some((f) => hasCall(f)
+      && (matchState(f).kind === 'live' || (f.kickoff > now && f.kickoff - now < 3600)));
+  };
+  const refresh = async () => {
+    if (document.hidden || !busy()) return;
+    try {
+      const [fresh, picks, slipNow] = await Promise.all([
+        loadBoard(),
+        getJSON('/api/picks?limit=40&settled=true').then((r) => r.picks ?? []).catch(() => recent),
+        getJSON('/api/slip').catch(() => slip),
+      ]);
+      fixtures.length = 0;
+      fixtures.push(...(fresh.fixtures ?? []));
+      recent = picks;
+      slip = slipNow;
+      const put = (key, html) => { const el = app.querySelector(`[data-live="${key}"]`); if (el) el.innerHTML = html; };
+      put('ticker', tickerHTML(fixtures, recent));
+      put('today', todayStripHTML(fixtures, recent));
+      put('rail', nextRailHTML(rail()));
+      put('live', liveNowHTML(fixtures));
+      put('slip', slipHTML(slip, fixtures));
+      paintTally(fixtures, recent);
+      tickCountdowns();
+    } catch { /* the last good frame stays up */ }
+  };
+  state.poll = setInterval(refresh, 60000);
+  state.onVisible = () => { if (!document.hidden) refresh(); };
+  addEventListener('visibilitychange', state.onVisible);
+}
+
+/**
+ * Today, counted.
+ *
+ * Every called match with today's date on it, keyed by fixture: the board's
+ * rows first, because they carry the running score and the record's grade
+ * once there is one, then the settled record for anything that has already
+ * dropped off the back of the board. One count feeds the strip on the front
+ * page and the tally in the header, so the two cannot disagree.
+ */
+function todayTally(fixtures, recent) {
+  const today = new Date().toDateString();
+  const isToday = (epoch) => new Date(epoch * 1000).toDateString() === today;
+  const GRADE = { WON: 'won', HALF_WON: 'won', LOST: 'lost', HALF_LOST: 'lost' };
+  const seen = new Set();
+  const t = { calls: 0, live: 0, onTrack: 0, landed: 0, missed: 0, run: 0, recentWon: 0, recentN: 0 };
+  for (const f of fixtures ?? []) {
+    if (!hasCall(f) || !isToday(f.kickoff)) continue;
+    seen.add(Number(f.id));
+    t.calls++;
+    const st = matchState(f);
+    const pick = f.top_pick;
+    if (st.kind === 'live') {
+      t.live++;
+      if (liveTrack(pick, f)?.on) t.onTrack++;
+    } else if (st.kind === 'ft' && pick && Array.isArray(f.score)) {
+      const r = GRADE[pick.result] ?? didItLand({ market: pick.market, outcome: pick.outcome, line: pick.line,
+                                                   homeGoals: f.score[0], awayGoals: f.score[1] });
+      if (r === 'won') t.landed++;
+      else if (r === 'lost') t.missed++;
+    }
+  }
+  for (const x of recent ?? []) {
+    if (!isToday(x.kickoff) || seen.has(Number(x.fixture_id))) continue;
+    const r = GRADE[x.result];
+    if (!r) continue;
+    seen.add(Number(x.fixture_id));
+    t.calls++;
+    if (r === 'won') t.landed++; else t.missed++;
+  }
+  // The run: how many of the most recent settled calls landed in a row. A
+  // stake returned sits out; the count stops at the first miss.
+  const settled = [...(recent ?? [])]
+    .filter((x) => GRADE[x.result])
+    .sort((a, b) => (b.kickoff ?? 0) - (a.kickoff ?? 0));
+  for (const x of settled) { if (GRADE[x.result] === 'won') t.run++; else break; }
+  t.recentN = settled.length;
+  t.recentWon = settled.filter((x) => GRADE[x.result] === 'won').length;
+  return t;
+}
+
+/**
+ * Today so far, in figures, under the masthead.
+ *
+ * Calls up, on now, landed, missed, and the run -- the numbers a reader
+ * checking in on a match day wants before anything else. Every one is a
+ * count, every one is a link to the rows it counts, and it is not drawn at all
+ * on a day with nothing to count.
+ */
+function todayStripHTML(fixtures, recent) {
+  const t = todayTally(fixtures, recent);
+  const cell = (n, label, cls = '', href = '#/board') =>
+    `<a class="stat${cls ? ` ${cls}` : ''}" href="${href}"><b>${esc(n)}</b><span>${esc(label)}</span></a>`;
+  const cells = [];
+  if (t.calls) cells.push(cell(t.calls, t.calls === 1 ? 'call today' : 'calls today'));
+  if (t.live) cells.push(cell(t.live, t.onTrack ? `on now, ${t.onTrack} on track` : 'on now', 'live', '#/board?when=live'));
+  if (t.landed) cells.push(cell(t.landed, 'landed today', 'won', '#/board?when=played'));
+  if (t.missed) cells.push(cell(t.missed, 'missed today', '', '#/board?when=played'));
+  if (t.run >= 2) cells.push(cell(t.run, 'landed in a row', 'run', '#/results'));
+  else if (t.recentN) cells.push(cell(t.recentWon, `of the last ${t.recentN} landed`, 'won', '#/results'));
+  if (!cells.length) return '';
+  return `<div class="wrap"><section class="today-strip" aria-label="Today so far">${cells.join('')}</section></div>`;
+}
+
+/** The header's version of the same count: landed and missed today. */
+function paintTally(fixtures, recent) {
+  const el = document.getElementById('tally');
+  if (!el) return;
+  const t = todayTally(fixtures, recent);
+  const parts = [];
+  if (t.landed) parts.push(`<b class="won">${t.landed}</b> landed`);
+  if (t.missed) parts.push(`<b>${t.missed}</b> missed`);
+  if (!parts.length && t.live) parts.push(`<b class="live">${t.live}</b> on now`);
+  el.hidden = !parts.length;
+  el.innerHTML = parts.length ? `${parts.join(', ')} today` : '';
 }
 
 /**
@@ -1208,7 +1403,7 @@ function tickCountdowns() {
     if (!nodes.length) { clearInterval(state.tick); return; }
     for (const el of nodes) {
       const left = Number(el.dataset.countdown) * 1000 - Date.now();
-      if (left <= 0) { el.textContent = 'Under way'; el.classList.add('live'); continue; }
+      if (left <= 0) { el.textContent = el.dataset.done ?? 'Under way'; el.classList.add('live'); continue; }
       const s = Math.floor(left / 1000);
       const d = Math.floor(s / 86400);
       const h = Math.floor((s % 86400) / 3600);
@@ -1641,6 +1836,8 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
     ? didItLand({ market: c.market, outcome: c.outcome, line: c.line, homeGoals: hg, awayGoals: ag })
     : null);
   const VERDICT_WORD = { won: 'Landed', lost: 'Did not land', part: 'Half back', back: 'Stake back' };
+  // While the match is on: where the call stands against the running score.
+  const track = landed ? null : liveTrack(c, fixture);
   const story = landed
     ? recap({ market: c.market, outcome: c.outcome, line: c.line, home, away,
               homeGoals: hg, awayGoals: ag,
@@ -1659,6 +1856,8 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
     ${landed
       ? `<p class="wins">${esc(story ?? d.wins)}</p>`
       : `<p class="wins">${esc(d.wins)}</p>`}
+    ${track ? `<p class="track-line">${trackHTML(track)} It is ${esc(track.score)} as things stand${
+        track.on ? ', which is what we need.' : ', so this one still has work to do.'}</p>` : ''}
     ${prose ? `<p class="narrative">${esc(prose)}</p>` : ''}
     ${why ? `<div class="why"><p class="why-head">Why this call</p><p>${esc(why)}</p></div>` : ''}
     ${played && (prose || why) ? `<p class="aside">Written before kick-off, and left as it was.</p>` : ''}
@@ -1845,7 +2044,7 @@ function pitchHTML(lineups, home, away, homeId, awayId) {
     </div>
 
     ${out.length
-      ? `<div class="outlist"><b>Unavailable</b>${out.map((u) => `<span class="also-call">${esc(u.name)}${u.reason ? ` — ${esc(u.reason)}` : ''}</span>`).join('')}</div>`
+      ? `<div class="outlist"><b>Unavailable</b>${out.map((u) => `<span class="also-call">${esc(u.name)}${u.reason ? ` (${esc(u.reason)})` : ''}</span>`).join('')}</div>`
       : ''}
   </div>`;
 }
@@ -2312,6 +2511,10 @@ async function viewFixture(id, params = new URLSearchParams()) {
     && f.score[0] !== null && f.score[1] !== null ? f.score : null;
   const hg = sc ? Number(sc[0]) : null;
   const ag = sc ? Number(sc[1]) : null;
+  // The running score while it is on -- shown where the final score goes,
+  // with the live badge beside it saying which kind it is.
+  const ls = !sc && st.kind === 'live' && Array.isArray(f.live_score) && f.live_score.length === 2 ? f.live_score : null;
+  const shown = sc ?? ls;
 
   // The provider hands back round labels already joined with a middle dot
   // ("Regular season · Matchday 4"), which is the meta-string tell arriving
@@ -2414,16 +2617,16 @@ async function viewFixture(id, params = new URLSearchParams()) {
       <div class="hero-copy">
         <span class="timechip${isSoon(f.kickoff) ? ' soon' : ''}">${esc(kickoffLabel(f.kickoff))}</span>
         ${st.kind === 'upcoming' ? '' : liveBadge(st)}
-        <h1 class="fx-stack${sc ? ' scored' : ''}">
+        <h1 class="fx-stack${shown ? ' scored' : ''}">
           <span class="fx-line">
             ${crest(f.home, 'md', f.home_id)}
             <span class="name">${esc(f.home)}</span>
-            ${sc ? `<span class="gf${hg > ag ? ' win' : ''}">${hg}</span>` : formChips(f.form?.home)}
+            ${shown ? `<span class="gf${shown[0] > shown[1] ? ' win' : ''}">${esc(shown[0])}</span>` : formChips(f.form?.home)}
           </span>
           <span class="fx-line">
             ${crest(f.away, 'md', f.away_id)}
             <span class="name">${esc(f.away)}</span>
-            ${sc ? `<span class="gf${ag > hg ? ' win' : ''}">${ag}</span>` : formChips(f.form?.away)}
+            ${shown ? `<span class="gf${shown[1] > shown[0] ? ' win' : ''}">${esc(shown[1])}</span>` : formChips(f.form?.away)}
           </span>
         </h1>
         <p class="hero-blurb">${esc([f.league, ...meta.slice(1)].filter(Boolean).join(', '))}</p>
@@ -2465,6 +2668,25 @@ async function viewFixture(id, params = new URLSearchParams()) {
       const q = t.dataset.tab === TABS[0][0] ? '' : `?tab=${encodeURIComponent(t.dataset.tab)}`;
       history.replaceState(null, '', `${location.pathname}#/fixture/${encodeURIComponent(id)}${q}`);
     };
+  }
+
+  /*
+   * A match being played is re-read once a minute, and the page redrawn --
+   * scroll and open tab intact, because the tab is in the address and the
+   * page's height does not change. The router clears the timer on the way
+   * out, and a backgrounded tab does not ask.
+   */
+  if (st.kind === 'live') {
+    const refresh = () => {
+      if (document.hidden) return;
+      const y = window.scrollY;
+      viewFixture(id, new URLSearchParams(location.hash.split('?')[1] ?? ''))
+        .then(() => window.scrollTo(0, y))
+        .catch(() => { /* the last good page stays up */ });
+    };
+    state.poll = setInterval(refresh, 60000);
+    state.onVisible = () => { if (!document.hidden) refresh(); };
+    addEventListener('visibilitychange', state.onVisible);
   }
 }
 
@@ -2633,7 +2855,7 @@ async function viewResults() {
         ? `Called at average ${oddsOf(avgOdds)} or so, so most of them landing
            is what those odds already expect. Winning most is not the same as
            being ahead.`
-        : 'Winning most of them is not the same as being ahead — these are short prices.'}</p>
+        : 'These are short prices, so winning most of them is not the same as being ahead.'}</p>
       ${n > 0 && n < 100
         ? `<p class="record-note">That is ${n} results. It is not enough to tell a good run
              from a good model, and we will say so until it is.</p>`
@@ -2862,7 +3084,7 @@ function formStringHTML(settled, n = 20) {
   return `
   <div class="formline">
     <span class="chips big">${seq.map((x) => `<i class="chip ${x.result === 'WON' || x.result === 'HALF_WON' ? 'w' : 'l'}">${x.result === 'WON' || x.result === 'HALF_WON' ? 'W' : 'L'}</i>`).join('')}</span>
-    <span class="formline-note">the last ${seq.length}, oldest first${run >= 3 ? ` — <b>${run} in a row</b>` : ''}</span>
+    <span class="formline-note">the last ${seq.length}, oldest first${run >= 3 ? `, ending on <b>${run} in a row</b>` : ''}</span>
   </div>`;
 }
 
@@ -3242,7 +3464,7 @@ async function viewPricing() {
       <section class="tier">
         <h3>Free, always</h3>
         <ul class="ticks">
-          <li>One full call a day, with the reason — the headline match</li>
+          <li>One full call a day, with the reason: the headline match</li>
           <li>Every preview: team news, who starts, who scores, the form</li>
           <li>The bet slip's size, its total odds and its record</li>
           <li>Every settled call, with why it landed or did not</li>
@@ -3251,7 +3473,7 @@ async function viewPricing() {
       <section class="tier tier-paid">
         <h3>Members</h3>
         <ul class="ticks">
-          <li><b>Every open call</b>, the moment it goes up — typically twenty to sixty a day</li>
+          <li><b>Every open call</b> the moment it goes up, typically twenty to sixty a day</li>
           <li><b>The bet slip's legs</b>, before the first one kicks off</li>
           <li><b>Why this call</b> on every match: the argument for this market at these odds</li>
           <li>The board's filters by league and by day</li>
@@ -3261,7 +3483,7 @@ async function viewPricing() {
 
     <div class="prose pricing-small">
       <p><b>Paying and signing in.</b> Payment is taken by Whop. Use the same email address there as you
-        use to sign in here — that is how your membership finds you. Nothing else is needed.</p>
+        use to sign in here. That is how your membership finds you. Nothing else is needed.</p>
       <p><b>Changed your mind?</b> Fourteen days, full refund, whatever you have read.
         <a href="#/legal/refunds">How refunds work</a>. Cancel a renewing plan from your Whop account in one tap;
         you keep access to the end of what you paid for.</p>
@@ -3503,19 +3725,19 @@ const LEGAL = {
       <h2>What we collect</h2>
       <p><b>Nothing, until you make an account.</b> You can read every fixture, every write-up and
          the whole results record without telling us anything at all.</p>
-      <p>If you sign in, we hold your <b>email address</b> — because that is how you sign in — and,
+      <p>If you sign in, we hold your <b>email address</b> (that is how you sign in) and,
          if you become a member, the <b>dates your membership runs</b> and a <b>record of each
          payment</b>: when, how much, and whether it went through.</p>
       <p><b>We never see your card.</b> Card details are entered on our payment processor's own
          page and never touch this site or our database. What we are told is the brand and the last
          four digits, so your account page can say "Visa ending 4242" and you know which card is
          on file. That is all we could tell anyone, including ourselves.</p>
-      <p>Our host records standard server logs — IP address, browser, page requested, time — which
+      <p>Our host records standard server logs (IP address, browser, page requested, time), which
          are used to keep the site up and to spot abuse, and are not used to build a profile of you.</p>
       <h2>Analytics</h2>
       <p>If analytics are enabled they run only after you accept them in the cookie notice. Decline
-         and none are loaded at all — not loaded-but-anonymised, not loaded. Your choice is stored
-         in your own browser so we do not have to ask again.</p>
+         and the analytics script is never loaded, so there is nothing to anonymise. Your choice is
+         stored in your own browser so we do not have to ask again.</p>
       <h2>What we never do</h2>
       <ul>
         <li>Sell or share your data with advertisers or data brokers.</li>
@@ -3538,7 +3760,7 @@ const LEGAL = {
       <p>Where the UK GDPR or EU GDPR applies you may ask what we hold, ask for it to be corrected
          or deleted, and complain to your data protection authority. Ask and we will delete your
          account and your email address. We have to keep the record of payments themselves for as
-         long as tax and accounting law requires, which we cannot waive — but it can be separated
+         long as tax and accounting law requires, which we cannot waive, but it can be separated
          from you.</p>
       <h2>Contact</h2>
       <p>Questions about this policy go to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>,
@@ -3552,10 +3774,10 @@ const LEGAL = {
       <p>One item of local storage records whether you accepted or declined non-essential cookies,
          so the notice is not shown on every visit. It holds a single value and nothing else. It
          cannot be switched off, because without it we cannot remember that you said no.</p>
-      <p>If you sign in, a second item holds your session — the thing that keeps you signed in
+      <p>If you sign in, a second item holds your session, the thing that keeps you signed in
          between visits. It is set only after you sign in, it is removed when you sign out, and
          without it an account would not work at all.</p>
-      <h2>Analytics — optional, off until you say otherwise</h2>
+      <h2>Analytics: optional, and off until you say otherwise</h2>
       <p>If you accept, an analytics cookie may be set to count visits and see which pages are
          read. If you decline, the analytics script is never loaded, so no such cookie can exist.</p>
       <h2>Advertising</h2>
@@ -3587,18 +3809,18 @@ const LEGAL = {
          of this site, including money lost betting.</p>
       <h2>Membership</h2>
       <p>Reading the site is free: every fixture, every write-up, the form, the team news and the
-         full record of results. A membership adds the call itself — which market, which side, the
+         full record of results. A membership adds the call itself: which market, which side, the
          price, and the bookmaker offering it.</p>
       <p>Three plans. A <b>matchday pass</b> is one payment for seven days and does not renew.
          The <b>monthly</b> membership and the <b>season ticket</b> renew at the end of each period,
-         at the price shown on the membership page when you bought, until you cancel — which you can
-         do in one tap from your account with our payment provider, keeping access to the end of the
+         at the price shown on the membership page when you bought, until you cancel. You can cancel
+         in one tap from your account with our payment provider and keep access to the end of the
          period you have paid for. We will tell you before any price changes.</p>
       <p>Payment is taken by Whop, which holds your card; we never see it. Your membership is tied
          to the email address you pay with, so sign in here with the same address.</p>
       <p>This is digital content and your access starts the moment you pay. UK consumer law lets a
          seller ask you to give up the 14-day right to cancel in exchange for that. <b>We do not
-         ask.</b> You keep the 14 days in full — see the refunds page — and there is nothing to
+         ask.</b> You keep the 14 days in full (see the refunds page), and there is nothing to
          agree to at checkout beyond the payment itself.</p>
       <h2>Changes</h2>
       <p>These terms may change. The date below shows when they were last revised.</p>`,
@@ -3609,7 +3831,7 @@ const LEGAL = {
       <p>Short, because it should be.</p>
       <h2>If it did not work</h2>
       <p>If the site was down, or your membership did not start after you paid, tell us and we will
-         put it right — either by extending your membership by the time you lost, or by refunding
+         put it right, either by extending your membership by the time you lost or by refunding
          you in full. No argument and no form.</p>
       <h2>If you changed your mind</h2>
       <p>Tell us within 14 days of your first payment and you can have it back in full, whatever
@@ -3618,7 +3840,7 @@ const LEGAL = {
          not. Your access starts immediately anyway and the 14 days stand.</p>
       <h2>If you simply want to stop</h2>
       <p>A matchday pass simply stops. A monthly membership or a season ticket is cancelled in one
-         tap from your account with our payment provider — you keep what you have paid for until it
+         tap from your account with our payment provider. You keep what you have paid for until it
          runs out and are not charged again. We do not refund part of a period already under way,
          and we do not make you ask a person to leave.</p>
       <h2>What we will not refund</h2>
@@ -3648,13 +3870,13 @@ const LEGAL = {
       <p><a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a></p>
       <p>Refunds, a membership that did not start, a scoreline we have got wrong, a question about
          what we hold on you, or a complaint. Write from the email address on your account where
-         the question is about your account — it saves us asking you to prove it is you.</p>
+         the question is about your account. It saves us asking you to prove it is you.</p>
       <h2>What to expect</h2>
       <p>We answer every email, including the ones where the answer is no. Refund requests are
          answered within two working days; everything else as soon as we can.</p>
       <h2>What we cannot help with</h2>
       <p>We are not a bookmaker and we hold no betting account. If a bet has been settled in a way
-         you disagree with, that is between you and the book that took it — the rules that decided
+         you disagree with, that is between you and the book that took it. The rules that decided
          it are theirs, not ours. If gambling has stopped being something you can afford, the
          <a href="#/legal/responsible">responsible gambling page</a> lists people who can help, and
          they are better placed than we are.</p>`,
@@ -3667,22 +3889,22 @@ const LEGAL = {
       <h2>Signs worth taking seriously</h2>
       <ul>
         <li>Betting more than you planned, or more than you can comfortably lose.</li>
-        <li>Chasing losses — staking more to win back what has gone.</li>
+        <li>Chasing losses: staking more to win back what has gone.</li>
         <li>Borrowing money to bet, or hiding betting from people close to you.</li>
         <li>Betting to escape stress or low mood rather than for enjoyment.</li>
       </ul>
       <h2>Practical steps</h2>
       <ul>
         <li>Set a deposit limit with your bookmaker before you need one.</li>
-        <li>Use self-exclusion — <a href="https://www.gamstop.co.uk" target="_blank" rel="noopener noreferrer">GAMSTOP</a>
+        <li>Use self-exclusion. <a href="https://www.gamstop.co.uk" target="_blank" rel="noopener noreferrer">GAMSTOP</a>
             covers every licensed operator in Great Britain in one step.</li>
         <li>Block gambling sites with software such as Gamban, and turn on your bank's gambling block.</li>
       </ul>
       <h2>Free, confidential help</h2>
       <ul>
-        <li><a href="https://www.begambleaware.org" target="_blank" rel="noopener noreferrer">BeGambleAware</a> — advice and a 24/7 helpline on 0808 8020 133.</li>
-        <li><a href="https://www.gamcare.org.uk" target="_blank" rel="noopener noreferrer">GamCare</a> — support for anyone affected by gambling, including family.</li>
-        <li><a href="https://www.gamblersanonymous.org" target="_blank" rel="noopener noreferrer">Gamblers Anonymous</a> — meetings worldwide.</li>
+        <li><a href="https://www.begambleaware.org" target="_blank" rel="noopener noreferrer">BeGambleAware</a>: advice and a 24/7 helpline on 0808 8020 133.</li>
+        <li><a href="https://www.gamcare.org.uk" target="_blank" rel="noopener noreferrer">GamCare</a>: support for anyone affected by gambling, including family.</li>
+        <li><a href="https://www.gamblersanonymous.org" target="_blank" rel="noopener noreferrer">Gamblers Anonymous</a>: meetings worldwide.</li>
       </ul>
       <p><b>A high strike rate is not a safe bet.</b> Everything published here can be right more often
          than not and still lose money at the wrong price. Please treat it accordingly.</p>`,
@@ -3968,7 +4190,7 @@ async function headerAuth() {
       pill.href = '#/dev';
       document.body.prepend(pill);
     }
-    pill.textContent = 'Viewing as a free reader — tap to switch back';
+    pill.textContent = 'Viewing as a free reader. Tap to switch back';
   } else if (pill) {
     pill.remove();
   }
@@ -4041,6 +4263,15 @@ async function health() {
       <div><b>${(h.fixtures ?? 0).toLocaleString()}</b><span>Games on the board</span></div>
       <div><b>Every 15 min</b><span>Refreshed</span></div>`;
   } catch { /* the dot stays grey, which is the honest state */ }
+  // The header's tally, on every page. The board is only fetched for it where
+  // a page has not already loaded one; the settled record is small.
+  try {
+    const [recent, board] = await Promise.all([
+      getJSON('/api/picks?limit=40&settled=true').then((r) => r.picks ?? []),
+      state.board ? state.board : loadBoard().catch(() => null),
+    ]);
+    paintTally(board?.fixtures ?? [], recent);
+  } catch { /* stays hidden */ }
 }
 
 document.getElementById('burger').onclick = (e) => {

@@ -307,7 +307,7 @@ function polymarketFactor(ctx: FixtureContext): Factor {
     tier: 7,
     note: diverges
       ? `The prediction market makes ${gapOutcome} ${(Math.abs(maxGap) * 100).toFixed(1)} points ` +
-        `${maxGap > 0 ? 'more' : 'less'} likely than the bookmakers do — past the five-point mark ` +
+        `${maxGap > 0 ? 'more' : 'less'} likely than the bookmakers do, past the five-point mark ` +
         `where one of them is wrong.`
       : 'The prediction market and the bookmakers agree within the noise.',
     evidence: {

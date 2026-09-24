@@ -154,7 +154,7 @@ function sideForm(ctx: FixtureContext, which: 'home' | 'away'): Factor {
   const where = atHome ? 'at home' : 'on the road';
   const note =
     `${side.team_name} have taken ${form.ppg.toFixed(2)} points a game from their last ` +
-    `${form.played} — ${form.wins}W ${form.draws}D ${form.losses}L, scoring ` +
+    `${form.played} (${form.wins}W ${form.draws}D ${form.losses}L), scoring ` +
     `${form.goalsFor.toFixed(1)} and conceding ${form.goalsAgainst.toFixed(1)}` +
     (form.venue ? `, and ${form.venue.ppg.toFixed(2)} a game ${where}.` : '.');
 

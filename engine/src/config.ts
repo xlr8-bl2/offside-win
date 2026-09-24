@@ -145,6 +145,10 @@ export const config = {
     // Second tiers, domestic cups and the rest of the covered set.
     38: 5, 89: 5, 88: 5, 86: 5, 87: 5, 34: 5, 44: 5, 42: 5, 46: 5,
     91: 5, 57: 5, 80: 5, 52: 5, 22: 5, 82: 5, 28: 5, 47: 5, 36: 5, 72: 5,
+    // International competition: the Nations League is a Europa-level night
+    // and CONCACAF's is a second tier. Neither was ranked, so both sorted
+    // below MLS.
+    64: 3, 65: 5,
     // Friendlies last, below unranked.
     79: 9, 31: 9,
   } as Record<number, number>,
