@@ -150,13 +150,29 @@ export function stakesFactors(ctx: FixtureContext): Factor[] {
   const gamesLeft =
     ctx.seasonRounds !== null && ctx.round !== null ? Math.max(0, ctx.seasonRounds - ctx.round) : null;
 
-  if (!ctx.standings || gamesLeft === null) {
+  /*
+   * A table that is not a league table is not read.
+   *
+   * A cup or a group stage comes back flattened into one list -- the Nations
+   * League as fifty-four rows, every one of them on nil points -- and read as
+   * a league it says both sides are "safely mid-table with 105 games
+   * remaining". No side in any competition has 105 games left. Anything with
+   * more than twenty-four rows, or where nobody has played, has no table to
+   * read yet, and the honest note says so.
+   */
+  const rows = ctx.standings ?? [];
+  const nobodyHasPlayed = rows.length > 0 && rows.every((r) => (r.played ?? 0) === 0);
+  const notALeague = rows.length > 24 || nobodyHasPlayed || (gamesLeft !== null && gamesLeft > 46);
+
+  if (!ctx.standings || gamesLeft === null || notALeague) {
     out.push(
       unavailable({
         id: 'stakes.table',
         section: '§5.1',
         tier: 2,
-        note: 'No league table or round number available, so what either side is playing for is unknown.',
+        note: notALeague
+          ? 'A cup or a group stage, so there is no league table to read what either side is playing for.'
+          : 'No league table or round number available, so what either side is playing for is unknown.',
       }),
     );
   } else {
@@ -279,8 +295,13 @@ function stakeFactor(
         });
       }
     }
-    note = `${parts.join('; ')}, with ${gamesLeft} games remaining.`;
-    strength = clamp(Math.max(home.intensity, away.intensity), 0.1, 0.8);
+    // Two sides with nothing riding on it is not a sentence worth two clauses
+    // and a games-remaining count. Say it once, quietly, and carry no weight.
+    const bothMid = home.state === 'mid_table' && away.state === 'mid_table';
+    note = bothMid
+      ? 'Nothing much riding on this one for either side yet.'
+      : `${parts.join('; ')}, with ${gamesLeft} game${gamesLeft === 1 ? '' : 's'} remaining.`;
+    strength = bothMid ? 0 : clamp(Math.max(home.intensity, away.intensity), 0.1, 0.8);
   }
 
   return computed({
