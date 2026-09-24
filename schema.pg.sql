@@ -623,7 +623,7 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
 $fn$;
 
 CREATE OR REPLACE FUNCTION get_board(p_from bigint, p_to bigint, p_league bigint DEFAULT NULL)
-RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   WITH m AS MATERIALIZED (SELECT has_membership() AS ok)
   SELECT json_build_object(
            'generated_at', floor(extract(epoch FROM now()))::bigint,
@@ -676,7 +676,7 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
 $fn$;
 
 CREATE OR REPLACE FUNCTION get_fixture(p_id bigint)
-RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   SELECT (
            -- A finished match is not the thing being sold, so it is not walled.
            --
@@ -734,7 +734,7 @@ $fn$;
 -- both. A text flag rather than a boolean because the query string carries it
 -- as text and a missing value must mean "both", not false.
 CREATE OR REPLACE FUNCTION get_picks(p_limit integer DEFAULT 60, p_settled text DEFAULT NULL)
-RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   SELECT json_build_object(
            'summary', (SELECT to_json(s) FROM pick_summary s),
            'picks', coalesce((
@@ -773,7 +773,7 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
 $fn$;
 
 CREATE OR REPLACE FUNCTION get_model()
-RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   SELECT json_build_object(
            'calibration', coalesce((
              SELECT json_agg(row_to_json(c) ORDER BY c.market_family)
@@ -805,7 +805,7 @@ $fn$;
 -- What the site leads with. An override set by hand wins over the daily pick,
 -- so a hand-made graphic can go up for a final without a deploy.
 CREATE OR REPLACE FUNCTION get_hero()
-RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   SELECT coalesce(
     (SELECT try_json(v) FROM kv WHERE k = 'hero:override'
        AND (expires_at IS NULL OR expires_at > floor(extract(epoch FROM now())))),
@@ -815,7 +815,7 @@ RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $f
 $fn$;
 
 CREATE OR REPLACE FUNCTION get_health()
-RETURNS json LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   WITH s AS (
     SELECT count(*) AS fixtures,
            count(*) FILTER (WHERE board_free_json IS NULL) AS without_free_copy,
@@ -885,13 +885,13 @@ GRANT SELECT ON referee_rate TO anon;
 
 ALTER TABLE fixture ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS fixture_read ON fixture;
-CREATE POLICY fixture_read ON fixture FOR SELECT TO anon USING (true);
-GRANT SELECT ON fixture TO anon;
+-- No direct reads. See "The paid tables are read through the functions" below.
+REVOKE ALL ON fixture FROM anon, authenticated;
 
 ALTER TABLE pick ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS pick_read ON pick;
-CREATE POLICY pick_read ON pick FOR SELECT TO anon USING (true);
-GRANT SELECT ON pick TO anon;
+-- No direct reads. See "The paid tables are read through the functions" below.
+REVOKE ALL ON pick FROM anon, authenticated;
 
 ALTER TABLE calibration ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS calibration_read ON calibration;
@@ -905,8 +905,8 @@ GRANT SELECT ON backtest TO anon;
 
 ALTER TABLE kv ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS kv_read ON kv;
-CREATE POLICY kv_read ON kv FOR SELECT TO anon USING (true);
-GRANT SELECT ON kv TO anon;
+-- No direct reads. See "The paid tables are read through the functions" below.
+REVOKE ALL ON kv FROM anon, authenticated;
 
 -- The membership tables. Same four-line shape as everything above, but the
 -- USING clause is a predicate rather than `true`, and that is the whole
@@ -973,6 +973,23 @@ REVOKE ALL ON pick_summary_by_kind FROM anon;
 -- The serving functions are the Worker's whole read path. EXECUTE only: they
 -- are SECURITY INVOKER, so each one still reads under the anon SELECT policies
 -- above and can reach nothing a direct select could not.
+-- The paid tables are read through the functions, never directly.
+--
+-- fixture, pick and kv used to carry a policy letting the public key SELECT
+-- every row, on the reasoning that there was nothing secret in them. There
+-- is: `pick` holds every open call, `fixture.bundle_json` the full write-up
+-- with the call in it, and `kv` the cached members' paragraphs. The public key
+-- ships to every browser and /api/config hands out the project URL, so anyone
+-- could skip the site and read all thirty-two open calls from
+-- /rest/v1/pick with it -- confirmed against production before this change.
+--
+-- So those tables grant nothing to either role, and the serving functions
+-- below run SECURITY DEFINER: they read as the owner, apply the wall
+-- (has_membership(), settled or not, finished or not) themselves, and return
+-- only what the caller is entitled to. That also fixes the other half: the
+-- read policies were written TO anon only, so a signed-in member (role
+-- `authenticated`) calling them as invoker would have seen empty tables.
+-- Every definer function pins search_path, which is what makes it safe.
 GRANT EXECUTE ON FUNCTION try_json(text) TO anon;
 GRANT EXECUTE ON FUNCTION has_membership() TO anon;
 GRANT EXECUTE ON FUNCTION get_account() TO anon;
@@ -982,6 +999,8 @@ GRANT EXECUTE ON FUNCTION get_picks(integer, text) TO anon;
 GRANT EXECUTE ON FUNCTION get_model() TO anon;
 GRANT EXECUTE ON FUNCTION get_hero() TO anon;
 GRANT EXECUTE ON FUNCTION get_health() TO anon;
+GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint), get_fixture(bigint), get_picks(integer, text),
+  get_model(), get_hero(), get_health(), get_account(), has_membership(), try_json(text) TO authenticated;
 
 -- PostgREST caches the schema and will answer 404 for a function it has not
 -- seen yet. Supabase reloads on DDL via an event trigger, but that fires on its
