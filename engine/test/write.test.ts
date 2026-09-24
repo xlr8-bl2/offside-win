@@ -78,7 +78,47 @@ test('an unknown injury reason is not named', () => {
       evidence: { count: 1, players: [{ player: 'Frederik Carstensen', reason: 'Unknown', goal_share: 0 }] },
     }],
   });
-  assert.equal(facts[0]?.text, 'Frederik Carstensen is out for Sarpsborg 08');
+  // The player is still named -- that is the point -- but no fact may say
+  // "an unknown problem".
+  assert.ok(facts.some((f) => f.text === 'Frederik Carstensen is out for Sarpsborg 08'));
+  assert.ok(facts.some((f) => f.text === 'Sarpsborg 08 are without Frederik Carstensen'));
+  assert.ok(!facts.some((f) => /unknown/i.test(f.text)), 'an unknown reason was named');
+});
+
+test('absences are named and grouped by where they play', () => {
+  const facts = pubFacts({
+    home: 'Nice', away: 'Lille', ledger: [{
+      id: 'availability.home.absences', state: 'COMPUTED',
+      evidence: { count: 3, players: [
+        { player: 'Antoine Mendy', role: 'DEF', reason: 'Cruciate Ligament Injury' },
+        { player: 'Moise Bombito', role: 'DEF', reason: 'Leg Injury' },
+        { player: 'Laurent Abergel', role: 'MID', reason: 'Cruciate Ligament Injury' },
+      ] },
+    }],
+  });
+  assert.equal(facts[0]?.text, 'Nice are without Antoine Mendy and Moise Bombito at the back and Laurent Abergel in midfield');
+});
+
+test('league position, starters and likely scorers become facts, by name', () => {
+  const facts = pubFacts({
+    home: 'Nice', away: 'Lille',
+    standings: { home: { position: 14 }, away: { position: 18 }, size: 18 },
+    lineups: {
+      status: 'predicted',
+      home: { formation: '4-2-3-1', players: [
+        ...Array.from({ length: 9 }, (_, i) => ({ name: `N${i}`, position: 'M', starting: true })),
+        { name: 'Diouf', position: 'G', starting: true },
+        { name: 'Amoura', position: 'F', starting: true },
+      ] },
+      away: null,
+    },
+    goalscorers: [{ player: 'Amoura', price: 0.3 }, { player: 'Giroud', price: 0.2 }],
+  }).map((f) => f.text);
+  assert.ok(facts.includes('Nice are 14th in the table'));
+  assert.ok(facts.includes('Lille are bottom of the table'));
+  assert.ok(facts.includes('Amoura is expected to start up front for Nice'));
+  assert.ok(facts.includes('the players most fancied to score are Amoura for Nice and Giroud'));
+  assert.ok(!facts.some((f) => /0\.3|30%/.test(f)), 'a price reached a fact');
 });
 
 /* -------------------------------------------------------------- the brief */

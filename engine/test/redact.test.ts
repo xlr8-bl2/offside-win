@@ -215,3 +215,21 @@ test('what the writer accepts is what a free reader may read', () => {
   const template = 'Over 1.5 goals at 1.13. Expected goals total 3.23 against a line of 1.5.';
   assert.equal(freeProse(template), null, 'a narrative naming the call reached a free reader');
 });
+
+test('the members-only "why this call" never reaches the free copy', () => {
+  // The preview is written to be shown to everyone and never names the call.
+  // The why is the opposite: it names the call and its odds, and it is the
+  // thing a member pays to read.
+  const withWhy = {
+    ...BUNDLE,
+    verdicts: [{
+      candidate: { market: 'over_under_15', outcome: 'OVER', line: 1.5, odds: 1.29 },
+      narrative: 'Nice cannot keep anyone out.',
+      why: 'Over 1.5 goals at odds of 1.29 because Amoura starts.',
+      drivers: [], set_aside: [],
+    }],
+  };
+  const free = JSON.stringify(freeBundle(withWhy));
+  assert.ok(!free.includes('odds of 1.29'), 'the why leaked into the free copy');
+  assert.ok(!free.includes('"why"'), 'the why key survived');
+});
