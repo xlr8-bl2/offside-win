@@ -519,6 +519,29 @@ RETURNS jsonb LANGUAGE sql IMMUTABLE PARALLEL SAFE SET search_path = public AS $
   ) END;
 $fn$;
 
+-- A reader's own account: the name they go by and how they like odds written.
+-- One row per signed-in user, written only through save_profile() below, so
+-- the table itself grants nothing to anyone.
+CREATE TABLE IF NOT EXISTS profile (
+  user_id      uuid PRIMARY KEY,
+  display_name text,
+  odds_format  text NOT NULL DEFAULT 'decimal',
+  created_at   bigint NOT NULL,
+  updated_at   bigint NOT NULL
+);
+
+-- The teams and competitions a reader follows. The label is kept so the
+-- account page can list a follow without a lookup, and so a team that drops
+-- off the board still reads as itself.
+CREATE TABLE IF NOT EXISTS follow (
+  user_id    uuid NOT NULL,
+  kind       text NOT NULL,
+  ref_id     bigint NOT NULL,
+  label      text NOT NULL,
+  created_at bigint NOT NULL,
+  PRIMARY KEY (user_id, kind, ref_id)
+);
+
 -- The picks page needs one aggregate row. Settled, non-void picks only: a void
 -- bet is a stake returned, so counting it would dilute the strike rate with
 -- results that were never in play. HALF_WON is an Asian-handicap half-win and
@@ -811,8 +834,81 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
                SELECT created_at, plan_id, amount_minor, currency, status
                FROM payment_receipt LIMIT 24
              ) r
+           ), '[]'::json),
+           'profile', (SELECT json_build_object('display_name', display_name, 'odds_format', odds_format)
+                       FROM profile WHERE user_id = auth.uid()),
+           'follows', coalesce((
+             SELECT json_agg(json_build_object('kind', kind, 'id', ref_id, 'label', label) ORDER BY created_at)
+             FROM follow WHERE user_id = auth.uid()
            ), '[]'::json)
          );
+$fn$;
+
+-- The account's own settings. SECURITY DEFINER because the tables grant the
+-- caller nothing; every statement is pinned to auth.uid(), so a caller can
+-- only ever read or write their own row, and an anonymous one is refused.
+CREATE OR REPLACE FUNCTION save_profile(p_name text, p_odds text)
+RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE
+  me uuid := auth.uid();
+  now_s bigint := floor(extract(epoch FROM now()))::bigint;
+  name_clean text := nullif(left(btrim(regexp_replace(coalesce(p_name, ''), '\s+', ' ', 'g')), 60), '');
+BEGIN
+  IF me IS NULL THEN RAISE EXCEPTION 'sign in first' USING ERRCODE = '28000'; END IF;
+  IF coalesce(p_odds, 'decimal') NOT IN ('decimal', 'fractional', 'american') THEN
+    RAISE EXCEPTION 'unknown odds format' USING ERRCODE = '22023';
+  END IF;
+  INSERT INTO profile (user_id, display_name, odds_format, created_at, updated_at)
+  VALUES (me, name_clean, coalesce(p_odds, 'decimal'), now_s, now_s)
+  ON CONFLICT (user_id) DO UPDATE
+    SET display_name = excluded.display_name, odds_format = excluded.odds_format, updated_at = excluded.updated_at;
+  RETURN (SELECT json_build_object('display_name', display_name, 'odds_format', odds_format)
+          FROM profile WHERE user_id = me);
+END;
+$fn$;
+
+-- Follow or unfollow one team or competition. Returns the whole list, so the
+-- page redraws from what was stored rather than from what it hoped for.
+-- Capped at a hundred: enough for anyone, and a ceiling on what one account
+-- can make the table hold.
+CREATE OR REPLACE FUNCTION set_follow(p_kind text, p_ref bigint, p_label text, p_on boolean)
+RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE
+  me uuid := auth.uid();
+  now_s bigint := floor(extract(epoch FROM now()))::bigint;
+BEGIN
+  IF me IS NULL THEN RAISE EXCEPTION 'sign in first' USING ERRCODE = '28000'; END IF;
+  IF p_kind NOT IN ('team', 'league') OR p_ref IS NULL THEN
+    RAISE EXCEPTION 'unknown follow' USING ERRCODE = '22023';
+  END IF;
+  IF p_on THEN
+    IF (SELECT count(*) FROM follow WHERE user_id = me) >= 100 THEN
+      RAISE EXCEPTION 'follow limit reached' USING ERRCODE = '54000';
+    END IF;
+    INSERT INTO follow (user_id, kind, ref_id, label, created_at)
+    VALUES (me, p_kind, p_ref, coalesce(nullif(left(btrim(coalesce(p_label, '')), 80), ''), p_kind || ' ' || p_ref), now_s)
+    ON CONFLICT (user_id, kind, ref_id) DO UPDATE SET label = excluded.label;
+  ELSE
+    DELETE FROM follow WHERE user_id = me AND kind = p_kind AND ref_id = p_ref;
+  END IF;
+  RETURN coalesce((SELECT json_agg(json_build_object('kind', kind, 'id', ref_id, 'label', label) ORDER BY created_at)
+                   FROM follow WHERE user_id = me), '[]'::json);
+END;
+$fn$;
+
+-- Everything held about one account, removed, for the Worker's delete route
+-- (which has already checked the caller's token and runs with the service
+-- key). Payment records stay, without the processor's payload: tax law
+-- requires the records, and the privacy policy says so. SECURITY INVOKER and no grant, so the public key cannot call it.
+CREATE OR REPLACE FUNCTION delete_account_data(p_user uuid)
+RETURNS void LANGUAGE sql VOLATILE SET search_path = public AS $fn$
+  DELETE FROM follow WHERE user_id = p_user;
+  DELETE FROM profile WHERE user_id = p_user;
+  DELETE FROM payment_method WHERE user_id = p_user;
+  DELETE FROM membership WHERE user_id = p_user;
+  -- The records stay, for tax; the processor's raw payload goes, because it
+  -- can carry the email address and the privacy policy promises it will not.
+  UPDATE payment SET raw_json = '{"redacted": true}' WHERE user_id = p_user;
 $fn$;
 
 CREATE OR REPLACE FUNCTION get_board(p_from bigint, p_to bigint, p_league bigint DEFAULT NULL)
@@ -1350,6 +1446,14 @@ GRANT UPDATE (auto_renew, cancelled_at, updated_at) ON membership TO anon;
 ALTER TABLE payment_method ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment ENABLE ROW LEVEL SECURITY;
 
+-- Private as well: read through get_account(), written through save_profile()
+-- and set_follow(), each pinned to the caller. Supabase grants new tables to
+-- the public roles by default, so that is revoked explicitly.
+ALTER TABLE profile ENABLE ROW LEVEL SECURITY;
+ALTER TABLE follow ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON profile FROM anon, authenticated;
+REVOKE ALL ON follow FROM anon, authenticated;
+
 -- The safe projection of `payment`, filtered to the caller inside the view.
 GRANT SELECT ON payment_receipt TO anon;
 
@@ -1427,6 +1531,9 @@ GRANT EXECUTE ON FUNCTION try_json(text) TO anon;
 GRANT EXECUTE ON FUNCTION report_goals(text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION has_membership() TO anon;
 GRANT EXECUTE ON FUNCTION get_account() TO anon;
+GRANT EXECUTE ON FUNCTION save_profile(text, text) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION set_follow(text, bigint, text, boolean) TO anon, authenticated;
+REVOKE ALL ON FUNCTION delete_account_data(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint) TO anon;
 GRANT EXECUTE ON FUNCTION get_fixture(bigint) TO anon;
 GRANT EXECUTE ON FUNCTION get_picks(integer, text) TO anon;

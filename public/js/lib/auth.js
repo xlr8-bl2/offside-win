@@ -127,7 +127,19 @@ export function setViewAs(mode) {
 export async function currentUser({ real = false } = {}) {
   if (!real && viewingAsFree()) return null;
   const s = await session();
-  return s ? { id: s.user.id, email: s.user.email } : null;
+  if (!s) return null;
+  // What the account page shows about the person: the name and picture
+  // Google hands over (nothing, for an email sign-in), how they signed in,
+  // and since when.
+  const meta = s.user.user_metadata ?? {};
+  return {
+    id: s.user.id,
+    email: s.user.email,
+    name: meta.full_name || meta.name || null,
+    avatar: typeof meta.avatar_url === 'string' && /^https:\/\//.test(meta.avatar_url) ? meta.avatar_url : null,
+    provider: s.user.app_metadata?.provider ?? 'email',
+    since: s.user.created_at ?? null,
+  };
 }
 
 /**
@@ -164,9 +176,20 @@ export async function signInWithGoogle() {
   if (error) throw new Error(error.message);
 }
 
-export async function signOut() {
+/**
+ * Sign out. `everywhere` ends every session this account holds, on every
+ * device, which is what someone wants after using a shared computer.
+ */
+export async function signOut({ everywhere = false } = {}) {
   if (!hasStoredSession()) return;
-  try { await (await client()).auth.signOut(); } catch { /* already gone */ }
+  try { await (await client()).auth.signOut({ scope: everywhere ? 'global' : 'local' }); } catch { /* already gone */ }
+}
+
+/** Call one of the account's own database functions with the reader's session. */
+export async function accountRpc(fn, args) {
+  const { data, error } = await (await client()).rpc(fn, args);
+  if (error) throw new Error(error.message);
+  return data;
 }
 
 /**
