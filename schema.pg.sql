@@ -1331,3 +1331,34 @@ GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint), get_fixture(bigint)
 -- own schedule and a deploy that races it serves a broken read path until the
 -- next one. Asking explicitly costs nothing and removes the race.
 NOTIFY pgrst, 'reload schema';
+
+
+-- ------------------------------------------------------------ page views
+--
+-- Visits, counted, for readers who accepted analytics in the cookie notice
+-- and for no one else. Deliberately the least a counter can hold: the UK day,
+-- which kind of page (never which fixture, never a URL, never an IP, a
+-- browser, a referrer or anything that could tell one reader from another),
+-- and a number. The Worker only sends a hit when the page asks it to, and the
+-- page only asks after the reader has said yes.
+--
+-- Private: RLS on, no policy, no grant. The one way in is record_view, which
+-- can add one to a known page and do nothing else.
+CREATE TABLE IF NOT EXISTS page_view (
+  day   date   NOT NULL,
+  page  text   NOT NULL,
+  n     bigint NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, page)
+);
+ALTER TABLE page_view ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON page_view FROM anon, authenticated;
+
+CREATE OR REPLACE FUNCTION record_view(p_page text)
+RETURNS void LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+  INSERT INTO page_view (day, page, n)
+  SELECT (now() AT TIME ZONE 'Europe/London')::date, p_page, 1
+  WHERE p_page IN ('home', 'board', 'fixture', 'league', 'leagues', 'results', 'slip',
+                   'pricing', 'signin', 'account', 'legal')
+  ON CONFLICT (day, page) DO UPDATE SET n = page_view.n + 1;
+$fn$;
+GRANT EXECUTE ON FUNCTION record_view(text) TO anon, authenticated;
