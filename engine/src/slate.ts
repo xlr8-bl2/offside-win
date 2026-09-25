@@ -1,8 +1,8 @@
 import { chanceInWords, refreshSlip } from './slip.ts';
-import { bsdList, num, str, stats as bsdStats, toEpoch } from './bsd.ts';
+import { bsdList, bsdOrNull, num, str, stats as bsdStats, toEpoch } from './bsd.ts';
 import { config } from './config.ts';
 import { analyseFixture } from './context/index.ts';
-import { checkComparisonEntitlement, gatherFixture } from './context/gather.ts';
+import { checkComparisonEntitlement, gatherFixture, parseScorers } from './context/gather.ts';
 import { RepetitionLedger, narrate, narrateConfident, narratePass } from './narrate/compose.ts';
 import { chooseHero, type HeroCandidate } from './feature.ts';
 import { chooseFreeCall } from './free.ts';
@@ -261,6 +261,8 @@ export async function runSlate(): Promise<SlateReport> {
   const pickRows: Array<Record<string, unknown>> = [];
   // Matches this pass saw finished, so their reports can be written below.
   const finishedIds: number[] = [];
+  // Leagues whose table and scorers this pass has already written.
+  const leagueSeen = new Set<number>();
   // The confident calls each fixture carries as of this run, for fixtures
   // that have not kicked off. See the withdrawal after the pick upsert.
   const standing = new Map<number, Array<{ market: string; outcome: string; line: number | null }>>();
@@ -274,6 +276,17 @@ export async function runSlate(): Promise<SlateReport> {
         continue;
       }
       ctx.comparisonEntitled = entitled;
+
+      // The competition's table and top scorers, once per run per league, for
+      // its own page. The table is already in hand; the scorers are one
+      // request, cached for the run.
+      const leagueId = num(event['league_id']);
+      if (leagueId !== undefined && !leagueSeen.has(leagueId)) {
+        leagueSeen.add(leagueId);
+        if (ctx.standings?.length) await kvSetJSON(`league:${leagueId}:standings`, { updated_at: now, rows: ctx.standings });
+        const scorers = parseScorers(await bsdOrNull(`/api/v2/leagues/${leagueId}/top/scorers/`, { limit: 15 }));
+        if (scorers?.length) await kvSetJSON(`league:${leagueId}:scorers`, { updated_at: now, rows: scorers });
+      }
 
       const { analysis, factors, confidence } = analyseFixture(ctx);
       const cands = buildCandidates(analysis.model, analysis.book, calibration);

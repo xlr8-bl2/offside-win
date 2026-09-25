@@ -213,6 +213,14 @@ export function parseStandings(raw: unknown): StandingRow[] | null {
         num(row?.['goal_diff'] ?? row?.['goal_difference'] ?? row?.['gd']) ??
         (num(row?.['goals_for'] ?? row?.['gf']) ?? 0) -
           (num(row?.['goals_against'] ?? row?.['ga']) ?? 0),
+      // The rest of the row, for the league page's table. Absent fields stay
+      // absent rather than reading as nought.
+      team_name: str(row?.['team_name'] ?? row?.['team'] ?? pickStr(row, 'team.name') ?? row?.['name']) ?? null,
+      won: num(row?.['won'] ?? row?.['wins'] ?? row?.['w']) ?? null,
+      drawn: num(row?.['drawn'] ?? row?.['draws'] ?? row?.['draw'] ?? row?.['d']) ?? null,
+      lost: num(row?.['lost'] ?? row?.['losses'] ?? row?.['l']) ?? null,
+      goals_for: num(row?.['goals_for'] ?? row?.['gf']) ?? null,
+      goals_against: num(row?.['goals_against'] ?? row?.['ga']) ?? null,
     });
   }
   return out.length ? out.sort((a, b) => a.position - b.position) : null;
@@ -292,6 +300,8 @@ export function parseScorers(raw: unknown): ScorerRow[] | null {
       name: str(row?.['name'] ?? row?.['player_name'] ?? pickStr(row, 'player.name')) ?? `#${id}`,
       goals: num(row?.['goals'] ?? row?.['value'] ?? row?.['total'] ?? row?.['count']) ?? 0,
       assists: num(row?.['assists']) ?? 0,
+      team_id: num(row?.['team_id'] ?? pickNum(row, 'team.id')) ?? null,
+      team_name: str(row?.['team_name'] ?? pickStr(row, 'team.name')) ?? null,
     });
   }
   return out.length ? out : null;

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-GB">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -21,24 +21,31 @@
 <meta name="twitter:description" content="Football analysis across 88 leagues. Every call comes with the reason behind it, and the reason not to like it.">
 <meta name="twitter:image" content="https://offside.win/og.png">
 
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://sports.bzzoiro.com">
+<!-- The two reads every front-page visit makes, started with the HTML rather
+     than after the script has loaded and run. `crossorigin` so the request
+     matches the fetch() that picks it up; a signed-in reader's fetch carries a
+     token and simply goes to the network, which is correct for them. -->
+<link rel="preload" href="/api/board?hours=72" as="fetch" crossorigin>
+<link rel="preload" href="/api/hero" as="fetch" crossorigin>
 <!--
-  Big Shoulders Display for the scoreboard, Geist for the interface.
-
-  Big Shoulders is signage type: tall, narrow, squared, drawn for Chicago's
-  public design programme. Its numerals read at speed, which is what a column
-  of odds is. Geist takes the UI because Inter is the web's default and using
-  it is a decision nobody made.
+  The faces are self-hosted (public/fonts). The two that set the first screen
+  are preloaded so they arrive with the stylesheet rather than after it:
+  Geist for everything a reader reads, and the figures cut the scoreboard
+  numbers are drawn in. Big Shoulders' letters and the marker hand follow.
 -->
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@400..800&family=Geist:wght@400..700&family=Caveat:wght@500;600;700&display=swap">
+<link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/bigshoulders-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/offside-figures-800.woff2" as="font" type="font/woff2" crossorigin>
 
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/base.css">
 <link rel="stylesheet" href="/components.css">
 
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%2316171b'/><path d='M66 22 C44 12 20 24 16 46 C12 70 32 88 56 86 C78 84 90 64 84 45 C79 29 62 19 44 20 C34 21 26 25 21 32' fill='none' stroke='%237a5af8' stroke-width='9' stroke-linecap='round'/></svg>">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/icon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
 </head>
 <body>
 
@@ -46,11 +53,14 @@
 
 <header class="top" id="top">
   <div class="top-inner">
-    <a class="brand" href="#/home" aria-label="offside.win home">
-      <svg class="brand-mark" viewBox="0 0 100 100" aria-hidden="true">
-        <path d="M66 22 C44 12 20 24 16 46 C12 70 32 88 56 86 C78 84 90 64 84 45 C79 29 62 19 44 20 C34 21 26 25 21 32"/>
-      </svg>
-      <span class="brand-text">ffside<i>.win</i></span>
+    <!--
+      The wordmark: the offside line drawn through the name, between "off" and
+      "side". The same line runs through the ball in the mark, which lives on
+      the favicon, the home-screen icon and the footer, where there is room
+      for a symbol and no need for the name twice.
+    -->
+    <a class="brand" href="#/home" aria-label="offside.win, home">
+      <span class="wordmark" aria-hidden="true">off<i class="wm-line"></i>side<span class="wm-tld">.win</span></span>
     </a>
     <nav class="nav" id="nav" aria-label="Main">
       <a href="#/home" data-route="home">Home</a>
@@ -94,13 +104,19 @@
   </div>
 </header>
 
-<main id="app"><div class="spinner">Loading…</div></main>
+<!-- A skeleton of the page, not a word: what shows for the fraction of a
+     second before the script has anything, on a first visit only. After that
+     the last copy of every page is kept in the browser and paints at once. -->
+<main id="app"><div class="wrap section dense" aria-busy="true" aria-label="Loading">
+  <div class="skeleton skeleton-title"></div><div class="skeleton skeleton-line"></div>
+  <div class="rows skeleton-rows"><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div></div>
+</div></main>
 
 <footer class="foot">
   <div class="foot-top">
     <div class="foot-cta">
-      <p>Same games.</p>
-      <h2 class="display">Better picks.</h2>
+      <p>the whole record is public</p>
+      <h2 class="display">Tonight's are on the board.</h2>
     </div>
     <a class="btn btn-primary btn-lg" href="#/board">See today's board</a>
   </div>
@@ -128,7 +144,8 @@
       <div class="foot-col">
         <h4>Legal</h4>
         <a href="#/legal/privacy">Privacy policy</a>
-        <a href="#/legal/cookies">Cookie policy</a>
+        <a href="#/legal/cookies">Cookies and storage</a>
+        <button type="button" class="foot-link" id="cookie-settings">Cookie settings</button>
         <a href="#/legal/terms">Terms of use</a>
         <a href="#/legal/refunds">Refunds</a>
         <a href="#/legal/responsible">Responsible gambling</a>
@@ -149,10 +166,14 @@
       </div>
     </div>
     <div class="foot-brand">
-      <svg class="brand-mark" viewBox="0 0 100 100" aria-hidden="true">
-        <path d="M66 22 C44 12 20 24 16 46 C12 70 32 88 56 86 C78 84 90 64 84 45 C79 29 62 19 44 20 C34 21 26 25 21 32"/>
+      <svg class="brand-symbol" viewBox="0 0 64 64" aria-hidden="true">
+        <clipPath id="mark-l"><rect width="40" height="64"/></clipPath>
+        <clipPath id="mark-r"><rect x="40" width="30" height="64"/></clipPath>
+        <circle cx="29" cy="32" r="18.5" fill="none" style="stroke:var(--chalk)" stroke-width="7" clip-path="url(#mark-l)"/>
+        <circle cx="29" cy="32" r="18.5" fill="none" style="stroke:var(--floodlight)" stroke-width="7" clip-path="url(#mark-r)"/>
+        <rect x="38.25" y="4" width="3.5" height="56" rx="1.75" style="fill:var(--floodlight-hi)"/>
       </svg>
-      <span class="brand-text">ffside<i>.win</i></span>
+      <span class="wordmark" aria-label="offside.win">off<i class="wm-line"></i>side<span class="wm-tld">.win</span></span>
     </div>
     <div class="foot-stats" id="foot-stats"></div>
     <!--

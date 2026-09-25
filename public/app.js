@@ -37,14 +37,106 @@ const oddsTag = (v) => `${dec(v)} odds`;
  * never throws: a failure to attach a token produces an anonymous request,
  * which is a page that loads rather than a page that does not.
  */
-async function getJSON(path) {
-  const res = await fetch(path, { headers: await authHeaders() });
+/*
+ * The last copy of every read, so a page opens on what the reader saw last
+ * time rather than on "Loading…".
+ *
+ * Stale-while-revalidate, by hand. A copy younger than half a minute is
+ * served as it is. An older one (up to a day) is served at once and fetched
+ * again behind it; when the fresh copy differs, the page redraws in place,
+ * at the same scroll position (see softRefresh). A cold cache is the only
+ * time a reader waits on the network, and then they see a skeleton of the
+ * page rather than a word.
+ *
+ * Keyed by whether the request carried a token, so a member's copy is never
+ * handed to the signed-out view of the same browser and the other way
+ * round. Stored in localStorage as well as memory so the second visit is as
+ * quick as the second page; every access is wrapped, because private modes
+ * throw on it and the site has to work without it.
+ */
+const CACHEABLE = /^\/api\/(board|hero|picks|slip|plans|fixture\/|league\/|health)/;
+const FRESH_MS = 30_000;
+const KEEP_MS = 24 * 3600_000;
+const memo = new Map();
+const cacheKey = (scope, path) => `ow.c1:${scope}:${path}`;
+function cacheRead(key) {
+  if (memo.has(key)) return memo.get(key);
+  if (!consented()) return null;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const hit = JSON.parse(raw);
+    memo.set(key, hit);
+    return hit;
+  } catch { return null; }
+}
+function cacheWrite(key, text) {
+  const hit = { at: Date.now(), text };
+  memo.set(key, hit);
+  // On the device only with the reader's yes; in memory for this visit either way.
+  if (!consented()) return;
+  try { localStorage.setItem(key, JSON.stringify(hit)); }
+  catch {
+    // Full. Drop every stored copy and try once more; a cache is disposable.
+    try {
+      for (const k of Object.keys(localStorage)) if (k.startsWith('ow.c1:')) localStorage.removeItem(k);
+      localStorage.setItem(key, JSON.stringify(hit));
+    } catch { /* memory only, then */ }
+  }
+}
+/** Forget every cached read: on sign-out, and the stored copies on a no. */
+function cacheClear({ keepMemory = false } = {}) {
+  if (!keepMemory) memo.clear();
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith('ow.c1:')) localStorage.removeItem(k); } catch { /* nothing to clear */ }
+}
+
+async function fetchText(path, headers) {
+  const res = await fetch(path, { headers });
+  const text = await res.text();
   if (!res.ok) {
     let msg = 'Something went wrong loading this.';
-    try { msg = (await res.json()).error ?? msg; } catch { /* body was not json */ }
+    try { msg = JSON.parse(text).error ?? msg; } catch { /* body was not json */ }
     throw new Error(msg);
   }
-  return res.json();
+  return text;
+}
+
+async function getJSON(path, { fresh = false } = {}) {
+  const headers = await authHeaders();
+  if (!CACHEABLE.test(path)) return JSON.parse(await fetchText(path, headers));
+
+  const key = cacheKey(headers.authorization ? 'auth' : 'anon', path);
+  const hit = fresh ? null : cacheRead(key);
+  const age = hit ? Date.now() - hit.at : Infinity;
+  if (hit && age < FRESH_MS) return JSON.parse(hit.text);
+  if (hit && age < KEEP_MS) {
+    // Serve the old copy now; fetch the new one behind it.
+    fetchText(path, headers).then((text) => {
+      cacheWrite(key, text);
+      if (text !== hit.text) softRefresh();
+    }).catch(() => { /* the old copy stays up */ });
+    return JSON.parse(hit.text);
+  }
+  const text = await fetchText(path, headers);
+  cacheWrite(key, text);
+  return JSON.parse(text);
+}
+
+/*
+ * Redraw the current page with the data that has just arrived, without
+ * moving the reader. Debounced, because a page's reads come back one after
+ * another. Only on the pages that are pure reads: a form half filled in is
+ * not something to redraw under somebody.
+ */
+const SOFT_ROUTES = new Set(['home', 'board', 'fixture', 'league', 'leagues', 'results', 'slip']);
+let softTimer = null;
+function softRefresh() {
+  clearTimeout(softTimer);
+  softTimer = setTimeout(() => {
+    const name = parseHash().parts[0] || 'home';
+    if (!SOFT_ROUTES.has(name) || document.hidden) return;
+    route({ soft: true });
+  }, 250);
 }
 
 function kickoffLabel(epoch) {
@@ -302,6 +394,18 @@ function boardHash(hours = state.hours, league = state.leagueName) {
  */
 const hasCall = (f) => Boolean(f?.top_pick || f?.locked);
 
+/*
+ * The shape of a page before its data arrives: a title bar and rows, in the
+ * page's own surfaces. A cold first visit is the only time anyone sees it.
+ */
+function skeletonHTML(kind = 'page') {
+  const rows = '<div class="skeleton skeleton-row"></div>'.repeat(kind === 'rows' ? 6 : 4);
+  return `<div class="wrap section dense" aria-busy="true" aria-label="Loading">
+    ${kind === 'rows' ? '' : '<div class="skeleton skeleton-title"></div><div class="skeleton skeleton-line"></div>'}
+    <div class="rows skeleton-rows">${rows}</div>
+  </div>`;
+}
+
 /**
  * How a call is doing while the match is on.
  *
@@ -322,8 +426,8 @@ function liveTrack(pick, f) {
 }
 const trackHTML = (t) => (t ? `<span class="track ${t.on ? 'on' : 'off'}"><i></i>${t.on ? 'On track' : 'Not yet'}</span>` : '');
 
-async function loadBoard() {
-  state.board = await getJSON(`/api/board?hours=${state.hours}`);
+async function loadBoard({ fresh = false } = {}) {
+  state.board = await getJSON(`/api/board?hours=${state.hours}`, { fresh });
   /*
    * A played match's call is whatever the record says it was.
    *
@@ -479,7 +583,7 @@ function matchCentreHTML(hero, d) {
 
     ${meetings ? `
       <div class="mc-block">
-        <span class="mc-label">${meetings} meetings</span>
+        <span class="mc-label">${meetings === 1 ? 'One meeting' : `${meetings} meetings`}</span>
         ${formBarHTML(
           Number(h2h.home_wins) || 0,
           Number(h2h.draws) || 0,
@@ -528,6 +632,38 @@ function freeCallHTML(hero, detail, free = null) {
   }
   const d = market({ market: v.market, outcome: v.outcome, line: v.line, home: tie.home, away: tie.away, odds: v.odds });
   const elsewhere = !hero || Number(tie.id) !== Number(hero.fixture_id);
+
+  /*
+   * Once its match has started, the free call stops being an offer and
+   * becomes a result: the score, and whether it landed. A free call that
+   * landed is the best thing the front page can show a stranger, and one
+   * that missed is shown the same way, because the record does not choose.
+   */
+  const st = free ? matchState(free) : { kind: 'upcoming' };
+  const score = Array.isArray(free?.score) ? free.score : null;
+  if (free && st.kind !== 'upcoming') {
+    const GRADE = { WON: 'won', LOST: 'lost', HALF_WON: 'part', HALF_LOST: 'part', PUSH: 'back', VOID: 'back' };
+    const landed = score
+      ? (GRADE[free.called?.result] ?? didItLand({ market: v.market, outcome: v.outcome, line: v.line, homeGoals: score[0], awayGoals: score[1] }))
+      : null;
+    const WORD = { won: 'Landed', lost: 'Missed', part: 'Half back', back: 'Stake back' };
+    const shown = score ?? (Array.isArray(free.live_score) ? free.live_score : null);
+    return `
+  <div class="freecall">
+    <span class="freecall-tag">Today's free call</span>
+    <a class="freecall-tie" href="#/fixture/${encodeURIComponent(tie.id)}">${crest(tie.home, 'xs', tie.home_id)}${esc(tie.home)}
+      ${shown ? `<b>${esc(shown[0])}–${esc(shown[1])}</b>` : 'v'} ${crest(tie.away, 'xs', tie.away_id)}${esc(tie.away)}
+      ${st.kind === 'live' ? liveBadge(st) : ''}</a>
+    <p class="freecall-sel">${esc(d.name)}</p>
+    <p class="freecall-meta" data-public-price>${landed
+      ? `<span class="mark ${landed}">${WORD[landed] ?? ''}</span>`
+      : trackHTML(liveTrack(v, free))} <b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
+    <p class="hero-blurb">${landed
+      ? 'Free for everyone, as one call is every day. Members had every other call on the board.'
+      : 'Free for everyone, and under way. Members get every other call the moment it goes up.'}</p>
+  </div>`;
+  }
+
   return `
   <div class="freecall">
     <span class="freecall-tag">Today's free call</span>
@@ -660,9 +796,9 @@ function promoHTML(user) {
   return `
   <section class="promo">
     <p class="hand promo-aside">nobody else prints the losses</p>
-    <h2>Every call, every competition.</h2>
-    <p>The analysis is free and stays free. Membership is the call itself: which market,
-       which side, the price and the book offering it.</p>
+    <h2>Members see every call the moment it goes up.</h2>
+    <p>The analysis stays free. Membership adds the call itself on every match we cover: the
+       market, the side, the price and the bookmaker offering it.</p>
     <a class="btn btn-light" href="#/pricing">${user ? 'See what membership costs' : 'Become a member'}</a>
   </section>`;
 }
@@ -813,7 +949,7 @@ function tickerHTML(fixtures, recent) {
 
 /** The slip, and every settled slip before it. */
 async function viewSlip() {
-  app.innerHTML = '<div class="wrap section narrow"><div class="spinner">Loading…</div></div>';
+  placeholder(skeletonHTML());
   let data;
   let board = null;
   // The board rides along so each leg can show how its match stands.
@@ -890,7 +1026,7 @@ function leaguesTodayHTML(fixtures) {
     <p class="panel-head">Where the calls are</p>
     <div class="league-chips">
       ${rows.map(([name, v]) => `
-        <a class="league-chip" href="#/board?league=${encodeURIComponent(name)}">
+        <a class="league-chip" href="${v.id ? `#/league/${encodeURIComponent(v.id)}` : `#/board?league=${encodeURIComponent(name)}`}">
           ${crest(name, 'xs', v.id, 'league')}<span>${esc(name)}</span><b>${v.n}</b>
         </a>`).join('')}
     </div>
@@ -1161,7 +1297,7 @@ function rowHTML(f) {
         ${trackHTML(track)}<span class="odds-book">at ${oddsOf(p.odds)}</span>`
         : pick && p ? `
         <span class="odds-tile${p.local ? '' : ' away'}"><span class="odds">${dec(p.odds)}</span><span class="odds-unit">odds</span></span>
-        <span class="odds-book">${pick.lean ? 'lean · ' : ''}${p.local ? esc(p.book) : `no ${esc(country())} book`}</span>`
+        <span class="odds-book">${pick.lean ? 'lean, ' : ''}${esc(p.book)}</span>`
         : f.locked ? `<span class="row-locked-mark">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>
                         Members</span>`
@@ -1213,7 +1349,12 @@ function spread(fixtures, limit) {
 }
 
 async function viewHome() {
-  app.innerHTML = heroHTML(state.hero, state.heroVenue) + '<div class="spinner">Loading the board…</div>';
+  placeholder(heroHTML(state.hero, state.heroVenue) + skeletonHTML('rows'));
+  // Everything the page needs, asked for at once. They used to go in three
+  // rounds -- board and masthead, then the masthead's bundle, then the record
+  // and the slip -- so a cold visit waited on three trips instead of one.
+  const picksReq = getJSON('/api/picks?limit=40&settled=true').then((r) => r.picks ?? []).catch(() => []);
+  const slipReq = getJSON('/api/slip').catch(() => null);
   let board;
   try {
     [board, state.hero] = await Promise.all([
@@ -1237,10 +1378,7 @@ async function viewHome() {
   let recent = [];
   let slip = null;
   // Both optional: a page with no slip and no record still has a board on it.
-  [recent, slip] = await Promise.all([
-    getJSON('/api/picks?limit=40&settled=true').then((r) => r.picks ?? []).catch(() => []),
-    getJSON('/api/slip').catch(() => null),
-  ]);
+  [recent, slip] = await Promise.all([picksReq, slipReq]);
   const settled = recent.filter((x) => x.result && x.result !== 'VOID');
   const won = settled.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
   const lost = settled.filter((x) => x.result === 'LOST' || x.result === 'HALF_LOST').length;
@@ -1298,15 +1436,15 @@ async function viewHome() {
     if (document.hidden || !busy()) return;
     try {
       const [fresh, picks, slipNow] = await Promise.all([
-        loadBoard(),
-        getJSON('/api/picks?limit=40&settled=true').then((r) => r.picks ?? []).catch(() => recent),
-        getJSON('/api/slip').catch(() => slip),
+        loadBoard({ fresh: true }),
+        getJSON('/api/picks?limit=40&settled=true', { fresh: true }).then((r) => r.picks ?? []).catch(() => recent),
+        getJSON('/api/slip', { fresh: true }).catch(() => slip),
       ]);
       fixtures.length = 0;
       fixtures.push(...(fresh.fixtures ?? []));
       recent = picks;
       slip = slipNow;
-      const put = (key, html) => { const el = app.querySelector(`[data-live="${key}"]`); if (el) el.innerHTML = html; };
+      const put = (key, html) => { const el = app.querySelector(`[data-live="${key}"]`); if (el) { el.innerHTML = html; smartQuotes(el); } };
       put('ticker', tickerHTML(fixtures, recent));
       put('today', todayStripHTML(fixtures, recent));
       put('rail', nextRailHTML(rail()));
@@ -1676,7 +1814,8 @@ async function viewBoard(params = new URLSearchParams()) {
         ? groupsSorted.map(([name, g]) => `
             <section class="league-block">
               <h3 class="league-head">
-                ${crest(name, 'xs', g.id, 'league')}${esc(name)}
+                ${g.id ? `<a href="#/league/${encodeURIComponent(g.id)}">${crest(name, 'xs', g.id, 'league')}${esc(name)}</a>`
+                       : `${crest(name, 'xs', g.id, 'league')}${esc(name)}`}
                 <span class="count">${g.list.length}</span>
               </h3>
               ${g.list.map(rowHTML).join('')}
@@ -1733,7 +1872,7 @@ async function viewBoard(params = new URLSearchParams()) {
   const refresh = async () => {
     if (document.hidden || state.when !== 'live') return;
     try {
-      const fresh = await loadBoard();
+      const fresh = await loadBoard({ fresh: true });
       fixtures.length = 0;
       fixtures.push(...(fresh.fixtures ?? []));
       for (const k of Object.keys(counts)) counts[k] = 0;
@@ -1893,8 +2032,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
         ? `<span>We put it up at ${oddsOf(c.odds)}${c.bookmaker ? ` with ${esc(bookName(c.bookmaker))}` : ''}.</span>`
         : `${p ? (p.local
             ? `<span>Best price at <b>${esc(p.book)}</b> in ${esc(COUNTRY_NAMES[country()] ?? 'your country')}</span>`
-            : `<span class="warnish">No book in ${esc(COUNTRY_NAMES[country()] ?? 'your country')} is quoting this. ` +
-              `The ${oddsOf(p.odds)} above are ${esc(p.book)}'s.</span>`) : ''}
+            : `<span>Quoted at ${oddsOf(p.odds)} with <b>${esc(p.book)}</b>. The books where you are may price it differently.</span>`) : ''}
            <span>${esc(d.returns)}</span>`}
     </div>
     ${!played && p && p.local && p.count > 1 ? `
@@ -2599,7 +2737,7 @@ function readsFor(f, verdicts) {
 }
 
 async function viewFixture(id, params = new URLSearchParams()) {
-  app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
+  placeholder(skeletonHTML());
   let f;
   try { f = await getJSON(`/api/fixture/${id}`); } catch {
     /*
@@ -2822,7 +2960,9 @@ async function viewFixture(id, params = new URLSearchParams()) {
             ${shown ? `<span class="gf${shown[1] > shown[0] ? ' win' : ''}">${esc(shown[1])}</span>` : formChips(f.form?.away)}
           </span>
         </h1>
-        <p class="hero-blurb">${esc([f.league, ...meta.slice(1)].filter(Boolean).join(', '))}</p>
+        <p class="hero-blurb">${f.league && f.league_id
+          ? `<a class="league-link" href="#/league/${encodeURIComponent(f.league_id)}">${esc(f.league)}</a>${meta.slice(1).length ? `, ${esc(meta.slice(1).join(', '))}` : ''}`
+          : esc([f.league, ...meta.slice(1)].filter(Boolean).join(', '))}</p>
       </div>
     </div>
   </section>
@@ -2872,9 +3012,8 @@ async function viewFixture(id, params = new URLSearchParams()) {
   if (st.kind === 'live') {
     const refresh = () => {
       if (document.hidden) return;
-      const y = window.scrollY;
-      viewFixture(id, new URLSearchParams(location.hash.split('?')[1] ?? ''))
-        .then(() => window.scrollTo(0, y))
+      getJSON(`/api/fixture/${id}`, { fresh: true })
+        .then(() => route({ soft: true }))
         .catch(() => { /* the last good page stays up */ });
     };
     state.poll = setInterval(refresh, 60000);
@@ -2892,7 +3031,7 @@ function bar(label, v) {
 // ---------------------------------------------------------------- results
 
 async function viewResults() {
-  app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
+  placeholder(skeletonHTML());
   /*
    * Two requests, because one cannot answer both halves of this page.
    *
@@ -3462,7 +3601,7 @@ async function viewLeagues() {
   const totalCalls = all.reduce((t, e) => t + e.picks, 0);
 
   const row = (e) => `
-    <a class="lg" href="${esc(boardHash(state.hours, e.name))}">
+    <a class="lg" href="${e.id ? `#/league/${encodeURIComponent(e.id)}` : esc(boardHash(state.hours, e.name))}">
       ${crest(e.name, 'sm', e.id, 'league')}
       <span class="lg-name">${esc(e.name)}</span>
       ${e.live ? `<span class="lg-live"><i></i>${e.live}</span>` : ''}
@@ -3491,6 +3630,153 @@ async function viewLeagues() {
 }
 
 
+
+// ----------------------------------------------------------------- league
+
+/**
+ * A competition's own page.
+ *
+ * The table, the games either side of today with our calls on them, the top
+ * scorers, and how our calls in this competition have gone. Every league name
+ * on the site links here, so a reader who meets "Categoría Primera A" on a
+ * fixture page can find out what it is without leaving. The tabs work as they
+ * do on a fixture page: the open one is in the address.
+ */
+async function viewLeague(id, params = new URLSearchParams()) {
+  placeholder(skeletonHTML('rows'));
+  let d;
+  try { d = await getJSON(`/api/league/${encodeURIComponent(id)}`); } catch (err) { return errorState(err); }
+  const lg = d?.league;
+  if (!lg?.id) return notFound('league');
+
+  const fixtures = Array.isArray(d.fixtures) ? d.fixtures : [];
+  // Same rule as loadBoard: on a played match the record decides the call.
+  for (const f of fixtures) {
+    if (!Array.isArray(f.score)) continue;
+    f.locked = false;
+    f.top_pick = f.called ? { ...f.called, prices: [{ slug: '', book: f.called.bookmaker, odds: f.called.odds }] } : null;
+  }
+  const rank = (f) => { const k = matchState(f).kind; return k === 'live' ? 0 : k === 'upcoming' ? 1 : 2; };
+  const ahead = fixtures.filter((f) => rank(f) < 2).sort((a, b) => rank(a) - rank(b) || a.kickoff - b.kickoff);
+  const played = fixtures.filter((f) => rank(f) === 2).sort((a, b) => b.kickoff - a.kickoff);
+  const calls = ahead.filter(hasCall).length;
+  const live = ahead.filter((f) => matchState(f).kind === 'live').length;
+
+  // Games, grouped by day, in board rows.
+  const byDay = new Map();
+  for (const f of ahead) {
+    const k = dayLabel(f.kickoff);
+    if (!byDay.has(k)) byDay.set(k, []);
+    byDay.get(k).push(f);
+  }
+  const gamesHTML = ahead.length ? [...byDay.entries()].map(([day, list]) => `
+    <section class="league-block">
+      <h3 class="league-head">${esc(day)} <span class="count">${list.length}</span></h3>
+      ${list.map(rowHTML).join('')}
+    </section>`).join('') : '';
+
+  const resultsHTML = played.length ? `
+    <section class="league-block">
+      <h3 class="league-head">Played <span class="count">${played.length}</span></h3>
+      ${played.map(rowHTML).join('')}
+    </section>` : '';
+
+  // The table. Columns the feed did not fill are left out rather than shown
+  // as noughts.
+  const rows = Array.isArray(d.standings) ? d.standings : [];
+  const has = (k) => rows.some((r) => r[k] != null);
+  const cols = [
+    ['played', 'P', true], ['won', 'W', has('won')], ['drawn', 'D', has('drawn')], ['lost', 'L', has('lost')],
+    ['goals_for', 'F', has('goals_for')], ['goals_against', 'A', has('goals_against')],
+    ['goal_diff', 'GD', true], ['points', 'Pts', true],
+  ].filter(([, , on]) => on);
+  const cell = (r, k) => k === 'goal_diff'
+    ? `${r.goal_diff > 0 ? '+' : ''}${r.goal_diff ?? ''}`
+    : k === 'points' ? `<b>${r.points ?? ''}</b>` : String(r[k] ?? '');
+  const tableHTML = rows.length ? `
+    <div class="panel">
+      <p class="panel-head">The table${d.standings_at ? ` <span>as of ${esc(kickoffLabel(d.standings_at))}</span>` : ''}</p>
+      <div class="scroll-x"><table class="tbl standings">
+        <thead><tr><th>#</th><th>Team</th>${cols.map(([, h]) => `<th class="num">${h}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map((r) => `
+          <tr>
+            <td class="num">${esc(r.position ?? '')}</td>
+            <td class="team">${crest(r.team ?? '', 'sm', r.team_id)}<span>${esc(r.team ?? `Team ${r.team_id}`)}</span></td>
+            ${cols.map(([k]) => `<td class="num">${cell(r, k)}</td>`).join('')}
+          </tr>`).join('')}</tbody>
+      </table></div>
+    </div>` : '';
+
+  const scorers = Array.isArray(d.scorers) ? d.scorers.slice(0, 15) : [];
+  const scorersHTML = scorers.length ? `
+    <div class="panel">
+      <p class="panel-head">Top scorers</p>
+      <ol class="scorer-list">${scorers.map((s) => `
+        <li>
+          ${crest(s.name, 'sm', s.player_id, 'player')}
+          <span class="scorer-name">${esc(s.name)}${s.team_name ? `<small>${esc(s.team_name)}</small>` : ''}</span>
+          <b>${esc(s.goals)}</b>${s.assists ? `<small>${esc(s.assists)} assist${s.assists === 1 ? '' : 's'}</small>` : ''}
+        </li>`).join('')}</ol>
+    </div>` : '';
+
+  const rec = d.record ?? {};
+  const recent = Array.isArray(d.recent) ? d.recent : [];
+  const recordHTML = rec.n ? `
+    <div>
+      <div class="section-head"><div><h2 class="display">Our calls here</h2></div></div>
+      ${formBarHTML(rec.wins, 0, rec.n - rec.wins, ['landed', 'void', 'missed'], `${rec.n} settled call${rec.n === 1 ? '' : 's'} in this competition.`)}
+      ${playedHTML(recent.slice(0, 12))}
+    </div>` : '';
+
+  const TABS = [
+    ['games', 'Games', gamesHTML],
+    ['table', 'Table', tableHTML],
+    ['results', 'Results', resultsHTML],
+    ['scorers', 'Top scorers', scorersHTML],
+    ['calls', 'Our calls', recordHTML],
+  ].filter(([, , html]) => html);
+  const asked = params.get('tab');
+  const open = TABS.some(([k]) => k === asked) ? asked : TABS[0]?.[0];
+
+  const sub = [
+    lg.country,
+    ahead.length ? `${ahead.length} game${ahead.length === 1 ? '' : 's'} coming up` : null,
+    calls ? `${calls} call${calls === 1 ? '' : 's'}` : null,
+    live ? `${live} on now` : null,
+  ].filter(Boolean).join('. ');
+
+  app.innerHTML = `
+  <div class="wrap section dense">
+    <div class="page-head league-title">
+      ${crest(lg.name, 'md', lg.id, 'league')}
+      <div>
+        <h1 class="display xl">${esc(lg.name)}</h1>
+        ${sub ? `<p class="page-sub">${esc(sub)}.</p>` : ''}
+      </div>
+    </div>
+    ${TABS.length ? `
+    <div class="tabs" role="tablist">
+      ${TABS.map(([k, label]) => `<button class="tab${k === open ? ' on' : ''}" data-tab="${k}" role="tab" aria-selected="${k === open}">${esc(label)}</button>`).join('')}
+    </div>
+    ${TABS.map(([k, , html]) => `<div class="tabpane" data-pane="${k}"${k === open ? '' : ' hidden'}>${html}</div>`).join('')}`
+    : `<div class="empty-state"><b>Nothing on record here yet</b>
+         <span>The table and the games fill in once the board has covered this competition.</span>
+         <a class="btn btn-primary" href="#/leagues">Every competition</a></div>`}
+  </div>`;
+
+  for (const t of app.querySelectorAll('.tab')) {
+    t.onclick = () => {
+      for (const o of app.querySelectorAll('.tab')) {
+        const on = o === t;
+        o.classList.toggle('on', on);
+        o.setAttribute('aria-selected', String(on));
+      }
+      for (const pane of app.querySelectorAll('.tabpane')) pane.hidden = pane.dataset.pane !== t.dataset.tab;
+      const q = t.dataset.tab === TABS[0][0] ? '' : `?tab=${encodeURIComponent(t.dataset.tab)}`;
+      history.replaceState(null, '', `${location.pathname}#/league/${encodeURIComponent(id)}${q}`);
+    };
+  }
+}
 
 // ------------------------------------------------- membership: the pages
 
@@ -3596,7 +3882,7 @@ async function setRenewal(on) {
  * the only honest pitch and it is the one that survives an ad review.
  */
 async function viewPricing() {
-  app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
+  placeholder(skeletonHTML());
   const [user, plans, hero] = await Promise.all([
     currentUser(),
     getJSON('/api/plans').catch(() => []),
@@ -3615,7 +3901,7 @@ async function viewPricing() {
    */
   const COPY = {
     matchday: { blurb: 'A weekend of every call. One payment, seven days, and it stops.', renews: false, tag: null },
-    monthly:  { blurb: 'Every call, every day. Renews each month until you cancel.', renews: true, tag: 'Most take this' },
+    monthly:  { blurb: 'All the calls, all month. Renews each month until you cancel.', renews: true, tag: 'Most take this' },
     season:   { blurb: 'The whole season for less than half the monthly price.', renews: true, tag: 'Best value' },
   };
   const perMonth = (p) => p.days >= 300 ? money(Math.round(p.amount_minor / 12), p.currency) + ' a month' : null;
@@ -3815,7 +4101,7 @@ async function viewAccount() {
   const user = await currentUser();
   if (!user) { setIntent('#/account'); goInstead('#/signin'); return; }
 
-  app.innerHTML = '<div class="wrap section narrow"><div class="spinner">Loading…</div></div>';
+  placeholder(skeletonHTML());
   let account = { membership: null, receipts: [] };
   try { account = await getJSON('/api/account'); } catch { /* shown as no membership */ }
 
@@ -3879,6 +4165,7 @@ async function viewAccount() {
 
   document.getElementById('out').onclick = async () => {
     await signOut();
+    cacheClear();
     state.member = null;
     state.board = null;
     location.hash = '#/home';
@@ -3914,136 +4201,210 @@ const LEGAL = {
   privacy: {
     title: 'Privacy policy',
     body: `
-      <p>This policy explains what offside.win collects, why, and what you can do about it.
-         It is written to be read rather than to be survived.</p>
-      <h2>What we collect</h2>
-      <p><b>Nothing, until you make an account.</b> You can read every fixture, every write-up and
-         the whole results record without telling us anything at all.</p>
-      <p>If you sign in, we hold your <b>email address</b> (that is how you sign in) and,
-         if you become a member, the <b>dates your membership runs</b> and a <b>record of each
-         payment</b>: when, how much, and whether it went through.</p>
-      <p><b>We never see your card.</b> Card details are entered on our payment processor's own
-         page and never touch this site or our database. What we are told is the brand and the last
-         four digits, so your account page can say "Visa ending 4242" and you know which card is
-         on file. That is all we could tell anyone, including ourselves.</p>
-      <p>Our host records standard server logs (IP address, browser, page requested, time), which
-         are used to keep the site up and to spot abuse, and are not used to build a profile of you.</p>
-      <h2>Analytics</h2>
-      <p>If analytics are enabled they run only after you accept them in the cookie notice. Decline
-         and the analytics script is never loaded, so there is nothing to anonymise. Your choice is
-         stored in your own browser so we do not have to ask again.</p>
-      <h2>What we never do</h2>
+      <p>This is what offside.win knows about you, why, who else sees it, and how to make us
+         delete it. If something here is unclear, write to
+         <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> and we will explain it.</p>
+
+      <h2>The short version</h2>
+      <p>You can read the whole site without telling us anything. If you make an account we hold
+         your email address, and if you buy a membership we hold a record of what you bought and when.
+         We never see your card. We do not sell data, show adverts or track you on other sites. Visit
+         counting and keeping pages on your device only happen if you say yes to them.</p>
+
+      <h2>Who is responsible</h2>
+      <p>offside.win is the controller of the personal data described here, which means we decide
+         what is collected and are answerable for it. You can reach us at
+         <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
+
+      <h2>What we hold, and why</h2>
+      <p><b>If you only read the site</b>, we hold nothing about you. Our host keeps ordinary request
+         logs (your IP address, your browser, the page asked for and the time) to keep the site
+         running and to stop abuse. We rely on our legitimate interest in running a secure website for
+         that, and we do not use the logs to build a picture of anyone.</p>
+      <p><b>If you make an account</b>, we hold your email address, because a sign-in link is sent to
+         it and it is how your membership finds you. If you sign in with Google instead, Google tells
+         us your email address and that you signed in, and nothing else. We hold this to provide the
+         account you asked for.</p>
+      <p><b>If you buy a membership</b>, we hold which plan you bought, when it started and when it
+         ends, and a record of each payment: the amount, the currency, the date, whether it went
+         through, and the reference our payment provider gave it. We hold this to provide what you
+         paid for, and we keep the payment records because tax law requires it.</p>
+      <p><b>Your card never reaches us.</b> It is typed into Whop's checkout, on Whop's site, and
+         Whop keeps it. We are told that a payment happened, and to which email address.</p>
+      <p><b>If you say yes to visit counting</b>, each page you open adds one to a daily count for that
+         kind of page (the front page, a fixture page, the results and so on). The count records the
+         day and the kind of page. It does not record which fixture, your IP address, your browser or
+         anything that could tell you apart from anyone else, and it sets no cookie. If you say no,
+         nothing is counted.</p>
+      <p>We send email only to sign you in and about your membership: that it started, that it is
+         about to renew, that a payment failed. Never marketing.</p>
+
+      <h2>Who else handles it</h2>
+      <p>A few companies do part of the work for us. Each gets only what its job needs and may use it
+         for nothing else.</p>
       <ul>
-        <li>Sell or share your data with advertisers or data brokers.</li>
-        <li>Track you across other websites.</li>
-        <li>Send you marketing email. If you have an account you will get sign-in links and
-            notices about your membership, and nothing else.</li>
+        <li><b>Cloudflare</b> hosts the site and keeps the request logs described above.</li>
+        <li><b>Supabase</b> stores accounts, memberships and payment records, and runs sign-in.</li>
+        <li><b>Whop</b> runs the checkout and the billing, holds your card, and has its own privacy
+            policy for the purchase you make with it.</li>
+        <li><b>Google</b>, only if you choose to sign in with Google.</li>
+        <li><b>jsDelivr</b> serves the sign-in library to your browser when you sign in or open your
+            account, so it sees that request as any server would.</li>
+        <li>Club crests, league marks, player photographs and stadium photographs load from our
+            football data provider's image server, which sees those requests. No personal data is
+            sent to the provider, and our match and odds data comes from it, not from you.</li>
       </ul>
-      <h2>Third parties</h2>
-      <p>Two companies process data on our behalf, and only what they need to do their job.
-         <b>Supabase</b> stores the accounts and runs the sign-in. <b>Whop</b> takes the
-         payments and holds the card details we never see. Both are bound by their own agreements
-         with us and may not use your data for anything else.</p>
-      <p>If you sign in with Google, Google is told that you signed in to this site. We are told
-         your email address and nothing more.</p>
-      <p>Pages load club crests, league marks and stadium photographs from our data provider, and
-         fonts from Google Fonts. Those requests reach their servers and are subject to their own
-         policies. Match and odds data comes from our provider; none of your information is sent to
-         them.</p>
+      <p>Some of these companies process data outside the UK and the European Economic Area. Where
+         they do, the transfer has to be covered by safeguards UK law recognises, such as standard
+         contractual clauses.</p>
+
+      <h2>How long we keep it</h2>
+      <p>Your account and membership details stay while you have an account. Ask us to delete the
+         account and we will do it within 30 days. Payment records are kept for six years after the
+         payment, which is what UK tax rules require; after an account is deleted they are kept
+         without your email address attached. Visit counts are not personal data and are kept as a
+         running total.</p>
+
       <h2>Your rights</h2>
-      <p>Where the UK GDPR or EU GDPR applies you may ask what we hold, ask for it to be corrected
-         or deleted, and complain to your data protection authority. Ask and we will delete your
-         account and your email address. We have to keep the record of payments themselves for as
-         long as tax and accounting law requires, which we cannot waive, but it can be separated
-         from you.</p>
-      <h2>Contact</h2>
-      <p>Questions about this policy go to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>,
-         or see the <a href="#/legal/contact">contact page</a>.</p>`,
+      <p>You can ask us for a copy of what we hold about you, ask us to correct it, ask us to delete
+         it, ask us to stop or limit using it, and ask for it in a form you can take elsewhere. Where
+         we rely on your consent, which is only visit counting and keeping pages on your device, you
+         can withdraw it at any time from the cookie settings in the footer. Write to
+         <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> from the address on your account and
+         we will answer within a month.</p>
+      <p>If you are unhappy with how we have handled your data you can complain to the Information
+         Commissioner's Office (<a href="https://ico.org.uk" target="_blank" rel="noopener noreferrer">ico.org.uk</a>)
+         or to the data protection authority where you live. We would rather hear about it first.</p>
+
+      <h2>Under-18s</h2>
+      <p>The site is for adults. We do not knowingly hold data about anyone under 18, and if we learn
+         that we do, we delete it.</p>
+
+      <h2>Changes</h2>
+      <p>When this policy changes, the date at the top changes with it. If a change affects what we
+         hold about members or why, we tell members by email before it takes effect.</p>`,
   },
   cookies: {
-    title: 'Cookie policy',
+    title: 'Cookies and storage',
     body: `
-      <p>A short policy, because the site uses very few cookies.</p>
-      <h2>Strictly necessary</h2>
-      <p>One item of local storage records whether you accepted or declined non-essential cookies,
-         so the notice is not shown on every visit. It holds a single value and nothing else. It
-         cannot be switched off, because without it we cannot remember that you said no.</p>
-      <p>If you sign in, a second item holds your session, the thing that keeps you signed in
-         between visits. It is set only after you sign in, it is removed when you sign out, and
-         without it an account would not work at all.</p>
-      <h2>Analytics: optional, and off until you say otherwise</h2>
-      <p>If you accept, an analytics cookie may be set to count visits and see which pages are
-         read. If you decline, the analytics script is never loaded, so no such cookie can exist.</p>
-      <h2>Advertising</h2>
-      <p>We set no advertising cookies and run no ad network on this site.</p>
-      <h2>Changing your mind</h2>
-      <p>Clear this site's data in your browser settings and the notice will appear again on your
-         next visit, letting you choose differently.</p>`,
+      <p>The site sets no cookies of its own. It does keep a few small items in your browser's
+         storage, which the law treats the same way, so here is every one of them.</p>
+
+      <h2>Always on, because the site needs them</h2>
+      <div class="scroll-x"><table class="tbl">
+        <thead><tr><th>Item</th><th>What it does</th><th>How long</th></tr></thead>
+        <tbody>
+          <tr><td><code>ow.consent</code></td><td>Remembers your answer below, so you are not asked on every visit.</td><td>Until you change it or clear the site's data</td></tr>
+          <tr><td><code>sb-…-auth-token</code></td><td>Keeps you signed in. Set only when you sign in.</td><td>Until you sign out</td></tr>
+          <tr><td><code>ow.after-signin</code></td><td>Remembers what you were doing when we asked you to sign in, such as buying a membership, so you land back there.</td><td>Removed as soon as it has been used</td></tr>
+          <tr><td><code>offside.country</code></td><td>The country you picked for bookmaker prices, if you changed it.</td><td>Until you change it</td></tr>
+        </tbody>
+      </table></div>
+
+      <h2>Only if you say yes</h2>
+      <div class="scroll-x"><table class="tbl">
+        <thead><tr><th>What</th><th>What it does</th><th>How long</th></tr></thead>
+        <tbody>
+          <tr><td>Saved pages (<code>ow.c1:…</code>)</td><td>A copy of each page's data, so the site opens instantly on your next visit and then updates.</td><td>Replaced as pages update; deleted if you change your answer to no</td></tr>
+          <tr><td>Visit counting</td><td>One anonymous count per page opened, by kind of page. Nothing is stored on your device for this.</td><td>Not stored on your device</td></tr>
+        </tbody>
+      </table></div>
+
+      <h2>Nothing else</h2>
+      <p>No advertising, no tracking pixels, no social media widgets, and no analytics company.
+         Fonts are served from this site. If your browser sends the Global Privacy Control signal we
+         treat it as a no without asking.</p>`,
   },
   terms: {
     title: 'Terms of use',
     body: `
-      <p>By using offside.win you agree to these terms. If you do not, please do not use the site.</p>
-      <h2>What this site is</h2>
-      <p>offside.win publishes statistical analysis of football fixtures. Every figure is computed
-         from public match data and publicly quoted bookmaker prices.</p>
+      <p>These terms cover using offside.win and buying a membership. Using the site means you
+         accept them; if you do not, please do not use it. Nothing here takes away rights you have
+         under consumer law.</p>
+
+      <h2>What the site is</h2>
+      <p>offside.win publishes analysis of football matches and our calls on them: which outcome
+         we think is likeliest, the price a bookmaker is offering on it, and our reasons. The
+         analysis is built from match data and bookmakers' published prices. Some of the written
+         analysis is drafted with the help of an AI language model working from that data, and every
+         paragraph passes our own checks before it is shown.</p>
+
       <h2>What it is not</h2>
-      <p><b>It is not betting advice, and it is not a promise of profit.</b> A pick is our reading of
-         a match. Nothing here is a recommendation that you place a bet, and no past result predicts
-         a future one. You are solely responsible for anything you choose to stake.</p>
-      <h2>Accuracy</h2>
-      <p>Odds move and team news changes. Figures are correct as at the time shown on the page and
-         may be out of date by the time you read them. We publish our losing picks alongside the
-         winning ones, but we do not warrant that any number is free of error.</p>
-      <h2>Eligibility</h2>
-      <p>This site is for people aged 18 or over. Gambling laws differ by country and it is your
-         responsibility to know the law where you are.</p>
-      <h2>Liability</h2>
-      <p>To the fullest extent the law allows, we are not liable for any loss arising from your use
-         of this site, including money lost betting.</p>
-      <h2>Membership</h2>
-      <p>Reading the site is free: every fixture, every write-up, the form, the team news and the
-         full record of results. A membership adds the call itself: which market, which side, the
-         price, and the bookmaker offering it.</p>
-      <p>Three plans. A <b>matchday pass</b> is one payment for seven days and does not renew.
-         The <b>monthly</b> membership and the <b>season ticket</b> renew at the end of each period,
-         at the price shown on the membership page when you bought, until you cancel. You can cancel
-         in one tap from your account with our payment provider and keep access to the end of the
-         period you have paid for. We will tell you before any price changes.</p>
-      <p>Payment is taken by Whop, which holds your card; we never see it. Your membership is tied
-         to the email address you pay with, so sign in here with the same address.</p>
-      <p>This is digital content and your access starts the moment you pay. UK consumer law lets a
-         seller ask you to give up the 14-day right to cancel in exchange for that. <b>We do not
-         ask.</b> You keep the 14 days in full (see the refunds page), and there is nothing to
-         agree to at checkout beyond the payment itself.</p>
-      <h2>Changes</h2>
-      <p>These terms may change. The date below shows when they were last revised.</p>`,
+      <p>It is not betting advice, and it is not a promise that you will make money. A call is our
+         opinion about a football match. Results are published in full, the losing calls included, so
+         you can judge the record for yourself. Whether you bet, and how much, is your decision and
+         your responsibility.</p>
+      <p>Prices move and team news changes. What is on a page is correct as of the time it shows,
+         and may have changed by the time you read it.</p>
+
+      <h2>Who can use it</h2>
+      <p>You must be 18 or over. Betting is restricted or illegal in some places, and it is up to
+         you to know the law where you are.</p>
+
+      <h2>Your account</h2>
+      <p>An account is for one person. Keep access to your email address secure, because a sign-in
+         link sent there is what lets someone into the account.</p>
+
+      <h2>Membership and payment</h2>
+      <p>Reading the site is free, and one full call a day is free. A membership shows every call
+         the moment it goes up, the bet slip's legs, and the reasons for every call.</p>
+      <p>The <b>matchday pass</b> is one payment for seven days and does not renew. The <b>monthly</b>
+         membership and the <b>season ticket</b> renew automatically at the end of each period, at the
+         price you bought at, until you cancel. We will tell you before a price changes, and a new
+         price only applies from your next renewal after we have told you.</p>
+      <p>Payment is taken by Whop on its own checkout. Your membership is linked to the email address
+         you pay with, so sign in here with that address. You can cancel a renewing membership at any
+         time from your Whop account; you keep access until the end of the period you have paid for
+         and are not charged again.</p>
+      <p>You have 14 days from your first payment to change your mind and get a full refund, whatever
+         you have read in that time. Many sellers of digital content ask you to give that right up at
+         checkout; we do not. The refunds page has the detail.</p>
+
+      <h2>Using what you read</h2>
+      <p>The analysis, the calls and the way they are presented belong to us. You are welcome to
+         read them, talk about them and share links to them. Please do not copy calls to publish or
+         sell elsewhere, share your account, or use automated tools to collect content from the site
+         or get round the membership wall. If an account is used that way we may end the membership;
+         if we end one for any other reason we refund the unused part.</p>
+
+      <h2>If something goes wrong</h2>
+      <p>We work to keep the site running and the data right, but we cannot promise it will always
+         be available or free of mistakes. If we get a scoreline or a result wrong, tell us and we
+         will correct it on the record.</p>
+      <p>We are not responsible for money you stake or lose. Beyond that, our total responsibility to
+         you for anything connected with the site is limited to what you have paid us in the 12
+         months before the problem arose. None of this limits our responsibility for anything the law
+         does not allow us to limit, such as fraud, or death or injury caused by negligence.</p>
+
+      <h2>Changes and law</h2>
+      <p>We may update these terms. The date at the top shows the latest version; if a change
+         affects members, we tell them by email before it takes effect. These terms are governed by
+         the law of England and Wales, and if you live elsewhere in the UK or in the EU you keep any
+         protection the law where you live gives you.</p>`,
   },
   refunds: {
     title: 'Refunds',
     body: `
-      <p>Short, because it should be.</p>
       <h2>If it did not work</h2>
-      <p>If the site was down, or your membership did not start after you paid, tell us and we will
-         put it right, either by extending your membership by the time you lost or by refunding
-         you in full. No argument and no form.</p>
+      <p>If the site was down or your membership did not start after you paid, tell us and we will
+         put it right: either extra time on your membership to cover what you lost, or your money
+         back in full. There is no form to fill in.</p>
       <h2>If you changed your mind</h2>
-      <p>Tell us within 14 days of your first payment and you can have it back in full, whatever
-         you have read in the meantime. We could ask you to sign that right away at checkout, the
-         way most sellers of digital content do, in exchange for access starting immediately. We do
-         not. Your access starts immediately anyway and the 14 days stand.</p>
-      <h2>If you simply want to stop</h2>
-      <p>A matchday pass simply stops. A monthly membership or a season ticket is cancelled in one
-         tap from your account with our payment provider. You keep what you have paid for until it
-         runs out and are not charged again. We do not refund part of a period already under way,
-         and we do not make you ask a person to leave.</p>
-      <h2>What we will not refund</h2>
-      <p><b>Losing bets.</b> Nothing here is advice to stake money and no call is a promise. Our
-         record is published in full, wins and losses alike, so that is knowable before you pay
-         rather than after.</p>
+      <p>Write to us within 14 days of your first payment and you get it all back, whatever you have
+         read in that time. Your access starts the moment you pay, and we do not ask you to give up
+         the 14 days in exchange for that.</p>
+      <h2>If you want to stop</h2>
+      <p>A matchday pass ends by itself. A monthly membership or a season ticket is cancelled from
+         your Whop account, in one step. You keep access until the end of the period you have paid
+         for and you are not charged again. We do not refund part of a period that has already
+         started.</p>
+      <h2>What we do not refund</h2>
+      <p>Bets. A call is an opinion about a match, not a promise, and the full record of wins and
+         losses is public so you can see how the calls do before you pay anything.</p>
       <h2>How to ask</h2>
       <p>Write to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> from the email address on
-         the account. We answer every refund request, including the ones we turn down.</p>`,
+         the account. Refund requests get an answer within two working days, and the money goes back
+         to the card you paid with.</p>`,
   },
   /*
    * A way to reach a person.
@@ -4175,12 +4536,37 @@ async function viewDev() {
 function viewLegal(which) {
   const page = LEGAL[which];
   if (!page) return notFound(`legal/${which}`);
+  /*
+   * On the cookie page the choice itself, with what it currently is. A
+   * policy that tells a reader they can change their mind should let them
+   * change it where they are reading that.
+   */
+  const choice = which === 'cookies' ? (() => {
+    const now = readConsent();
+    const gpc = !!navigator.globalPrivacyControl;
+    const said = now === 'accepted' ? 'You said yes.' : now === 'declined'
+      ? (gpc && !(() => { try { return localStorage.getItem(CONSENT_KEY); } catch { return null; } })()
+          ? 'Your browser sends the Global Privacy Control signal, so this is set to no.'
+          : 'You said no.')
+      : 'You have not answered yet.';
+    return `
+    <section class="panel consent-panel" aria-labelledby="consent-h">
+      <p class="panel-head" id="consent-h">Your choice</p>
+      <p>${esc(said)} Saved pages and visit counting are ${now === 'accepted' ? 'on' : 'off'}.</p>
+      <div class="cta-row">
+        <button class="btn ${now === 'accepted' ? 'btn-ghost' : 'btn-primary'}" data-consent-set="accepted"${now === 'accepted' ? ' disabled' : ''}>Turn them on</button>
+        <button class="btn ${now === 'accepted' ? 'btn-primary' : 'btn-ghost'}" data-consent-set="declined"${now === 'declined' ? ' disabled' : ''}>Turn them off</button>
+      </div>
+    </section>`;
+  })() : '';
   app.innerHTML = `
   <div class="wrap section">
     <div class="section-head"><div><h1 class="display">${esc(page.title)}</h1>
       <p>Last updated ${esc(UPDATED)}.</p></div></div>
     <div class="prose">${page.body}</div>
+    ${choice}
   </div>`;
+  for (const b of app.querySelectorAll('[data-consent-set]')) b.onclick = () => applyConsent(b.dataset.consentSet);
 }
 
 // -------------------------------------------------------- cookie consent
@@ -4188,23 +4574,51 @@ function viewLegal(which) {
 const CONSENT_KEY = 'ow.consent';
 
 /**
- * A notice that actually decides something.
+ * A notice that decides something.
  *
- * Most cookie banners set their trackers before you answer and then record the
- * answer. This one loads nothing until a choice is made, and "decline" means the
- * analytics script is never fetched — not fetched and anonymised. The only thing
- * stored either way is the answer itself, which is what makes the notice stop
- * appearing.
+ * Two things wait on the answer, and both are real:
+ *
+ *   - a visit counter: one anonymous hit per page opened, the kind of page
+ *     and nothing else (see /api/hit and page_view in the schema), so we can
+ *     tell which pages people read;
+ *   - keeping a copy of pages on this device, so the site opens on the last
+ *     copy instantly next time (see getJSON).
+ *
+ * Neither runs until the reader says yes, and a no switches both off and
+ * deletes the stored copies. A browser sending the Global Privacy Control
+ * signal is treated as a no without asking. The choice can be changed at any
+ * time from the footer or the cookie policy, which says what it currently is.
  */
 function readConsent() {
-  try { return localStorage.getItem(CONSENT_KEY); } catch { return null; }
+  try {
+    const v = localStorage.getItem(CONSENT_KEY);
+    if (v) return v;
+  } catch { /* private mode: no stored answer */ }
+  return navigator.globalPrivacyControl ? 'declined' : null;
 }
+const consented = () => readConsent() === 'accepted';
 
 function applyConsent(value) {
   try { localStorage.setItem(CONSENT_KEY, value); } catch { /* private mode: ask again next visit */ }
   document.getElementById('cookie-notice')?.remove();
   document.body.style.paddingBottom = '';
-  // Analytics would be loaded here, and only here, when value === 'accepted'.
+  if (value === 'accepted') countView();
+  // A no removes what a yes stored.
+  else cacheClear({ keepMemory: true });
+  // The cookie policy shows the current choice; redraw it if it is open.
+  if (parseHash().parts[0] === 'legal') route({ soft: true });
+}
+
+/** One anonymous page view, if and only if the reader said yes. */
+function countView() {
+  if (!consented()) return;
+  const page = parseHash().parts[0] || 'home';
+  const body = JSON.stringify({ p: page });
+  try {
+    if (!navigator.sendBeacon?.('/api/hit', body)) {
+      fetch('/api/hit', { method: 'POST', body, keepalive: true }).catch(() => {});
+    }
+  } catch { /* a lost count is fine */ }
 }
 
 /*
@@ -4230,16 +4644,20 @@ function reserveForNotice() {
   document.body.style.paddingBottom = `${Math.ceil(gap)}px`;
 }
 
-function cookieNotice() {
-  if (readConsent()) return;
+function cookieNotice({ force = false } = {}) {
+  if (readConsent() && !force) return;
+  document.getElementById('cookie-notice')?.remove();
   const el = document.createElement('div');
   el.className = 'cookie';
   el.id = 'cookie-notice';
+  el.setAttribute('role', 'region');
+  el.setAttribute('aria-label', 'Cookie choice');
   el.innerHTML = `
-    <p>One item of storage remembers this choice. Analytics load only if you
-       accept. <a href="#/legal/cookies">Cookie policy</a></p>
-    <button class="btn btn-ghost btn-sm" data-consent="declined">Decline</button>
-    <button class="btn btn-primary btn-sm" data-consent="accepted">Accept</button>`;
+    <p>Say yes and we count visits anonymously and keep a copy of pages on this
+       device so they open instantly. Say no and we do neither.
+       <a href="#/legal/cookies">What we store</a></p>
+    <button class="btn btn-ghost btn-sm" data-consent="declined">No thanks</button>
+    <button class="btn btn-primary btn-sm" data-consent="accepted">Yes, that's fine</button>`;
   el.addEventListener('click', (e) => {
     const v = e.target?.dataset?.consent;
     if (v) applyConsent(v);
@@ -4307,21 +4725,106 @@ function notFound(name) {
 
 let routed = 0;
 
-async function route() {
+/*
+ * Where the page sits when it opens.
+ *
+ * The browser's own scroll restoration was on, and on a single-page site it
+ * restores against whatever height the page has at that instant -- a
+ * skeleton, half a board -- so a page could open a screen or two down, or
+ * jump when the content landed. It is off. A page reached by a link opens at
+ * the top. A page reached with Back or Forward opens where the reader left
+ * it, which is the one case where remembering is what they want. And a
+ * redraw with fresh data (softRefresh) does not move them at all.
+ */
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+const scrollMemory = new Map();
+let navByLink = false;
+document.addEventListener('click', (e) => {
+  const a = e.target.closest?.('a[href^="#/"]');
+  if (a && !e.defaultPrevented && e.button === 0 && !e.metaKey && !e.ctrlKey) navByLink = true;
+}, true);
+
+/*
+ * The placeholder a view shows while it waits. Skipped on a soft redraw,
+ * where the page already has content and swapping it for a skeleton for one
+ * frame is exactly the flash this is meant to remove.
+ */
+function placeholder(html) {
+  if (!state.soft) app.innerHTML = html;
+}
+
+async function route({ soft = false } = {}) {
   const { parts, params } = parseHash();
   const name = parts[0] || 'home';
-  // Set after the first render, so the first route of a session -- the deep
-  // link itself -- does not count as somewhere to go back to.
-  state.cameFromInApp = routed++ > 0;
+  const here = location.hash || '#/home';
+  const keepY = window.scrollY;
+  state.soft = soft;
+  if (!soft) {
+    // Set after the first render, so the first route of a session -- the
+    // deep link itself -- does not count as somewhere to go back to.
+    state.cameFromInApp = routed++ > 0;
+    if (state.here) scrollMemory.set(state.here, keepY);
+    state.here = here;
+  }
+  const backTo = !soft && !navByLink ? scrollMemory.get(here) : undefined;
+  navByLink = false;
   clearInterval(state.tick);
   clearInterval(state.poll);
   if (state.onVisible) { removeEventListener('visibilitychange', state.onVisible); state.onVisible = null; }
   for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.route === name);
-  document.getElementById('nav').classList.remove('open');
-  document.getElementById('burger').setAttribute('aria-expanded', 'false');
-  window.scrollTo(0, 0);
+  if (!soft) {
+    document.getElementById('nav').classList.remove('open');
+    document.getElementById('burger').setAttribute('aria-expanded', 'false');
+    window.scrollTo(0, 0);
+  }
   try {
+    await render(name, parts, params);
+  } catch (err) {
+    errorState(err);
+  } finally {
+    if (!soft) countView();
+    state.soft = false;
+    smartQuotes(app);
+    // After the content is in, so the position is measured against the real
+    // page rather than a skeleton.
+    window.scrollTo(0, soft ? keepY : (backTo ?? 0));
+  }
+}
+
+/*
+ * Typographer's quotes, applied to whatever the page just drew.
+ *
+ * Copy is written with straight quotes because that is what a keyboard and a
+ * data feed produce, and a straight apostrophe in "Today's" or "O'Neill" is a
+ * typewriter mark. This walks the text nodes (never attributes, inputs or
+ * code) and sets apostrophes and quotation marks as a typesetter would, plus
+ * three dots as an ellipsis.
+ */
+const SKIP_QUOTES = new Set(['SCRIPT', 'STYLE', 'TEXTAREA', 'INPUT', 'CODE', 'PRE']);
+function smartQuotes(root) {
+  if (!root) return;
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (SKIP_QUOTES.has(n.parentNode?.nodeName) || !/['"]|\.\.\./.test(n.nodeValue)
+      ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  const nodes = [];
+  while (walk.nextNode()) nodes.push(walk.currentNode);
+  for (const n of nodes) {
+    n.nodeValue = n.nodeValue
+      .replace(/(\w)'(\w)/g, '$1\u2019$2')          // it's, O'Neill
+      .replace(/'(?=\d)/g, '\u2019')                 // the '90s: an apostrophe, not a quote
+      .replace(/(^|[\s(\[{\u2014\u2013-])'/g, '$1\u2018') // opening single
+      .replace(/'/g, '\u2019')                        // closing single, '90s
+      .replace(/(^|[\s(\[{\u2014\u2013-])"/g, '$1\u201C') // opening double
+      .replace(/"/g, '\u201D')                        // closing double
+      .replace(/\.\.\./g, '\u2026');
+  }
+}
+
+async function render(name, parts, params) {
+  {
     if (name === 'fixture' && parts[1]) return await viewFixture(parts[1], params);
+    if (name === 'league' && parts[1]) return await viewLeague(parts[1], params);
     if (name === 'board') return await viewBoard(params);
     if (name === 'leagues') return await viewLeagues();
     if (name === 'results') return await viewResults();
@@ -4342,8 +4845,6 @@ async function route() {
      * Saying so costs four lines and two ways out.
      */
     return notFound(name);
-  } catch (err) {
-    errorState(err);
   }
 }
 
@@ -4534,6 +5035,9 @@ renderRegion();
     if (intent && intent.startsWith('#/')) location.hash = intent;
   }
   await route();
+  smartQuotes(document.querySelector('footer'));
+  const settings = document.getElementById('cookie-settings');
+  if (settings) settings.onclick = () => cookieNotice({ force: true });
   health();
   headerAuth();
   cookieNotice();
