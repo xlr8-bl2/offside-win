@@ -1,18 +1,20 @@
 import { exec, select } from './store.ts';
 
 /**
- * The bet slip: our most likely calls, combined to a total the owner asked for.
+ * The bet slip: our most confident calls, combined to a total the owner asked for.
  *
  * The brief, in the owner's words: "the most probable to enter, the highest
- * confidence to reach, like two or three odds combined". So the objective is
- * the chance of every leg landing, and the constraint is the total odds --
- * between 2.00 and 3.00. Not the most legs, not the biggest price.
+ * confidence to reach, like two or three odds combined", and then, plainly,
+ * "the top most confident picks should be there". So the slip is built from
+ * the top of the board down: the most confident call goes on first, then the
+ * next, until the total odds reach 2.00. A call that would push the total
+ * past 3.00 is skipped and the next one tried. The call we are surest of is
+ * always on the slip.
  *
- * Maximising the joint chance under a price constraint is a small subset
- * search, and the pool is small: the dozen most likely calls on the board, one
- * per match, is at most a few thousand combinations. Exhaustive beats clever
- * here -- a greedy "add the next most likely leg until the price is right"
- * overshoots the band as often as it lands in it.
+ * An earlier version searched every combination for the best joint chance
+ * inside the band, which is a sound objective and the wrong product: it would
+ * leave the top call off in favour of four slightly longer ones, and a slip
+ * that does not carry the day's best call is not the slip anyone asked for.
  *
  * What it will not do is pretend. Multiplying legs multiplies the risk, and the
  * slip says how often a slip like it comes in, in words, next to the odds.
@@ -70,39 +72,27 @@ export function buildSlip(candidates: Leg[], opts: SlipOptions = SLIP_DEFAULTS):
   }
   const pool = [...best.values()].sort((a, b) => b.model_prob - a.model_prob).slice(0, opts.pool);
 
-  let top: { legs: Leg[]; chance: number; odds: number } | null = null;
-  const pick: Leg[] = [];
-  const walk = (start: number, odds: number, chance: number): void => {
-    if (pick.length >= opts.minLegs && odds >= opts.minOdds && odds <= opts.maxOdds) {
-      // Best chance wins; on a tie, fewer legs, then the price nearer the
-      // middle of the band.
-      const mid = (opts.minOdds + opts.maxOdds) / 2;
-      if (!top || chance > top.chance + 1e-12
-          || (Math.abs(chance - top.chance) <= 1e-12 && (pick.length < top.legs.length
-            || (pick.length === top.legs.length && Math.abs(odds - mid) < Math.abs(top.odds - mid))))) {
-        top = { legs: [...pick], chance, odds };
-      }
-    }
-    if (pick.length >= opts.maxLegs || odds > opts.maxOdds) return;
-    // Nothing added can raise the chance, so a branch already below the best
-    // found cannot win.
-    if (top && chance < top.chance) return;
-    for (let i = start; i < pool.length; i++) {
-      const leg = pool[i]!;
-      pick.push(leg);
-      walk(i + 1, odds * leg.odds, chance * leg.model_prob);
-      pick.pop();
-    }
-  };
-  walk(0, 1, 1);
+  // Top of the board down. A leg that would take the total past the band is
+  // skipped, not the end of the search: the next most confident call may
+  // still fit.
+  const picked: Leg[] = [];
+  let odds = 1;
+  let chance = 1;
+  for (const leg of pool) {
+    if (picked.length >= opts.maxLegs) break;
+    if (odds >= opts.minOdds) break;
+    if (odds * leg.odds > opts.maxOdds) continue;
+    picked.push(leg);
+    odds *= leg.odds;
+    chance *= leg.model_prob;
+  }
+  if (picked.length < opts.minLegs || odds < opts.minOdds || odds > opts.maxOdds) return null;
 
-  const found = top as { legs: Leg[]; chance: number; odds: number } | null;
-  if (!found) return null;
-  const legs = [...found.legs].sort((a, b) => a.kickoff - b.kickoff);
+  const legs = [...picked].sort((a, b) => a.kickoff - b.kickoff);
   return {
     legs,
-    odds: Number(found.odds.toFixed(2)),
-    chance: Number(found.chance.toFixed(4)),
+    odds: Number(odds.toFixed(2)),
+    chance: Number(chance.toFixed(4)),
     first_kickoff: legs[0]!.kickoff,
   };
 }

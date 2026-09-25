@@ -13,13 +13,20 @@ test('the slip lands inside the odds band', () => {
   assert.ok(s.odds >= 2 && s.odds <= 3, `odds ${s.odds} outside 2-3`);
 });
 
-test('it maximises the chance of all landing, not the number of legs', () => {
-  // Two legs at 1.5 each (2.25) with 0.7 each = 0.49, against four short legs
-  // (1.2^4 = 2.07) at 0.85 each = 0.52. The four-leg slip is likelier.
-  const s = buildSlip([leg(1, 1.5, 0.7), leg(2, 1.5, 0.7), leg(3, 1.2, 0.85), leg(4, 1.2, 0.85), leg(5, 1.2, 0.85), leg(6, 1.2, 0.85)]);
+test('the most confident calls go on first, and the top one is always there', () => {
+  // The two 1.5s are the likeliest calls, so they lead; together they make
+  // 2.25, inside the band, and the slip stops there.
+  const s = buildSlip([leg(3, 1.2, 0.8), leg(4, 1.2, 0.8), leg(1, 1.5, 0.9), leg(2, 1.5, 0.88), leg(5, 1.2, 0.8), leg(6, 1.2, 0.8)]);
   assert.ok(s);
-  assert.ok(Math.abs(s.chance - 0.85 ** 4) < 1e-3, `chance ${s.chance}`);
-  assert.equal(s.legs.length, 4);
+  assert.deepEqual(s.legs.map((l) => l.fixture_id).sort((a, b) => a - b), [1, 2]);
+  assert.ok(Math.abs(s.odds - 2.25) < 1e-9, `odds ${s.odds}`);
+});
+
+test('a call that would push the total past the band is skipped, not the end of the slip', () => {
+  // 1.9 first (surest), then 1.7 would make 3.23: skipped. 1.1 makes 2.09: in.
+  const s = buildSlip([leg(1, 1.9, 0.9), leg(2, 1.7, 0.85), leg(3, 1.1, 0.84)]);
+  assert.ok(s);
+  assert.deepEqual(s.legs.map((l) => l.fixture_id).sort((a, b) => a - b), [1, 3]);
 });
 
 test('one leg per match', () => {

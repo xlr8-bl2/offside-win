@@ -131,6 +131,13 @@ export default {
       }
       if (path === '/api/board') return await board(url, env, jwt);
       if (path.startsWith('/api/fixture/')) return await fixture(path, env, jwt);
+      // A competition's page. The token goes with it because the fixtures
+      // inside are walled exactly as the board is.
+      if (path.startsWith('/api/league/')) {
+        const id = Number(path.slice('/api/league/'.length));
+        if (!Number.isFinite(id)) return fail('bad league id', 400);
+        return await passthrough(env, 'get_league', { p_id: id }, jwt);
+      }
       if (path === '/api/picks') return await picks(url, env, jwt);
       if (path === '/api/model') return await passthrough(env, 'get_model', {});
       if (path === '/api/hero') return await passthrough(env, 'get_hero', {});
