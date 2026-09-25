@@ -538,6 +538,23 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 @media (max-width: 560px) {
   .top-right .btn-primary { display: none; }
 }
+/*
+ * The header on a phone: the name, the account button and the menu, and
+ * nothing that can collide with them. The name keeps its own width (it used
+ * to sit in a column allowed to shrink to nothing, so the tally and the plan
+ * tag slid over the top of it), and the smaller items leave in order of how
+ * little they are missed.
+ */
+@media (max-width: 940px) {
+  .top-inner { grid-template-columns: auto minmax(0, 1fr); }
+  .top-right { min-width: 0; justify-content: flex-end; }
+}
+@media (max-width: 680px) { .tally { display: none; } }
+@media (max-width: 440px) {
+  .plan-tag { display: none; }
+  .wordmark { font-size: 1.375rem; }
+  .top-right { gap: var(--space-3); }
+}
 
 /* --------------------------------------------------------------- buttons */
 
@@ -831,7 +848,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .tally b.won { color: var(--won); }
 .tally b.live { color: var(--lost); }
 .tally:hover { color: var(--chalk-2); border-color: var(--rule); }
-@media (max-width: 400px) { .tally { display: none; } }
+
 
 
 /* ------------------------------------------------------------ typesetting */

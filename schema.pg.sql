@@ -1097,8 +1097,12 @@ CREATE OR REPLACE FUNCTION get_player(p_id bigint, p_league bigint DEFAULT NULL)
 RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   WITH t AS (SELECT floor(extract(epoch FROM now()))::bigint AS now),
   scorer AS (
+    -- Rank shared between level scorers: one goal in a chart where fourteen
+    -- players have one is joint second, not fifteenth.
     SELECT substring(k.k FROM '^league:(\d+):scorers$')::bigint AS league_id,
-           e.ord AS rank, e.v AS row
+           1 + (SELECT count(*) FROM jsonb_array_elements(coalesce(try_json(k.v)::jsonb->'rows', '[]'::jsonb)) o
+                WHERE coalesce((o->>'goals')::int, 0) > coalesce((e.v->>'goals')::int, 0)) AS rank,
+           e.v AS row
     FROM kv k
     CROSS JOIN LATERAL jsonb_array_elements(coalesce(try_json(k.v)::jsonb->'rows', '[]'::jsonb)) WITH ORDINALITY e(v, ord)
     WHERE k.k LIKE 'league:%:scorers' AND (e.v->>'player_id')::bigint = p_id

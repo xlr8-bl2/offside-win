@@ -183,7 +183,8 @@ function buildWriter(): Writer | null {
   return geminiWriter({
     apiKey,
     model: process.env['GEMINI_MODEL'] || undefined,
-    ratePerMinute: Number(process.env['GEMINI_RPM'] ?? 15),
+    // Gentle enough for the free tier's per-minute limit on any flash model.
+    ratePerMinute: Number(process.env['GEMINI_RPM'] ?? 8),
   });
 }
 
@@ -206,6 +207,15 @@ export async function runSlate(): Promise<SlateReport> {
   let consecutiveErrors = 0;
   let narrateReused = 0;
   let writerGaveUp: string | null = null;
+  /*
+   * New write-ups per run. The slate runs every quarter of an hour and a
+   * write-up is kept for the life of the call, so a dozen a run is well over
+   * a hundred a day: every call on the board gets one within a few runs,
+   * without a single run spending the free tier's daily allowance in one go.
+   * Soonest kick-offs are written first (see the candidate order), so the
+   * matches about to be read are the ones that get the writing.
+   */
+  const perRun = Number(process.env['GEMINI_PER_RUN'] ?? 12);
   const from = new Date((now - config.slate.lookbackHours * 3600) * 1000).toISOString();
   const to = new Date((now + config.slate.horizonHours * 3600) * 1000).toISOString();
 
@@ -263,6 +273,9 @@ export async function runSlate(): Promise<SlateReport> {
   const finishedIds: number[] = [];
   // Leagues whose table and scorers this pass has already written.
   const leagueSeen = new Set<number>();
+  // Each competition's scoring chart, for the fixtures in it: the players
+  // worth a link on a match page are the ones in this list.
+  const leagueScorers = new Map<number, Array<{ player_id: number; name: string; goals: number; team_name?: string | null }>>();
   // The confident calls each fixture carries as of this run, for fixtures
   // that have not kicked off. See the withdrawal after the pick upsert.
   const standing = new Map<number, Array<{ market: string; outcome: string; line: number | null }>>();
@@ -285,7 +298,10 @@ export async function runSlate(): Promise<SlateReport> {
         leagueSeen.add(leagueId);
         if (ctx.standings?.length) await kvSetJSON(`league:${leagueId}:standings`, { updated_at: now, rows: ctx.standings });
         const scorers = parseScorers(await bsdOrNull(`/api/v2/leagues/${leagueId}/top/scorers/`, { limit: 15 }));
-        if (scorers?.length) await kvSetJSON(`league:${leagueId}:scorers`, { updated_at: now, rows: scorers });
+        if (scorers?.length) {
+          await kvSetJSON(`league:${leagueId}:scorers`, { updated_at: now, rows: scorers });
+          leagueScorers.set(leagueId, scorers);
+        }
       }
 
       const { analysis, factors, confidence } = analyseFixture(ctx);
@@ -388,6 +404,7 @@ export async function runSlate(): Promise<SlateReport> {
             continue;
           }
 
+          if (narrateAttempts >= perRun) break;
           narrateAttempts++;
           const result = await write({
             home: analysis.home_team,
@@ -593,6 +610,12 @@ export async function runSlate(): Promise<SlateReport> {
         // analysis into a link by looking it up here, so a name the writer
         // uses that is not in this list simply stays text.
         people: peopleOf(ctx),
+        // The players worth a link: the competition's top scorers. A name in
+        // the analysis links only if it is one of these, and the link opens
+        // the competition's chart at that name.
+        notable: (leagueScorers.get(analysis.league_id) ?? []).map((sc, i) => ({
+          id: sc.player_id, name: sc.name, goals: sc.goals, rank: i + 1,
+        })),
         // Everything the match page shows in its own panels. All of it was
         // gathered for the factors already and then dropped on the floor.
         round_label: str(event['round_label']) || null,
