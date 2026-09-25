@@ -1059,8 +1059,9 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
                'position', (r->>'position')::int, 'played', (r->>'played')::int,
                'won', (r->>'won')::int, 'drawn', (r->>'drawn')::int, 'lost', (r->>'lost')::int,
                'goals_for', (r->>'goals_for')::int, 'goals_against', (r->>'goals_against')::int,
-               'goal_diff', (r->>'goal_diff')::int, 'points', (r->>'points')::int)
-             ORDER BY (r->>'position')::int)
+               'goal_diff', (r->>'goal_diff')::int, 'points', (r->>'points')::int,
+               'group', r->>'group')
+             ORDER BY r->>'group' NULLS FIRST, (r->>'position')::int)
       FROM kv k
       CROSS JOIN LATERAL jsonb_array_elements(coalesce(try_json(k.v)::jsonb->'rows', '[]'::jsonb)) r
       LEFT JOIN team tm ON tm.id = (r->>'team_id')::bigint

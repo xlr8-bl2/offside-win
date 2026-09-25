@@ -59,6 +59,8 @@ export interface StandingRow {
   lost?: number | null;
   goals_for?: number | null;
   goals_against?: number | null;
+  /** The group, in a competition played in groups. */
+  group?: string | null;
 }
 
 export interface ManagerTenure {
