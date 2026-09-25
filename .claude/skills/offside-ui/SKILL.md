@@ -46,6 +46,10 @@ reasoning is written down because otherwise the next pass reverts it by eye.
 saturated green, so it reads as gambling promo. It is semantic here and
 nothing else.
 
+**Superseded:** the paragraphs below describe Bricolage and Inter, which were
+replaced by Big Shoulders Display and Geist (see "Type, in practice" above and
+tokens.css). They stay for the reasoning about width and condensed cuts.
+
 **Two faces, and a width axis.** `Bricolage Grotesque` for display and for
 anything condensed — it is variable, with width (75–100) and optical-size axes,
 and it is not the face anyone reaches for by default. `Inter` for UI with
@@ -72,6 +76,47 @@ display face carries emphasis through width.
 is a price. Proportional digits make a column of odds unscannable — 1.11 and
 2.87 come out different widths and the decimal points stop lining up — and a
 live board jitters on every tick.
+
+## The mark and the wordmark
+
+The subject of the product is the call, and the clearest picture of a call
+in football is the offside line the broadcaster draws across the pitch. So:
+
+- **Wordmark**: "off", a thin violet line, "side", then ".win" in the quiet
+  colour. Set in Big Shoulders at 800. The line runs a little past the
+  capitals top and bottom, the way the broadcast line runs off the players.
+  It lives in the header.
+- **Mark**: a ball (a ring), the line through it right of centre, and the
+  part of the ball past the line in violet. For the favicon, the home-screen
+  icons, the footer and the share image. `public/icon.svg` is the tile
+  version, with heavier strokes so it reads at 16px.
+
+Three marks preceded it and each failed for a reason worth remembering:
+diagonal strokes said nothing, a linesman's flag read as an icon, and a
+hand-drawn ring standing in for the "o" read as a stray O among condensed
+capitals. Do not put the ring back into the word.
+
+SVG presentation attributes do not resolve `var()`. Colour an inline SVG
+with `style="stroke:var(--...)"`, never `stroke="var(--...)"`.
+
+## Type, in practice
+
+- Fonts are self-hosted in `public/fonts` (see its README). No Google Fonts
+  link. Geist, Big Shoulders latin and the 800 figures cut are preloaded.
+- **Figures.** Big Shoulders has proportional digits and no `tnum`. Numbers
+  in the display face that stack or tick use `--display-figures` (the
+  Offside Figures cut, equal widths). The rule is at the end of
+  components.css so it wins. Geist has real `tnum`; tables use that.
+- Only ask for OpenType features the faces have: Geist kern, liga, tnum,
+  pnum, frac; Big Shoulders kern, liga; Caveat calt. No small caps and no
+  old-style figures exist in any of them, so do not ask for them.
+- Headings `text-wrap: balance`; paragraphs `pretty` with hanging
+  punctuation. Reading text (`.narrative`, `.why p`, `.prose`) is
+  `--text-read` on `--leading-read` at `--measure`, hyphenated (`lang="en-GB"`).
+- Capitals get `--tracking-caps`.
+- A pass after every render sets typographer's quotes and ellipses
+  (`smartQuotes` in app.js). Write copy with straight quotes; it is fixed on
+  the page.
 
 ## Two registers
 

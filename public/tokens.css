@@ -124,74 +124,100 @@
    * using it is a decision nobody made; Geist is cleaner in the small sizes
    * this interface mostly lives at and its tabular figures are properly drawn.
    */
-  --display: 'Big Shoulders Display', 'Arial Narrow', system-ui, sans-serif;
-  --body:    Geist, 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /*
+   * The faces are self-hosted (public/fonts, declared at the top of
+   * base.css): no third-party request before first paint, and the two that
+   * matter are preloaded from the HTML.
+   *
+   * OFFSIDE FIGURES leads --display-figures. It is Big Shoulders'
+   * own digits and price punctuation, respaced so every figure is one width
+   * (built once with fontTools; see public/fonts/README.md). Big
+   * Shoulders ships proportional figures and no tabular feature at all, so
+   * `tabular-nums` on a column of odds set in it did nothing: the "1" is half
+   * the width of the "0", and 1.18 over 2.35 never lined up. Stadium boards
+   * use equal-width figures for the same reason we need them. Its
+   * unicode-range is digits and price punctuation only, so letters in the
+   * same element fall through to Big Shoulders itself.
+   */
+  --display: 'Big Shoulders Display', 'Big Shoulders Fallback', 'Arial Narrow', sans-serif;
+  /* The same face with equal-width figures, for numbers that stack in a
+     column or tick in place: odds, kick-off times, scores, clocks. A number
+     standing alone keeps Big Shoulders' own proportional figures, which
+     look better on their own ("11", not "1 1"). */
+  --display-figures: 'Offside Figures', 'Big Shoulders Display', 'Big Shoulders Fallback', 'Arial Narrow', sans-serif;
+  --body:    Geist, 'Geist Fallback', system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   /*
    * THE THIRD FACE IS THE BRAND.
    *
-   * Caveat, a marker hand, and it is the one thing on this site that could not
-   * belong to anybody else. The product's whole premise is a pundit talking
-   * over a game -- the brief was "pundits who actually know ball" -- and the
-   * visual form of that is the telestrator: somebody drawing on the screen.
-   * Monday Night Football, a marker circling a full-back who has stepped up.
-   *
-   * So the handwriting is not decoration. It is the annotation layer: the
-   * aside, the signature, the thing a person scribbled next to the data. Which
-   * is exactly why it is rationed. It goes on the brand's own voice -- the
-   * sign-off, the lead-in, the take -- and never on a number, a price, a
-   * scoreline or a control. The moment it labels data it stops being a voice
-   * and becomes a font choice.
-   *
-   * It was in this codebase once, as `--script`, and got flattened into an
-   * alias for the display face during a rebuild. Nobody noticed it had gone
-   * except the person who missed it.
+   * Caveat, a marker hand: the telestrator, a pundit drawing on the screen.
+   * Rationed to the brand's own asides and sign-offs, never a number, a
+   * price, a scoreline or a control.
    */
   --hand: Caveat, 'Bradley Hand', 'Segoe Script', cursive;
 
-  /*
-   * No width axis on the display face, so these are kept only because the
-   * component layer still names them and an unresolved var() invalidates the
-   * whole declaration. They resolve to 100 and do nothing.
-   */
+  /* No width axis on the display face; kept because rules still name them. */
   --wide:      100;
   --condensed: 100;
   --tight:     100;
 
-  /* A scoreboard shouts. 800 is for numbers and one headline per screen. */
   --weight-normal: 400;
   --weight-medium: 500;
   --weight-bold:   700;
   --weight-black:  800;
 
+  /*
+   * THE SCALE.
+   *
+   * Interface sizes are fixed steps, because a label that grows with the
+   * window stops lining up with the control beside it. Reading and display
+   * sizes are fluid: each is a clamp() between a phone size and a desk size
+   * on a modular ratio, 1.2 at 390px widening to 1.333 at 1440px, so a
+   * headline gains presence on a big screen without the body copy doing the
+   * same. Big Shoulders is signage type and reads about a third smaller than
+   * a grotesque at the same size, which is why the display steps sit high.
+   */
   --text-2xs: 0.6875rem;
   --text-xs:  0.75rem;
   --text-sm:  0.8125rem;
-  --text-md:  0.875rem;
-  --text-lg:  1rem;
-  /*
-   * From --text-xl up, these sizes are set in the display face, and the display
-   * face is Big Shoulders: a signage type so narrow that at a given pixel size
-   * it reads roughly a third smaller than a normal grotesque. Seen rendered for
-   * the first time at the old numbers, every heading on the site looked timid.
-   * These are the same scale pushed up to match it optically.
-   */
-  --text-xl:  1.625rem;
-  --text-2xl: 2rem;
-  --text-3xl: clamp(2rem, 3.2vw, 2.75rem);
-  --text-4xl: clamp(2.5rem, 4.2vw, 3.5rem);
+  --text-md:  clamp(0.875rem, 0.85rem + 0.1vw, 0.9375rem);
+  --text-lg:  clamp(1rem, 0.96rem + 0.15vw, 1.0625rem);
+  /* Long-form reading: the analysis, the why, the legal pages. */
+  --text-read: clamp(1rem, 0.95rem + 0.22vw, 1.125rem);
+
+  --text-xl:  clamp(1.5rem, 1.32rem + 0.75vw, 1.875rem);
+  --text-2xl: clamp(1.875rem, 1.6rem + 1.15vw, 2.5rem);
+  --text-3xl: clamp(2.25rem, 1.8rem + 1.9vw, 3.25rem);
+  --text-4xl: clamp(2.75rem, 2.1rem + 2.8vw, 4.25rem);
   /* The matchup on a masthead, and nothing else on the site. */
-  --text-hero: clamp(2.25rem, 4.4vw, 3.75rem);
-  /* The scoreboard: a scoreline, total odds, a strike count. The one size on
-     the site that is meant to be read from the back of the stand. */
-  --text-board: clamp(3rem, 7vw, 5rem);
+  --text-hero: clamp(2.5rem, 1.85rem + 2.9vw, 4.25rem);
+  /* The scoreboard: a scoreline, total odds, a strike count. */
+  --text-board: clamp(3rem, 1.9rem + 4.8vw, 5.75rem);
 
-  --leading-tight:  1.02;
-  --leading-snug:   1.3;
-  --leading-normal: 1.55;
+  /*
+   * LEADING, BY JOB.
+   *
+   * Tall condensed capitals want almost none; interface text wants a little;
+   * prose a reader is meant to get through wants a lot, and more on a dark
+   * ground, where light type on black blooms and the lines seem closer than
+   * they are.
+   */
+  --leading-display: 0.94;
+  --leading-tight:   1.02;
+  --leading-snug:    1.25;
+  --leading-normal:  1.5;
+  --leading-read:    1.65;
 
-  /* Tracking tightens as size grows. Flat tracking across a scale is the
-     amateur tell. */
+  /* The measure. 60 to 70 characters is where a line is easiest to follow. */
+  --measure:       66ch;
+  --measure-short: 46ch;
+
+  /*
+   * TRACKING. Tightens as size grows on the grotesque, which is designed
+   * for text sizes; stays near zero on the display face, which is already
+   * tight; opens for capitals, which are spaced for sitting next to lower
+   * case and crowd each other when set on their own.
+   */
   --tracking-hero: -0.005em;
   --tracking-4xl: -0.005em;
   --tracking-3xl: 0;
@@ -200,7 +226,17 @@
   --tracking-md:  -0.006em;
   --tracking-sm:  0;
   --tracking-wide: 0.04em;
+  --tracking-caps: 0.08em;
   --tracking-num: -0.02em;
+
+  /*
+   * FEATURES. Only ones the faces actually have (checked with fontTools):
+   * Geist carries kern, liga, tnum, pnum and frac; Big Shoulders kern and
+   * liga; Caveat calt, whose contextual alternates are what stop a run of
+   * the same letter looking stamped.
+   */
+  --features-text: 'kern' 1, 'liga' 1, 'calt' 1;
+  --features-data: 'kern' 1, 'tnum' 1;
 
   /* ----------------------------------------------------------------- space */
 
