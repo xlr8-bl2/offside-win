@@ -227,25 +227,6 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 }
 
 /*
- * The lead-in above a headline.
- *
- * What it replaces: a tracked-out all-caps eyebrow in the accent colour above
- * every single heading on the site. That is the first item on the list of
- * things that mark a page as machine-generated, and it was on five sections of
- * the front door. This is sentence case, body face, one hairline rule to its
- * left, and it earns its place by saying something rather than by labelling
- * the section beneath it.
- */
-.kicker {
-  display: block;
-  margin: 0 0 var(--space-3);
-  font-family: var(--hand);
-  font-size: var(--text-xl);
-  font-weight: 600;
-  color: var(--floodlight-hi);
-}
-
-/*
  * The annotation voice.
  *
  * Rationed on purpose: the brand's own asides and sign-offs, never a number,
@@ -865,7 +846,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
  * through the figures font for the display face and the tnum feature for
  * Geist.
  */
-h1, h2, h3, h4, .display, .kicker, .freecall-sel, .row-sel, .verdict-head .sel { text-wrap: balance; }
+h1, h2, h3, h4, .display, .freecall-sel, .row-sel, .verdict-head .sel { text-wrap: balance; }
 p, li, dd, figcaption, blockquote { text-wrap: pretty; hanging-punctuation: first allow-end last; }
 table, .tbl, .odds, .price, .row-goals, .slip-odds, .mc-count, [data-countdown] {
   font-feature-settings: var(--features-data);
