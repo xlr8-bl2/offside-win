@@ -36,6 +36,15 @@ CREATE TABLE IF NOT EXISTS team (
   updated_at  bigint NOT NULL
 );
 
+-- A club's colour, read off its crest (engine/src/images/crest.ts). One hex
+-- value per team, or '' for a crest that could not be read, so it is tried
+-- once rather than every run. The match page washes its masthead in the two.
+CREATE TABLE IF NOT EXISTS team_color (
+  team_id    bigint PRIMARY KEY,
+  color      text NOT NULL,
+  updated_at bigint NOT NULL
+);
+
 -- A photograph of a team, re-hosted.
 --
 -- One row per team, holding the best action shot we have found for them. The
@@ -835,6 +844,11 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
              -- the column costs nothing here and means the scoreline is
              -- whatever settlement last wrote, however old the card is.
              || CASE WHEN f.id = free_fixture_id() THEN '{"free_call": true}'::jsonb ELSE '{}'::jsonb END
+           -- The two clubs' colours, for the masthead. Absent until the slate
+           -- has read both crests, and the page falls back to its own wash.
+           || jsonb_build_object('colors', jsonb_build_object(
+                'home', (SELECT nullif(c.color, '') FROM team_color c WHERE c.team_id = f.home_team_id),
+                'away', (SELECT nullif(c.color, '') FROM team_color c WHERE c.team_id = f.away_team_id)))
              -- The status and the running score come from the columns too:
              -- the card froze at kick-off saying the match had not started,
              -- and these are the only two things that can say otherwise
@@ -914,6 +928,11 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
                    THEN jsonb_build_object('report', try_json(f.report_json)::jsonb)
                    ELSE '{}'::jsonb END
            || CASE WHEN f.id = free_fixture_id() THEN '{"free_call": true}'::jsonb ELSE '{}'::jsonb END
+           -- The two clubs' colours, for the masthead. Absent until the slate
+           -- has read both crests, and the page falls back to its own wash.
+           || jsonb_build_object('colors', jsonb_build_object(
+                'home', (SELECT nullif(c.color, '') FROM team_color c WHERE c.team_id = f.home_team_id),
+                'away', (SELECT nullif(c.color, '') FROM team_color c WHERE c.team_id = f.away_team_id)))
            -- The calls, from the record rather than from the write-up.
            --
            -- The write-up is a snapshot, and before the freeze at kick-off it
@@ -1214,6 +1233,11 @@ ALTER TABLE team_shot ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS team_shot_read ON team_shot;
 CREATE POLICY team_shot_read ON team_shot FOR SELECT TO anon USING (true);
 GRANT SELECT ON team_shot TO anon;
+
+ALTER TABLE team_color ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS team_color_read ON team_color;
+CREATE POLICY team_color_read ON team_color FOR SELECT TO anon USING (true);
+GRANT SELECT ON team_color TO anon;
 
 ALTER TABLE team ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS team_read ON team;
