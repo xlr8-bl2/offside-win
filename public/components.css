@@ -3426,3 +3426,18 @@
 .skeleton-title { height: 44px; width: min(420px, 70%); margin-bottom: var(--space-4); }
 .skeleton-line { height: 14px; width: min(560px, 90%); margin-bottom: var(--space-8); }
 .skeleton-rows { display: flex; flex-direction: column; gap: var(--space-3); }
+
+
+/* ============================================================== figures */
+
+/*
+ * Display-face numbers that stack in a column or tick in place take the
+ * equal-width cut (tokens.css, --display-figures), so 1.18 sits over 2.35
+ * with the points aligned and a countdown does not shuffle sideways every
+ * second. Last in the file on purpose: several of these set the display
+ * face earlier, and this has to win.
+ */
+.odds, .price, .row-goals, .row-time, .fx-line .gf, .mc-count, [data-countdown],
+.ev-min, .minute, .slip-odds { font-family: var(--display-figures); }
+.freecall-tie b { font-family: var(--display-figures); font-size: var(--text-lg); color: var(--chalk); margin: 0 var(--space-1); }
+.freecall-meta .mark { margin-right: var(--space-3); }

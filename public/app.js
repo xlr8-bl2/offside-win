@@ -580,7 +580,7 @@ function matchCentreHTML(hero, d) {
 
     ${meetings ? `
       <div class="mc-block">
-        <span class="mc-label">${meetings} meetings</span>
+        <span class="mc-label">${meetings === 1 ? 'One meeting' : `${meetings} meetings`}</span>
         ${formBarHTML(
           Number(h2h.home_wins) || 0,
           Number(h2h.draws) || 0,
@@ -629,6 +629,38 @@ function freeCallHTML(hero, detail, free = null) {
   }
   const d = market({ market: v.market, outcome: v.outcome, line: v.line, home: tie.home, away: tie.away, odds: v.odds });
   const elsewhere = !hero || Number(tie.id) !== Number(hero.fixture_id);
+
+  /*
+   * Once its match has started, the free call stops being an offer and
+   * becomes a result: the score, and whether it landed. A free call that
+   * landed is the best thing the front page can show a stranger, and one
+   * that missed is shown the same way, because the record does not choose.
+   */
+  const st = free ? matchState(free) : { kind: 'upcoming' };
+  const score = Array.isArray(free?.score) ? free.score : null;
+  if (free && st.kind !== 'upcoming') {
+    const GRADE = { WON: 'won', LOST: 'lost', HALF_WON: 'part', HALF_LOST: 'part', PUSH: 'back', VOID: 'back' };
+    const landed = score
+      ? (GRADE[free.called?.result] ?? didItLand({ market: v.market, outcome: v.outcome, line: v.line, homeGoals: score[0], awayGoals: score[1] }))
+      : null;
+    const WORD = { won: 'Landed', lost: 'Missed', part: 'Half back', back: 'Stake back' };
+    const shown = score ?? (Array.isArray(free.live_score) ? free.live_score : null);
+    return `
+  <div class="freecall">
+    <span class="freecall-tag">Today's free call</span>
+    <a class="freecall-tie" href="#/fixture/${encodeURIComponent(tie.id)}">${crest(tie.home, 'xs', tie.home_id)}${esc(tie.home)}
+      ${shown ? `<b>${esc(shown[0])}–${esc(shown[1])}</b>` : 'v'} ${crest(tie.away, 'xs', tie.away_id)}${esc(tie.away)}
+      ${st.kind === 'live' ? liveBadge(st) : ''}</a>
+    <p class="freecall-sel">${esc(d.name)}</p>
+    <p class="freecall-meta" data-public-price>${landed
+      ? `<span class="mark ${landed}">${WORD[landed] ?? ''}</span>`
+      : trackHTML(liveTrack(v, free))} <b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
+    <p class="hero-blurb">${landed
+      ? 'Free for everyone, as one call is every day. Members had every other call on the board.'
+      : 'Free for everyone, and under way. Members get every other call the moment it goes up.'}</p>
+  </div>`;
+  }
+
   return `
   <div class="freecall">
     <span class="freecall-tag">Today's free call</span>
@@ -1409,7 +1441,7 @@ async function viewHome() {
       fixtures.push(...(fresh.fixtures ?? []));
       recent = picks;
       slip = slipNow;
-      const put = (key, html) => { const el = app.querySelector(`[data-live="${key}"]`); if (el) el.innerHTML = html; };
+      const put = (key, html) => { const el = app.querySelector(`[data-live="${key}"]`); if (el) { el.innerHTML = html; smartQuotes(el); } };
       put('ticker', tickerHTML(fixtures, recent));
       put('today', todayStripHTML(fixtures, recent));
       put('rail', nextRailHTML(rail()));
@@ -4617,9 +4649,40 @@ async function route({ soft = false } = {}) {
     errorState(err);
   } finally {
     state.soft = false;
+    smartQuotes(app);
     // After the content is in, so the position is measured against the real
     // page rather than a skeleton.
     window.scrollTo(0, soft ? keepY : (backTo ?? 0));
+  }
+}
+
+/*
+ * Typographer's quotes, applied to whatever the page just drew.
+ *
+ * Copy is written with straight quotes because that is what a keyboard and a
+ * data feed produce, and a straight apostrophe in "Today's" or "O'Neill" is a
+ * typewriter mark. This walks the text nodes (never attributes, inputs or
+ * code) and sets apostrophes and quotation marks as a typesetter would, plus
+ * three dots as an ellipsis.
+ */
+const SKIP_QUOTES = new Set(['SCRIPT', 'STYLE', 'TEXTAREA', 'INPUT', 'CODE', 'PRE']);
+function smartQuotes(root) {
+  if (!root) return;
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (SKIP_QUOTES.has(n.parentNode?.nodeName) || !/['"]|\.\.\./.test(n.nodeValue)
+      ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  const nodes = [];
+  while (walk.nextNode()) nodes.push(walk.currentNode);
+  for (const n of nodes) {
+    n.nodeValue = n.nodeValue
+      .replace(/(\w)'(\w)/g, '$1\u2019$2')          // it's, O'Neill
+      .replace(/'(?=\d)/g, '\u2019')                 // the '90s: an apostrophe, not a quote
+      .replace(/(^|[\s(\[{\u2014\u2013-])'/g, '$1\u2018') // opening single
+      .replace(/'/g, '\u2019')                        // closing single, '90s
+      .replace(/(^|[\s(\[{\u2014\u2013-])"/g, '$1\u201C') // opening double
+      .replace(/"/g, '\u201D')                        // closing double
+      .replace(/\.\.\./g, '\u2026');
   }
 }
 
@@ -4837,6 +4900,7 @@ renderRegion();
     if (intent && intent.startsWith('#/')) location.hash = intent;
   }
   await route();
+  smartQuotes(document.querySelector('footer'));
   health();
   headerAuth();
   cookieNotice();

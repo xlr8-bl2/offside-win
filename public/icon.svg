@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- The mark on its tile: a ball, the offside line through it, and the
+       sliver beyond the line in violet. Weights opened up from the in-page
+       mark so it still reads at 16 pixels. -->
+  <rect width="64" height="64" rx="14" fill="#16171b"/>
+  <clipPath id="l"><rect width="38.5" height="64"/></clipPath>
+  <clipPath id="r"><rect x="38.5" width="30" height="64"/></clipPath>
+  <circle cx="28" cy="32" r="16.5" fill="none" stroke="#f4f6fa" stroke-width="8.5" clip-path="url(#l)"/>
+  <circle cx="28" cy="32" r="16.5" fill="none" stroke="#7a5af8" stroke-width="8.5" clip-path="url(#r)"/>
+  <rect x="36" y="7" width="5" height="50" rx="2.5" fill="#9e86ff"/>
+</svg>
