@@ -193,7 +193,10 @@ export function parseStandings(raw: unknown): StandingRow[] | null {
       for (const [name, g] of Object.entries(groups)) {
         const rows = asArray(asRecord(g)?.['standings'] ?? g);
         if (!rows) continue;
-        for (const r of rows) groupOf.set(r, str(asRecord(g)?.['name']) ?? name);
+        // The map key, not the group's own name: the Nations League has a
+        // "Group 1" in each of its four leagues, and only the key tells them
+        // apart. Grouping on the name put fifteen teams in one table.
+        for (const r of rows) groupOf.set(r, name);
         list.push(...rows);
       }
     }

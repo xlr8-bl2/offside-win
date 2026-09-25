@@ -553,9 +553,17 @@ function ordinal(n) {
   return v + (s[(m - 20) % 10] ?? s[m] ?? s[0]);
 }
 
+/*
+ * Whether a fixture's table is a real league table. A cup or a group stage
+ * the provider sends merged (the Nations League comes as one ranking of
+ * fifty-odd countries) has no position worth printing; the same bounds as
+ * storyFor's isLeague.
+ */
+const realTable = (st) => Boolean(st && (!st.size || (st.size >= 3 && st.size <= 30)));
+
 function matchCentreHTML(hero, d) {
   if (!d) return '';
-  const st = d.standings ?? {};
+  const st = realTable(d.standings) ? (d.standings ?? {}) : {};
   const h2h = d.h2h ?? {};
 
   const side = (name, id, table, form) => `
@@ -2488,7 +2496,7 @@ function h2hHTML(h2h, home, away) {
 }
 
 function standingsHTML(st, home, away, homeId, awayId) {
-  if (!st || (!st.home && !st.away)) return '';
+  if (!st || (!st.home && !st.away) || !realTable(st)) return '';
   const row = (r, name, id) => r
     ? `<tr>
          <td class="num">${r.position}</td>
@@ -3716,12 +3724,29 @@ async function viewLeague(id, params = new URLSearchParams()) {
       </table></div>`;
   const asOf = d.standings_at ? ` <span>as of ${esc(kickoffLabel(d.standings_at))}</span>` : '';
   const grouped = groups.size > 1 || (groups.size === 1 && !groups.has(''));
+  /*
+   * A real group has three to six teams. The provider sends the Nations
+   * League's groups merged across its four leagues, so its "Group 1" is one
+   * ranking of fifteen countries from League A to League D, with nothing in
+   * the data to pull them apart. A table like that is not a table of
+   * anything, so it is left out and the page says why, rather than printing
+   * something wrong with our name on it.
+   */
+  const MAX_GROUP = 6;
+  const realGroups = [...groups.entries()].filter(([, list]) => list.length <= MAX_GROUP);
+  const merged = grouped && realGroups.length < groups.size;
+  const mergedNote = `<div class="empty-state"><b>No reliable table for this one</b>
+      <span>The group tables for this competition reach us merged across its leagues, fifteen
+      teams to a group, so we have left them out rather than show them wrong. Every game and
+      result is on the other tabs.</span></div>`;
   const tableHTML = !rows.length ? '' : grouped
-    ? `<div class="group-tables">${[...groups.entries()].map(([g, list]) => `
+    ? (realGroups.length
+        ? `<div class="group-tables">${realGroups.map(([g, list]) => `
         <div class="panel">
           <p class="panel-head">${esc(g ? (/^group\b/i.test(g) ? g : `Group ${g}`) : 'Table')}${asOf}</p>
           ${oneTable(list)}
-        </div>`).join('')}</div>`
+        </div>`).join('')}</div>${merged ? mergedNote : ''}`
+        : mergedNote)
     : `<div class="panel"><p class="panel-head">The table${asOf}</p>${oneTable(rows)}</div>`;
 
   const scorers = Array.isArray(d.scorers) ? d.scorers.slice(0, 15) : [];
