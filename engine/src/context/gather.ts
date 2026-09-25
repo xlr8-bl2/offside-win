@@ -182,13 +182,19 @@ export function parseStandings(raw: unknown): StandingRow[] | null {
   const rec = asRecord(raw);
   // League competitions return a flat array; cups return a groups map.
   let list = asArray(rec?.['standings'] ?? rec?.['results'] ?? raw);
+  // Which group each row came from, for competitions played in groups. Kept
+  // so a group stage is drawn as one table per group rather than as one
+  // table with every position repeated.
+  const groupOf = new Map<unknown, string>();
   if (!list) {
     const groups = asRecord(rec?.['groups']);
     if (groups) {
       list = [];
-      for (const g of Object.values(groups)) {
+      for (const [name, g] of Object.entries(groups)) {
         const rows = asArray(asRecord(g)?.['standings'] ?? g);
-        if (rows) list.push(...rows);
+        if (!rows) continue;
+        for (const r of rows) groupOf.set(r, str(asRecord(g)?.['name']) ?? name);
+        list.push(...rows);
       }
     }
   }
@@ -221,9 +227,12 @@ export function parseStandings(raw: unknown): StandingRow[] | null {
       lost: num(row?.['lost'] ?? row?.['losses'] ?? row?.['l']) ?? null,
       goals_for: num(row?.['goals_for'] ?? row?.['gf']) ?? null,
       goals_against: num(row?.['goals_against'] ?? row?.['ga']) ?? null,
+      group: groupOf.get(r) ?? str(row?.['group'] ?? row?.['group_name']) ?? null,
     });
   }
-  return out.length ? out.sort((a, b) => a.position - b.position) : null;
+  return out.length
+    ? out.sort((a, b) => String(a.group ?? '').localeCompare(String(b.group ?? ''), 'en', { numeric: true }) || a.position - b.position)
+    : null;
 }
 
 export function parseManagerCareer(
