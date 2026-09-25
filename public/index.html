@@ -24,6 +24,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://sports.bzzoiro.com">
+<!-- The two reads every front-page visit makes, started with the HTML rather
+     than after the script has loaded and run. `crossorigin` so the request
+     matches the fetch() that picks it up; a signed-in reader's fetch carries a
+     token and simply goes to the network, which is correct for them. -->
+<link rel="preload" href="/api/board?hours=72" as="fetch" crossorigin>
+<link rel="preload" href="/api/hero" as="fetch" crossorigin>
 <!--
   Big Shoulders Display for the scoreboard, Geist for the interface.
 
@@ -94,7 +100,13 @@
   </div>
 </header>
 
-<main id="app"><div class="spinner">Loading…</div></main>
+<!-- A skeleton of the page, not a word: what shows for the fraction of a
+     second before the script has anything, on a first visit only. After that
+     the last copy of every page is kept in the browser and paints at once. -->
+<main id="app"><div class="wrap section dense" aria-busy="true" aria-label="Loading">
+  <div class="skeleton skeleton-title"></div><div class="skeleton skeleton-line"></div>
+  <div class="rows skeleton-rows"><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div></div>
+</div></main>
 
 <footer class="foot">
   <div class="foot-top">
