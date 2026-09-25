@@ -4244,6 +4244,31 @@ async function setRenewal(on) {
 }
 
 /**
+ * The pricing page's pointer to today's free call: the real one, and in the
+ * right tense. Before kick-off it is an invitation to read it; once played,
+ * the score and how it went, because a free call that landed is the best
+ * argument this page has and one that missed is shown just the same.
+ */
+function freeLineHTML(free) {
+  if (!free?.home) return '';
+  const st = matchState(free);
+  const score = Array.isArray(free.score) ? free.score : Array.isArray(free.live_score) ? free.live_score : null;
+  const WORD = { WON: 'It landed.', HALF_WON: 'Half of it landed.', LOST: 'It missed.', HALF_LOST: 'Half of it missed.', PUSH: 'Stake back.', VOID: 'Stake back.' };
+  const tie = score && st.kind !== 'upcoming'
+    ? `${esc(free.home)} ${esc(score[0])}–${esc(score[1])} ${esc(free.away)}`
+    : `${esc(free.home)} v ${esc(free.away)}`;
+  const say = st.kind === 'upcoming' ? 'Free to read in full. Watch it land, then decide.'
+    : st.kind === 'live' ? 'Under way now. The call is free to read.'
+    : `${WORD[(free.published ?? []).find((x) => x?.market)?.result ?? free.called?.result] ?? 'Played.'} Read how it went.`;
+  return `
+    <a class="freecall-line" href="#/fixture/${encodeURIComponent(free.id ?? free.fixture_id)}">
+      <span class="freecall-tag">Today's free call</span>
+      <b>${tie}</b>
+      <span>${esc(say)}</span>
+    </a>`;
+}
+
+/**
  * What a membership costs.
  *
  * One plan, one price, one button. No decoy tier that exists only to flatter
@@ -4258,6 +4283,11 @@ async function viewPricing() {
     getJSON('/api/plans').catch(() => []),
     getJSON('/api/hero').catch(() => null),
   ]);
+  // The free call is its own fixture, chosen by the slate: not the headline
+  // match. Pointing this line at the headline sent readers to a locked call
+  // under a label that said it was free.
+  const freeId = hero?.free_fixture_id;
+  const free = freeId ? await getJSON(`/api/fixture/${encodeURIComponent(freeId)}`).catch(() => null) : null;
   const money = (minor, cur) => new Intl.NumberFormat('en-GB', { style: 'currency', currency: cur || 'GBP', minimumFractionDigits: minor % 100 ? 2 : 0 }).format(minor / 100);
   const byId = Object.fromEntries((plans ?? []).map((p) => [p.id, p]));
   const order = ['matchday', 'monthly', 'season'].filter((id) => byId[id]);
@@ -4284,12 +4314,7 @@ async function viewPricing() {
         every open call the moment it goes up, the legs of the bet slip, and the reason behind each call.</p>
     </div>
 
-    ${hero?.home ? `
-    <a class="freecall-line" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">
-      <span class="freecall-tag">Today's free call</span>
-      <b>${esc(hero.home)} v ${esc(hero.away)}</b>
-      <span>Read it, watch it land, then decide.</span>
-    </a>` : ''}
+    ${freeLineHTML(free)}
 
     <div class="plans" data-public-price>
       ${order.map((id) => {
