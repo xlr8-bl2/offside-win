@@ -129,6 +129,10 @@ export default {
         if (path === '/api/pay/webhook') return await webhook(request, env);
         return fail('not found', 404);
       }
+      // A page view, from a reader who accepted analytics. Anonymous by
+      // construction: the reader's token is not forwarded, and only a page
+      // kind from a fixed list is passed on.
+      if (path === '/api/hit') return await hit(request, env);
       if (path === '/api/board') return await board(url, env, jwt);
       if (path.startsWith('/api/fixture/')) return await fixture(path, env, jwt);
       // A competition's page. The token goes with it because the fixtures
@@ -222,4 +226,34 @@ function picks(url: URL, env: Env, jwt: string | null): Promise<Response> {
     p_limit: limit,
     p_settled: settled === 'true' || settled === 'false' ? settled : undefined,
   }, jwt);
+}
+
+
+const PAGES = new Set(['home', 'board', 'fixture', 'league', 'leagues', 'results', 'slip',
+  'pricing', 'signin', 'account', 'legal']);
+
+/**
+ * Count one page view. POST only, answered 204 whatever happens: a counter
+ * that fails must never be something a reader notices. The body is sent with
+ * navigator.sendBeacon, so it arrives as text.
+ */
+async function hit(request: Request, env: Env): Promise<Response> {
+  const done = new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
+  if (request.method !== 'POST') return fail('method not allowed', 405);
+  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return done;
+  let page = '';
+  try { page = String((JSON.parse(await request.text()) as { p?: unknown }).p ?? ''); } catch { return done; }
+  if (!PAGES.has(page)) return done;
+  try {
+    await fetch(new URL('/rest/v1/rpc/record_view', env.SUPABASE_URL), {
+      method: 'POST',
+      headers: {
+        apikey: env.SUPABASE_ANON_KEY,
+        authorization: `Bearer ${env.SUPABASE_ANON_KEY}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ p_page: page }),
+    });
+  } catch { /* a lost count is not worth an error */ }
+  return done;
 }

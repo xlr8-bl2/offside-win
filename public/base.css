@@ -715,6 +715,20 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   color: var(--chalk-2);
 }
 .foot-col a:hover { color: var(--chalk); }
+/* The cookie settings control is a button, because it opens something rather
+   than going somewhere, dressed as the links around it. */
+.foot-link {
+  display: block;
+  padding: var(--space-2) 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--chalk-2);
+  cursor: pointer;
+  text-align: left;
+}
+.foot-link:hover { color: var(--chalk); }
 
 .socials { display: flex; gap: var(--space-3); margin-top: var(--space-2); }
 .socials a {
