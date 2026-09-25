@@ -388,6 +388,32 @@ export async function probeReport(): Promise<void> {
     .sort((a, b) => Number(config.leagueRank[Number(a.league_id)] ?? 6) - Number(config.leagueRank[Number(b.league_id)] ?? 6));
   console.log(`${finished.length} events in the window, ${done.length} finished`);
 
+  // How a group-stage table arrives: the Nations League (64). Group keys and
+  // sizes and the field names on a row; team names and numbers are public
+  // fixtures data but are not printed anyway.
+  const st = await bsdRaw<Record<string, unknown>>('/api/v2/leagues/64/standings/');
+  if (st.ok) {
+    const root = st.data;
+    console.log(`\n=== standings_64 top-level keys: ${Object.keys(root).join(', ')}`);
+    const groups = root['groups'] as Record<string, unknown> | undefined;
+    if (groups && typeof groups === 'object') {
+      for (const [k, v] of Object.entries(groups)) {
+        const vr = v as Record<string, unknown>;
+        const rows = (Array.isArray(vr?.['standings']) ? vr['standings'] : Array.isArray(v) ? v : []) as Record<string, unknown>[];
+        console.log(`  group key ${JSON.stringify(k)}: name ${JSON.stringify(vr?.['name'] ?? null)}, ${rows.length} rows, other keys [${Object.keys(vr ?? {}).filter((x) => x !== 'standings').join(', ')}]`);
+      }
+      const any = Object.values(groups)[0] as Record<string, unknown>;
+      const row = ((any?.['standings'] as unknown[]) ?? (any as unknown as unknown[]))?.[0];
+      console.log(`  row fields: ${Object.keys((row as Record<string, unknown>) ?? {}).join(', ')}`);
+    } else {
+      const rows = (root['standings'] ?? root['results']) as Record<string, unknown>[] | undefined;
+      console.log(`  flat list of ${rows?.length ?? 0}; row fields: ${Object.keys(rows?.[0] ?? {}).join(', ')}`);
+      const byGroup: Record<string, number> = {};
+      for (const r of rows ?? []) { const g = String(r['group'] ?? r['group_name'] ?? r['stage'] ?? '-'); byGroup[g] = (byGroup[g] ?? 0) + 1; }
+      console.log(`  by group/stage field: ${JSON.stringify(byGroup)}`);
+    }
+  }
+
   for (const ev of done.slice(0, 6)) {
     const id = Number(ev.id);
     const inc = await bsdRaw<Record<string, unknown>>(`/api/v2/events/${id}/incidents/`);
