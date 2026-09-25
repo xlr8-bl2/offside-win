@@ -1041,6 +1041,51 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
   ) h;
 $fn$;
 
+-- A competition's own page: the table, the top scorers, its games either side
+-- of today, and how our calls in it have gone. The table and the scorers are
+-- written by the slate once per run per league (kv league:<id>:standings and
+-- :scorers); the fixtures come through get_board, so they are walled exactly
+-- as the board is; the settled record is public, as it is everywhere.
+CREATE OR REPLACE FUNCTION get_league(p_id bigint)
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  WITH t AS (SELECT floor(extract(epoch FROM now()))::bigint AS now)
+  SELECT json_build_object(
+    'league', (SELECT json_build_object('id', l.id, 'name', l.name, 'country', l.country)
+               FROM league l WHERE l.id = p_id),
+    'standings', coalesce((
+      SELECT json_agg(json_build_object(
+               'team_id', (r->>'team_id')::bigint,
+               'team', coalesce(tm.name, r->>'team_name'),
+               'position', (r->>'position')::int, 'played', (r->>'played')::int,
+               'won', (r->>'won')::int, 'drawn', (r->>'drawn')::int, 'lost', (r->>'lost')::int,
+               'goals_for', (r->>'goals_for')::int, 'goals_against', (r->>'goals_against')::int,
+               'goal_diff', (r->>'goal_diff')::int, 'points', (r->>'points')::int)
+             ORDER BY (r->>'position')::int)
+      FROM kv k
+      CROSS JOIN LATERAL jsonb_array_elements(coalesce(try_json(k.v)::jsonb->'rows', '[]'::jsonb)) r
+      LEFT JOIN team tm ON tm.id = (r->>'team_id')::bigint
+      WHERE k.k = 'league:' || p_id || ':standings'
+    ), '[]'::json),
+    'standings_at', (SELECT (try_json(v)->>'updated_at')::bigint FROM kv WHERE k = 'league:' || p_id || ':standings'),
+    'scorers', coalesce((SELECT try_json(v)->'rows' FROM kv WHERE k = 'league:' || p_id || ':scorers'), '[]'::json),
+    'fixtures', coalesce((SELECT get_board(t.now - 3 * 86400, t.now + 10 * 86400, p_id)->'fixtures' FROM t), '[]'::json),
+    'record', (
+      SELECT json_build_object('n', count(*), 'wins', count(*) FILTER (WHERE pk.result IN ('WON', 'HALF_WON')))
+      FROM pick pk JOIN fixture f ON f.id = pk.fixture_id
+      WHERE f.league_id = p_id AND pk.kind = 'CONFIDENT' AND pk.settled_at IS NOT NULL
+        AND pk.result IS DISTINCT FROM 'VOID'),
+    'recent', coalesce((
+      SELECT json_agg(row_to_json(p) ORDER BY p.kickoff DESC) FROM (
+        SELECT pk.fixture_id, f.kickoff, pk.market, pk.outcome, pk.line, pk.odds, pk.bookmaker, pk.result,
+               f.home_team, f.away_team, f.home_goals, f.away_goals, f.home_team_id, f.away_team_id,
+               report_goals(f.report_json) AS goals
+        FROM pick pk JOIN fixture f ON f.id = pk.fixture_id
+        WHERE f.league_id = p_id AND pk.kind = 'CONFIDENT' AND pk.settled_at IS NOT NULL
+        ORDER BY f.kickoff DESC LIMIT 24
+      ) p), '[]'::json)
+  );
+$fn$;
+
 CREATE OR REPLACE FUNCTION get_health()
 RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   WITH s AS (
@@ -1277,6 +1322,7 @@ GRANT EXECUTE ON FUNCTION get_health() TO anon;
 GRANT EXECUTE ON FUNCTION get_slip() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_plans() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION free_fixture_id() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_league(bigint) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint), get_fixture(bigint), get_picks(integer, text),
   get_model(), get_hero(), get_health(), get_account(), has_membership(), try_json(text) TO authenticated;
 

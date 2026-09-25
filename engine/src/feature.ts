@@ -102,20 +102,24 @@ export function scoreCandidate(f: HeroCandidate, now: number): number {
   else if (hoursOut < 0) score -= 400; // already kicked off
 
   score += Math.round((f.confidence ?? 0) * 40);
+  // A game we have a call on edges one we passed on, all else being equal.
+  if (f.called) score += 60;
   return score;
 }
 
 export function chooseHero(fixtures: HeroCandidate[], now = Math.floor(Date.now() / 1000)): HeroPick | null {
   /*
-   * A called fixture, or nothing.
+   * The biggest game, whether or not we called it.
    *
-   * The masthead says "Our call on it, the argument for it", and it was
-   * choosing on prominence alone -- so the front page led with Rivers United v
-   * Kun Khalifat, a match we had passed on, under a sentence promising a call.
-   * A candidate without `called` set is treated as called, so older callers
-   * and tests keep their behaviour; the slate always sets it.
+   * For a while the masthead required a call, because it promised one ("Our
+   * call on it, the argument for it") and had led with a match we passed on.
+   * That promise has moved: the free call is chosen separately (free.ts) and
+   * the masthead is the occasion, so on a night when Netherlands v Germany
+   * is a pass and Liechtenstein v Lithuania is called, the front page still
+   * leads with Netherlands v Germany. A call is a bonus in the score, not a
+   * gate.
    */
-  const live = fixtures.filter((f) => f.kickoff > now - 2 * 3600 && f.called !== false);
+  const live = fixtures.filter((f) => f.kickoff > now - 2 * 3600);
   if (live.length === 0) return null;
 
   const best = live.reduce((a, b) => (scoreCandidate(b, now) > scoreCandidate(a, now) ? b : a));

@@ -52,6 +52,13 @@ export interface StandingRow {
   played: number;
   points: number;
   goal_diff: number;
+  /** The rest of a table row, where the feed carries it; the league page draws it. */
+  team_name?: string | null;
+  won?: number | null;
+  drawn?: number | null;
+  lost?: number | null;
+  goals_for?: number | null;
+  goals_against?: number | null;
 }
 
 export interface ManagerTenure {
@@ -80,6 +87,9 @@ export interface ScorerRow {
   name: string;
   goals: number;
   assists: number;
+  /** Whose player, where the feed says; the league page groups by it. */
+  team_id?: number | null;
+  team_name?: string | null;
 }
 
 export interface SideContext {

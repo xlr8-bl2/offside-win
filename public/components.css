@@ -3376,3 +3376,48 @@
 .squad-row .unused { font-size: var(--text-2xs); color: var(--chalk-3); }
 .squad-row.bench .name { color: var(--chalk-2); }
 .squad-row .name small { color: var(--chalk-3); font-size: var(--text-2xs); }
+
+/* =============================================================== league page */
+
+.league-title { display: flex; align-items: center; gap: var(--space-5); }
+.league-title .crest { flex: none; width: 48px; height: 48px; }
+.league-title h1 { margin: 0; }
+.league-head a { color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: var(--space-2); }
+.league-head a:hover { color: var(--floodlight-hi); }
+.league-link { color: inherit; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+.league-link:hover { text-decoration-color: var(--floodlight-hi); }
+
+.tbl.standings td.team { display: flex; align-items: center; gap: var(--space-3); white-space: nowrap; }
+.tbl.standings td.team span { overflow: hidden; text-overflow: ellipsis; }
+.tbl.standings th.num, .tbl.standings td.num { font-variant-numeric: tabular-nums; }
+
+.scorer-list { list-style: none; margin: 0; padding: 0; counter-reset: scorer; }
+.scorer-list li {
+  display: grid;
+  grid-template-columns: 24px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: var(--border) solid var(--hairline);
+  counter-increment: scorer;
+}
+.scorer-list li::before {
+  content: counter(scorer);
+  font-family: var(--display);
+  font-variation-settings: 'wdth' var(--condensed);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  color: var(--chalk-3);
+}
+.scorer-list li:last-child { border-bottom: 0; }
+.scorer-name { display: flex; flex-direction: column; min-width: 0; }
+.scorer-name small { font-size: var(--text-2xs); color: var(--chalk-3); }
+.scorer-list b {
+  font-family: var(--display);
+  font-variation-settings: 'wdth' var(--condensed);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xl);
+  line-height: 1;
+  color: var(--chalk);
+}
+.scorer-list li > small { grid-column: 4; justify-self: end; font-size: var(--text-2xs); color: var(--chalk-3); }

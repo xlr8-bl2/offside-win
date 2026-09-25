@@ -890,7 +890,7 @@ function leaguesTodayHTML(fixtures) {
     <p class="panel-head">Where the calls are</p>
     <div class="league-chips">
       ${rows.map(([name, v]) => `
-        <a class="league-chip" href="#/board?league=${encodeURIComponent(name)}">
+        <a class="league-chip" href="${v.id ? `#/league/${encodeURIComponent(v.id)}` : `#/board?league=${encodeURIComponent(name)}`}">
           ${crest(name, 'xs', v.id, 'league')}<span>${esc(name)}</span><b>${v.n}</b>
         </a>`).join('')}
     </div>
@@ -1161,7 +1161,7 @@ function rowHTML(f) {
         ${trackHTML(track)}<span class="odds-book">at ${oddsOf(p.odds)}</span>`
         : pick && p ? `
         <span class="odds-tile${p.local ? '' : ' away'}"><span class="odds">${dec(p.odds)}</span><span class="odds-unit">odds</span></span>
-        <span class="odds-book">${pick.lean ? 'lean · ' : ''}${p.local ? esc(p.book) : `no ${esc(country())} book`}</span>`
+        <span class="odds-book">${pick.lean ? 'lean, ' : ''}${esc(p.book)}</span>`
         : f.locked ? `<span class="row-locked-mark">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>
                         Members</span>`
@@ -1676,7 +1676,8 @@ async function viewBoard(params = new URLSearchParams()) {
         ? groupsSorted.map(([name, g]) => `
             <section class="league-block">
               <h3 class="league-head">
-                ${crest(name, 'xs', g.id, 'league')}${esc(name)}
+                ${g.id ? `<a href="#/league/${encodeURIComponent(g.id)}">${crest(name, 'xs', g.id, 'league')}${esc(name)}</a>`
+                       : `${crest(name, 'xs', g.id, 'league')}${esc(name)}`}
                 <span class="count">${g.list.length}</span>
               </h3>
               ${g.list.map(rowHTML).join('')}
@@ -1893,8 +1894,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
         ? `<span>We put it up at ${oddsOf(c.odds)}${c.bookmaker ? ` with ${esc(bookName(c.bookmaker))}` : ''}.</span>`
         : `${p ? (p.local
             ? `<span>Best price at <b>${esc(p.book)}</b> in ${esc(COUNTRY_NAMES[country()] ?? 'your country')}</span>`
-            : `<span class="warnish">No book in ${esc(COUNTRY_NAMES[country()] ?? 'your country')} is quoting this. ` +
-              `The ${oddsOf(p.odds)} above are ${esc(p.book)}'s.</span>`) : ''}
+            : `<span>Quoted at ${oddsOf(p.odds)} with <b>${esc(p.book)}</b>. The books where you are may price it differently.</span>`) : ''}
            <span>${esc(d.returns)}</span>`}
     </div>
     ${!played && p && p.local && p.count > 1 ? `
@@ -2822,7 +2822,9 @@ async function viewFixture(id, params = new URLSearchParams()) {
             ${shown ? `<span class="gf${shown[1] > shown[0] ? ' win' : ''}">${esc(shown[1])}</span>` : formChips(f.form?.away)}
           </span>
         </h1>
-        <p class="hero-blurb">${esc([f.league, ...meta.slice(1)].filter(Boolean).join(', '))}</p>
+        <p class="hero-blurb">${f.league && f.league_id
+          ? `<a class="league-link" href="#/league/${encodeURIComponent(f.league_id)}">${esc(f.league)}</a>${meta.slice(1).length ? `, ${esc(meta.slice(1).join(', '))}` : ''}`
+          : esc([f.league, ...meta.slice(1)].filter(Boolean).join(', '))}</p>
       </div>
     </div>
   </section>
@@ -3462,7 +3464,7 @@ async function viewLeagues() {
   const totalCalls = all.reduce((t, e) => t + e.picks, 0);
 
   const row = (e) => `
-    <a class="lg" href="${esc(boardHash(state.hours, e.name))}">
+    <a class="lg" href="${e.id ? `#/league/${encodeURIComponent(e.id)}` : esc(boardHash(state.hours, e.name))}">
       ${crest(e.name, 'sm', e.id, 'league')}
       <span class="lg-name">${esc(e.name)}</span>
       ${e.live ? `<span class="lg-live"><i></i>${e.live}</span>` : ''}
@@ -3491,6 +3493,155 @@ async function viewLeagues() {
 }
 
 
+
+// ----------------------------------------------------------------- league
+
+/**
+ * A competition's own page.
+ *
+ * The table, the games either side of today with our calls on them, the top
+ * scorers, and how our calls in this competition have gone. Every league name
+ * on the site links here, so a reader who meets "Categoría Primera A" on a
+ * fixture page can find out what it is without leaving. The tabs work as they
+ * do on a fixture page: the open one is in the address.
+ */
+async function viewLeague(id, params = new URLSearchParams()) {
+  app.innerHTML = `<div class="wrap section dense">
+    <div class="rows">${'<div class="skeleton skeleton-row"></div>'.repeat(6)}</div>
+  </div>`;
+  let d;
+  try { d = await getJSON(`/api/league/${encodeURIComponent(id)}`); } catch (err) { return errorState(err); }
+  const lg = d?.league;
+  if (!lg?.id) return notFound('league');
+
+  const fixtures = Array.isArray(d.fixtures) ? d.fixtures : [];
+  // Same rule as loadBoard: on a played match the record decides the call.
+  for (const f of fixtures) {
+    if (!Array.isArray(f.score)) continue;
+    f.locked = false;
+    f.top_pick = f.called ? { ...f.called, prices: [{ slug: '', book: f.called.bookmaker, odds: f.called.odds }] } : null;
+  }
+  const rank = (f) => { const k = matchState(f).kind; return k === 'live' ? 0 : k === 'upcoming' ? 1 : 2; };
+  const ahead = fixtures.filter((f) => rank(f) < 2).sort((a, b) => rank(a) - rank(b) || a.kickoff - b.kickoff);
+  const played = fixtures.filter((f) => rank(f) === 2).sort((a, b) => b.kickoff - a.kickoff);
+  const calls = ahead.filter(hasCall).length;
+  const live = ahead.filter((f) => matchState(f).kind === 'live').length;
+
+  // Games, grouped by day, in board rows.
+  const byDay = new Map();
+  for (const f of ahead) {
+    const k = dayLabel(f.kickoff);
+    if (!byDay.has(k)) byDay.set(k, []);
+    byDay.get(k).push(f);
+  }
+  const gamesHTML = ahead.length ? [...byDay.entries()].map(([day, list]) => `
+    <section class="league-block">
+      <h3 class="league-head">${esc(day)} <span class="count">${list.length}</span></h3>
+      ${list.map(rowHTML).join('')}
+    </section>`).join('') : '';
+
+  const resultsHTML = played.length ? `
+    <section class="league-block">
+      <h3 class="league-head">Played <span class="count">${played.length}</span></h3>
+      ${played.map(rowHTML).join('')}
+    </section>` : '';
+
+  // The table. Columns the feed did not fill are left out rather than shown
+  // as noughts.
+  const rows = Array.isArray(d.standings) ? d.standings : [];
+  const has = (k) => rows.some((r) => r[k] != null);
+  const cols = [
+    ['played', 'P', true], ['won', 'W', has('won')], ['drawn', 'D', has('drawn')], ['lost', 'L', has('lost')],
+    ['goals_for', 'F', has('goals_for')], ['goals_against', 'A', has('goals_against')],
+    ['goal_diff', 'GD', true], ['points', 'Pts', true],
+  ].filter(([, , on]) => on);
+  const cell = (r, k) => k === 'goal_diff'
+    ? `${r.goal_diff > 0 ? '+' : ''}${r.goal_diff ?? ''}`
+    : k === 'points' ? `<b>${r.points ?? ''}</b>` : String(r[k] ?? '');
+  const tableHTML = rows.length ? `
+    <div class="panel">
+      <p class="panel-head">The table${d.standings_at ? ` <span>as of ${esc(kickoffLabel(d.standings_at))}</span>` : ''}</p>
+      <div class="scroll-x"><table class="tbl standings">
+        <thead><tr><th>#</th><th>Team</th>${cols.map(([, h]) => `<th class="num">${h}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map((r) => `
+          <tr>
+            <td class="num">${esc(r.position ?? '')}</td>
+            <td class="team">${crest(r.team ?? '', 'sm', r.team_id)}<span>${esc(r.team ?? `Team ${r.team_id}`)}</span></td>
+            ${cols.map(([k]) => `<td class="num">${cell(r, k)}</td>`).join('')}
+          </tr>`).join('')}</tbody>
+      </table></div>
+    </div>` : '';
+
+  const scorers = Array.isArray(d.scorers) ? d.scorers.slice(0, 15) : [];
+  const scorersHTML = scorers.length ? `
+    <div class="panel">
+      <p class="panel-head">Top scorers</p>
+      <ol class="scorer-list">${scorers.map((s) => `
+        <li>
+          ${crest(s.name, 'sm', s.player_id, 'player')}
+          <span class="scorer-name">${esc(s.name)}${s.team_name ? `<small>${esc(s.team_name)}</small>` : ''}</span>
+          <b>${esc(s.goals)}</b>${s.assists ? `<small>${esc(s.assists)} assist${s.assists === 1 ? '' : 's'}</small>` : ''}
+        </li>`).join('')}</ol>
+    </div>` : '';
+
+  const rec = d.record ?? {};
+  const recent = Array.isArray(d.recent) ? d.recent : [];
+  const recordHTML = rec.n ? `
+    <div>
+      <div class="section-head"><div><h2 class="display">Our calls here</h2></div></div>
+      ${formBarHTML(rec.wins, 0, rec.n - rec.wins, ['landed', 'void', 'missed'], `${rec.n} settled call${rec.n === 1 ? '' : 's'} in this competition.`)}
+      ${playedHTML(recent.slice(0, 12))}
+    </div>` : '';
+
+  const TABS = [
+    ['games', 'Games', gamesHTML],
+    ['table', 'Table', tableHTML],
+    ['results', 'Results', resultsHTML],
+    ['scorers', 'Top scorers', scorersHTML],
+    ['calls', 'Our calls', recordHTML],
+  ].filter(([, , html]) => html);
+  const asked = params.get('tab');
+  const open = TABS.some(([k]) => k === asked) ? asked : TABS[0]?.[0];
+
+  const sub = [
+    lg.country,
+    ahead.length ? `${ahead.length} game${ahead.length === 1 ? '' : 's'} coming up` : null,
+    calls ? `${calls} call${calls === 1 ? '' : 's'}` : null,
+    live ? `${live} on now` : null,
+  ].filter(Boolean).join('. ');
+
+  app.innerHTML = `
+  <div class="wrap section dense">
+    <div class="page-head league-title">
+      ${crest(lg.name, 'md', lg.id, 'league')}
+      <div>
+        <h1 class="display xl">${esc(lg.name)}</h1>
+        ${sub ? `<p class="page-sub">${esc(sub)}.</p>` : ''}
+      </div>
+    </div>
+    ${TABS.length ? `
+    <div class="tabs" role="tablist">
+      ${TABS.map(([k, label]) => `<button class="tab${k === open ? ' on' : ''}" data-tab="${k}" role="tab" aria-selected="${k === open}">${esc(label)}</button>`).join('')}
+    </div>
+    ${TABS.map(([k, , html]) => `<div class="tabpane" data-pane="${k}"${k === open ? '' : ' hidden'}>${html}</div>`).join('')}`
+    : `<div class="empty-state"><b>Nothing on record here yet</b>
+         <span>The table and the games fill in once the board has covered this competition.</span>
+         <a class="btn btn-primary" href="#/leagues">Every competition</a></div>`}
+  </div>`;
+
+  for (const t of app.querySelectorAll('.tab')) {
+    t.onclick = () => {
+      for (const o of app.querySelectorAll('.tab')) {
+        const on = o === t;
+        o.classList.toggle('on', on);
+        o.setAttribute('aria-selected', String(on));
+      }
+      for (const pane of app.querySelectorAll('.tabpane')) pane.hidden = pane.dataset.pane !== t.dataset.tab;
+      const q = t.dataset.tab === TABS[0][0] ? '' : `?tab=${encodeURIComponent(t.dataset.tab)}`;
+      history.replaceState(null, '', `${location.pathname}#/league/${encodeURIComponent(id)}${q}`);
+    };
+  }
+}
 
 // ------------------------------------------------- membership: the pages
 
@@ -4322,6 +4473,7 @@ async function route() {
   window.scrollTo(0, 0);
   try {
     if (name === 'fixture' && parts[1]) return await viewFixture(parts[1], params);
+    if (name === 'league' && parts[1]) return await viewLeague(parts[1], params);
     if (name === 'board') return await viewBoard(params);
     if (name === 'leagues') return await viewLeagues();
     if (name === 'results') return await viewResults();
