@@ -549,9 +549,10 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   .top-inner { grid-template-columns: auto minmax(0, 1fr); }
   .top-right { min-width: 0; justify-content: flex-end; }
 }
-@media (max-width: 680px) { .tally { display: none; } }
+/* Scoped under .top-right so it outranks .tally further down this file. */
+@media (max-width: 680px) { .top-right .tally { display: none; } }
 @media (max-width: 440px) {
-  .plan-tag { display: none; }
+  .top-right .plan-tag { display: none; }
   .wordmark { font-size: 1.375rem; }
   .top-right { gap: var(--space-3); }
 }
