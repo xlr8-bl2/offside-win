@@ -23,6 +23,7 @@
 
 import { bearer, jsonHeaders } from './http.ts';
 import { checkout, renewal, webhook, type PayEnv } from './pay.ts';
+import { deleteAccount } from './account.ts';
 
 interface Env extends PayEnv {
   SUPABASE_URL: string;
@@ -116,6 +117,10 @@ export default {
 
     try {
       if (path === '/api/config') return config(env);
+
+      // Deleting an account: the reader's token names the account, GoTrue
+      // vouches for it, and the service key does the removing. account.ts.
+      if (path === '/api/account/delete') return await deleteAccount(request, env, jwt);
 
       // The write side. Kept together and kept POST-only: a payment route that
       // answers a GET is a payment route that can be triggered by a link.

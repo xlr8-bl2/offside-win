@@ -146,3 +146,41 @@ test('a missing database configuration says so rather than throwing', async () =
   );
   assert.equal(res.status, 503);
 });
+
+/* ------------------------------------------------------ deleting an account */
+
+const post = (path: string, headers: Record<string, string> = {}, env = ENV) =>
+  worker.fetch(new Request('https://offside.win' + path, { method: 'POST', headers }), env);
+const WITH_SERVICE = { ...ENV, SUPABASE_SERVICE_KEY: 'service-key' };
+const USER = '3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
+
+test('deleting an account needs a token', async () => {
+  const res = await post('/api/account/delete', {}, WITH_SERVICE);
+  assert.equal(res.status, 401);
+  assert.equal(calls.length, 0);
+});
+
+test('deleting an account asks GoTrue who the token is, then removes that id and nothing else', async () => {
+  respond = (n) => (n === 1 ? new Response(JSON.stringify({ id: USER }), { status: 200 }) : new Response('', { status: 200 }));
+  const res = await post('/api/account/delete', { authorization: 'Bearer reader.jwt' }, WITH_SERVICE);
+  assert.equal(res.status, 204);
+  assert.equal(calls.length, 3);
+  assert.match(calls[0]!.url, /\/auth\/v1\/user$/);
+  assert.equal(calls[0]!.headers['authorization'], 'Bearer reader.jwt', 'the reader token is only used to ask who they are');
+  assert.match(calls[1]!.url, /\/rest\/v1\/rpc\/delete_account_data$/);
+  assert.equal(calls[1]!.headers['authorization'], 'Bearer service-key');
+  assert.match(calls[2]!.url, new RegExp(`/auth/v1/admin/users/${USER}$`));
+});
+
+test('a token GoTrue rejects deletes nothing', async () => {
+  respond = () => new Response('{"msg":"bad jwt"}', { status: 401 });
+  const res = await post('/api/account/delete', { authorization: 'Bearer forged' }, WITH_SERVICE);
+  assert.equal(res.status, 401);
+  assert.equal(calls.length, 1, 'no delete call after a failed identity check');
+});
+
+test('without the service key the route says so instead of half-deleting', async () => {
+  const res = await post('/api/account/delete', { authorization: 'Bearer reader.jwt' });
+  assert.equal(res.status, 503);
+  assert.equal(calls.length, 0);
+});
