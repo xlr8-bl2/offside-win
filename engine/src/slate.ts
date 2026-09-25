@@ -7,6 +7,7 @@ import { RepetitionLedger, narrate, narrateConfident, narratePass } from './narr
 import { chooseHero, type HeroCandidate } from './feature.ts';
 import { chooseFreeCall } from './free.ts';
 import { writeMissingReports } from './report.ts';
+import { fillCrestColors } from './images/crest.ts';
 import { pubFacts } from './narrate/facts.ts';
 import { geminiWriter } from './narrate/gemini.ts';
 import { write, type Writer } from './narrate/write.ts';
@@ -945,6 +946,16 @@ export async function runSlate(): Promise<SlateReport> {
   const free = await chooseFreeCall(now);
   if (free) console.log(`  free call: fixture ${free.fixture_id}, kicks off ${new Date(free.kickoff * 1000).toISOString()}`);
   else console.log('  free call: none open');
+
+  // The clubs' colours for the match page, from their crests. Once per team,
+  // and never allowed to fail the slate: a masthead without them falls back
+  // to its own wash.
+  try {
+    const colored = await fillCrestColors({ limit: 40 });
+    if (colored) console.log(`  read ${colored} crest colour${colored === 1 ? '' : 's'}`);
+  } catch (err) {
+    console.log(`  crest colours skipped: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   await kvSetJSON('narrate:ledger', ledger.snapshot());
   await kvSetJSON('slate:last_run', { at: now, ...report });

@@ -51,6 +51,10 @@
    * meant to read as sodium and concrete just desaturated everything on top of
    * it. The differentiation is the violet, which is doing that job on its own.
    */
+  /* The two clubs' colours on a match page. Set inline per fixture from
+     get_fixture's `colors`; transparent anywhere else. */
+  --home-c: transparent;
+  --away-c: transparent;
   --pitch:     #0a0a0c;
   --stand:     #16171b;
   --terrace:   #202329;

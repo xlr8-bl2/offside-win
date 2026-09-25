@@ -707,10 +707,17 @@ function heroHTML(hero = null, venueIds = [], detail = null, free = null) {
   }
 
   const when = kickoffLabel(hero.kickoff);
-  // The occasion is the pundit's aside — "the Madrid derby", "Champions League
-  // night" — so it goes in the handwriting above the tie, not buried in a
-  // sentence under it. The league stays in the blurb, where it is a fact.
-  const aside = unshout(hero.kicker) || hero.league || '';
+  // The competition sits above the tie as a link to its page, in the same
+  // face as everything else: a handwritten league name read as a
+  // decoration rather than a fact, and could not be tapped. An occasion
+  // ("the Madrid derby") follows it when there is one worth saying.
+  const occasion = unshout(hero.kicker);
+  const compHTML = hero.league || occasion ? `
+        <p class="comp-line">${hero.league_id && hero.league
+          ? `<a class="comp-link" href="#/league/${encodeURIComponent(hero.league_id)}">${crest(hero.league, 'xs', hero.league_id, 'league')}<span>${esc(hero.league)}</span></a>`
+          : hero.league ? `<span class="comp-link">${esc(hero.league)}</span>` : ''}${
+          occasion && occasion.toLowerCase() !== String(hero.league ?? '').toLowerCase()
+            ? `<span class="comp-occasion">${esc(occasion)}</span>` : ''}</p>` : '';
 
   return `
   <section class="hero" data-shot="${queue.length ? 'yes' : 'none'}">
@@ -718,7 +725,7 @@ function heroHTML(hero = null, venueIds = [], detail = null, free = null) {
     <div class="wrap hero-inner">
       <div class="hero-copy">
         <span class="timechip${isSoon(hero.kickoff) ? ' soon' : ''}">${esc(when)}</span>
-        ${aside ? `<p class="kicker">${esc(aside)}</p>` : ''}
+        ${compHTML}
         <!-- The tie is the page's heading. Without this the home page had no
              h1 at all whenever a hero fixture was set, which is the one case
              it always is. -->
@@ -774,28 +781,36 @@ function nextRailHTML(fixtures) {
     ? (ahead.every((f) => matchState(f).kind === 'live') ? 'On right now' : 'Next up')
     : 'Just finished';
   if (!soon.length) return '';
-  const clock = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
+  // A fixture list, the way every football page prints one: home, the
+  // kick-off between, away. One match to a line, read top to bottom.
   return `
   <div class="wrap section dense">
     <div class="section-head"><div><h2 class="display">${esc(heading)}</h2></div>
       <a class="btn btn-ghost btn-sm" href="#/board${heading === 'Just finished' ? '?when=played' : ''}">The full board</a></div>
-    <div class="next-rail">
+    <ol class="next-list">
       ${soon.map((f) => {
         const k = new Date(f.kickoff * 1000);
         const time = k.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
         const st = matchState(f);
-        const mark = (f.top_pick || f.locked) ? '<span class="pill call">call</span>' : '';
+        const score = st.kind === 'live'
+          ? (Array.isArray(f.live_score) && f.live_score.length === 2 ? f.live_score : null)
+          : (Array.isArray(f.score) && f.score.length === 2 ? f.score : null);
+        const middle = st.kind === 'upcoming'
+          ? `<b class="next-time">${esc(time)}</b><small>${esc(dayLabel(f.kickoff))}</small>`
+          : `<b class="next-time">${score ? `${esc(score[0])}–${esc(score[1])}` : esc(time)}</b><small>${liveBadge(st)}</small>`;
+        // Whether we made a pick, as a word under the kick-off: "Pick" in the
+        // accent, with a lock where it is for members.
+        const lock = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>';
+        const mark = f.top_pick ? '<small class="next-pick">Pick</small>'
+          : f.locked ? `<small class="next-pick" title="A pick for members">${lock}Pick</small>` : '';
         return `
-        <a class="nextcard" href="#/fixture/${encodeURIComponent(f.id)}">
-          <span class="nextcard-side">${crest(f.home, 'sm', f.home_id)}<span>${esc(f.home)}</span>${mark}</span>
-          <span class="nextcard-side">${crest(f.away, 'sm', f.away_id)}<span>${esc(f.away)}</span></span>
-          <span class="nextcard-foot">
-            <span>${st.kind === 'upcoming' ? esc(dayLabel(f.kickoff)) : liveBadge(st)}</span>
-            <time>${clock}${esc(time)}</time>
-          </span>
-        </a>`;
+        <li><a class="next-row" href="#/fixture/${encodeURIComponent(f.id)}">
+          <span class="next-side home"><span class="next-name">${esc(f.home)}</span>${crest(f.home, 'sm', f.home_id)}</span>
+          <span class="next-mid">${middle}${mark}</span>
+          <span class="next-side away">${crest(f.away, 'sm', f.away_id)}<span class="next-name">${esc(f.away)}</span></span>
+        </a></li>`;
       }).join('')}
-    </div>
+    </ol>
   </div>`;
 }
 
@@ -1527,17 +1542,22 @@ function todayTally(fixtures, recent) {
  */
 function todayStripHTML(fixtures, recent) {
   const t = todayTally(fixtures, recent);
-  const cell = (n, label, cls = '', href = '#/board') =>
-    `<a class="stat${cls ? ` ${cls}` : ''}" href="${href}"><b>${esc(n)}</b><span>${esc(label)}</span></a>`;
-  const cells = [];
-  if (t.calls) cells.push(cell(t.calls, t.calls === 1 ? 'call today' : 'calls today'));
-  if (t.live) cells.push(cell(t.live, t.onTrack ? `on now, ${t.onTrack} on track` : 'on now', 'live', '#/board?when=live'));
-  if (t.landed) cells.push(cell(t.landed, 'landed today', 'won', '#/board?when=played'));
-  if (t.missed) cells.push(cell(t.missed, 'missed today', '', '#/board?when=played'));
-  if (t.run >= 2) cells.push(cell(t.run, 'landed in a row', 'run', '#/results'));
-  else if (t.recentN) cells.push(cell(t.recentWon, `of the last ${t.recentN} landed`, 'won', '#/results'));
-  if (!cells.length) return '';
-  return `<div class="wrap"><section class="today-strip" aria-label="Today so far">${cells.join('')}</section></div>`;
+  if (!t.calls && !t.live && !t.landed && !t.missed && !t.recentN) return '';
+  const fig = (n, cls = '') => `<b class="fig${cls ? ` ${cls}` : ''}">${esc(n)}</b>`;
+  const link = (href, html) => `<a href="${href}">${html}</a>`;
+  const sentences = [];
+  const since = [];
+  if (t.landed) since.push(link('#/board?when=played', `${fig(t.landed, 'won')} landed`));
+  if (t.missed) since.push(link('#/board?when=played', `${fig(t.missed, 'lost')} missed`));
+  if (t.live) since.push(link('#/board?when=live', `${fig(t.live, 'now')} ${t.live === 1 ? 'is' : 'are'} being played${t.onTrack ? `, ${t.onTrack} on track` : ''}`));
+  if (t.calls) {
+    sentences.push(`${link('#/board', `${fig(t.calls)} ${t.calls === 1 ? 'call' : 'calls'} today`)}${since.length ? `: ${andList(since)}.` : '.'}`);
+  } else if (since.length) {
+    sentences.push(`Today, ${andList(since)}.`);
+  }
+  if (t.run >= 2) sentences.push(link('#/results', `The last ${fig(t.run, 'run')} in a row landed.`));
+  else if (t.recentN) sentences.push(link('#/results', `${fig(t.recentWon, 'won')} of the last ${t.recentN} landed.`));
+  return `<div class="wrap"><p class="figure-line" aria-label="Today so far">${sentences.join(' ')}</p></div>`;
 }
 
 /** The header's version of the same count: landed and missed today. */
@@ -3055,9 +3075,19 @@ async function viewFixture(id, params = new URLSearchParams()) {
   const asked = params.get('tab');
   const open = TABS.some(([k]) => k === asked) ? asked : TABS[0]?.[0];
 
+  // The two clubs' colours, read off their crests by the slate. Checked as
+  // hex before they go anywhere near a style attribute.
+  const hexOk = (c) => (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c : null);
+  const homeC = hexOk(f.colors?.home);
+  const awayC = hexOk(f.colors?.away);
+  const wash = homeC || awayC
+    ? ` has-colors" style="--home-c:${homeC ?? 'transparent'};--away-c:${awayC ?? 'transparent'}`
+    : '';
+
   app.innerHTML = `
-  <section class="hero fx-top" data-shot="${f.venue_id ? 'yes' : 'none'}">
+  <section class="hero fx-top${wash}" data-shot="${f.venue_id ? 'yes' : 'none'}">
     <div class="hero-media">${venueShot(f.venue_id, '', true)}</div>
+    ${wash ? '<div class="fx-wash" aria-hidden="true"></div>' : ''}
     <div class="wrap hero-inner">
       ${backHTML('Back to the board')}
       <div class="hero-copy">
@@ -3245,14 +3275,12 @@ async function viewResults() {
    * title reading as a caption to it. The hierarchy was upside down and the
    * biggest element was the one that reflowed worst.
    *
-   * The numbers are a strip instead. Four figures, each with what it is, which
-   * is how anybody reads a record and is legible at any width because it is a
-   * grid rather than a sentence. The sentence stays, at sentence size, because
-   * it says the thing the numbers cannot: that winning most of them is not the
-   * same as making money.
+   * The numbers are one sentence with the figures set large. They were a
+   * grid of boxed cells for a while, which readers found harder to follow
+   * than the sentence it replaced; a record is read as a line, "208 landed
+   * and 49 missed", not as a table.
    */
-  const stat = (v, label, tone = '') =>
-    `<div class="stat${tone ? ` ${tone}` : ''}"><b>${esc(v)}</b><span>${esc(label)}</span></div>`;
+  const stat = (v, tone = '') => `<b class="fig${tone ? ` ${tone}` : ''}">${esc(v)}</b>`;
 
   app.innerHTML = `
   <div class="wrap section">
@@ -3274,12 +3302,8 @@ async function viewResults() {
         has always treated them, and the two disagreeing was the third time
         this page has contradicted itself about the same thing.
       -->
-      <div class="record-strip">
-        ${stat(wins, 'landed', 'won')}
-        ${stat(`${rate}%`, 'of those graded')}
-        ${stat(Math.max(0, n - wins - refunds), 'missed', 'lost')}
-        ${stat(refunds, 'stake back')}
-      </div>
+      <p class="figure-line record-line">${stat(wins, 'won')} landed and ${stat(Math.max(0, n - wins - refunds), 'lost')} missed${
+        refunds ? `, with ${stat(refunds)} ${refunds === 1 ? 'stake' : 'stakes'} back` : ''}. That is ${stat(`${rate}%`)} of those graded.</p>
       ${formStringHTML(settled)}
       ${formBarHTML(won, voided, lost, ['won', 'stake back', 'lost'],
         `The ${settled.length + voided} most recent, in order. The figures above cover all ${n}.`)}
@@ -3962,17 +3986,17 @@ async function viewPlayer(id, params = new URLSearchParams()) {
   const goalsSeen = matches.reduce((t, m) => t + (Number(m.goals) || 0), 0);
   const assistsSeen = matches.reduce((t, m) => t + (Number(m.assists) || 0), 0);
 
-  // The figures, as the today strip draws them: each one a count a fan says.
-  const cells = [];
-  const cell = (n, label, cls = '', href = '') => `${href ? `<a class="stat${cls ? ` ${cls}` : ''}" href="${href}">` : `<div class="stat${cls ? ` ${cls}` : ''}">`}<b>${esc(n)}</b><span>${esc(label)}</span>${href ? '</a>' : '</div>'}`;
-  if (comp) {
-    cells.push(cell(comp.goals ?? 0, `goals in the ${comp.league ?? 'competition'}`, 'won', `#/league/${encodeURIComponent(comp.league_id)}?tab=scorers`));
-    cells.push(cell(ordinal(comp.rank), 'in its scoring chart', 'run', `#/league/${encodeURIComponent(comp.league_id)}?tab=scorers`));
-    if (comp.assists) cells.push(cell(comp.assists, comp.assists === 1 ? 'assist' : 'assists'));
+  // The figures, as a sentence rather than a grid of boxes. The goals and the
+  // chart place are already in the line under the name; this says the rest.
+  const fig = (n, cls = '') => `<b class="fig${cls ? ` ${cls}` : ''}">${esc(n)}</b>`;
+  const facts = [];
+  if (comp?.assists) facts.push(`${fig(comp.assists)} ${comp.assists === 1 ? 'assist' : 'assists'} in the ${esc(comp.league ?? 'competition')}.`);
+  if (matches.length) {
+    facts.push(`Seen in ${fig(matches.length)} ${matches.length === 1 ? 'match' : 'matches'} we covered${
+      avg !== null ? `, with an average rating of ${fig(avg.toFixed(1), avg >= 7 ? 'won' : '')}` : ''}${
+      !comp && (goalsSeen || assistsSeen) ? ` and ${fig(goalsSeen, 'won')} ${goalsSeen === 1 ? 'goal' : 'goals'} in those` : ''}.`);
   }
-  if (matches.length) cells.push(cell(matches.length, matches.length === 1 ? 'match we covered' : 'matches we covered'));
-  if (avg !== null) cells.push(cell(avg.toFixed(1), 'average rating', avg >= 7 ? 'won' : ''));
-  if (!comp && (goalsSeen || assistsSeen)) cells.push(cell(goalsSeen, goalsSeen === 1 ? 'goal in those' : 'goals in those', 'won'));
+  const cells = facts;
 
   // The competition's chart, with this player in it.
   const chart = Array.isArray(d?.lead_scorers) ? d.lead_scorers.slice(0, 10) : [];
@@ -4048,7 +4072,7 @@ async function viewPlayer(id, params = new URLSearchParams()) {
         ${meta.length ? `<p class="page-sub">${d?.team?.id ? `${crest(d.team.name ?? '', 'xs', d.team.id)} ` : ''}${esc(meta.join(', '))}</p>` : ''}
       </div>
     </div>
-    ${cells.length ? `<section class="today-strip player-strip" aria-label="${esc(name)} in figures">${cells.join('')}</section>` : ''}
+    ${cells.length ? `<p class="figure-line player-facts">${cells.join(' ')}</p>` : ''}
     ${empty ? `<div class="empty-state"><b>Not much on ${esc(name)} yet</b>
         <span>We build this page from the scoring charts and the match reports we hold. Once
         ${esc(name)} scores in a competition we cover, or plays in a match we report on, it fills in.</span>

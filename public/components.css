@@ -264,7 +264,30 @@
   .hero-inner { grid-template-columns: minmax(0, 1fr); }
 }
 .hero-copy { max-width: 46ch; }
-.hero .kicker { text-shadow: 0 1px 12px rgba(10, 10, 12, 0.9); }
+/*
+ * The competition above the headline tie: a link, in the UI face. The crest
+ * says which competition before the name is read; the occasion follows in
+ * a quieter colour when there is one.
+ */
+.comp-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-4);
+  text-shadow: 0 1px 12px rgba(10, 10, 12, 0.9);
+}
+.comp-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--floodlight-hi);
+  text-decoration: none;
+}
+.comp-link:hover span { text-decoration: underline; text-underline-offset: 3px; }
+.comp-occasion { font-size: var(--text-sm); color: var(--chalk-2); }
 
 /* The kick-off, as a chip. First thing the reference states, and the first
    thing anybody wants: is this on tonight. */
@@ -400,74 +423,75 @@
 .matchcentre .formbar-keys { font-size: 10px; gap: var(--space-2); }
 .matchcentre .formbar-keys b { font-size: var(--text-md); }
 
-/* ====================================================== the next-match rail */
+/* ====================================================== the next-match list */
 
 /*
- * What is on after this one. Six compact cards, scrolling sideways.
- *
- * Each is the same two-row shape as the board row reduced to its bones: two
- * clubs with their crests, then a footer with the date and the kick-off. It is
- * the densest useful unit on the page and the reference leans on it hard.
+ * What is on next, as a fixture list: home on the left reading in to the
+ * kick-off, away on the right reading out of it, one match to a line. It
+ * replaced a sideways-scrolling row of cards that readers found confusing --
+ * a list is how every football page prints fixtures, so nobody has to learn
+ * it.
  */
-.next-rail {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(208px, 1fr);
-  gap: var(--space-3);
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding-bottom: var(--space-1);
-}
-.next-rail::-webkit-scrollbar { display: none; }
-
-.nextcard {
-  display: flex;
-  flex-direction: column;
-  padding: var(--space-4);
+.next-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   background: var(--stand);
   border: var(--border) solid var(--hairline);
   border-radius: var(--radius);
-  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
-.nextcard:hover { background: var(--terrace); border-color: var(--rule); }
-.nextcard-side {
+.next-list li + li { border-top: var(--border) solid var(--hairline); }
+.next-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  padding: var(--space-4) var(--space-4);
+  color: inherit;
+  text-decoration: none;
+}
+.next-row:hover { background: var(--terrace); }
+.next-side {
+  flex: 1 1 0;
   min-width: 0;
-  padding-block: var(--space-2);
-  font-size: var(--text-xs);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
 }
-.nextcard-side > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nextcard-side .pill {
-  margin-left: auto;
+.next-side.home { justify-content: flex-end; text-align: right; }
+.next-name { min-width: 0; overflow-wrap: anywhere; line-height: 1.25; }
+.next-side .crest { flex: none; }
+.next-mid {
   flex: none;
-  min-width: 20px;
-  padding: 1px var(--space-2);
-  border-radius: 2px;
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-black);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  text-align: center;
-  color: var(--chalk-3);
-}
-.nextcard-side .pill.call { background: var(--floodlight); color: #fff; }
-.nextcard-foot {
+  width: 72px;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
-  padding-top: var(--space-3);
-  border-top: var(--border) solid var(--hairline);
-  font-size: var(--text-2xs);
-  color: var(--chalk-3);
-  font-variant-numeric: tabular-nums;
+  gap: 2px;
 }
-.nextcard-foot time { display: inline-flex; align-items: center; gap: 4px; }
-.nextcard-foot svg { width: 11px; height: 11px; }
+.next-time {
+  font-family: var(--display);
+  font-variation-settings: 'wdth' var(--condensed);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+.next-mid small { font-size: var(--text-2xs); color: var(--chalk-3); }
+.next-mid .next-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 600;
+  color: var(--floodlight-hi);
+}
+.next-pick svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2.4; }
+@media (max-width: 560px) {
+  .next-row { padding-inline: var(--space-3); gap: var(--space-2); }
+  .next-side { font-size: var(--text-xs); gap: var(--space-2); }
+  .next-mid { width: 58px; }
+}
 
 /* ============================================================== the promo */
 
@@ -1630,7 +1654,23 @@
   .fx-top .hero-inner { grid-template-columns: minmax(0, 1fr) minmax(340px, 520px); }
   .fx-top .hero-copy { max-width: none; }
 }
-.fx-top .back { align-self: flex-start; margin-bottom: auto; }
+.fx-top .back { grid-column: 1 / -1; align-self: flex-start; margin-bottom: auto; }
+/*
+ * The two clubs' colours across the masthead: home from the left, away from
+ * the right, meeting in the dark middle so neither colour sits under the
+ * names. Above the photograph's scrim, at a strength the type still reads on.
+ */
+.fx-wash {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(105deg, color-mix(in srgb, var(--home-c) 55%, transparent) 0%, transparent 52%),
+    linear-gradient(285deg, color-mix(in srgb, var(--away-c) 55%, transparent) 0%, transparent 52%),
+    linear-gradient(to top, var(--pitch) 0%, transparent 60%);
+}
+.fx-top.has-colors[data-shot="none"] .hero-media { background: var(--terrace); }
 .fx-top .fx-line .chips { margin-left: var(--space-2); }
 .fx-top .hero-blurb { margin-bottom: 0; }
 
@@ -2463,42 +2503,6 @@
  * parsing a sentence, and a grid is legible at any width where a two-line
  * display-face sentence is not. Two across on a phone, four on a laptop.
  */
-.record-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
-  gap: var(--border);
-  margin-bottom: var(--space-6);
-  background: var(--rule-firm);
-  border: var(--border) solid var(--rule-firm);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.stat {
-  padding: var(--space-5);
-  background: var(--stand);
-}
-.stat b {
-  display: block;
-  font-family: var(--display);
-  font-variation-settings: 'wdth' var(--condensed);
-  font-variant-numeric: tabular-nums;
-  font-weight: var(--weight-black);
-  font-size: var(--text-3xl);
-  letter-spacing: var(--tracking-2xl);
-  line-height: 1;
-}
-.stat span {
-  display: block;
-  margin-top: var(--space-2);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-medium);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--chalk-3);
-}
-.stat.won b  { color: var(--won); }
-.stat.lost b { color: var(--lost); }
-
 /* ================================================================= pager
  *
  * Numbered, not "load more". A number is somewhere you can go back to; a
@@ -3092,10 +3096,6 @@
 .formline-note { font-size: var(--text-xs); color: var(--chalk-3); }
 .formline-note b { color: var(--won); }
 
-/* The record's numbers, in the scoreboard face. */
-.record-strip .stat b { font-family: var(--display); font-weight: var(--weight-black); font-size: var(--text-board); line-height: 1; letter-spacing: var(--tracking-num); }
-.record-strip .stat.won b { color: var(--won); }
-
 /* ============================================================ live tracker */
 
 /*
@@ -3129,52 +3129,37 @@
 /* The slots the front page redraws in place. Invisible in the layout. */
 [data-live] { display: contents; }
 
-/* ============================================================= today strip */
+/* ============================================================ figure line */
 
 /*
- * Today so far, under the masthead: calls up, on now, landed, missed, the run.
- * Counts in the scoreboard face, each a link to the rows it counts. Same
- * construction as the record strip, one size down, because it is a glance
- * rather than a page.
+ * Figures in a sentence: "11 calls today: 3 landed and 1 is being played."
+ * The numbers are set in the scoreboard face so they are found at a glance,
+ * and the words around them say what they are -- which a grid of boxed cells
+ * with a caption under each number did less clearly.
  */
-.today-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
-  gap: var(--border);
+.figure-line {
   margin: var(--space-6) 0 0;
-  background: var(--rule-firm);
-  border: var(--border) solid var(--rule-firm);
-  border-radius: var(--radius);
-  overflow: hidden;
+  max-width: 62ch;
+  font-size: var(--text-lg);
+  line-height: 1.45;
+  color: var(--chalk-2);
 }
-.today-strip .stat {
-  display: block;
-  padding: var(--space-4) var(--space-5);
-  background: var(--stand);
-  color: inherit;
-  text-decoration: none;
-}
-.today-strip .stat:hover { background: var(--terrace); }
-.today-strip .stat b {
-  display: block;
+.figure-line a { color: inherit; text-decoration: none; }
+.figure-line a:hover { color: var(--chalk); text-decoration: underline; text-underline-offset: 4px; }
+.fig {
   font-family: var(--display);
   font-variation-settings: 'wdth' var(--condensed);
   font-variant-numeric: tabular-nums;
-  font-weight: var(--weight-black);
-  font-size: var(--text-2xl);
-  letter-spacing: var(--tracking-num);
+  font-weight: 600;
+  font-size: 1.5em;
   line-height: 1;
+  color: var(--chalk);
 }
-.today-strip .stat span { display: block; margin-top: var(--space-2); font-size: var(--text-xs); color: var(--chalk-3); }
-.today-strip .stat.won b  { color: var(--won); }
-.today-strip .stat.live b { color: var(--lost); }
-.today-strip .stat.run b  { color: var(--floodlight-hi); }
-/* Two across on a phone, and an odd last cell takes the whole row rather
-   than leaving a grey block beside it. */
-@media (max-width: 560px) {
-  .today-strip { grid-template-columns: repeat(2, 1fr); }
-  .today-strip .stat:last-child:nth-child(odd) { grid-column: span 2; }
-}
+.fig.won  { color: var(--won); }
+.fig.lost, .fig.now { color: var(--lost); }
+.fig.run  { color: var(--floodlight-hi); }
+.record-line { margin: 0 0 var(--space-6); }
+.player-facts { margin: 0 0 var(--space-7); }
 
 /* ============================================================== slip clock */
 
@@ -3481,7 +3466,6 @@ a.pp:hover .pp-name { color: var(--floodlight-hi); }
 .player-face .crest { width: 84px; height: 84px; font-size: 22px; flex: none; }
 .player-head h1 { margin: 0; }
 .player-head .page-sub { display: flex; align-items: center; gap: var(--space-2); }
-.player-strip { margin: 0 0 var(--space-7); }
 .scorer-list li.is-me { background: var(--floodlight-dim); margin: 0 calc(-1 * var(--space-3)); padding-inline: var(--space-3); border-radius: var(--radius-sm); }
 
 .pl-matches { display: flex; flex-direction: column; }
