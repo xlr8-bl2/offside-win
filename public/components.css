@@ -3376,3 +3376,75 @@
 .squad-row .unused { font-size: var(--text-2xs); color: var(--chalk-3); }
 .squad-row.bench .name { color: var(--chalk-2); }
 .squad-row .name small { color: var(--chalk-3); font-size: var(--text-2xs); }
+
+/* =============================================================== league page */
+
+.league-title { display: flex; align-items: center; gap: var(--space-5); }
+.league-title .crest { flex: none; width: 48px; height: 48px; }
+.league-title h1 { margin: 0; }
+.league-head a { color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: var(--space-2); }
+.league-head a:hover { color: var(--floodlight-hi); }
+.league-link { color: inherit; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+.league-link:hover { text-decoration-color: var(--floodlight-hi); }
+
+.tbl.standings td.team { display: flex; align-items: center; gap: var(--space-3); white-space: nowrap; }
+.tbl.standings td.team span { overflow: hidden; text-overflow: ellipsis; }
+.tbl.standings th.num, .tbl.standings td.num { font-variant-numeric: tabular-nums; }
+
+.scorer-list { list-style: none; margin: 0; padding: 0; counter-reset: scorer; }
+.scorer-list li {
+  display: grid;
+  grid-template-columns: 24px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: var(--border) solid var(--hairline);
+  counter-increment: scorer;
+}
+.scorer-list li::before {
+  content: counter(scorer);
+  font-family: var(--display);
+  font-variation-settings: 'wdth' var(--condensed);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  color: var(--chalk-3);
+}
+.scorer-list li:last-child { border-bottom: 0; }
+.scorer-name { display: flex; flex-direction: column; min-width: 0; }
+.scorer-name small { font-size: var(--text-2xs); color: var(--chalk-3); }
+.scorer-list b {
+  font-family: var(--display);
+  font-variation-settings: 'wdth' var(--condensed);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xl);
+  line-height: 1;
+  color: var(--chalk);
+}
+.scorer-list li > small { grid-column: 4; justify-self: end; font-size: var(--text-2xs); color: var(--chalk-3); }
+
+/* The shape of a page before its data: a title bar, a line and rows. */
+.skeleton-title { height: 44px; width: min(420px, 70%); margin-bottom: var(--space-4); }
+.skeleton-line { height: 14px; width: min(560px, 90%); margin-bottom: var(--space-8); }
+.skeleton-rows { display: flex; flex-direction: column; gap: var(--space-3); }
+
+
+/* ============================================================== figures */
+
+/*
+ * Display-face numbers that stack in a column or tick in place take the
+ * equal-width cut (tokens.css, --display-figures), so 1.18 sits over 2.35
+ * with the points aligned and a countdown does not shuffle sideways every
+ * second. Last in the file on purpose: several of these set the display
+ * face earlier, and this has to win.
+ */
+.odds, .price, .row-goals, .row-time, .fx-line .gf, .mc-count, [data-countdown],
+.ev-min, .minute, .slip-odds { font-family: var(--display-figures); }
+.freecall-tie b { font-family: var(--display-figures); font-size: var(--text-lg); color: var(--chalk); margin: 0 var(--space-1); }
+.freecall-meta .mark { margin-right: var(--space-3); }
+
+/* The cookie choice on the cookie page. */
+.consent-panel { max-width: var(--maxw-read); margin-top: var(--space-8); }
+.consent-panel p { margin: 0 0 var(--space-5); color: var(--chalk-2); }
+.prose code { font-family: var(--body); font-size: 0.92em; color: var(--chalk); background: var(--terrace); padding: 1px 5px; border-radius: 3px; }
+.prose .tbl { margin: var(--space-4) 0 var(--space-6); }
+.prose .tbl td { vertical-align: top; font-size: var(--text-sm); line-height: var(--leading-snug); }

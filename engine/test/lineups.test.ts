@@ -72,5 +72,5 @@ test('top scorers are read from `leaders`', () => {
   // results/players/top left every list empty.
   const sc = parseScorers({ league_id: 1, team_id: 9, season: 2026, stat: 'goals', label: 'Goals',
     leaders: [{ player_id: 7, player_name: 'Umar Sadiq', value: 6 }] });
-  assert.deepEqual(sc, [{ player_id: 7, name: 'Umar Sadiq', goals: 6, assists: 0 }]);
+  assert.deepEqual(sc, [{ player_id: 7, name: 'Umar Sadiq', goals: 6, assists: 0, team_id: null, team_name: null }]);
 });

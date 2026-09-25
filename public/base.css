@@ -12,12 +12,114 @@
  * route. components.css owns the things inside it.
  */
 
+/* ------------------------------------------------------------------ faces */
+
+/*
+ * Self-hosted, and only the subsets the site uses: Latin and Latin Extended,
+ * which covers every club and player name on the board (Ž, ł, ğ, ő and the
+ * rest). All three are SIL Open Font License. Offside Figures is built from
+ * Big Shoulders; see public/fonts/README.md. Its weight ranges map the three
+ * static cuts onto the whole weight axis, so any weight the page asks for
+ * finds the nearest cut rather than a synthesised one.
+ */
+@font-face {
+  font-family: 'Big Shoulders Display';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/bigshoulders-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Big Shoulders Display';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/bigshoulders-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Caveat';
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: url('/fonts/caveat-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/geist-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/geist-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Offside Figures';
+  font-style: normal;
+  font-weight: 100 649;
+  font-display: swap;
+  src: url('/fonts/offside-figures-600.woff2') format('woff2');
+  unicode-range: U+0030-0039, U+002B-002E, U+003A, U+0025, U+2013, U+2212;
+}
+@font-face {
+  font-family: 'Offside Figures';
+  font-style: normal;
+  font-weight: 650 749;
+  font-display: swap;
+  src: url('/fonts/offside-figures-700.woff2') format('woff2');
+  unicode-range: U+0030-0039, U+002B-002E, U+003A, U+0025, U+2013, U+2212;
+}
+@font-face {
+  font-family: 'Offside Figures';
+  font-style: normal;
+  font-weight: 750 900;
+  font-display: swap;
+  src: url('/fonts/offside-figures-800.woff2') format('woff2');
+  unicode-range: U+0030-0039, U+002B-002E, U+003A, U+0025, U+2013, U+2212;
+}
+
+/*
+ * Stand-ins shaped like the real faces, for the moment before they load.
+ * The overrides match each face's ascent and descent, so the line boxes are
+ * the same height before and after the swap and nothing below a headline
+ * jumps when the font arrives.
+ */
+@font-face {
+  font-family: 'Big Shoulders Fallback';
+  src: local('Arial Narrow'), local('ArialNarrow'), local('Roboto Condensed'), local('DejaVu Sans Condensed'), local('Arial');
+  ascent-override: 98.4%;
+  descent-override: 21.3%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'Geist Fallback';
+  src: local('Arial'), local('Helvetica Neue'), local('Roboto'), local('DejaVu Sans');
+  size-adjust: 104%;
+  ascent-override: 96.6%;
+  descent-override: 28.4%;
+  line-gap-override: 0%;
+}
+
 /* ------------------------------------------------------------------ reset */
 
 *, *::before, *::after { box-sizing: border-box; }
 
 html {
   -webkit-text-size-adjust: 100%;
+  /* Kerning always, never a faked bold or italic, and the ligatures and
+     contextual forms each face was drawn with. */
+  font-kerning: normal;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
   /* The board is long and the fixture page has anchors in it. */
   scroll-padding-top: calc(var(--header-h) + var(--space-5));
 }
@@ -32,6 +134,8 @@ body {
   font-family: var(--body);
   font-size: var(--text-md);
   line-height: var(--leading-normal);
+  font-feature-settings: var(--features-text);
+  font-optical-sizing: auto;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   /*
@@ -250,44 +354,52 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .top-inner .brand { justify-self: start; }
 .top-inner .top-right { justify-self: end; }
 
-.brand { display: inline-flex; align-items: center; gap: var(--space-3); flex: none; }
+.brand { display: inline-flex; align-items: center; flex: none; }
 /*
- * The mark: a circle drawn round something, by hand.
+ * The wordmark: the offside line drawn through the name.
  *
- * Two marks preceded it. Three diagonal strokes said nothing. A raised
- * linesman's flag said "offside" but read as an icon rather than a logo, and
- * was odd at the sizes a logo has to live at.
+ * Three marks preceded it. Three diagonal strokes said nothing. A raised
+ * linesman's flag read as an icon rather than a name. A hand-drawn ring
+ * standing in for the "o" was the telestrator, which is the product's voice
+ * but not its subject, and a circle among condensed capitals read as a
+ * stray "O".
  *
- * This is the telestrator gesture — a pundit ringing a player on the screen —
- * and it is also, literally, the "o" of offside: the wordmark beside it reads
- * "ffside.win" and the ring completes it. So the mark is not decoration next
- * to the name, it is part of the name, which is the difference between a logo
- * and a badge.
+ * The subject is the call, and the purest picture of a call in football is
+ * the line: the one the broadcaster draws across the pitch to show whether a
+ * forward was level. Here it is drawn through the word itself, between "off"
+ * and "side", in the one colour on the site that belongs to us, running a
+ * little past the capitals top and bottom the way the broadcast line runs
+ * off the players. The mark (see .mark and public/icon.svg) is the same
+ * idea as a symbol: a ball, the line through it, and the sliver of the ball
+ * past the line in violet.
  *
- * Drawn rather than geometric, with the stroke overshooting where it crosses
- * back over itself, because that overshoot is the entire tell that a hand did
- * it. A clean circle here would be a loading spinner.
+ * Set in the display face at its heaviest, tracked a touch open because Big
+ * Shoulders at 800 closes up at small sizes. ".win" drops to the quiet
+ * colour: it is the address, not the name.
  */
-.brand-mark {
-  width: 30px;
-  height: 30px;
-  margin-right: -3px;
-  fill: none;
-  stroke: var(--floodlight);
-  stroke-width: 9;
-  stroke-linecap: round;
-  overflow: visible;
-}
-.foot-brand .brand-mark { stroke: var(--floodlight); }
-
-.brand-text {
+.wordmark {
+  display: inline-flex;
+  align-items: baseline;
   font-family: var(--display);
   font-weight: var(--weight-black);
   font-size: var(--text-xl);
-  letter-spacing: var(--tracking-md);
-  font-variation-settings: 'wdth' var(--condensed);
+  line-height: 1;
+  letter-spacing: 0.012em;
+  color: var(--chalk);
+  white-space: nowrap;
 }
-.brand-text i { font-style: normal; color: var(--chalk-3); }
+.wm-line {
+  align-self: stretch;
+  width: max(2px, 0.075em);
+  margin: -0.14em 0.07em -0.1em 0.075em;
+  border-radius: 1px;
+  background: var(--floodlight-hi);
+}
+.wm-tld { color: var(--chalk-3); letter-spacing: 0.005em; }
+.brand:hover .wm-line { background: var(--floodlight); }
+
+/* The mark, where there is room for a symbol: the footer, the icons. */
+.brand-symbol { width: 40px; height: 40px; flex: none; color: var(--chalk); }
 
 /*
  * A pill rail, with the current route as a filled pill.
@@ -603,6 +715,20 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   color: var(--chalk-2);
 }
 .foot-col a:hover { color: var(--chalk); }
+/* The cookie settings control is a button, because it opens something rather
+   than going somewhere, dressed as the links around it. */
+.foot-link {
+  display: block;
+  padding: var(--space-2) 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--chalk-2);
+  cursor: pointer;
+  text-align: left;
+}
+.foot-link:hover { color: var(--chalk); }
 
 .socials { display: flex; gap: var(--space-3); margin-top: var(--space-2); }
 .socials a {
@@ -616,7 +742,8 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .socials a:hover { color: var(--chalk); border-color: var(--rule-firm); }
 .socials svg { width: 15px; height: 15px; }
 
-.foot-brand { display: inline-flex; align-items: center; gap: var(--space-3); color: var(--chalk-2); }
+.foot-brand { display: inline-flex; align-items: center; gap: var(--space-4); color: var(--chalk-2); }
+.foot-brand .wordmark { font-size: var(--text-2xl); }
 .foot-stats { display: flex; gap: var(--space-9); flex-wrap: wrap; }
 .foot-stats div b {
   display: block;
@@ -705,3 +832,62 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .tally b.live { color: var(--lost); }
 .tally:hover { color: var(--chalk-2); border-color: var(--rule); }
 @media (max-width: 400px) { .tally { display: none; } }
+
+
+/* ------------------------------------------------------------ typesetting */
+
+/*
+ * The rules a typesetter applies by hand, applied everywhere.
+ *
+ * Headlines are balanced, so a two-line headline breaks into two lines of
+ * similar length instead of a full line and an orphaned word. Paragraphs are
+ * set "pretty", which stops a single word sitting alone on the last line.
+ * Punctuation hangs, so a paragraph that opens with a quote mark keeps its
+ * left edge on the letters. Numbers in data are equal width everywhere,
+ * through the figures font for the display face and the tnum feature for
+ * Geist.
+ */
+h1, h2, h3, h4, .display, .kicker, .freecall-sel, .row-sel, .verdict-head .sel { text-wrap: balance; }
+p, li, dd, figcaption, blockquote { text-wrap: pretty; hanging-punctuation: first allow-end last; }
+table, .tbl, .odds, .price, .row-goals, .slip-odds, .mc-count, [data-countdown] {
+  font-feature-settings: var(--features-data);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+
+/*
+ * Reading text. The pundit's paragraphs are the product, so they are set to
+ * be read: a size up from the interface, generous leading, a measure of
+ * about sixty-six characters, and hyphenation (British English, set on the
+ * <html> element) so a narrow phone column keeps an even right edge instead
+ * of a ragged one with rivers in it.
+ */
+.narrative, .why p, .prose p, .prose li, .recap-why p, .read p {
+  font-size: var(--text-read);
+  line-height: var(--leading-read);
+  max-width: var(--measure);
+  hyphens: auto;
+  -webkit-hyphens: auto;
+  hyphenate-limit-chars: 7 3 3;
+}
+.read p { font-size: var(--text-md); line-height: var(--leading-normal); }
+
+/*
+ * Capitals, when a label is set in them, need air: they were drawn to sit
+ * beside lower case and crowd each other alone. One tracking value for all of
+ * them, and the size a step down so a label never shouts over its content.
+ */
+.panel-head span, .mark, .live-badge, .plan-tag, .track, .freecall-tag, .rep-heads { letter-spacing: var(--tracking-caps); }
+
+/*
+ * The display face's own figures sit a hair high against its capitals;
+ * nudging a big number down by a fraction of an em puts it on the same
+ * optical baseline as a team name beside it.
+ */
+.row-goals, .fx-line .gf { position: relative; top: 0.02em; }
+
+/* Trim the half-leading off the wordmark so it centres in the header on its
+   capitals, not on its line box. Progressive: ignored where unsupported. */
+@supports (text-box: trim-both cap alphabetic) {
+  .wordmark { text-box: trim-both cap alphabetic; }
+}

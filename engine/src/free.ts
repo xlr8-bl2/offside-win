@@ -9,13 +9,19 @@ import { kvGetJSON, kvSetJSON, select } from './store.ts';
  * are surest of, so that a reader who watches it land knows what the rest
  * look like.
  *
- * "The day" is enforced by the lock, not by the calendar. Until its match
- * kicks off the free call follows the board, so a stronger call published
- * later in the day takes over. From kick-off it is fixed, and it stays up as
- * the day's free call through the match and for most of a day afterwards,
- * so the front page is never handing out a second free call an hour after
- * the first was played. After that window the next strongest open call takes
- * its place.
+ * "The day" is the UK calendar day, because that is the day the site's
+ * readers are living in. Until the free call kicks off it follows the board:
+ * a stronger call published later takes over. Once it has kicked off it is
+ * fixed for the rest of that day, and the front page shows how it went,
+ * which is the best advert the product has. Late in the evening, with
+ * nothing left to play today, tomorrow's strongest call goes up, so the
+ * front page is never offering a call nobody can still use.
+ *
+ * The first version held a call for twenty hours from kick-off, measured
+ * from whenever it was chosen, so a Caribbean match kicking off at midnight
+ * became "today's free call" for the whole of the following UK day and sat
+ * on the masthead at three in the afternoon, long finished, as if it were
+ * still to come.
  */
 export interface FreeCall {
   fixture_id: number;
@@ -24,27 +30,33 @@ export interface FreeCall {
   chosen_at: number;
 }
 
-/** How long a played free call stays the free call. */
-const HOLD_SECONDS = 20 * 3600;
-/** How far ahead a call may be and still count as today's. */
-const AHEAD_SECONDS = 30 * 3600;
+const LONDON = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' });
+/** The UK calendar day an instant falls on, as YYYY-MM-DD. */
+export function ukDay(epochSeconds: number): string {
+  const parts = Object.fromEntries(LONDON.formatToParts(new Date(epochSeconds * 1000)).map((p) => [p.type, p.value]));
+  return `${parts['year']}-${parts['month']}-${parts['day']}`;
+}
 
 export async function chooseFreeCall(now = Math.floor(Date.now() / 1000)): Promise<FreeCall | null> {
+  const today = ukDay(now);
   const current = await kvGetJSON<FreeCall>('free:today');
-  if (current && current.kickoff <= now && now - current.kickoff < HOLD_SECONDS) return current;
+  // Today's free call has started: it stays today's free call.
+  if (current && current.kickoff <= now && ukDay(current.kickoff) === today) return current;
 
-  const [best] = await select<{ fixture_id: number; kickoff: number; model_prob: number }>(
+  // The strongest call still to kick off today; failing that, tomorrow's.
+  const open = await select<{ fixture_id: number; kickoff: number; model_prob: number }>(
     `SELECT p.fixture_id, p.kickoff, p.model_prob
      FROM pick p
      WHERE p.kind = 'CONFIDENT' AND p.settled_at IS NULL
        AND p.kickoff > ? AND p.kickoff < ?
-     ORDER BY p.model_prob DESC, p.kickoff ASC
-     LIMIT 1`,
-    [now, now + AHEAD_SECONDS],
+     ORDER BY p.model_prob DESC, p.kickoff ASC`,
+    [now, now + 48 * 3600],
   );
+  const todays = open.filter((r) => ukDay(Number(r.kickoff)) === today);
+  const tomorrow = ukDay(now + 86400);
+  const pool = todays.length ? todays : open.filter((r) => ukDay(Number(r.kickoff)) === tomorrow);
+  const best = pool[0];
   if (!best) {
-    // Nothing open. A free call whose match kicked off inside the hold is
-    // returned above; anything older is cleared rather than left up.
     if (current) await kvSetJSON('free:today', null);
     return null;
   }
