@@ -13,7 +13,7 @@
 import { describe as market, didItLand, recap } from './js/lib/markets.js';
 import { COUNTRY_NAMES, bookName, cash, country, localPrice, purse } from './js/lib/books.js';
 import { cleanProse } from './js/lib/vocabulary.js';
-import { authHeaders, completeSignIn, currentUser, setViewAs, signInWithEmail, signInWithGoogle, signOut, viewingAsFree } from './js/lib/auth.js';
+import { accountRpc, authHeaders, completeSignIn, currentUser, setViewAs, signInWithEmail, signInWithGoogle, signOut, viewingAsFree } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
 
@@ -26,8 +26,32 @@ const dec = (v) => (typeof v === 'number' && isFinite(v) ? v.toFixed(2) : '—')
  * number and attach the word odds to it. A bare "at 1.29" reads as a price tag
  * or a kick-off time; every price on the site goes through one of these two.
  */
-const oddsOf = (v) => `odds of ${dec(v)}`;
-const oddsTag = (v) => `${dec(v)} odds`;
+/*
+ * Odds in the reader's own format: decimal (2.50), fractional (6/4) or
+ * American (+150), set on the account page. Decimal is what the books send
+ * and what the written analysis quotes, so `dec` stays the raw form for
+ * anything that has to match the prose; `showOdds` is only for display.
+ */
+const ODDS_KEY = 'ow.odds';
+let oddsFormat = (() => { try { return localStorage.getItem(ODDS_KEY) || 'decimal'; } catch { return 'decimal'; } })();
+function setOddsFormat(f) {
+  oddsFormat = ['fractional', 'american'].includes(f) ? f : 'decimal';
+  try { if (oddsFormat === 'decimal') localStorage.removeItem(ODDS_KEY); else localStorage.setItem(ODDS_KEY, oddsFormat); } catch { /* private mode */ }
+}
+// The fractions a UK bookmaker actually prints, nearest one wins.
+const FRACTIONS = ['1/20', '1/16', '1/12', '1/10', '1/8', '1/7', '1/6', '1/5', '2/9', '1/4', '2/7', '3/10', '1/3', '4/11',
+  '2/5', '4/9', '1/2', '8/15', '4/7', '8/13', '4/6', '8/11', '4/5', '5/6', '10/11', '1/1', '11/10', '6/5', '5/4', '11/8',
+  '6/4', '13/8', '7/4', '15/8', '2/1', '9/4', '5/2', '11/4', '3/1', '10/3', '7/2', '4/1', '9/2', '5/1', '11/2', '6/1',
+  '13/2', '7/1', '15/2', '8/1', '9/1', '10/1', '11/1', '12/1', '14/1', '16/1', '20/1', '25/1', '33/1', '40/1', '50/1', '66/1', '100/1']
+  .map((f) => { const [a, b] = f.split('/').map(Number); return [f, a / b]; });
+function showOdds(v) {
+  if (typeof v !== 'number' || !isFinite(v) || v <= 1 || oddsFormat === 'decimal') return dec(v);
+  if (oddsFormat === 'american') return v >= 2 ? `+${Math.round((v - 1) * 100)}` : `−${Math.round(100 / (v - 1))}`;
+  const [f] = FRACTIONS.reduce((best, c) => (Math.abs(c[1] - (v - 1)) < Math.abs(best[1] - (v - 1)) ? c : best));
+  return f === '1/1' ? 'evens' : f;
+}
+const oddsOf = (v) => (showOdds(v) === 'evens' ? 'evens' : `odds of ${showOdds(v)}`);
+const oddsTag = (v) => (showOdds(v) === 'evens' ? 'evens' : `${showOdds(v)} odds`);
 
 /**
  * Every read goes through here, which is why the token goes on here.
@@ -323,7 +347,7 @@ const READ_LABEL = {
 
 const state = {
   board: null, hours: 72, leagueName: '', heroVenue: [], hero: null,
-  user: null, authError: null, tick: null, poll: null, onVisible: null,
+  user: null, account: null, authError: null, tick: null, poll: null, onVisible: null,
   /*
    * The board opens on the games we have a call on.
    *
@@ -788,30 +812,63 @@ function nextRailHTML(fixtures) {
     <div class="section-head"><div><h2 class="display">${esc(heading)}</h2></div>
       <a class="btn btn-ghost btn-sm" href="#/board${heading === 'Just finished' ? '?when=played' : ''}">The full board</a></div>
     <ol class="next-list">
-      ${soon.map((f) => {
-        const k = new Date(f.kickoff * 1000);
-        const time = k.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
-        const st = matchState(f);
-        const score = st.kind === 'live'
-          ? (Array.isArray(f.live_score) && f.live_score.length === 2 ? f.live_score : null)
-          : (Array.isArray(f.score) && f.score.length === 2 ? f.score : null);
-        const middle = st.kind === 'upcoming'
-          ? `<b class="next-time">${esc(time)}</b><small>${esc(dayLabel(f.kickoff))}</small>`
-          : `<b class="next-time">${score ? `${esc(score[0])}–${esc(score[1])}` : esc(time)}</b><small>${liveBadge(st)}</small>`;
-        // Whether we made a pick, as a word under the kick-off: "Pick" in the
-        // accent, with a lock where it is for members.
-        const lock = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>';
-        const mark = f.top_pick ? '<small class="next-pick">Pick</small>'
-          : f.locked ? `<small class="next-pick" title="A pick for members">${lock}Pick</small>` : '';
-        return `
-        <li><a class="next-row" href="#/fixture/${encodeURIComponent(f.id)}">
-          <span class="next-side home"><span class="next-name">${esc(f.home)}</span>${crest(f.home, 'sm', f.home_id)}</span>
-          <span class="next-mid">${middle}${mark}</span>
-          <span class="next-side away">${crest(f.away, 'sm', f.away_id)}<span class="next-name">${esc(f.away)}</span></span>
-        </a></li>`;
-      }).join('')}
+      ${soon.map(nextRowHTML).join('')}
     </ol>
   </div>`;
+}
+
+/**
+ * The reader's own games: every match on the board involving a team they
+ * follow or in a competition they follow, live first then soonest. Drawn
+ * only for a signed-in reader who follows something, and above everything
+ * else below the headline, because it is the reason they made an account.
+ */
+function yourGamesHTML(fixtures) {
+  const follows = state.account?.follows ?? [];
+  if (!state.user || !follows.length) return '';
+  const teams = new Set(follows.filter((f) => f.kind === 'team').map((f) => Number(f.id)));
+  const comps = new Set(follows.filter((f) => f.kind === 'league').map((f) => Number(f.id)));
+  const rank = (f) => ({ live: 0, upcoming: 1 })[matchState(f).kind] ?? 2;
+  const mine = fixtures
+    .filter((f) => teams.has(Number(f.home_id)) || teams.has(Number(f.away_id)) || comps.has(Number(f.league_id)))
+    .filter((f) => rank(f) < 2)
+    .sort((a, b) => rank(a) - rank(b) || (a.kickoff ?? 0) - (b.kickoff ?? 0))
+    .slice(0, 8);
+  const name = accountName(state.user, state.account?.profile).split(' ')[0];
+  return `
+  <div class="wrap section dense">
+    <div class="section-head"><div><h2 class="display">Your games</h2>
+      <p>${esc(name)}, the teams and competitions you follow.</p></div>
+      <a class="btn btn-ghost btn-sm" href="#/account?tab=following">Edit</a></div>
+    ${mine.length
+      ? `<ol class="next-list">${mine.map(nextRowHTML).join('')}</ol>`
+      : `<div class="empty-state"><b>Nothing from them in the next few days</b>
+           <span>Their next games show here as soon as they are on the board.</span></div>`}
+  </div>`;
+}
+
+/** One match in a fixture list: home, the kick-off (or the score), away. */
+function nextRowHTML(f) {
+  const k = new Date(f.kickoff * 1000);
+  const time = k.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const st = matchState(f);
+  const score = st.kind === 'live'
+    ? (Array.isArray(f.live_score) && f.live_score.length === 2 ? f.live_score : null)
+    : (Array.isArray(f.score) && f.score.length === 2 ? f.score : null);
+  const middle = st.kind === 'upcoming'
+    ? `<b class="next-time">${esc(time)}</b><small>${esc(dayLabel(f.kickoff))}</small>`
+    : `<b class="next-time">${score ? `${esc(score[0])}–${esc(score[1])}` : esc(time)}</b><small>${liveBadge(st)}</small>`;
+  // Whether we made a pick, as a word under the kick-off: "Pick" in the
+  // accent, with a lock where it is for members.
+  const lock = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>';
+  const mark = f.top_pick ? '<small class="next-pick">Pick</small>'
+    : f.locked ? `<small class="next-pick" title="A pick for members">${lock}Pick</small>` : '';
+  return `
+  <li><a class="next-row" href="#/fixture/${encodeURIComponent(f.id)}">
+    <span class="next-side home"><span class="next-name">${esc(f.home)}</span>${crest(f.home, 'sm', f.home_id)}</span>
+    <span class="next-mid">${middle}${mark}</span>
+    <span class="next-side away">${crest(f.away, 'sm', f.away_id)}<span class="next-name">${esc(f.away)}</span></span>
+  </a></li>`;
 }
 
 /** The one block of solid colour on the site, and it sells the membership. */
@@ -904,7 +961,7 @@ function slipHTML(data, fixtures = []) {
   <section class="panel slip">
     <p class="panel-head">Today's bet slip <a href="#/slip">Every slip</a></p>
     <div class="slip-total">
-      <span class="slip-odds">${dec(cur.odds)}<small>total odds</small></span>
+      <span class="slip-odds">${showOdds(cur.odds)}<small>total odds</small></span>
       <span class="slip-legs">${cur.legs_count} legs</span>
     </div>
     <p class="slip-chance">Our most likely calls, combined. A slip like this comes in
@@ -1319,7 +1376,7 @@ function rowHTML(f) {
         : pick && p && track ? `
         ${trackHTML(track)}<span class="odds-book">at ${oddsOf(p.odds)}</span>`
         : pick && p ? `
-        <span class="odds-tile${p.local ? '' : ' away'}"><span class="odds">${dec(p.odds)}</span><span class="odds-unit">odds</span></span>
+        <span class="odds-tile${p.local ? '' : ' away'}"><span class="odds">${showOdds(p.odds)}</span><span class="odds-unit">odds</span></span>
         <span class="odds-book">${pick.lean ? 'lean, ' : ''}${esc(p.book)}</span>`
         : f.locked ? `<span class="row-locked-mark">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>
@@ -1418,6 +1475,7 @@ async function viewHome() {
     `<div data-live="ticker">${tickerHTML(fixtures, recent)}</div>` +
     heroHTML(state.hero, state.heroVenue, state.heroDetail, freeFx) +
     `<div data-live="today">${todayStripHTML(fixtures, recent)}</div>` +
+    `<div data-live="mine">${yourGamesHTML(fixtures)}</div>` +
     `<div data-live="rail">${nextRailHTML(rail())}</div>` +
     `<div class="wrap section dense">
        <div class="with-side">
@@ -1470,6 +1528,7 @@ async function viewHome() {
       const put = (key, html) => { const el = app.querySelector(`[data-live="${key}"]`); if (el) { el.innerHTML = html; smartQuotes(el); } };
       put('ticker', tickerHTML(fixtures, recent));
       put('today', todayStripHTML(fixtures, recent));
+      put('mine', yourGamesHTML(fixtures));
       put('rail', nextRailHTML(rail()));
       put('live', liveNowHTML(fixtures));
       put('slip', slipHTML(slip, fixtures));
@@ -2046,7 +2105,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
       <span class="sel">${esc(d.name)}</span>
       ${landed
         ? `<span class="mark ${landed}">${esc(VERDICT_WORD[landed] ?? '')}</span>`
-        : `<span class="price">${dec(odds)}<small>odds</small></span>`}
+        : `<span class="price">${showOdds(odds)}<small>odds</small></span>`}
     </div>
     ${landed
       ? `<p class="wins">${esc(story ?? d.wins)}</p>`
@@ -2069,7 +2128,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
         <summary>${p.count} book${p.count === 1 ? '' : 's'} where you are</summary>
         <table class="tbl settle-tbl"><thead><tr><th>Bookmaker</th><th class="num">Odds</th></tr></thead><tbody>
           ${(c.prices ?? []).filter((q) => localPrice([q]).local).sort((a, b) => b.odds - a.odds)
-            .map((q) => `<tr><td>${esc(bookName(q.book, q.slug))}</td><td class="num">${dec(q.odds)}</td></tr>`).join('')}
+            .map((q) => `<tr><td>${esc(bookName(q.book, q.slug))}</td><td class="num">${showOdds(q.odds)}</td></tr>`).join('')}
         </tbody></table>
       </details>` : ''}
     ${d.outcomes?.length ? `
@@ -3108,6 +3167,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
         <p class="hero-blurb">${f.league && f.league_id
           ? `<a class="league-link" href="#/league/${encodeURIComponent(f.league_id)}">${esc(f.league)}</a>${meta.slice(1).length ? `, ${esc(meta.slice(1).join(', '))}` : ''}`
           : esc([f.league, ...meta.slice(1)].filter(Boolean).join(', '))}</p>
+        <div class="fx-follow">${followButtonHTML('team', f.home_id, f.home, { named: true })}${followButtonHTML('team', f.away_id, f.away, { named: true })}</div>
       </div>
     </div>
   </section>
@@ -3132,6 +3192,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
   app.querySelector('.back').onclick = () => {
     if (state.cameFromInApp) history.back(); else location.hash = '#/board';
   };
+  wireFollowButtons();
   for (const t of app.querySelectorAll('.tab')) {
     t.onclick = () => {
       for (const o of app.querySelectorAll('.tab')) {
@@ -3600,8 +3661,8 @@ function postMortemHTML(x) {
   }
   if (pm.market && pm.opening_odds && pm.closing_odds) {
     facts.push(pm.market === 'held'
-      ? `odds held at ${dec(pm.closing_odds)}`
-      : `odds moved from ${dec(pm.opening_odds)} to ${dec(pm.closing_odds)} by kick-off`);
+      ? `odds held at ${showOdds(pm.closing_odds)}`
+      : `odds moved from ${showOdds(pm.opening_odds)} to ${showOdds(pm.closing_odds)} by kick-off`);
   }
 
   return `
@@ -3926,6 +3987,7 @@ async function viewLeague(id, params = new URLSearchParams()) {
         <h1 class="display xl">${esc(lg.name)}</h1>
         ${sub ? `<p class="page-sub">${esc(sub)}.</p>` : ''}
       </div>
+      ${followButtonHTML('league', lg.id, lg.name)}
     </div>
     ${TABS.length ? `
     <div class="tabs" role="tablist">
@@ -3936,6 +3998,8 @@ async function viewLeague(id, params = new URLSearchParams()) {
          <span>The table and the games fill in once the board has covered this competition.</span>
          <a class="btn btn-primary" href="#/leagues">Every competition</a></div>`}
   </div>`;
+
+  wireFollowButtons();
 
   // Arrived from a name in the analysis: that player, highlighted, in view.
   const wanted = params.get('p');
@@ -4402,28 +4466,100 @@ async function viewSignin() {
 
 const PLAN_NAME = { matchday: 'Matchday pass', monthly: 'Monthly membership', season: 'Season ticket' };
 
-/** The account: what you have, what it costs, and how to stop it. */
+/*
+ * The account.
+ *
+ * It used to be a ticket and a sign-out button: what you had paid for, and
+ * nothing about you. An account on a football site is also who you are here
+ * (a name and a face), what you follow (so the front page opens on your
+ * teams), how you like odds written, and the controls every account owes its
+ * holder: sign out everywhere, take your data, delete the lot.
+ *
+ * Four tabs, in the address like the match page's, so a reload or a shared
+ * link opens the same one.
+ */
+const ACCOUNT_TABS = [['profile', 'Profile'], ['following', 'Following'], ['membership', 'Membership'], ['settings', 'Settings']];
+
+/** A face for the account: Google's picture where there is one, else initials. */
+function avatarHTML(user, name, size = 'md') {
+  const label = name || user?.email || '';
+  if (user?.avatar) {
+    return `<span class="avatar avatar-${size}"><img src="${esc(user.avatar)}" alt="" referrerpolicy="no-referrer"
+      onerror="this.parentNode.classList.add('noimg');this.remove()"><i>${esc(initials(label))}</i></span>`;
+  }
+  return `<span class="avatar avatar-${size} noimg"><i>${esc(initials(label))}</i></span>`;
+}
+
+/** The name to call someone by: what they saved, else what Google said, else their email's first part. */
+function accountName(user, profile) {
+  return profile?.display_name || user?.name || String(user?.email ?? '').split('@')[0] || 'Your account';
+}
+
 async function viewAccount() {
   const user = await currentUser();
   if (!user) { setIntent('#/account'); goInstead('#/signin'); return; }
 
   placeholder(skeletonHTML());
-  let account = { membership: null, receipts: [] };
-  try { account = await getJSON('/api/account'); } catch { /* shown as no membership */ }
+  let account = { membership: null, receipts: [], profile: null, follows: [] };
+  try { account = await getJSON('/api/account'); } catch { /* shown as a fresh account */ }
+  state.account = account;
+  if (account.profile?.odds_format && account.profile.odds_format !== oddsFormat) setOddsFormat(account.profile.odds_format);
 
   const m = account.membership;
   const active = m && m.expires_at * 1000 > Date.now();
   // The page that knows for certain, so the header stops guessing.
   state.member = Boolean(active);
-  const when = (e) => new Date(e * 1000).toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' });
+  const when = (e) => new Date(e * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const name = accountName(user, account.profile);
+  const since = user.since ? new Date(user.since).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : null;
+  const how = user.provider === 'google' ? 'Signed in with Google' : 'Signed in with an email link';
 
-  app.innerHTML = `
-  <div class="wrap section narrow">
-    <div class="section-head"><div>
-      <h1 class="display">Your account</h1>
-      <p>${esc(user.email ?? '')}</p>
-    </div></div>
+  const params = new URLSearchParams(location.hash.split('?')[1] ?? '');
+  const asked = params.get('tab');
+  const open = ACCOUNT_TABS.some(([k]) => k === asked) ? asked : 'profile';
 
+  const follows = Array.isArray(account.follows) ? account.follows : [];
+
+  // --- profile
+  const profileHTML = `
+    <form class="acct-form" id="profile-form" novalidate>
+      <label for="display-name">Your name</label>
+      <input id="display-name" name="name" type="text" maxlength="60" autocomplete="name"
+             value="${esc(account.profile?.display_name ?? user.name ?? '')}" placeholder="What should we call you?">
+      <p class="acct-hint">Used to greet you on the front page. Nobody else sees it.</p>
+      <div class="acct-actions"><button class="btn btn-primary" type="submit">Save name</button><span class="acct-note" id="profile-note" role="status"></span></div>
+    </form>
+    <dl class="acct-facts">
+      <div><dt>Email</dt><dd>${esc(user.email ?? '')}</dd></div>
+      <div><dt>Sign-in</dt><dd>${esc(how)}. There is no password to forget.</dd></div>
+      ${since ? `<div><dt>Joined</dt><dd>${esc(since)}</dd></div>` : ''}
+    </dl>`;
+
+  // --- following
+  const followRow = (f) => `
+    <li class="follow-item">
+      ${crest(f.label, 'sm', f.id, f.kind === 'league' ? 'league' : 'team')}
+      ${f.kind === 'league'
+        ? `<a class="follow-name" href="#/league/${encodeURIComponent(f.id)}">${esc(f.label)}</a>`
+        : `<span class="follow-name">${esc(f.label)}</span>`}
+      <button class="btn btn-quiet btn-sm" data-unfollow="${esc(f.kind)}:${esc(f.id)}" data-label="${esc(f.label)}">Unfollow</button>
+    </li>`;
+  const teams = follows.filter((f) => f.kind === 'team');
+  const comps = follows.filter((f) => f.kind === 'league');
+  const followingHTML = `
+    <div class="follow-find">
+      <label for="follow-q">Find a team or competition</label>
+      <input id="follow-q" type="search" autocomplete="off" placeholder="Arsenal, Serie A, Norway…">
+      <ul class="follow-results" id="follow-results" aria-live="polite"></ul>
+    </div>
+    ${follows.length ? `
+      ${comps.length ? `<h2 class="acct-sub">Competitions</h2><ul class="follow-list">${comps.map(followRow).join('')}</ul>` : ''}
+      ${teams.length ? `<h2 class="acct-sub">Teams</h2><ul class="follow-list">${teams.map(followRow).join('')}</ul>` : ''}`
+    : `<div class="empty-state"><b>You are not following anyone yet</b>
+         <span>Follow a team or a competition and its games open the front page for you, above everything else.</span></div>`}`;
+
+  // --- membership
+  const membershipHTML = `
     <!--
       The membership as a ticket: the plan, who it is for, and when it runs to.
       A ticket is the shape a football person already knows a paid-for period
@@ -4432,7 +4568,7 @@ async function viewAccount() {
     <section class="ticket${active ? '' : ' off'}">
       <div class="ticket-main">
         <span class="ticket-kind">${active ? esc(PLAN_NAME[m.plan_id] ?? 'Membership') : 'No membership'}</span>
-        <span class="ticket-who">${esc(user.email ?? '')}</span>
+        <span class="ticket-who">${esc(name)}</span>
         ${active
           ? `<span class="ticket-until">Valid until <b>${esc(when(m.expires_at))}</b></span>`
           : `<span class="ticket-until" data-public-price>One call a day is free. The rest are from £3.49 for the weekend.</span>`}
@@ -4449,41 +4585,303 @@ async function viewAccount() {
           : `<a class="btn btn-accent" href="#/pricing">See the plans</a>`}
       </div>
     </section>
-
     ${account.receipts?.length ? `
-      <div class="panel">
-        <h3 class="panel-head">Payments</h3>
-        <table class="tbl"><tbody>
-          ${account.receipts.map((r) => `
-            <tr><td>${esc(when(r.created_at))}</td>
-                <td>${esc(r.status)}</td>
-                <td class="num">${esc(money(r.amount_minor, r.currency))}</td></tr>`).join('')}
-        </tbody></table>
-      </div>` : ''}
+      <h2 class="acct-sub">Payments</h2>
+      <table class="tbl"><tbody>
+        ${account.receipts.map((r) => `
+          <tr><td>${esc(when(r.created_at))}</td>
+              <td>${esc(PLAN_NAME[r.plan_id] ?? r.plan_id ?? '')}</td>
+              <td>${esc(r.status)}</td>
+              <td class="num">${esc(money(r.amount_minor, r.currency))}</td></tr>`).join('')}
+      </tbody></table>` : `<p class="acct-hint">No payments on this account.</p>`}`;
 
-    <div class="panel">
-      <h3 class="panel-head">This browser</h3>
-      <p class="acct-line">Signing out here does not touch your membership. Sign back in with the same
-        email and it is still yours.</p>
+  // --- settings
+  const fmt = [['decimal', 'Decimal', '2.50'], ['fractional', 'Fractional', '6/4'], ['american', 'American', '+150']];
+  const settingsHTML = `
+    <fieldset class="acct-choice">
+      <legend>Odds</legend>
+      <p class="acct-hint">How prices are written across the site. The written analysis quotes the books' own decimal odds.</p>
+      <div class="seg" role="radiogroup" aria-label="Odds format">
+        ${fmt.map(([k, label, eg]) => `
+          <label class="seg-opt"><input type="radio" name="odds" value="${k}"${oddsFormat === k ? ' checked' : ''}>
+            <span><b>${esc(label)}</b><small>${esc(eg)}</small></span></label>`).join('')}
+      </div>
+      <span class="acct-note" id="odds-note" role="status"></span>
+    </fieldset>
+
+    <h2 class="acct-sub">Signing in</h2>
+    <p class="acct-hint">Signing out does not touch your membership. Sign back in with the same email and it is still yours.</p>
+    <div class="acct-actions">
       <button class="btn btn-ghost" id="out">Sign out</button>
+      <button class="btn btn-quiet" id="out-all">Sign out on every device</button>
     </div>
+
+    <h2 class="acct-sub">Your data</h2>
+    <p class="acct-hint">Everything this account holds: your email, name, settings, follows, membership and payments.</p>
+    <div class="acct-actions"><button class="btn btn-ghost" id="export">Download your data</button></div>
+
+    <div class="danger-zone" id="danger">
+      <h2 class="acct-sub">Delete your account</h2>
+      <p class="acct-hint">Removes your sign-in, name, settings and follows, and ends any membership straight away with no
+        refund for the time left. Payment records are kept, because tax law requires it.</p>
+      <div class="acct-actions">
+        <button class="btn btn-quiet danger" id="delete">Delete my account</button>
+        <span class="acct-note" id="delete-note" role="status"></span>
+      </div>
+    </div>`;
+
+  const panes = { profile: profileHTML, following: followingHTML, membership: membershipHTML, settings: settingsHTML };
+
+  app.innerHTML = `
+  <div class="wrap section narrow account">
+    <div class="acct-head">
+      ${avatarHTML(user, name, 'lg')}
+      <div class="acct-who">
+        <h1 class="display">${esc(name)}</h1>
+        <p>${esc(user.email ?? '')}</p>
+        <a class="acct-plan${active ? ' on' : ''}" href="#/account?tab=membership">${active
+          ? `Member until ${esc(when(m.expires_at))}` : 'Free account'}</a>
+      </div>
+    </div>
+    <div class="tabs" role="tablist">
+      ${ACCOUNT_TABS.map(([k, label]) => `<button class="tab${k === open ? ' on' : ''}" data-tab="${k}" role="tab" aria-selected="${k === open}">${esc(label)}</button>`).join('')}
+    </div>
+    ${ACCOUNT_TABS.map(([k]) => `<div class="tabpane acct-pane" data-pane="${k}"${k === open ? '' : ' hidden'}>${panes[k]}</div>`).join('')}
   </div>`;
 
-  document.getElementById('out').onclick = async () => {
-    await signOut();
+  for (const t of app.querySelectorAll('.tab')) {
+    t.onclick = () => {
+      for (const o of app.querySelectorAll('.tab')) {
+        const on = o === t;
+        o.classList.toggle('on', on);
+        o.setAttribute('aria-selected', String(on));
+      }
+      for (const pane of app.querySelectorAll('.tabpane')) pane.hidden = pane.dataset.pane !== t.dataset.tab;
+      const q = t.dataset.tab === 'profile' ? '' : `?tab=${encodeURIComponent(t.dataset.tab)}`;
+      history.replaceState(null, '', `${location.pathname}#/account${q}`);
+    };
+  }
+
+  const note = (id, text, bad = false) => {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = text; el.classList.toggle('bad', bad); }
+  };
+
+  // Name.
+  document.getElementById('profile-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const button = e.currentTarget.querySelector('button');
+    button.disabled = true;
+    note('profile-note', 'Saving…');
+    try {
+      const saved = await accountRpc('save_profile', { p_name: document.getElementById('display-name').value, p_odds: oddsFormat });
+      account.profile = saved;
+      note('profile-note', 'Saved');
+      const n = accountName(user, saved);
+      app.querySelector('.acct-who h1').textContent = n;
+      headerAuth();
+    } catch (err) {
+      note('profile-note', humaneError(err), true);
+    }
+    button.disabled = false;
+  };
+
+  // Odds format: saved the moment it is picked.
+  for (const r of app.querySelectorAll('input[name="odds"]')) {
+    r.onchange = async () => {
+      setOddsFormat(r.value);
+      note('odds-note', 'Saving…');
+      try {
+        account.profile = await accountRpc('save_profile', { p_name: account.profile?.display_name ?? user.name ?? '', p_odds: r.value });
+        note('odds-note', `Saved. Odds now read like ${showOdds(2.5)}.`);
+        state.board = null;
+      } catch (err) {
+        note('odds-note', humaneError(err), true);
+      }
+    };
+  }
+
+  // Following: search the teams and competitions on the board.
+  wireFollowing(account);
+
+  // Sign out, here or everywhere.
+  const leave = async (everywhere) => {
+    await signOut({ everywhere });
     cacheClear();
     state.member = null;
     state.board = null;
+    state.account = null;
     location.hash = '#/home';
     await route();
     headerAuth();
   };
+  document.getElementById('out').onclick = () => leave(false);
+  document.getElementById('out-all').onclick = () => leave(true);
+
+  // Take your data: one JSON file, built from what the account page already holds.
+  document.getElementById('export').onclick = () => {
+    const data = {
+      exported_at: new Date().toISOString(),
+      email: user.email,
+      signed_in_with: user.provider,
+      joined: user.since,
+      profile: account.profile,
+      follows,
+      membership: account.membership,
+      payments: account.receipts,
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: 'offside-win-account.json' });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  // Delete: the one action here with a second step, because it cannot be undone.
+  const del = document.getElementById('delete');
+  del.onclick = async () => {
+    if (del.dataset.armed !== '1') {
+      del.dataset.armed = '1';
+      del.textContent = 'Yes, delete it for good';
+      note('delete-note', 'Tap again to delete. This cannot be undone.');
+      return;
+    }
+    del.disabled = true;
+    note('delete-note', 'Deleting…');
+    try {
+      await postJSON('/api/account/delete', {});
+      await leave(false);
+    } catch (err) {
+      del.disabled = false;
+      note('delete-note', err.message, true);
+    }
+  };
+
   const cancel = document.getElementById('cancel');
   // One tap, no "are you sure", no offer to stay. Retention mazes are a dark
   // pattern and in several places an illegal one.
   if (cancel) cancel.onclick = () => setRenewal(false);
   const resume = document.getElementById('resume');
   if (resume) resume.onclick = () => setRenewal(true);
+}
+
+/** The database's words, said to a person. */
+function humaneError(err) {
+  const raw = String(err?.message ?? '');
+  if (/sign in first|jwt|token/i.test(raw)) return 'Your sign-in has expired. Sign in again and try once more.';
+  if (/follow limit/i.test(raw)) return 'That is a hundred already. Unfollow one to make room.';
+  if (/failed to fetch|network/i.test(raw) || navigator.onLine === false) return 'Your device cannot reach us at the moment. Try again.';
+  return 'That did not save. Try again in a moment.';
+}
+
+/**
+ * Follow or unfollow, from anywhere on the site. Returns the stored list and
+ * keeps state.account in step, so the front page's "Your games" is right the
+ * next time it draws.
+ */
+async function toggleFollow(kind, id, label, on) {
+  const list = await accountRpc('set_follow', { p_kind: kind, p_ref: Number(id), p_label: label, p_on: on });
+  if (state.account) state.account.follows = list ?? [];
+  return list ?? [];
+}
+const isFollowing = (kind, id) => Boolean(state.account?.follows?.some((f) => f.kind === kind && Number(f.id) === Number(id)));
+
+/**
+ * A Follow button for a team or competition page. Signed out, it goes to
+ * sign-in and comes back here, because following is a reason to have an
+ * account and the button should say so rather than disappear.
+ */
+const followText = (on, label, named) => `${on ? 'Following' : 'Follow'}${named ? ` ${label}` : ''}`;
+function followButtonHTML(kind, id, label, { named = false } = {}) {
+  if (!id) return '';
+  const on = isFollowing(kind, id);
+  return `<button class="btn btn-sm follow-btn ${on ? 'btn-quiet on' : 'btn-ghost'}" data-follow-kind="${esc(kind)}"
+    data-follow-id="${esc(id)}" data-follow-label="${esc(label)}"${named ? ' data-named="1"' : ''} aria-pressed="${on}">${esc(followText(on, label, named))}</button>`;
+}
+function wireFollowButtons() {
+  for (const b of app.querySelectorAll('.follow-btn')) {
+    b.onclick = async () => {
+      if (!state.user) { setIntent(location.hash); location.hash = '#/signin'; return; }
+      const on = b.getAttribute('aria-pressed') !== 'true';
+      b.disabled = true;
+      try {
+        await toggleFollow(b.dataset.followKind, b.dataset.followId, b.dataset.followLabel, on);
+        b.setAttribute('aria-pressed', String(on));
+        b.textContent = followText(on, b.dataset.followLabel, b.dataset.named === '1');
+        b.classList.toggle('on', on);
+        b.classList.toggle('btn-quiet', on);
+        b.classList.toggle('btn-ghost', !on);
+      } catch (err) {
+        alert(humaneError(err));
+      }
+      b.disabled = false;
+    };
+  }
+}
+
+/** The search box and unfollow buttons on the Following tab. */
+function wireFollowing(account) {
+  const q = document.getElementById('follow-q');
+  const out = document.getElementById('follow-results');
+  if (!q || !out) return;
+
+  let index = null;
+  const buildIndex = async () => {
+    if (index) return index;
+    const board = state.board ?? (await loadBoard().catch(() => ({ fixtures: [] })));
+    const seen = new Map();
+    for (const f of board.fixtures ?? []) {
+      if (f.league_id && f.league) seen.set(`league:${f.league_id}`, { kind: 'league', id: f.league_id, label: f.league, sub: 'Competition' });
+      if (f.home_id && f.home) seen.set(`team:${f.home_id}`, { kind: 'team', id: f.home_id, label: f.home, sub: f.league ?? 'Team' });
+      if (f.away_id && f.away) seen.set(`team:${f.away_id}`, { kind: 'team', id: f.away_id, label: f.away, sub: f.league ?? 'Team' });
+    }
+    index = [...seen.values()];
+    return index;
+  };
+  // Accents do not count against a match: "Turkiye" finds Türkiye.
+  const fold = (x) => String(x ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+  const draw = async () => {
+    const term = fold(q.value.trim());
+    if (term.length < 2) { out.innerHTML = ''; return; }
+    const all = await buildIndex();
+    const hits = all
+      .filter((x) => fold(x.label).includes(term))
+      .sort((a, b) => (fold(a.label).startsWith(term) ? 0 : 1) - (fold(b.label).startsWith(term) ? 0 : 1) || (a.kind === 'league' ? -1 : 1))
+      .slice(0, 8);
+    out.innerHTML = hits.length
+      ? hits.map((x) => {
+          const on = isFollowing(x.kind, x.id);
+          return `<li class="follow-item">
+            ${crest(x.label, 'sm', x.id, x.kind === 'league' ? 'league' : 'team')}
+            <span class="follow-name">${esc(x.label)}<small>${esc(x.sub)}</small></span>
+            <button class="btn btn-sm ${on ? 'btn-quiet' : 'btn-primary'}" data-follow="${esc(x.kind)}:${esc(x.id)}" data-label="${esc(x.label)}" data-on="${on ? '1' : ''}">${on ? 'Following' : 'Follow'}</button>
+          </li>`;
+        }).join('')
+      : `<li class="follow-none">Nothing on the board by that name. Only teams and competitions playing in the next few days show here.</li>`;
+  };
+  let t = null;
+  q.oninput = () => { clearTimeout(t); t = setTimeout(draw, 120); };
+
+  app.querySelector('.acct-pane[data-pane="following"]').onclick = async (e) => {
+    const b = e.target.closest('button[data-follow], button[data-unfollow]');
+    if (!b) return;
+    const [kind, id] = (b.dataset.follow ?? b.dataset.unfollow).split(':');
+    const on = b.dataset.follow ? !b.dataset.on : false;
+    b.disabled = true;
+    try {
+      await toggleFollow(kind, id, b.dataset.label, on);
+      // Redraw the tab from what was stored, keeping the search as typed.
+      const typed = q.value;
+      await viewAccount();
+      const again = document.getElementById('follow-q');
+      if (again && typed) { again.value = typed; again.dispatchEvent(new Event('input')); again.focus(); }
+    } catch (err) {
+      b.disabled = false;
+      alert(humaneError(err));
+    }
+  };
 }
 
 /** Money, from minor units, without floating point anywhere near it. */
@@ -4529,8 +4927,14 @@ const LEGAL = {
          that, and we do not use the logs to build a picture of anyone.</p>
       <p><b>If you make an account</b>, we hold your email address, because a sign-in link is sent to
          it and it is how your membership finds you. If you sign in with Google instead, Google tells
-         us your email address and that you signed in, and nothing else. We hold this to provide the
-         account you asked for.</p>
+         us your email address, your name and your profile picture, and that you signed in. We show the
+         name and picture on your own account page and in the header, to you and nobody else. We hold
+         this to provide the account you asked for.</p>
+      <p><b>What you choose to add to your account</b>: the name you want to be called, the teams and
+         competitions you follow, and how you like odds written. We use them to greet you, to put your
+         teams' games first on the front page, and to write prices your way. Your odds choice is also
+         kept on your device so pages open in it straight away. You can change or remove any of it on
+         your account page.</p>
       <p><b>If you buy a membership</b>, we hold which plan you bought, when it started and when it
          ends, and a record of each payment: the amount, the currency, the date, whether it went
          through, and the reference our payment provider gave it. We hold this to provide what you
@@ -4565,15 +4969,18 @@ const LEGAL = {
          contractual clauses.</p>
 
       <h2>How long we keep it</h2>
-      <p>Your account and membership details stay while you have an account. Ask us to delete the
-         account and we will do it within 30 days. Payment records are kept for six years after the
-         payment, which is what UK tax rules require; after an account is deleted they are kept
-         without your email address attached. Visit counts are not personal data and are kept as a
-         running total.</p>
+      <p>Your account and membership details stay while you have an account. You can delete the
+         account yourself, straight away, from the Settings tab of your account page; or ask us and we
+         will do it within 30 days. Deleting it removes your sign-in, name, follows and settings and
+         ends any membership. Payment records are kept for six years after the payment, which is what
+         UK tax rules require; after an account is deleted they are kept without your email address
+         attached. Visit counts are not personal data and are kept as a running total.</p>
 
       <h2>Your rights</h2>
       <p>You can ask us for a copy of what we hold about you, ask us to correct it, ask us to delete
-         it, ask us to stop or limit using it, and ask for it in a form you can take elsewhere. Where
+         it, ask us to stop or limit using it, and ask for it in a form you can take elsewhere. Most of
+         this you can do yourself on your account page: download your data as a file, change your
+         name and settings, and delete the account. Where
          we rely on your consent, which is only visit counting and keeping pages on your device, you
          can withdraw it at any time from the cookie settings in the footer. Write to
          <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> from the address on your account and
@@ -5214,16 +5621,40 @@ async function headerAuth() {
    */
   let member = false;
   if (user) {
-    if (state.member === null) {
-      try { state.member = Boolean((await getJSON('/api/account')).membership?.expires_at * 1000 > Date.now()); }
-      catch { state.member = Boolean(state.board?.member); }
+    // The same call carries the profile and the follows, so the front page
+    // can greet and personalise without a second request.
+    if (state.member === null || !state.account) {
+      try {
+        state.account = await getJSON('/api/account');
+        state.member = Boolean(state.account.membership?.expires_at * 1000 > Date.now());
+        const f = state.account.profile?.odds_format;
+        const oddsChanged = f && f !== oddsFormat;
+        if (oddsChanged) setOddsFormat(f);
+        // The page may have drawn before the account arrived: redraw it once
+        // so the odds and "Your games" are the reader's own.
+        if (oddsChanged || state.account.follows?.length) softRefresh();
+      } catch { state.member = Boolean(state.board?.member); }
     }
     member = state.member;
   } else {
     state.member = null;
+    state.account = null;
   }
 
-  link.textContent = user ? 'Account' : 'Sign in';
+  // Signed in, the button is the reader's own face: their picture or their
+  // initials, which is how every account on the web says "this is you".
+  if (user) {
+    const name = accountName(user, state.account?.profile);
+    link.className = 'account-chip';
+    link.innerHTML = avatarHTML(user, name, 'sm');
+    link.setAttribute('aria-label', `Your account, ${name}`);
+    link.title = name;
+  } else {
+    link.className = 'btn btn-ghost btn-sm';
+    link.textContent = 'Sign in';
+    link.removeAttribute('aria-label');
+    link.removeAttribute('title');
+  }
   link.href = user ? '#/account' : '#/signin';
 
   if (tag) {
