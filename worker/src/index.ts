@@ -137,6 +137,13 @@ export default {
       if (path.startsWith('/api/fixture/')) return await fixture(path, env, jwt);
       // A competition's page. The token goes with it because the fixtures
       // inside are walled exactly as the board is.
+      // A player's page: scorers, recent reports, next games. Nothing walled.
+      if (path.startsWith('/api/player/')) {
+        const id = Number(path.slice('/api/player/'.length));
+        if (!Number.isFinite(id)) return fail('bad player id', 400);
+        const lg = Number(url.searchParams.get('league'));
+        return await passthrough(env, 'get_player', { p_id: id, p_league: Number.isFinite(lg) && lg > 0 ? lg : undefined });
+      }
       if (path.startsWith('/api/league/')) {
         const id = Number(path.slice('/api/league/'.length));
         if (!Number.isFinite(id)) return fail('bad league id', 400);
@@ -230,7 +237,7 @@ function picks(url: URL, env: Env, jwt: string | null): Promise<Response> {
 
 
 const PAGES = new Set(['home', 'board', 'fixture', 'league', 'leagues', 'results', 'slip',
-  'pricing', 'signin', 'account', 'legal']);
+  'pricing', 'signin', 'account', 'legal', 'player']);
 
 /**
  * Count one page view. POST only, answered 204 whatever happens: a counter

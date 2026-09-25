@@ -587,6 +587,12 @@ export async function runSlate(): Promise<SlateReport> {
               unavailable: ctx.lineups.unavailable,
             }
           : null,
+        // Every player the write-up might name, with the id that links to
+        // their page: both squads, both team sheets, the absentees and the
+        // league's scorers for each side. The page turns a name in the
+        // analysis into a link by looking it up here, so a name the writer
+        // uses that is not in this list simply stays text.
+        people: peopleOf(ctx),
         // Everything the match page shows in its own panels. All of it was
         // gathered for the factors already and then dropped on the floor.
         round_label: str(event['round_label']) || null,
@@ -952,4 +958,29 @@ export async function runSlate(): Promise<SlateReport> {
 export async function pruneBoard(): Promise<void> {
   const cutoff = Math.floor(Date.now() / 1000) - 7 * 86400;
   await dbSelect('DELETE FROM fixture WHERE kickoff < ?', [cutoff]);
+}
+
+
+/** Who might be named on a fixture page: id, name, and which side. */
+function peopleOf(ctx: {
+  home: { squad: Array<{ id: number; name: string }> | null; scorers: Array<{ player_id: number; name: string }> | null };
+  away: { squad: Array<{ id: number; name: string }> | null; scorers: Array<{ player_id: number; name: string }> | null };
+  lineups: { home: { players: Array<{ id: number; name: string }> } | null; away: { players: Array<{ id: number; name: string }> } | null;
+             unavailable: Array<{ id: number; name: string; side: 'home' | 'away' | null }> } | null;
+}): Array<{ id: number; name: string; side: 'home' | 'away' | null }> {
+  const out = new Map<number, { id: number; name: string; side: 'home' | 'away' | null }>();
+  const add = (id: unknown, name: unknown, side: 'home' | 'away' | null) => {
+    const n = typeof name === 'string' ? name.trim() : '';
+    if (typeof id !== 'number' || !Number.isFinite(id) || !n || n.startsWith('#')) return;
+    // A full name beats an abbreviated one ("Erling Haaland" over "E. Haaland").
+    const prev = out.get(id);
+    if (!prev || (/^\p{L}\.\s/u.test(prev.name) && !/^\p{L}\.\s/u.test(n))) out.set(id, { id, name: n, side: side ?? prev?.side ?? null });
+  };
+  for (const side of ['home', 'away'] as const) {
+    for (const p of ctx.lineups?.[side]?.players ?? []) add(p.id, p.name, side);
+    for (const p of ctx[side].squad ?? []) add(p.id, p.name, side);
+    for (const p of ctx[side].scorers ?? []) add(p.player_id, p.name, side);
+  }
+  for (const u of ctx.lineups?.unavailable ?? []) add(u.id, u.name, u.side);
+  return [...out.values()];
 }

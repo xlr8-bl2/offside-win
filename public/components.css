@@ -3451,3 +3451,56 @@
 /* One table per group, two across where there is room. */
 .group-tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: var(--space-5); }
 .group-tables .panel { margin: 0; }
+
+/* ================================================================ players */
+
+/* A name in the analysis that goes somewhere. Underlined quietly, so a
+   paragraph with five names in it still reads as a paragraph. */
+.plink {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--floodlight-hi) 55%, transparent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
+.plink:hover { color: var(--floodlight-hi); text-decoration-color: var(--floodlight-hi); }
+.ev-body .plink, .squad-row .plink, .scorer-name .plink { text-decoration-color: transparent; }
+.ev-body .plink:hover, .squad-row .plink:hover, .scorer-name .plink:hover { text-decoration-color: var(--floodlight-hi); }
+a.pp { color: inherit; text-decoration: none; }
+a.pp:hover .pp-name { color: var(--floodlight-hi); }
+
+.player-head { display: flex; align-items: center; gap: var(--space-5); }
+.player-face .crest { width: 84px; height: 84px; font-size: 22px; flex: none; }
+.player-head h1 { margin: 0; }
+.player-head .page-sub { display: flex; align-items: center; gap: var(--space-2); }
+.player-strip { margin: 0 0 var(--space-7); }
+.scorer-list li.is-me { background: var(--floodlight-dim); margin: 0 calc(-1 * var(--space-3)); padding-inline: var(--space-3); border-radius: var(--radius-sm); }
+
+.pl-matches { display: flex; flex-direction: column; }
+.pl-match {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: var(--border) solid var(--hairline);
+  color: inherit;
+  text-decoration: none;
+}
+.pl-match:last-child { border-bottom: 0; }
+.pl-match:hover .pl-tie { color: var(--chalk); }
+.pl-when { display: flex; flex-direction: column; font-size: var(--text-xs); color: var(--chalk-2); }
+.pl-when small { color: var(--chalk-3); font-size: var(--text-2xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-tie { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: var(--text-sm); color: var(--chalk-2); flex-wrap: wrap; }
+.pl-tie b { font-family: var(--display-figures); font-size: var(--text-lg); color: var(--chalk); }
+.pl-did { display: inline-flex; align-items: center; gap: var(--space-2); }
+.pl-did small { font-size: var(--text-2xs); color: var(--chalk-3); }
+.pl-did .rating {
+  padding: 1px 5px; border-radius: 3px; background: var(--chalk-3); color: var(--pitch);
+  font-family: var(--display-figures); font-weight: var(--weight-black); font-size: var(--text-sm);
+}
+.pl-did .rating.top { background: var(--won); color: #fff; }
+.pl-did .rating.good { background: var(--floodlight-hi); color: #fff; }
+.pl-did .rating.poor { background: var(--lost); color: #fff; }
+@media (max-width: 560px) { .pl-match { grid-template-columns: minmax(0, 1fr) auto; } .pl-when { grid-column: 1 / -1; flex-direction: row; gap: var(--space-2); } }
+.player-body > .stack { order: 1; } .player-body > .home-side { order: 2; }

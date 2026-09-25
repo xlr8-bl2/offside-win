@@ -1087,6 +1087,91 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
   );
 $fn$;
 
+-- A player's page. Built from what we already hold rather than a feed of its
+-- own: where they stand in each competition's top scorers (kv
+-- league:<id>:scorers), how they played in the matches we have reports for
+-- (fixture.report_json, finished matches only, so nothing here is walled),
+-- and the next games of the team they last played for. p_league says which
+-- competition the reader came from, so its scorers list leads.
+CREATE OR REPLACE FUNCTION get_player(p_id bigint, p_league bigint DEFAULT NULL)
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  WITH t AS (SELECT floor(extract(epoch FROM now()))::bigint AS now),
+  scorer AS (
+    SELECT substring(k.k FROM '^league:(\d+):scorers$')::bigint AS league_id,
+           e.ord AS rank, e.v AS row
+    FROM kv k
+    CROSS JOIN LATERAL jsonb_array_elements(coalesce(try_json(k.v)::jsonb->'rows', '[]'::jsonb)) WITH ORDINALITY e(v, ord)
+    WHERE k.k LIKE 'league:%:scorers' AND (e.v->>'player_id')::bigint = p_id
+  ),
+  app AS (
+    SELECT f.id AS fixture_id, f.kickoff, f.league_id, l.name AS league,
+           f.home_team, f.away_team, f.home_team_id, f.away_team_id, f.home_goals, f.away_goals,
+           pl.v AS line,
+           (SELECT sh FROM jsonb_array_elements(
+                     coalesce(x.r->'lineups'->'home'->'players', '[]'::jsonb)
+                     || coalesce(x.r->'lineups'->'away'->'players', '[]'::jsonb)) sh
+             WHERE (sh->>'id')::bigint = p_id LIMIT 1) AS sheet
+    FROM fixture f
+    LEFT JOIN league l ON l.id = f.league_id
+    CROSS JOIN LATERAL (SELECT try_json(f.report_json)::jsonb AS r) x
+    CROSS JOIN LATERAL jsonb_array_elements(
+      CASE WHEN jsonb_typeof(x.r->'players') = 'array' THEN x.r->'players' ELSE '[]'::jsonb END) pl(v)
+    WHERE f.report_json IS NOT NULL AND f.home_goals IS NOT NULL
+      AND f.kickoff > (SELECT now FROM t) - 240 * 86400
+      AND (pl.v->>'id')::bigint = p_id
+  ),
+  their AS (
+    SELECT coalesce(
+      (SELECT (line->>'team_id')::bigint FROM app WHERE line->>'team_id' IS NOT NULL ORDER BY kickoff DESC LIMIT 1),
+      (SELECT (row->>'team_id')::bigint FROM scorer WHERE row->>'team_id' IS NOT NULL LIMIT 1)) AS id
+  ),
+  lead AS (
+    SELECT coalesce(p_league, (SELECT league_id FROM scorer ORDER BY rank LIMIT 1),
+                    (SELECT league_id FROM app ORDER BY kickoff DESC LIMIT 1)) AS id
+  )
+  SELECT json_build_object(
+    'id', p_id,
+    'name', coalesce((SELECT sheet->>'name' FROM app WHERE sheet IS NOT NULL ORDER BY kickoff DESC LIMIT 1),
+                     (SELECT row->>'name' FROM scorer LIMIT 1)),
+    'position', (SELECT sheet->>'position' FROM app WHERE sheet IS NOT NULL ORDER BY kickoff DESC LIMIT 1),
+    'number', (SELECT (sheet->>'number')::int FROM app WHERE sheet IS NOT NULL ORDER BY kickoff DESC LIMIT 1),
+    'team', (SELECT json_build_object('id', tm.id, 'name', coalesce(
+                (SELECT CASE WHEN a.home_team_id = tm.id THEN a.home_team ELSE a.away_team END
+                 FROM app a WHERE tm.id IN (a.home_team_id, a.away_team_id) ORDER BY a.kickoff DESC LIMIT 1),
+                (SELECT row->>'team_name' FROM scorer WHERE row->>'team_name' IS NOT NULL LIMIT 1),
+                (SELECT name FROM team WHERE id = tm.id)))
+             FROM their tm WHERE tm.id IS NOT NULL),
+    'competitions', coalesce((
+      SELECT json_agg(json_build_object(
+               'league_id', sc.league_id, 'league', l.name, 'rank', sc.rank,
+               'goals', (sc.row->>'goals')::int, 'assists', (sc.row->>'assists')::int)
+             ORDER BY sc.league_id = (SELECT id FROM lead) DESC, (sc.row->>'goals')::int DESC)
+      FROM scorer sc LEFT JOIN league l ON l.id = sc.league_id), '[]'::json),
+    'lead_league', (SELECT json_build_object('id', l.id, 'name', l.name) FROM league l WHERE l.id = (SELECT id FROM lead)),
+    'lead_scorers', coalesce((
+      SELECT try_json(v)->'rows' FROM kv WHERE k = 'league:' || (SELECT id FROM lead) || ':scorers'), '[]'::json),
+    'matches', coalesce((
+      SELECT json_agg(json_build_object(
+               'fixture_id', a.fixture_id, 'kickoff', a.kickoff, 'league', a.league, 'league_id', a.league_id,
+               'home', a.home_team, 'away', a.away_team, 'home_id', a.home_team_id, 'away_id', a.away_team_id,
+               'score', json_build_array(a.home_goals, a.away_goals),
+               'minutes', (a.line->>'minutes')::int, 'rating', (a.line->>'rating')::numeric,
+               'goals', (a.line->>'goals')::int, 'assists', (a.line->>'assists')::int,
+               'yellow', (a.line->>'yellow')::int, 'red', (a.line->>'red')::int,
+               'started', coalesce((a.sheet->>'starting')::boolean, true))
+             ORDER BY a.kickoff DESC)
+      FROM (SELECT * FROM app ORDER BY kickoff DESC LIMIT 12) a), '[]'::json),
+    'next', coalesce((
+      SELECT json_agg(json_build_object('fixture_id', f.id, 'kickoff', f.kickoff, 'home', f.home_team, 'away', f.away_team,
+                                        'home_id', f.home_team_id, 'away_id', f.away_team_id, 'league', l.name)
+             ORDER BY f.kickoff)
+      FROM (SELECT * FROM fixture f2
+            WHERE (SELECT id FROM their) IN (f2.home_team_id, f2.away_team_id) AND f2.kickoff > (SELECT now FROM t)
+            ORDER BY f2.kickoff LIMIT 3) f
+      LEFT JOIN league l ON l.id = f.league_id), '[]'::json)
+  );
+$fn$;
+
 CREATE OR REPLACE FUNCTION get_health()
 RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   WITH s AS (
@@ -1324,6 +1409,7 @@ GRANT EXECUTE ON FUNCTION get_slip() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_plans() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION free_fixture_id() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_league(bigint) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_player(bigint, bigint) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint), get_fixture(bigint), get_picks(integer, text),
   get_model(), get_hero(), get_health(), get_account(), has_membership(), try_json(text) TO authenticated;
 
@@ -1359,7 +1445,7 @@ RETURNS void LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = public AS 
   INSERT INTO page_view (day, page, n)
   SELECT (now() AT TIME ZONE 'Europe/London')::date, p_page, 1
   WHERE p_page IN ('home', 'board', 'fixture', 'league', 'leagues', 'results', 'slip',
-                   'pricing', 'signin', 'account', 'legal')
+                   'pricing', 'signin', 'account', 'legal', 'player')
   ON CONFLICT (day, page) DO UPDATE SET n = page_view.n + 1;
 $fn$;
 GRANT EXECUTE ON FUNCTION record_view(text) TO anon, authenticated;
