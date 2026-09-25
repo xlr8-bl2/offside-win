@@ -951,7 +951,7 @@ export async function runSlate(): Promise<SlateReport> {
   // and never allowed to fail the slate: a masthead without them falls back
   // to its own wash.
   try {
-    const colored = await fillCrestColors({ limit: 40 });
+    const colored = await fillCrestColors({ limit: 250 });
     if (colored) console.log(`  read ${colored} crest colour${colored === 1 ? '' : 's'}`);
   } catch (err) {
     console.log(`  crest colours skipped: ${err instanceof Error ? err.message : String(err)}`);
