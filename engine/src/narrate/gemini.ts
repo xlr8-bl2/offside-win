@@ -80,11 +80,11 @@ function spacer(perMinute: number) {
 
 export function geminiWriter(opts: GeminiOptions): Writer {
   const model = opts.model ?? DEFAULT_MODEL;
-  const pace = spacer(opts.ratePerMinute ?? 15);
+  const pace = spacer(opts.ratePerMinute ?? 8);
   const timeoutMs = opts.timeoutMs ?? 30_000;
 
   /** One request. Throws on anything the caller should know about. */
-  async function attempt(prompt: string): Promise<{ busy: true } | { busy: false; text: string }> {
+  async function attempt(prompt: string): Promise<{ busy: true; waitMs: number } | { busy: false; text: string }> {
     await pace();
 
     const res = await fetch(`${BASE}/${model}:generateContent`, {
@@ -119,12 +119,26 @@ export function geminiWriter(opts: GeminiOptions): Writer {
       signal: AbortSignal.timeout(timeoutMs),
     });
 
-    if (res.status === 429) throw new QuotaExhausted('gemini free-tier quota exhausted');
+    /*
+     * 429 is two different things on the free tier, and only one of them is
+     * the end of the day. Google says which in the body: a quota id naming a
+     * per-day limit, and a RetryInfo delay. A per-minute limit clears in
+     * seconds and is worth waiting out; treating it as final is what stopped
+     * the writer a minute into every run and left the site on the grammar.
+     */
+    if (res.status === 429) {
+      const body = await res.text();
+      const daily = /per\s*day|PerDay|daily/i.test(body);
+      const m = body.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
+      const delay = m ? Number(m[1]) : Number(res.headers.get('retry-after')) || 30;
+      if (daily || delay > 90) throw new QuotaExhausted(`gemini free-tier ${daily ? 'daily' : 'long'} limit reached`);
+      return { busy: true, waitMs: Math.ceil(delay * 1000) + 1000 };
+    }
 
     // 503 is the free tier being busy rather than anything being wrong -- their
     // own message says spikes in demand are usually temporary. Worth waiting
     // out, unlike every other failure, which falls back to the grammar.
-    if (res.status === 503) return { busy: true };
+    if (res.status === 503) return { busy: true, waitMs: 3000 };
 
     if (!res.ok) throw new Error(`gemini ${res.status}: ${(await res.text()).slice(0, 200)}`);
 
@@ -162,7 +176,7 @@ export function geminiWriter(opts: GeminiOptions): Writer {
       for (let tries = 0; tries <= RETRY_ON_BUSY; tries++) {
         const out = await attempt(prompt);
         if (!out.busy) return out.text;
-        if (tries < RETRY_ON_BUSY) await new Promise((r) => setTimeout(r, 2000 * (tries + 1)));
+        if (tries < RETRY_ON_BUSY) await new Promise((r) => setTimeout(r, out.waitMs * (tries + 1)));
       }
       throw new Error('gemini is busy — the model did not answer after three tries');
     },
