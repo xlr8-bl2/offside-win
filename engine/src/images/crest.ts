@@ -171,17 +171,21 @@ export function crestColor(px: Pixels): string | null {
  * Bounded per run, and a crest that cannot be read is recorded as tried
  * (an empty colour) so it is not fetched again every quarter of an hour.
  */
-export async function fillCrestColors({ limit = 40 } = {}): Promise<number> {
+export async function fillCrestColors({ limit = 250 } = {}): Promise<number> {
   const now = Math.floor(Date.now() / 1000);
+  // Soonest kick-off first, so the games people are opening today get their
+  // colours on the first run rather than whenever their turn comes round.
   const rows = await select<{ id: number | string }>(
-    `SELECT DISTINCT t.id FROM (
-       SELECT home_team_id AS id FROM fixture WHERE kickoff BETWEEN ? AND ?
-       UNION SELECT away_team_id FROM fixture WHERE kickoff BETWEEN ? AND ?
+    `SELECT t.id FROM (
+       SELECT home_team_id AS id, kickoff FROM fixture WHERE kickoff BETWEEN ? AND ?
+       UNION ALL SELECT away_team_id, kickoff FROM fixture WHERE kickoff BETWEEN ? AND ?
      ) t
      WHERE t.id IS NOT NULL
        AND NOT EXISTS (SELECT 1 FROM team_color c WHERE c.team_id = t.id)
+     GROUP BY t.id
+     ORDER BY min(abs(t.kickoff - ?))
      LIMIT ?`,
-    [now - 3 * 86400, now + 10 * 86400, now - 3 * 86400, now + 10 * 86400, limit],
+    [now - 3 * 86400, now + 10 * 86400, now - 3 * 86400, now + 10 * 86400, now, limit],
   );
   let done = 0;
   for (const { id } of rows) {
