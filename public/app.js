@@ -1300,7 +1300,7 @@ function rowHTML(f) {
                 ? `<span class="row-locked-mark">
                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>
                      Members</span>`
-                : `<span class="row-pass">Passed</span>`)
+                : `<span class="row-pass">No pick</span>`)
         : pick && p && track ? `
         ${trackHTML(track)}<span class="odds-book">at ${oddsOf(p.odds)}</span>`
         : pick && p ? `
@@ -1309,7 +1309,7 @@ function rowHTML(f) {
         : f.locked ? `<span class="row-locked-mark">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>
                         Members</span>`
-        : `<span class="row-pass">Passed</span>`}
+        : `<span class="row-pass">No pick</span>`}
     </div>
   </a>`;
 }
@@ -2971,7 +2971,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
 
   const callHead = verdicts.length
     ? (played ? 'What we called' : verdicts.length > 1 ? 'The calls' : 'The call')
-    : (played ? 'We did not call this one' : 'No call');
+    : (played ? 'We did not call this one' : 'No pick');
 
   /*
    * After the match the confirmed sheets in the report, with the bench and
