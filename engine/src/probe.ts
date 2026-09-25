@@ -402,6 +402,11 @@ export async function probeReport(): Promise<void> {
         const rows = (Array.isArray(vr?.['standings']) ? vr['standings'] : Array.isArray(v) ? v : []) as Record<string, unknown>[];
         console.log(`  group key ${JSON.stringify(k)}: name ${JSON.stringify(vr?.['name'] ?? null)}, ${rows.length} rows, other keys [${Object.keys(vr ?? {}).filter((x) => x !== 'standings').join(', ')}]`);
       }
+      console.log(`  zones: ${JSON.stringify(root['zones']).slice(0, 800)}`);
+      for (const [k, v] of Object.entries(groups)) {
+        const rows = (Array.isArray(v) ? v : []) as Record<string, unknown>[];
+        console.log(`  ${k}: positions ${rows.map((r) => r['position']).join(',')} | zones ${rows.map((r) => JSON.stringify(r['zone'])).join(',')} | played ${rows.map((r) => r['played']).join(',')}`);
+      }
       const any = Object.values(groups)[0] as Record<string, unknown>;
       const row = ((any?.['standings'] as unknown[]) ?? (any as unknown as unknown[]))?.[0];
       console.log(`  row fields: ${Object.keys((row as Record<string, unknown>) ?? {}).join(', ')}`);

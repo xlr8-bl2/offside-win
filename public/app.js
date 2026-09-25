@@ -3716,12 +3716,31 @@ async function viewLeague(id, params = new URLSearchParams()) {
       </table></div>`;
   const asOf = d.standings_at ? ` <span>as of ${esc(kickoffLabel(d.standings_at))}</span>` : '';
   const grouped = groups.size > 1 || (groups.size === 1 && !groups.has(''));
+  /*
+   * The provider files the Nations League's four tiers under one key per
+   * group number, so "Group 1" arrives as fifteen rows: League A's group 1,
+   * then B's, then C's, then D's, each numbered from 1 again. The restart
+   * is the only boundary in the data, so each run is drawn as its own table
+   * inside the group's panel. The tiers are not named, because the feed does
+   * not name them and a guessed label would be a made-up fact.
+   */
+  const runs = (list) => {
+    const out = [];
+    let prev = Infinity;
+    for (const r of list) {
+      const pos = Number(r.position) || 0;
+      if (!out.length || pos <= prev) out.push([]);
+      out[out.length - 1].push(r);
+      prev = pos;
+    }
+    return out;
+  };
   const tableHTML = !rows.length ? '' : grouped
-    ? `<div class="group-tables">${[...groups.entries()].map(([g, list]) => `
+    ? `<div class="group-tables">${[...groups.entries()].flatMap(([g, list]) => runs(list).map((run, i, all) => `
         <div class="panel">
-          <p class="panel-head">${esc(g ? (/^group\b/i.test(g) ? g : `Group ${g}`) : 'Table')}${asOf}</p>
-          ${oneTable(list)}
-        </div>`).join('')}</div>`
+          <p class="panel-head">${esc(g ? (/^group\b/i.test(g) ? g : `Group ${g}`) : 'Table')}${all.length > 1 ? ` <span>${i + 1} of ${all.length}</span>` : asOf}</p>
+          ${oneTable(run)}
+        </div>`)).join('')}</div>`
     : `<div class="panel"><p class="panel-head">The table${asOf}</p>${oneTable(rows)}</div>`;
 
   const scorers = Array.isArray(d.scorers) ? d.scorers.slice(0, 15) : [];
