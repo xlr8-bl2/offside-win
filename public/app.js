@@ -54,7 +54,7 @@ const oddsTag = (v) => `${dec(v)} odds`;
  * quick as the second page; every access is wrapped, because private modes
  * throw on it and the site has to work without it.
  */
-const CACHEABLE = /^\/api\/(board|hero|picks|slip|plans|fixture\/|league\/|health)/;
+const CACHEABLE = /^\/api\/(board|hero|picks|slip|plans|fixture\/|league\/|player\/|health)/;
 const FRESH_MS = 30_000;
 const KEEP_MS = 24 * 3600_000;
 const memo = new Map();
@@ -128,7 +128,7 @@ async function getJSON(path, { fresh = false } = {}) {
  * another. Only on the pages that are pure reads: a form half filled in is
  * not something to redraw under somebody.
  */
-const SOFT_ROUTES = new Set(['home', 'board', 'fixture', 'league', 'leagues', 'results', 'slip']);
+const SOFT_ROUTES = new Set(['home', 'board', 'fixture', 'league', 'leagues', 'results', 'slip', 'player']);
 let softTimer = null;
 function softRefresh() {
   clearTimeout(softTimer);
@@ -1970,7 +1970,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
   // rendered once by the caller, however many of these there are.
   if (!v.candidate) {
     return v.narrative
-      ? `<div class="verdict"><p class="narrative">${esc(v.narrative)}</p></div>`
+      ? `<div class="verdict"><p class="narrative">${(fixture?._link ?? ((h) => h))(esc(v.narrative))}</p></div>`
       : '';
   }
 
@@ -1990,6 +1990,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
   const templated = new RegExp(`\\b(?:at|priced)\\s+${dec(c.odds).replace('.', '\\.')}\\b`).test(String(v.narrative ?? ''));
   const prose = templated ? null : cleanProse(v.narrative, allowedFigures);
   const why = cleanProse(v.why ?? v.record?.why, allowedFigures);
+  const link = fixture?._link ?? ((h) => h);
   const p = localPrice(c.prices ?? [{ slug: '', book: c.bookmaker, odds: c.odds }]);
   const odds = p ? p.odds : c.odds;
   const d = market({
@@ -2032,8 +2033,8 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
       : `<p class="wins">${esc(d.wins)}</p>`}
     ${track ? `<p class="track-line">${trackHTML(track)} It is ${esc(track.score)} as things stand${
         track.on ? ', which is what we need.' : ', so this one still has work to do.'}</p>` : ''}
-    ${prose ? `<p class="narrative">${esc(prose)}</p>` : ''}
-    ${why ? `<div class="why"><p class="why-head">Why this call</p><p>${esc(why)}</p></div>` : ''}
+    ${prose ? `<p class="narrative">${link(esc(prose))}</p>` : ''}
+    ${why ? `<div class="why"><p class="why-head">Why this call</p><p>${link(esc(why))}</p></div>` : ''}
     ${played && (prose || why) ? `<p class="aside">Written before kick-off, and left as it was.</p>` : ''}
     <div class="verdict-meta">
       ${played
@@ -2074,7 +2075,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
  */
 const POSITION = { G: 'Goalkeeper', D: 'Defender', M: 'Midfielder', F: 'Forward' };
 
-function squadHTML(lineups, home, away, report = null) {
+function squadHTML(lineups, home, away, report = null, league = null) {
   const side = (label, s) => {
     const players = (s?.players ?? []).filter((x) => x?.name);
     if (!players.length) return '';
@@ -2092,7 +2093,7 @@ function squadHTML(lineups, home, away, report = null) {
       return `
           <div class="squad-row${x.starting === false ? ' bench' : ''}">
             ${crest(x.name, 'sm', x.id, 'player')}
-            <span class="name">${esc(x.name)}${x.captain ? ' <small>(c)</small>' : ''}</span>
+            <span class="name">${playerLink(x.id, x.name, league)}${x.captain ? ' <small>(c)</small>' : ''}</span>
             <span class="pos">${esc(POSITION[x.position] ?? x.position ?? '')}</span>
             <span class="no">${tail}</span>
           </div>`;
@@ -2145,7 +2146,7 @@ function surname(full) {
  * makes it read as a pitch rather than as a green panel, and they cost one
  * inline SVG.
  */
-function pitchHTML(lineups, home, away, homeId, awayId, report = null) {
+function pitchHTML(lineups, home, away, homeId, awayId, report = null, league = null) {
   if (!lineups?.home?.players?.length || !lineups?.away?.players?.length) return '';
 
   const rowsFor = (side) => {
@@ -2179,12 +2180,12 @@ function pitchHTML(lineups, home, away, homeId, awayId, report = null) {
   const player = (p, keyMan) => {
     const m = playerMarks(report, p.id);
     return `
-    <div class="pp${p.id === keyMan ? ' key' : ''}${m.rating != null ? ' rated' : ''}" title="${esc(p.name)}">
+    <a class="pp${p.id === keyMan ? ' key' : ''}${m.rating != null ? ' rated' : ''}" title="${esc(p.name)}" href="${esc(playerHref(p.id, league, p.name))}">
       ${crest(p.name, 'md', p.id, 'player')}
       ${m.rating != null ? `<b class="pp-rating ${ratingClass(m.rating)}">${Number(m.rating).toFixed(1)}</b>` : ''}
       ${m.html}
       <span class="pp-name">${esc(surname(p.name))}</span>
-    </div>`;
+    </a>`;
   };
 
   const sideHTML = (side, atTop) => {
@@ -2237,10 +2238,74 @@ function pitchHTML(lineups, home, away, homeId, awayId, report = null) {
 
     ${out.length
       ? `<div class="outlist"><b>Unavailable</b>${out.map((u) => `
-          <span class="also-call out-chip">${crest(u.name, 'sm', u.id, 'player')}<span class="out-name">${esc(u.name)}${
+          <span class="also-call out-chip">${crest(u.name, 'sm', u.id, 'player')}<span class="out-name">${playerLink(u.id, u.name, league)}${
             u.reason ? `<small>${esc(unshout(u.reason))}</small>` : ''}</span></span>`).join('')}</div>`
       : ''}
   </div>`;
+}
+
+// ---------------------------------------------------------- player links
+
+/** A player's page, carrying the competition the reader came from. */
+function playerHref(id, league = null, name = '') {
+  const q = new URLSearchParams();
+  if (league) q.set('league', league);
+  if (name) q.set('n', name);
+  const qs = q.toString();
+  return `#/player/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`;
+}
+const playerLink = (id, name, league, cls = 'plink') => (id
+  ? `<a class="${cls}" href="${esc(playerHref(id, league, name))}">${esc(name)}</a>`
+  : esc(name));
+
+/*
+ * Names in the analysis, as links.
+ *
+ * The write-up names players ("Haaland has been dangerous"), and every one
+ * of them is somebody the fixture knows: the team sheets, the squads, the
+ * absentees and the league's scorers travel with the bundle as `people`.
+ * This builds one pass that finds those names in already-escaped text and
+ * wraps the first mention of each in a link to the player's page. It
+ * matches full names, and surnames where only one player on the page has
+ * that surname, so "Haaland" links and a surname two players share does not.
+ * A name that is also part of a team's name is left alone. Anything it does
+ * not recognise stays plain text: a missing link is better than a wrong one.
+ */
+function playerLinker(f) {
+  const people = [];
+  const add = (id, name) => { if (Number.isFinite(Number(id)) && name && !String(name).startsWith('#')) people.push({ id: Number(id), name: String(name) }); };
+  for (const p of f?.people ?? []) add(p.id, p.name);
+  for (const side of ['home', 'away']) {
+    for (const p of f?.lineups?.[side]?.players ?? []) add(p.id, p.name);
+    for (const p of f?.report?.lineups?.[side]?.players ?? []) add(p.id, p.name);
+  }
+  for (const u of f?.lineups?.unavailable ?? []) add(u.id, u.name);
+  const teamWords = new Set([f?.home, f?.away].filter(Boolean)
+    .flatMap((t) => [t.toLowerCase(), ...t.toLowerCase().split(/\s+/)]));
+  const full = new Map();
+  const sur = new Map();
+  for (const p of people) {
+    if (!full.has(p.name)) full.set(p.name, p.id);
+    const sn = surname(p.name.replace(/^\p{L}\.\s+/u, ''));
+    if (sn.length < 4 || sn === p.name) continue;
+    const prev = sur.get(sn);
+    sur.set(sn, prev === undefined || prev === p.id ? p.id : null);
+  }
+  const aliases = [...full.entries(), ...[...sur.entries()].filter(([n, id]) => id !== null && !full.has(n))]
+    .filter(([n]) => n.length >= 4 && !teamWords.has(n.toLowerCase()));
+  if (!aliases.length) return (html) => html;
+  aliases.sort((a, b) => b[0].length - a[0].length);
+  const byEsc = new Map(aliases.map(([n, id]) => [esc(n), id]));
+  const pattern = [...byEsc.keys()].map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const re = new RegExp(`(?<![\\p{L}\\p{M}])(${pattern})(?![\\p{L}\\p{M}])`, 'gu');
+  const league = f?.league_id ?? null;
+  const done = new Set();
+  return (html) => html.replace(re, (m) => {
+    const id = byEsc.get(m);
+    if (done.has(id)) return m;
+    done.add(id);
+    return `<a class="plink" href="${esc(playerHref(id, league))}">${m}</a>`;
+  });
 }
 
 // ---------------------------------------------------------- match report
@@ -2331,15 +2396,15 @@ function reportHTML(f) {
   const line = (e) => {
     if (e.t === 'goal') {
       const kind = /own/i.test(e.kind ?? '') ? '<small>own goal</small>' : /pen/i.test(e.kind ?? '') ? '<small>penalty</small>' : '';
-      return `${/own/i.test(e.kind ?? '') ? EV_ICON.own : EV_ICON.goal}<b>${esc(e.player ?? 'Goal')}</b>${kind}${
-        e.assist ? `<small>assist ${esc(e.assist)}</small>` : ''}${
+      return `${/own/i.test(e.kind ?? '') ? EV_ICON.own : EV_ICON.goal}<b>${playerLink(e.player_id, e.player ?? 'Goal', f.league_id)}</b>${kind}${
+        e.assist ? `<small>assist ${(f._link ?? ((h) => h))(esc(e.assist))}</small>` : ''}${
         e.score ? `<em>${esc(e.score[0])}–${esc(e.score[1])}</em>` : ''}`;
     }
     if (e.t === 'card') {
-      return `${EV_ICON[e.card] ?? EV_ICON.yellow}<b>${esc(e.player ?? '')}</b>${
+      return `${EV_ICON[e.card] ?? EV_ICON.yellow}<b>${playerLink(e.player_id, e.player ?? '', f.league_id)}</b>${
         e.reason ? `<small>${esc(unshout(e.reason).toLowerCase())}</small>` : ''}`;
     }
-    return `${EV_ICON.sub}<b>${esc(e.in ?? '')}</b><small>for ${esc(e.out ?? '')}</small>`;
+    return `${EV_ICON.sub}<b>${playerLink(e.in_id, e.in ?? '', f.league_id)}</b><small>for ${playerLink(e.out_id, e.out ?? '', f.league_id)}</small>`;
   };
   const timeline = events.length ? `
     <div class="rep-heads"><span>${esc(f.home)}</span><span>${esc(f.away)}</span></div>
@@ -2817,6 +2882,8 @@ async function viewFixture(id, params = new URLSearchParams()) {
     : (Number.isInteger(f.score?.[0]) || String(f.status) === 'finished')
       ? []
       : (f.verdicts ?? []);
+  // Player names in everything below become links. See playerLinker.
+  f._link = playerLinker(f);
   // What the page argues with: built from the match, names first. See storyFor.
   const story = storyFor(f);
   const reads = story.slice(0, 6);
@@ -2892,11 +2959,11 @@ async function viewFixture(id, params = new URLSearchParams()) {
         </div>
         ${reads.length ? `<div class="panel">
           <p class="panel-head">${verdicts.length ? (played ? 'What made us call it' : 'What made the call') : 'What stood out'}</p>
-          <div class="reads">${reads.map((r) => `<div class="read"><b>${esc(r.label)}</b><p>${esc(r.note)}</p></div>`).join('')}</div>
+          <div class="reads">${reads.map((r) => `<div class="read"><b>${esc(r.label)}</b><p>${f._link(esc(r.note))}</p></div>`).join('')}</div>
           ${rest.length ? `
             <details class="more-reads">
               <summary>${rest.length} other thing${rest.length === 1 ? '' : 's'} we checked</summary>
-              <div class="reads">${rest.map((r) => `<div class="read"><b>${esc(r.label)}</b><p>${esc(r.note)}</p></div>`).join('')}</div>
+              <div class="reads">${rest.map((r) => `<div class="read"><b>${esc(r.label)}</b><p>${f._link(esc(r.note))}</p></div>`).join('')}</div>
             </details>` : ''}
         </div>` : ''}
       </div>
@@ -2931,8 +2998,8 @@ async function viewFixture(id, params = new URLSearchParams()) {
   const TABS = [
     ['overview', 'Overview', overview],
     ['lineups', 'Line-ups',
-      pitchHTML(sheet, f.home, f.away, f.home_id, f.away_id, report)
-      + squadHTML(sheet, f.home, f.away, report)],
+      pitchHTML(sheet, f.home, f.away, f.home_id, f.away_id, report, f.league_id)
+      + squadHTML(sheet, f.home, f.away, report, f.league_id)],
     ['h2h', 'Head to head', h2hHTML(f.h2h, f.home, f.away)],
     ['table', 'Table', standingsHTML(f.standings, f.home, f.away, f.home_id, f.away_id)],
   ].filter(([, , html]) => html);
@@ -3756,7 +3823,7 @@ async function viewLeague(id, params = new URLSearchParams()) {
       <ol class="scorer-list">${scorers.map((s) => `
         <li>
           ${crest(s.name, 'sm', s.player_id, 'player')}
-          <span class="scorer-name">${esc(s.name)}${s.team_name ? `<small>${esc(s.team_name)}</small>` : ''}</span>
+          <span class="scorer-name">${playerLink(s.player_id, s.name, lg.id)}${s.team_name ? `<small>${esc(s.team_name)}</small>` : ''}</span>
           <b>${esc(s.goals)}</b>${s.assists ? `<small>${esc(s.assists)} assist${s.assists === 1 ? '' : 's'}</small>` : ''}
         </li>`).join('')}</ol>
     </div>` : '';
@@ -3818,6 +3885,130 @@ async function viewLeague(id, params = new URLSearchParams()) {
       history.replaceState(null, '', `${location.pathname}#/league/${encodeURIComponent(id)}${q}`);
     };
   }
+}
+
+// ----------------------------------------------------------------- player
+
+/**
+ * A player's page, reached from a name in the analysis.
+ *
+ * What we hold on them, put where a reader looks first: where they stand in
+ * the competition they were mentioned in (their goals, their place in its
+ * scoring chart, the chart itself with them in it), how they played in the
+ * matches we have reports for, and when their team plays next. The chart is
+ * the point of the page for the brief it came from: a reader who follows
+ * "Haaland has been dangerous" lands on the proof.
+ */
+async function viewPlayer(id, params = new URLSearchParams()) {
+  placeholder(skeletonHTML());
+  const league = Number(params.get('league')) || null;
+  let d;
+  try { d = await getJSON(`/api/player/${encodeURIComponent(id)}${league ? `?league=${league}` : ''}`); }
+  catch (err) { return errorState(err); }
+  const name = d?.name || params.get('n') || 'Player';
+  const lead = d?.lead_league ?? null;
+  const comp = (d?.competitions ?? []).find((c) => Number(c.league_id) === Number(lead?.id)) ?? d?.competitions?.[0] ?? null;
+  const matches = Array.isArray(d?.matches) ? d.matches : [];
+  const rated = matches.filter((m) => typeof m.rating === 'number');
+  const avg = rated.length ? rated.reduce((t, m) => t + Number(m.rating), 0) / rated.length : null;
+  const goalsSeen = matches.reduce((t, m) => t + (Number(m.goals) || 0), 0);
+  const assistsSeen = matches.reduce((t, m) => t + (Number(m.assists) || 0), 0);
+
+  // The figures, as the today strip draws them: each one a count a fan says.
+  const cells = [];
+  const cell = (n, label, cls = '', href = '') => `${href ? `<a class="stat${cls ? ` ${cls}` : ''}" href="${href}">` : `<div class="stat${cls ? ` ${cls}` : ''}">`}<b>${esc(n)}</b><span>${esc(label)}</span>${href ? '</a>' : '</div>'}`;
+  if (comp) {
+    cells.push(cell(comp.goals ?? 0, `goals in the ${comp.league ?? 'competition'}`, 'won', `#/league/${encodeURIComponent(comp.league_id)}?tab=scorers`));
+    cells.push(cell(ordinal(comp.rank), 'in its scoring chart', 'run', `#/league/${encodeURIComponent(comp.league_id)}?tab=scorers`));
+    if (comp.assists) cells.push(cell(comp.assists, comp.assists === 1 ? 'assist' : 'assists'));
+  }
+  if (matches.length) cells.push(cell(matches.length, matches.length === 1 ? 'match we covered' : 'matches we covered'));
+  if (avg !== null) cells.push(cell(avg.toFixed(1), 'average rating', avg >= 7 ? 'won' : ''));
+  if (!comp && (goalsSeen || assistsSeen)) cells.push(cell(goalsSeen, goalsSeen === 1 ? 'goal in those' : 'goals in those', 'won'));
+
+  // The competition's chart, with this player in it.
+  const chart = Array.isArray(d?.lead_scorers) ? d.lead_scorers.slice(0, 10) : [];
+  const inChart = chart.some((r) => Number(r.player_id) === Number(id));
+  const chartHTML = chart.length ? `
+    <div class="panel">
+      <p class="panel-head">Top scorers${lead?.name ? `, ${esc(lead.name)}` : ''} ${lead?.id ? `<a href="#/league/${encodeURIComponent(lead.id)}?tab=scorers">The full list</a>` : ''}</p>
+      <ol class="scorer-list">${chart.map((r) => `
+        <li class="${Number(r.player_id) === Number(id) ? 'is-me' : ''}">
+          ${crest(r.name, 'sm', r.player_id, 'player')}
+          <span class="scorer-name">${playerLink(r.player_id, r.name, lead?.id)}${r.team_name ? `<small>${esc(r.team_name)}</small>` : ''}</span>
+          <b>${esc(r.goals)}</b>${r.assists ? `<small>${esc(r.assists)} assist${r.assists === 1 ? '' : 's'}</small>` : ''}
+        </li>`).join('')}</ol>
+      ${!inChart && comp ? `<p class="muted small">${esc(name)} is ${esc(ordinal(comp.rank))} on the list, with ${esc(comp.goals)}.</p>` : ''}
+    </div>` : '';
+
+  const matchesHTML = matches.length ? `
+    <div class="panel">
+      <p class="panel-head">Recent matches</p>
+      <div class="pl-matches">${matches.map((m) => {
+        const sc = Array.isArray(m.score) ? m.score : null;
+        const bits = [];
+        for (let i = 0; i < (Number(m.goals) || 0); i++) bits.push(EV_ICON.goal);
+        if (m.assists) bits.push(`<i class="pp-assist">${m.assists > 1 ? m.assists : ''}A</i>`);
+        if (m.red) bits.push(EV_ICON.red); else if (m.yellow) bits.push(EV_ICON.yellow);
+        return `
+        <a class="pl-match" href="#/fixture/${encodeURIComponent(m.fixture_id)}">
+          <span class="pl-when">${esc(dayLabel(m.kickoff))}<small>${esc(m.league ?? '')}</small></span>
+          <span class="pl-tie">${crest(m.home, 'xs', m.home_id)}${esc(m.home)} <b>${sc ? `${esc(sc[0])}–${esc(sc[1])}` : 'v'}</b> ${esc(m.away)}${crest(m.away, 'xs', m.away_id)}</span>
+          <span class="pl-did">${bits.join('')}${m.minutes != null ? `<small>${esc(m.minutes)}'</small>` : ''}${
+            typeof m.rating === 'number' ? `<b class="rating ${ratingClass(m.rating)}">${Number(m.rating).toFixed(1)}</b>` : ''}</span>
+        </a>`;
+      }).join('')}</div>
+    </div>` : '';
+
+  const next = Array.isArray(d?.next) ? d.next : [];
+  const nextHTML = next.length ? `
+    <div class="panel">
+      <p class="panel-head">Next up</p>
+      <div class="side-list">${next.map((n) => `
+        <a class="side-item" href="#/fixture/${encodeURIComponent(n.fixture_id)}">
+          <span class="side-thumb">${crest(n.home, 'sm', n.home_id)}${crest(n.away, 'sm', n.away_id)}</span>
+          <span class="side-body"><span class="side-sel">${esc(n.home)} v ${esc(n.away)}</span>
+            <span class="side-meta">${esc(kickoffLabel(n.kickoff))}${n.league ? `, ${esc(n.league)}` : ''}</span></span>
+        </a>`).join('')}</div>
+    </div>` : '';
+
+  const others = (d?.competitions ?? []).filter((c) => c !== comp);
+  const othersHTML = others.length ? `
+    <div class="panel">
+      <p class="panel-head">In other competitions</p>
+      <div class="side-list">${others.map((c) => `
+        <a class="side-item" href="#/league/${encodeURIComponent(c.league_id)}?tab=scorers">
+          <span class="side-body"><span class="side-sel">${esc(c.league ?? 'Competition')}</span>
+          <span class="side-meta">${esc(c.goals)} goal${c.goals === 1 ? '' : 's'}, ${esc(ordinal(c.rank))} in the chart</span></span>
+        </a>`).join('')}</div>
+    </div>` : '';
+
+  const meta = [
+    POSITION[d?.position] ?? null,
+    d?.number ? `No. ${d.number}` : null,
+    d?.team?.name ?? null,
+  ].filter(Boolean);
+  const empty = !cells.length && !chart.length && !matches.length && !next.length;
+
+  app.innerHTML = `
+  <div class="wrap section dense">
+    <div class="page-head player-head">
+      <span class="player-face">${crest(name, 'md', id, 'player')}</span>
+      <div>
+        <h1 class="display xl">${esc(name)}</h1>
+        ${meta.length ? `<p class="page-sub">${d?.team?.id ? `${crest(d.team.name ?? '', 'xs', d.team.id)} ` : ''}${esc(meta.join(', '))}</p>` : ''}
+      </div>
+    </div>
+    ${cells.length ? `<section class="today-strip player-strip" aria-label="${esc(name)} in figures">${cells.join('')}</section>` : ''}
+    ${empty ? `<div class="empty-state"><b>Not much on ${esc(name)} yet</b>
+        <span>We build this page from the scoring charts and the match reports we hold. Once
+        ${esc(name)} scores in a competition we cover, or plays in a match we report on, it fills in.</span>
+        ${league ? `<a class="btn btn-primary" href="#/league/${encodeURIComponent(league)}">The competition</a>` : ''}</div>` : `
+    <div class="with-side player-body">
+      <div class="stack">${chartHTML}${matchesHTML}</div>
+      <aside class="home-side">${nextHTML}${othersHTML}</aside>
+    </div>`}
+  </div>`;
 }
 
 // ------------------------------------------------- membership: the pages
@@ -4867,6 +5058,7 @@ async function render(name, parts, params) {
   {
     if (name === 'fixture' && parts[1]) return await viewFixture(parts[1], params);
     if (name === 'league' && parts[1]) return await viewLeague(parts[1], params);
+    if (name === 'player' && parts[1]) return await viewPlayer(parts[1], params);
     if (name === 'board') return await viewBoard(params);
     if (name === 'leagues') return await viewLeagues();
     if (name === 'results') return await viewResults();
