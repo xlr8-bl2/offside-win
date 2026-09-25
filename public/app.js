@@ -254,7 +254,7 @@ function crest(name, size = 'md', id = null, type = 'team') {
   if (id === null || id === undefined || !Number.isFinite(Number(id))) {
     return `<span class="crest crest-${size} noimg" style="${vars}" aria-hidden="true"><i>${esc(text)}</i></span>`;
   }
-  return `<span class="crest crest-${size}" style="${vars}" aria-hidden="true"
+  return `<span class="crest crest-${size}${type === 'player' ? ' crest-player' : ''}" style="${vars}" aria-hidden="true"
     ><img src="${IMG_BASE}/${esc(type)}/${encodeURIComponent(id)}/" alt="" loading="lazy" decoding="async"
       onerror="this.closest('.crest').classList.add('noimg');this.remove()"
     ><i>${esc(text)}</i></span>`;
@@ -2180,12 +2180,12 @@ function pitchHTML(lineups, home, away, homeId, awayId, report = null, league = 
   const player = (p, keyMan) => {
     const m = playerMarks(report, p.id);
     return `
-    <a class="pp${p.id === keyMan ? ' key' : ''}${m.rating != null ? ' rated' : ''}" title="${esc(p.name)}" href="${esc(playerHref(p.id, league, p.name))}">
+    <${isNotable(p.id) && league ? `a href="${esc(playerHref(p.id, league))}"` : 'div'} class="pp${p.id === keyMan ? ' key' : ''}${m.rating != null ? ' rated' : ''}${isNotable(p.id) ? ' notable' : ''}" title="${esc(p.name)}">
       ${crest(p.name, 'md', p.id, 'player')}
       ${m.rating != null ? `<b class="pp-rating ${ratingClass(m.rating)}">${Number(m.rating).toFixed(1)}</b>` : ''}
       ${m.html}
       <span class="pp-name">${esc(surname(p.name))}</span>
-    </a>`;
+    </${isNotable(p.id) && league ? 'a' : 'div'}>`;
   };
 
   const sideHTML = (side, atTop) => {
@@ -2246,16 +2246,42 @@ function pitchHTML(lineups, home, away, homeId, awayId, report = null, league = 
 
 // ---------------------------------------------------------- player links
 
-/** A player's page, carrying the competition the reader came from. */
-function playerHref(id, league = null, name = '') {
-  const q = new URLSearchParams();
-  if (league) q.set('league', league);
-  if (name) q.set('n', name);
-  const qs = q.toString();
-  return `#/player/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`;
+/*
+ * Only players worth a click get a link: the ones in the scoring chart of the
+ * competition the match is in (`notable` on the bundle, set per page in
+ * state.notable). The link opens that chart with their name highlighted and
+ * scrolled into view, so following "Haaland" lands on Haaland at the top of
+ * the Nations League scorers, not on a page about a squad player with
+ * nothing to show.
+ */
+function playerHref(id, league = null) {
+  return league
+    ? `#/league/${encodeURIComponent(league)}?tab=scorers&p=${encodeURIComponent(id)}`
+    : `#/player/${encodeURIComponent(id)}`;
 }
-const playerLink = (id, name, league, cls = 'plink') => (id
-  ? `<a class="${cls}" href="${esc(playerHref(id, league, name))}">${esc(name)}</a>`
+const isNotable = (id) => Boolean(id && state.notable?.has(Number(id)));
+/*
+ * Who counts as remarkable: the top of the chart, not all of it. Two goals or
+ * more and a top-ten place, with level scorers sharing a rank. Early in a
+ * competition that is one or two names; a scorer of one in fifteenth is not
+ * someone a reader is looking for.
+ */
+function remarkable(scorers) {
+  const rows = (scorers ?? []).map((sc) => ({ id: Number(sc.id ?? sc.player_id), name: sc.name, goals: Number(sc.goals) || 0 }));
+  return rows
+    .map((r) => ({ ...r, rank: 1 + rows.filter((o) => o.goals > r.goals).length }))
+    .filter((r) => r.id && r.goals >= 2 && r.rank <= 10);
+}
+// The rank printed beside a chart row: shared between level scorers, and
+// only on the first of them, the way a league table prints it.
+const chartRank = (rows, i) => {
+  const g = Number(rows[i]?.goals) || 0;
+  if (i > 0 && (Number(rows[i - 1]?.goals) || 0) === g) return '';
+  return String(1 + rows.filter((o) => (Number(o.goals) || 0) > g).length);
+};
+const chartLine = (n) => `${n.goals} goal${n.goals === 1 ? '' : 's'}, ${n.rank === 1 ? 'top of' : `${ordinal(n.rank)} in`} the scoring chart`;
+const playerLink = (id, name, league, cls = 'plink') => (isNotable(id) && league
+  ? `<a class="${cls}" href="${esc(playerHref(id, league))}" title="${esc(name)}: ${esc(chartLine(state.notable.get(Number(id))))}">${esc(name)}</a>`
   : esc(name));
 
 /*
@@ -2282,9 +2308,11 @@ function playerLinker(f) {
   for (const u of f?.lineups?.unavailable ?? []) add(u.id, u.name);
   const teamWords = new Set([f?.home, f?.away].filter(Boolean)
     .flatMap((t) => [t.toLowerCase(), ...t.toLowerCase().split(/\s+/)]));
+  // Only the competition's scorers; everyone else stays plain text.
+  const notable = state.notable ?? new Map();
   const full = new Map();
   const sur = new Map();
-  for (const p of people) {
+  for (const p of people.filter((x) => notable.has(x.id))) {
     if (!full.has(p.name)) full.set(p.name, p.id);
     const sn = surname(p.name.replace(/^\p{L}\.\s+/u, ''));
     if (sn.length < 4 || sn === p.name) continue;
@@ -2882,7 +2910,19 @@ async function viewFixture(id, params = new URLSearchParams()) {
     : (Number.isInteger(f.score?.[0]) || String(f.status) === 'finished')
       ? []
       : (f.verdicts ?? []);
-  // Player names in everything below become links. See playerLinker.
+  // Player names in everything below become links, for the competition's
+  // scorers only. Bundles written before the chart travelled with them fetch
+  // it from the league (usually already in the cache).
+  let notable = Array.isArray(f.notable) ? remarkable(f.notable) : null;
+  if (!notable && f.league_id) {
+    try {
+      const lg = await getJSON(`/api/league/${encodeURIComponent(f.league_id)}`);
+      notable = remarkable(lg?.scorers);
+    } catch { notable = []; }
+  }
+  state.notable = new Map((notable ?? []).map((n) => [Number(n.id), n]));
+  // A chart player's own name, so a name the sheet spells in full still matches.
+  f.people = [...(f.people ?? []), ...(notable ?? []).map((n) => ({ id: n.id, name: n.name }))];
   f._link = playerLinker(f);
   // What the page argues with: built from the match, names first. See storyFor.
   const story = storyFor(f);
@@ -3820,10 +3860,10 @@ async function viewLeague(id, params = new URLSearchParams()) {
   const scorersHTML = scorers.length ? `
     <div class="panel">
       <p class="panel-head">Top scorers</p>
-      <ol class="scorer-list">${scorers.map((s) => `
-        <li>
+      <ol class="scorer-list">${scorers.map((s, i) => `
+        <li data-player="${esc(s.player_id)}" data-rank="${chartRank(scorers, i)}">
           ${crest(s.name, 'sm', s.player_id, 'player')}
-          <span class="scorer-name">${playerLink(s.player_id, s.name, lg.id)}${s.team_name ? `<small>${esc(s.team_name)}</small>` : ''}</span>
+          <span class="scorer-name">${esc(s.name)}${s.team_name ? `<small>${esc(s.team_name)}</small>` : ''}</span>
           <b>${esc(s.goals)}</b>${s.assists ? `<small>${esc(s.assists)} assist${s.assists === 1 ? '' : 's'}</small>` : ''}
         </li>`).join('')}</ol>
     </div>` : '';
@@ -3872,6 +3912,14 @@ async function viewLeague(id, params = new URLSearchParams()) {
          <span>The table and the games fill in once the board has covered this competition.</span>
          <a class="btn btn-primary" href="#/leagues">Every competition</a></div>`}
   </div>`;
+
+  // Arrived from a name in the analysis: that player, highlighted, in view.
+  const wanted = params.get('p');
+  const row = wanted ? app.querySelector(`.scorer-list li[data-player="${CSS.escape(wanted)}"]`) : null;
+  if (row) {
+    row.classList.add('is-me', 'flash');
+    state.scrollTarget = row;
+  }
 
   for (const t of app.querySelectorAll('.tab')) {
     t.onclick = () => {
@@ -3932,13 +3980,13 @@ async function viewPlayer(id, params = new URLSearchParams()) {
   const chartHTML = chart.length ? `
     <div class="panel">
       <p class="panel-head">Top scorers${lead?.name ? `, ${esc(lead.name)}` : ''} ${lead?.id ? `<a href="#/league/${encodeURIComponent(lead.id)}?tab=scorers">The full list</a>` : ''}</p>
-      <ol class="scorer-list">${chart.map((r) => `
-        <li class="${Number(r.player_id) === Number(id) ? 'is-me' : ''}">
+      <ol class="scorer-list">${chart.map((r, i) => `
+        <li class="${Number(r.player_id) === Number(id) ? 'is-me' : ''}" data-rank="${chartRank(chart, i)}">
           ${crest(r.name, 'sm', r.player_id, 'player')}
           <span class="scorer-name">${playerLink(r.player_id, r.name, lead?.id)}${r.team_name ? `<small>${esc(r.team_name)}</small>` : ''}</span>
           <b>${esc(r.goals)}</b>${r.assists ? `<small>${esc(r.assists)} assist${r.assists === 1 ? '' : 's'}</small>` : ''}
         </li>`).join('')}</ol>
-      ${!inChart && comp ? `<p class="muted small">${esc(name)} is ${esc(ordinal(comp.rank))} on the list, with ${esc(comp.goals)}.</p>` : ''}
+      ${!inChart && comp ? `<p class="muted small">${esc(name)} is ${esc(ordinal(comp.rank))} on the list, with ${esc(comp.goals)} goal${comp.goals === 1 ? '' : 's'}.</p>` : ''}
     </div>` : '';
 
   const matchesHTML = matches.length ? `
@@ -3996,6 +4044,7 @@ async function viewPlayer(id, params = new URLSearchParams()) {
       <span class="player-face">${crest(name, 'md', id, 'player')}</span>
       <div>
         <h1 class="display xl">${esc(name)}</h1>
+        ${comp ? `<p class="player-line">${esc(comp.goals)} goal${comp.goals === 1 ? '' : 's'} in the ${esc(comp.league ?? 'competition')}, ${comp.rank === 1 ? 'top of' : `${esc(ordinal(comp.rank))} in`} its scoring chart</p>` : ''}
         ${meta.length ? `<p class="page-sub">${d?.team?.id ? `${crest(d.team.name ?? '', 'xs', d.team.id)} ` : ''}${esc(meta.join(', '))}</p>` : ''}
       </div>
     </div>
@@ -5019,8 +5068,12 @@ async function route({ soft = false } = {}) {
     state.soft = false;
     smartQuotes(app);
     // After the content is in, so the position is measured against the real
-    // page rather than a skeleton.
-    window.scrollTo(0, soft ? keepY : (backTo ?? 0));
+    // page rather than a skeleton. A view that asked for an element in view
+    // (a highlighted scorer) gets it, centred.
+    const target = state.scrollTarget;
+    state.scrollTarget = null;
+    if (target && !soft && backTo === undefined) target.scrollIntoView({ block: 'center' });
+    else window.scrollTo(0, soft ? keepY : (backTo ?? 0));
   }
 }
 
