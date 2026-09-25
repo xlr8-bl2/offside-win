@@ -38,3 +38,14 @@ test('a table with no points is not silently reported as all-square', () => {
   const rows = parseStandings(real)!;
   assert.ok(rows.some((r) => r.points > 0), 'points should not all be zero');
 });
+
+test('a group stage keeps each row in its group', async () => {
+  const { parseStandings } = await import('../src/context/gather.ts');
+  const rows = parseStandings({ groups: {
+    'Group 2': { standings: [{ team_id: 3, position: 1, pts: 6 }, { team_id: 4, position: 2, pts: 3 }] },
+    'Group 1': { standings: [{ team_id: 1, position: 1, pts: 4 }, { team_id: 2, position: 2, pts: 1 }] },
+  } });
+  assert.ok(rows);
+  assert.deepEqual(rows.map((r) => [r.group, r.position, r.team_id]),
+    [['Group 1', 1, 1], ['Group 1', 2, 2], ['Group 2', 1, 3], ['Group 2', 2, 4]]);
+});

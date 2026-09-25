@@ -3693,19 +3693,36 @@ async function viewLeague(id, params = new URLSearchParams()) {
   const cell = (r, k) => k === 'goal_diff'
     ? `${r.goal_diff > 0 ? '+' : ''}${r.goal_diff ?? ''}`
     : k === 'points' ? `<b>${r.points ?? ''}</b>` : String(r[k] ?? '');
-  const tableHTML = rows.length ? `
-    <div class="panel">
-      <p class="panel-head">The table${d.standings_at ? ` <span>as of ${esc(kickoffLabel(d.standings_at))}</span>` : ''}</p>
+  /*
+   * A competition played in groups is one table per group. Drawn as one
+   * table it listed four teams in first place, four in second and so on,
+   * which is not a table of anything.
+   */
+  const groups = new Map();
+  for (const r of rows) {
+    const g = r.group ?? '';
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(r);
+  }
+  const oneTable = (list) => `
       <div class="scroll-x"><table class="tbl standings">
         <thead><tr><th>#</th><th>Team</th>${cols.map(([, h]) => `<th class="num">${h}</th>`).join('')}</tr></thead>
-        <tbody>${rows.map((r) => `
+        <tbody>${list.map((r) => `
           <tr>
             <td class="num">${esc(r.position ?? '')}</td>
             <td class="team">${crest(r.team ?? '', 'sm', r.team_id)}<span>${esc(r.team ?? `Team ${r.team_id}`)}</span></td>
             ${cols.map(([k]) => `<td class="num">${cell(r, k)}</td>`).join('')}
           </tr>`).join('')}</tbody>
-      </table></div>
-    </div>` : '';
+      </table></div>`;
+  const asOf = d.standings_at ? ` <span>as of ${esc(kickoffLabel(d.standings_at))}</span>` : '';
+  const grouped = groups.size > 1 || (groups.size === 1 && !groups.has(''));
+  const tableHTML = !rows.length ? '' : grouped
+    ? `<div class="group-tables">${[...groups.entries()].map(([g, list]) => `
+        <div class="panel">
+          <p class="panel-head">${esc(g ? (/^group\b/i.test(g) ? g : `Group ${g}`) : 'Table')}${asOf}</p>
+          ${oneTable(list)}
+        </div>`).join('')}</div>`
+    : `<div class="panel"><p class="panel-head">The table${asOf}</p>${oneTable(rows)}</div>`;
 
   const scorers = Array.isArray(d.scorers) ? d.scorers.slice(0, 15) : [];
   const scorersHTML = scorers.length ? `
