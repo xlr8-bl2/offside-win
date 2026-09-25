@@ -37,14 +37,103 @@ const oddsTag = (v) => `${dec(v)} odds`;
  * never throws: a failure to attach a token produces an anonymous request,
  * which is a page that loads rather than a page that does not.
  */
-async function getJSON(path) {
-  const res = await fetch(path, { headers: await authHeaders() });
+/*
+ * The last copy of every read, so a page opens on what the reader saw last
+ * time rather than on "Loading…".
+ *
+ * Stale-while-revalidate, by hand. A copy younger than half a minute is
+ * served as it is. An older one (up to a day) is served at once and fetched
+ * again behind it; when the fresh copy differs, the page redraws in place,
+ * at the same scroll position (see softRefresh). A cold cache is the only
+ * time a reader waits on the network, and then they see a skeleton of the
+ * page rather than a word.
+ *
+ * Keyed by whether the request carried a token, so a member's copy is never
+ * handed to the signed-out view of the same browser and the other way
+ * round. Stored in localStorage as well as memory so the second visit is as
+ * quick as the second page; every access is wrapped, because private modes
+ * throw on it and the site has to work without it.
+ */
+const CACHEABLE = /^\/api\/(board|hero|picks|slip|plans|fixture\/|league\/|health)/;
+const FRESH_MS = 30_000;
+const KEEP_MS = 24 * 3600_000;
+const memo = new Map();
+const cacheKey = (scope, path) => `ow.c1:${scope}:${path}`;
+function cacheRead(key) {
+  if (memo.has(key)) return memo.get(key);
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const hit = JSON.parse(raw);
+    memo.set(key, hit);
+    return hit;
+  } catch { return null; }
+}
+function cacheWrite(key, text) {
+  const hit = { at: Date.now(), text };
+  memo.set(key, hit);
+  try { localStorage.setItem(key, JSON.stringify(hit)); }
+  catch {
+    // Full. Drop every stored copy and try once more; a cache is disposable.
+    try {
+      for (const k of Object.keys(localStorage)) if (k.startsWith('ow.c1:')) localStorage.removeItem(k);
+      localStorage.setItem(key, JSON.stringify(hit));
+    } catch { /* memory only, then */ }
+  }
+}
+/** Forget every cached read, for a sign-in or sign-out. */
+function cacheClear() {
+  memo.clear();
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith('ow.c1:')) localStorage.removeItem(k); } catch { /* nothing to clear */ }
+}
+
+async function fetchText(path, headers) {
+  const res = await fetch(path, { headers });
+  const text = await res.text();
   if (!res.ok) {
     let msg = 'Something went wrong loading this.';
-    try { msg = (await res.json()).error ?? msg; } catch { /* body was not json */ }
+    try { msg = JSON.parse(text).error ?? msg; } catch { /* body was not json */ }
     throw new Error(msg);
   }
-  return res.json();
+  return text;
+}
+
+async function getJSON(path, { fresh = false } = {}) {
+  const headers = await authHeaders();
+  if (!CACHEABLE.test(path)) return JSON.parse(await fetchText(path, headers));
+
+  const key = cacheKey(headers.authorization ? 'auth' : 'anon', path);
+  const hit = fresh ? null : cacheRead(key);
+  const age = hit ? Date.now() - hit.at : Infinity;
+  if (hit && age < FRESH_MS) return JSON.parse(hit.text);
+  if (hit && age < KEEP_MS) {
+    // Serve the old copy now; fetch the new one behind it.
+    fetchText(path, headers).then((text) => {
+      cacheWrite(key, text);
+      if (text !== hit.text) softRefresh();
+    }).catch(() => { /* the old copy stays up */ });
+    return JSON.parse(hit.text);
+  }
+  const text = await fetchText(path, headers);
+  cacheWrite(key, text);
+  return JSON.parse(text);
+}
+
+/*
+ * Redraw the current page with the data that has just arrived, without
+ * moving the reader. Debounced, because a page's reads come back one after
+ * another. Only on the pages that are pure reads: a form half filled in is
+ * not something to redraw under somebody.
+ */
+const SOFT_ROUTES = new Set(['home', 'board', 'fixture', 'league', 'leagues', 'results', 'slip']);
+let softTimer = null;
+function softRefresh() {
+  clearTimeout(softTimer);
+  softTimer = setTimeout(() => {
+    const name = parseHash().parts[0] || 'home';
+    if (!SOFT_ROUTES.has(name) || document.hidden) return;
+    route({ soft: true });
+  }, 250);
 }
 
 function kickoffLabel(epoch) {
@@ -302,6 +391,18 @@ function boardHash(hours = state.hours, league = state.leagueName) {
  */
 const hasCall = (f) => Boolean(f?.top_pick || f?.locked);
 
+/*
+ * The shape of a page before its data arrives: a title bar and rows, in the
+ * page's own surfaces. A cold first visit is the only time anyone sees it.
+ */
+function skeletonHTML(kind = 'page') {
+  const rows = '<div class="skeleton skeleton-row"></div>'.repeat(kind === 'rows' ? 6 : 4);
+  return `<div class="wrap section dense" aria-busy="true" aria-label="Loading">
+    ${kind === 'rows' ? '' : '<div class="skeleton skeleton-title"></div><div class="skeleton skeleton-line"></div>'}
+    <div class="rows skeleton-rows">${rows}</div>
+  </div>`;
+}
+
 /**
  * How a call is doing while the match is on.
  *
@@ -322,8 +423,8 @@ function liveTrack(pick, f) {
 }
 const trackHTML = (t) => (t ? `<span class="track ${t.on ? 'on' : 'off'}"><i></i>${t.on ? 'On track' : 'Not yet'}</span>` : '');
 
-async function loadBoard() {
-  state.board = await getJSON(`/api/board?hours=${state.hours}`);
+async function loadBoard({ fresh = false } = {}) {
+  state.board = await getJSON(`/api/board?hours=${state.hours}`, { fresh });
   /*
    * A played match's call is whatever the record says it was.
    *
@@ -813,7 +914,7 @@ function tickerHTML(fixtures, recent) {
 
 /** The slip, and every settled slip before it. */
 async function viewSlip() {
-  app.innerHTML = '<div class="wrap section narrow"><div class="spinner">Loading…</div></div>';
+  placeholder(skeletonHTML());
   let data;
   let board = null;
   // The board rides along so each leg can show how its match stands.
@@ -1213,7 +1314,12 @@ function spread(fixtures, limit) {
 }
 
 async function viewHome() {
-  app.innerHTML = heroHTML(state.hero, state.heroVenue) + '<div class="spinner">Loading the board…</div>';
+  placeholder(heroHTML(state.hero, state.heroVenue) + skeletonHTML('rows'));
+  // Everything the page needs, asked for at once. They used to go in three
+  // rounds -- board and masthead, then the masthead's bundle, then the record
+  // and the slip -- so a cold visit waited on three trips instead of one.
+  const picksReq = getJSON('/api/picks?limit=40&settled=true').then((r) => r.picks ?? []).catch(() => []);
+  const slipReq = getJSON('/api/slip').catch(() => null);
   let board;
   try {
     [board, state.hero] = await Promise.all([
@@ -1237,10 +1343,7 @@ async function viewHome() {
   let recent = [];
   let slip = null;
   // Both optional: a page with no slip and no record still has a board on it.
-  [recent, slip] = await Promise.all([
-    getJSON('/api/picks?limit=40&settled=true').then((r) => r.picks ?? []).catch(() => []),
-    getJSON('/api/slip').catch(() => null),
-  ]);
+  [recent, slip] = await Promise.all([picksReq, slipReq]);
   const settled = recent.filter((x) => x.result && x.result !== 'VOID');
   const won = settled.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
   const lost = settled.filter((x) => x.result === 'LOST' || x.result === 'HALF_LOST').length;
@@ -1298,9 +1401,9 @@ async function viewHome() {
     if (document.hidden || !busy()) return;
     try {
       const [fresh, picks, slipNow] = await Promise.all([
-        loadBoard(),
-        getJSON('/api/picks?limit=40&settled=true').then((r) => r.picks ?? []).catch(() => recent),
-        getJSON('/api/slip').catch(() => slip),
+        loadBoard({ fresh: true }),
+        getJSON('/api/picks?limit=40&settled=true', { fresh: true }).then((r) => r.picks ?? []).catch(() => recent),
+        getJSON('/api/slip', { fresh: true }).catch(() => slip),
       ]);
       fixtures.length = 0;
       fixtures.push(...(fresh.fixtures ?? []));
@@ -1734,7 +1837,7 @@ async function viewBoard(params = new URLSearchParams()) {
   const refresh = async () => {
     if (document.hidden || state.when !== 'live') return;
     try {
-      const fresh = await loadBoard();
+      const fresh = await loadBoard({ fresh: true });
       fixtures.length = 0;
       fixtures.push(...(fresh.fixtures ?? []));
       for (const k of Object.keys(counts)) counts[k] = 0;
@@ -2599,7 +2702,7 @@ function readsFor(f, verdicts) {
 }
 
 async function viewFixture(id, params = new URLSearchParams()) {
-  app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
+  placeholder(skeletonHTML());
   let f;
   try { f = await getJSON(`/api/fixture/${id}`); } catch {
     /*
@@ -2874,9 +2977,8 @@ async function viewFixture(id, params = new URLSearchParams()) {
   if (st.kind === 'live') {
     const refresh = () => {
       if (document.hidden) return;
-      const y = window.scrollY;
-      viewFixture(id, new URLSearchParams(location.hash.split('?')[1] ?? ''))
-        .then(() => window.scrollTo(0, y))
+      getJSON(`/api/fixture/${id}`, { fresh: true })
+        .then(() => route({ soft: true }))
         .catch(() => { /* the last good page stays up */ });
     };
     state.poll = setInterval(refresh, 60000);
@@ -2894,7 +2996,7 @@ function bar(label, v) {
 // ---------------------------------------------------------------- results
 
 async function viewResults() {
-  app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
+  placeholder(skeletonHTML());
   /*
    * Two requests, because one cannot answer both halves of this page.
    *
@@ -3506,9 +3608,7 @@ async function viewLeagues() {
  * do on a fixture page: the open one is in the address.
  */
 async function viewLeague(id, params = new URLSearchParams()) {
-  app.innerHTML = `<div class="wrap section dense">
-    <div class="rows">${'<div class="skeleton skeleton-row"></div>'.repeat(6)}</div>
-  </div>`;
+  placeholder(skeletonHTML('rows'));
   let d;
   try { d = await getJSON(`/api/league/${encodeURIComponent(id)}`); } catch (err) { return errorState(err); }
   const lg = d?.league;
@@ -3747,7 +3847,7 @@ async function setRenewal(on) {
  * the only honest pitch and it is the one that survives an ad review.
  */
 async function viewPricing() {
-  app.innerHTML = '<div class="wrap section"><div class="spinner">Loading…</div></div>';
+  placeholder(skeletonHTML());
   const [user, plans, hero] = await Promise.all([
     currentUser(),
     getJSON('/api/plans').catch(() => []),
@@ -3966,7 +4066,7 @@ async function viewAccount() {
   const user = await currentUser();
   if (!user) { setIntent('#/account'); goInstead('#/signin'); return; }
 
-  app.innerHTML = '<div class="wrap section narrow"><div class="spinner">Loading…</div></div>';
+  placeholder(skeletonHTML());
   let account = { membership: null, receipts: [] };
   try { account = await getJSON('/api/account'); } catch { /* shown as no membership */ }
 
@@ -4030,6 +4130,7 @@ async function viewAccount() {
 
   document.getElementById('out').onclick = async () => {
     await signOut();
+    cacheClear();
     state.member = null;
     state.board = null;
     location.hash = '#/home';
@@ -4458,20 +4559,72 @@ function notFound(name) {
 
 let routed = 0;
 
-async function route() {
+/*
+ * Where the page sits when it opens.
+ *
+ * The browser's own scroll restoration was on, and on a single-page site it
+ * restores against whatever height the page has at that instant -- a
+ * skeleton, half a board -- so a page could open a screen or two down, or
+ * jump when the content landed. It is off. A page reached by a link opens at
+ * the top. A page reached with Back or Forward opens where the reader left
+ * it, which is the one case where remembering is what they want. And a
+ * redraw with fresh data (softRefresh) does not move them at all.
+ */
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+const scrollMemory = new Map();
+let navByLink = false;
+document.addEventListener('click', (e) => {
+  const a = e.target.closest?.('a[href^="#/"]');
+  if (a && !e.defaultPrevented && e.button === 0 && !e.metaKey && !e.ctrlKey) navByLink = true;
+}, true);
+
+/*
+ * The placeholder a view shows while it waits. Skipped on a soft redraw,
+ * where the page already has content and swapping it for a skeleton for one
+ * frame is exactly the flash this is meant to remove.
+ */
+function placeholder(html) {
+  if (!state.soft) app.innerHTML = html;
+}
+
+async function route({ soft = false } = {}) {
   const { parts, params } = parseHash();
   const name = parts[0] || 'home';
-  // Set after the first render, so the first route of a session -- the deep
-  // link itself -- does not count as somewhere to go back to.
-  state.cameFromInApp = routed++ > 0;
+  const here = location.hash || '#/home';
+  const keepY = window.scrollY;
+  state.soft = soft;
+  if (!soft) {
+    // Set after the first render, so the first route of a session -- the
+    // deep link itself -- does not count as somewhere to go back to.
+    state.cameFromInApp = routed++ > 0;
+    if (state.here) scrollMemory.set(state.here, keepY);
+    state.here = here;
+  }
+  const backTo = !soft && !navByLink ? scrollMemory.get(here) : undefined;
+  navByLink = false;
   clearInterval(state.tick);
   clearInterval(state.poll);
   if (state.onVisible) { removeEventListener('visibilitychange', state.onVisible); state.onVisible = null; }
   for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.route === name);
-  document.getElementById('nav').classList.remove('open');
-  document.getElementById('burger').setAttribute('aria-expanded', 'false');
-  window.scrollTo(0, 0);
+  if (!soft) {
+    document.getElementById('nav').classList.remove('open');
+    document.getElementById('burger').setAttribute('aria-expanded', 'false');
+    window.scrollTo(0, 0);
+  }
   try {
+    await render(name, parts, params);
+  } catch (err) {
+    errorState(err);
+  } finally {
+    state.soft = false;
+    // After the content is in, so the position is measured against the real
+    // page rather than a skeleton.
+    window.scrollTo(0, soft ? keepY : (backTo ?? 0));
+  }
+}
+
+async function render(name, parts, params) {
+  {
     if (name === 'fixture' && parts[1]) return await viewFixture(parts[1], params);
     if (name === 'league' && parts[1]) return await viewLeague(parts[1], params);
     if (name === 'board') return await viewBoard(params);
@@ -4494,8 +4647,6 @@ async function route() {
      * Saying so costs four lines and two ways out.
      */
     return notFound(name);
-  } catch (err) {
-    errorState(err);
   }
 }
 

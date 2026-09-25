@@ -3421,3 +3421,8 @@
   color: var(--chalk);
 }
 .scorer-list li > small { grid-column: 4; justify-self: end; font-size: var(--text-2xs); color: var(--chalk-3); }
+
+/* The shape of a page before its data: a title bar, a line and rows. */
+.skeleton-title { height: 44px; width: min(420px, 70%); margin-bottom: var(--space-4); }
+.skeleton-line { height: 14px; width: min(560px, 90%); margin-bottom: var(--space-8); }
+.skeleton-rows { display: flex; flex-direction: column; gap: var(--space-3); }
