@@ -115,7 +115,7 @@ export default {
     // keeps answering on both, because payment webhooks and already-open tabs
     // still call the old one. Cloudflare serves static files before this code
     // runs, so index.html does the same move itself; this catches the rest.
-    if (!path.startsWith('/api/') && url.hostname.endsWith('.workers.dev') && env.SITE_URL?.startsWith('https://')) {
+    if (!path.startsWith('/api/') && (url.hostname.endsWith('.workers.dev') || url.hostname.startsWith('www.')) && env.SITE_URL?.startsWith('https://')) {
       const to = new URL(url.pathname + url.search, env.SITE_URL);
       return Response.redirect(to.toString(), 301);
     }

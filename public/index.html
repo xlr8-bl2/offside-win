@@ -11,10 +11,11 @@
 <!-- A shared link previewed as a blank card until now: no og:image, no card type. -->
 <meta property="og:type" content="website">
 <link rel="canonical" href="https://offside.win/">
-<!-- One address for readers. Cloudflare serves this file before the Worker
-     runs, so the move off the old workers.dev address happens here, before
-     anything else loads. The API still answers there for webhooks. -->
-<script>if (/\.workers\.dev$/.test(location.hostname)) location.replace('https://offside.win' + location.pathname + location.search + location.hash);</script>
+<!-- One address for readers: sign-ins are kept per address, so www and the
+     old workers.dev address both move to offside.win. Cloudflare serves this
+     file before the Worker runs, so the move happens here, before anything
+     else loads. The API still answers on every address, for webhooks. -->
+<script>if (/\.workers\.dev$|^www\./.test(location.hostname)) location.replace('https://offside.win' + location.pathname + location.search + location.hash);</script>
 <meta property="og:site_name" content="offside.win">
 <meta property="og:title" content="offside.win: the picks for the biggest games">
 <meta property="og:description" content="Football analysis across 88 leagues. Every call comes with the reason behind it, and the reason not to like it.">
