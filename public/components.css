@@ -3982,3 +3982,50 @@ html.pay-open { overflow: hidden; }
 .plan-mine { border-color: var(--won); }
 .plan-tagline.is-mine { background: var(--won); }
 .co-small a { color: var(--chalk-2); text-decoration: underline; text-underline-offset: 2px; }
+
+/* Back from Google: one line and a wheel while the session starts. */
+.signing {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-4);
+  padding: var(--space-12) 0; color: var(--chalk-2); font-size: var(--text-md);
+}
+.signing .spin { width: 28px; height: 28px; border-width: 3px; color: var(--floodlight); }
+.signing p { margin: 0; }
+
+/* The headline match's own call, when it is locked or closed. */
+.freecall-tag.is-ours { background: var(--floodlight); color: #fff; }
+.hero-lock {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-4);
+  margin: var(--space-5) 0 var(--space-6); padding: var(--space-4) var(--space-5);
+  max-width: 560px;
+  border: var(--border) solid var(--floodlight); border-radius: var(--radius);
+  background: color-mix(in srgb, var(--terrace) 88%, transparent);
+}
+.hero-lock svg { width: 20px; height: 20px; flex: none; fill: none; stroke: var(--floodlight-hi); stroke-width: 2; }
+.hero-lock p { flex: 1 1 220px; margin: 0; font-size: var(--text-sm); color: var(--chalk-2); line-height: var(--leading-normal); }
+.hero-lock b { color: var(--chalk); font-weight: var(--weight-medium); }
+.hero-closed { margin: var(--space-5) 0 var(--space-6); max-width: 560px; font-size: var(--text-sm); color: var(--chalk-2); line-height: var(--leading-normal); }
+
+/* Today's free call, as its own match, below the masthead. */
+.free-band { margin-top: var(--space-6); }
+.free-band .freecall {
+  margin: 0; padding: var(--space-5) var(--space-6);
+  border: var(--border) solid var(--sodium); border-radius: var(--radius-lg);
+  background: var(--stand);
+}
+.free-band .freecall-sel { font-size: var(--text-2xl); text-shadow: none; }
+
+/* In play: the call closed at kick-off. Not an offer (no accent) and not a
+   result (no green or red): amber, the colour of something still pending. */
+.row-closed {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--sodium);
+  white-space: nowrap;
+}
+.next-mid .next-pick.is-closed { color: var(--sodium); }
+.locked.is-closed { background: var(--stand); border-color: var(--rule); border-left-color: var(--sodium); }
+
+/* How calls move: said once, small, wherever a reader is looking at one. */
+.calls-note { margin: var(--space-4) 0 0; font-size: var(--text-xs); line-height: var(--leading-normal); color: var(--chalk-3); max-width: 70ch; }
+.calls-note b { color: var(--chalk-2); font-weight: var(--weight-medium); }
+.co-moves { margin-bottom: var(--space-5); }

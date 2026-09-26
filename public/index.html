@@ -28,12 +28,18 @@
 <meta name="twitter:image" content="https://offside.win/og.png">
 
 <link rel="preconnect" href="https://sports.bzzoiro.com">
-<!-- The two reads every front-page visit makes, started with the HTML rather
-     than after the script has loaded and run. `crossorigin` so the request
-     matches the fetch() that picks it up; a signed-in reader's fetch carries a
-     token and simply goes to the network, which is correct for them. -->
-<link rel="preload" href="/api/board?hours=72" as="fetch" crossorigin>
-<link rel="preload" href="/api/hero" as="fetch" crossorigin>
+<!-- The reads a visit makes first, started with the HTML rather than after the
+     script has loaded and run: the board and the masthead everywhere, the
+     record and the slip too when the front page is what is opening.
+     Only for a reader with no saved session. Chrome hands a preloaded
+     response to a later fetch of the same address whatever headers that
+     fetch carries, so a member's first board was the free copy. -->
+<script>(function () {
+  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) return; } } catch (e) { /* private mode: preload */ }
+  const urls = ['/api/board?hours=72', '/api/hero'];
+  if (!location.hash || /^#\/(home)?$/.test(location.hash)) urls.push('/api/picks?limit=40&settled=true', '/api/slip');
+  for (const u of urls) { const l = document.createElement('link'); l.rel = 'preload'; l.as = 'fetch'; l.href = u; l.crossOrigin = 'anonymous'; document.head.append(l); }
+})();</script>
 <!--
   The faces are self-hosted (public/fonts). The two that set the first screen
   are preloaded so they arrive with the stylesheet rather than after it:

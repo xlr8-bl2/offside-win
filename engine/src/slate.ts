@@ -12,6 +12,7 @@ import { fillVenues } from './context/venue.ts';
 import { refreshSchedule } from './schedule.ts';
 import { pubFacts } from './narrate/facts.ts';
 import { geminiWriter } from './narrate/gemini.ts';
+import { budgeted, spent, todays, type BudgetState } from './narrate/budget.ts';
 import { write, type Writer } from './narrate/write.ts';
 import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
@@ -187,13 +188,23 @@ function buildWriter(): Writer | null {
     apiKey,
     model: process.env['GEMINI_MODEL'] || undefined,
     // Gentle enough for the free tier's per-minute limit on any flash model.
-    ratePerMinute: Number(process.env['GEMINI_RPM'] ?? 8),
+    ratePerMinute: Number(process.env['GEMINI_RPM'] || 8),
   });
 }
 
 export async function runSlate(): Promise<SlateReport> {
   const now = Math.floor(Date.now() / 1000);
-  const writer = buildWriter();
+
+  // The day's allowance, across every run (see narrate/budget.ts). Set
+  // GEMINI_PER_DAY to the model's free requests-per-day, less some headroom.
+  const perDay = Number(process.env['GEMINI_PER_DAY'] || 200);
+  const budget: BudgetState = todays(await kvGetJSON<BudgetState>('gemini:budget'));
+  const rawWriter = buildWriter();
+  const writer = rawWriter && !spent(budget, perDay) ? budgeted(rawWriter, budget, perDay) : null;
+  if (rawWriter && !writer) {
+    console.log(`Narratives: today's ${rawWriter.name} allowance is spent (${budget.used}/${perDay}`
+      + `${budget.exhausted ? ', and Google has said so' : ''}); it resets at midnight Pacific. The grammar writes until then.`);
+  }
 
   // Counted rather than assumed. A silent drift back to template prose is
   // exactly the failure worth noticing, and it is invisible on the page --
@@ -218,7 +229,7 @@ export async function runSlate(): Promise<SlateReport> {
    * Soonest kick-offs are written first (see the candidate order), so the
    * matches about to be read are the ones that get the writing.
    */
-  const perRun = Number(process.env['GEMINI_PER_RUN'] ?? 12);
+  const perRun = Number(process.env['GEMINI_PER_RUN'] || 12);
   const from = new Date((now - config.slate.lookbackHours * 3600) * 1000).toISOString();
   const to = new Date((now + config.slate.horizonHours * 3600) * 1000).toISOString();
 
@@ -413,6 +424,10 @@ export async function runSlate(): Promise<SlateReport> {
           }
 
           if (narrateAttempts >= perRun) break;
+          if (spent(budget, perDay)) {
+            writerGaveUp = budget.exhausted ? 'Google says the daily limit is reached' : `today's allowance of ${perDay} is spent`;
+            break;
+          }
           narrateAttempts++;
           const result = await write({
             home: analysis.home_team,
@@ -443,6 +458,9 @@ export async function runSlate(): Promise<SlateReport> {
             }),
             odds: v.candidate.odds,
           }, writer);
+          // Kept after every write, not only at the end, so a run that dies
+          // halfway still leaves the day's count right for the next one.
+          await kvSetJSON('gemini:budget', budget);
 
           if (result.text) {
             v.narrative = result.text;
@@ -454,6 +472,10 @@ export async function runSlate(): Promise<SlateReport> {
             for (const r of result.rejections) narrateRejections[r] = (narrateRejections[r] ?? 0) + 1;
             // A rejected draft is the writer working. A thrown request is the
             // writer not being reachable, and only the second kind repeats.
+            if (result.error && spent(budget, perDay)) {
+              writerGaveUp = budget.exhausted ? 'Google says the daily limit is reached' : `today's allowance of ${perDay} is spent`;
+              break;
+            }
             if (result.error) {
               consecutiveErrors++;
               if (consecutiveErrors >= 3) {
@@ -983,6 +1005,7 @@ export async function runSlate(): Promise<SlateReport> {
   await kvSetJSON('narrate:ledger', ledger.snapshot());
   await kvSetJSON('slate:last_run', { at: now, ...report });
 
+  if (writer) console.log(`Narratives: ${budget.used} of today's ${perDay} Gemini requests used.`);
   if (writer && writerGaveUp) {
     console.log(
       `Narratives: ${narrateReused} reused, ${narrateWritten}/${narrateAttempts} written before ${writer.name} stopped answering `

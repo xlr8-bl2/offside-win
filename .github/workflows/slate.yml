@@ -43,4 +43,9 @@ jobs:
           # rather than a failure. Google has cut this free tier sharply and
           # without notice before, so that path has to stay live.
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Optional repository variables; empty means the defaults in slate.ts
+          # (200 requests a day, 8 a minute, the current free Flash model).
+          GEMINI_PER_DAY: ${{ vars.GEMINI_PER_DAY }}
+          GEMINI_RPM: ${{ vars.GEMINI_RPM }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
         run: npm run slate
