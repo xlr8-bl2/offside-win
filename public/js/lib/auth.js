@@ -35,7 +35,8 @@ let cachedConfig = null;
 
 async function config() {
   if (!cachedConfig) {
-    const res = await fetch(CONFIG_URL);
+    // Revalidated every time: a stale copy is how the Google button went missing.
+    const res = await fetch(CONFIG_URL, { cache: 'no-cache' });
     if (!res.ok) throw new Error('Could not reach the sign-in service.');
     cachedConfig = await res.json();
   }
