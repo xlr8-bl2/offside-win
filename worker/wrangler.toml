@@ -31,6 +31,10 @@ COINFLOW_BASE_URL = "https://api-sandbox.coinflow.cash"
 COINFLOW_WALLET = ""
 COINFLOW_BLOCKCHAIN = "solana"
 SITE_URL = "https://offside.win"
+# Google sign-in's OAuth client ID. Public by design: Google puts it in every
+# sign-in link, and the "Sign in with Google" button needs it in the page. The
+# client secret is not here and never will be; it lives in Supabase only.
+GOOGLE_CLIENT_ID = "819619713096-r9gvdihj81gjinubr5nqqgd721vcfqud.apps.googleusercontent.com"
 
 # Which processor takes the money. "whop": Whop runs the checkout and the
 # billing on its own site and tells us by webhook; each plan's checkout link
