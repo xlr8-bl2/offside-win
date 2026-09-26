@@ -14,7 +14,7 @@
 
 import { createCheckoutLink, parseWebhook, type CoinflowConfig } from './coinflow.ts';
 import { verifyWebhook } from './webhook.ts';
-import { createWhopCheckout, parseWhop, verifyWhop, whopAccountId, whopPeriodEnd } from './whop.ts';
+import { WhopError, createWhopCheckout, createWhopPayment, parseWhop, verifyWhop, whopAccountId, whopPeriodEnd } from './whop.ts';
 
 export interface PayEnv {
   SUPABASE_URL: string;
@@ -363,6 +363,14 @@ async function handleWhop(raw: string, via: string, env: PayEnv): Promise<Respon
   }
 
   if (event.kind === 'invalid') {
+    // A membership that ends, lapses or is set to cancel runs out on its own:
+    // the entitlement carries the date it was paid to. Cutting it here took
+    // away days a reader had paid for, and a matchday pass running out took
+    // the monthly membership bought after it along with it (one row per
+    // email). Only money going back ends access early.
+    if (!/refund|chargeback|dispute/i.test(event.eventType)) {
+      return json({ ok: true, ignored: event.eventType, reason: 'runs to its paid date', via: verdict.via });
+    }
     const out = await rpcAsService(env, 'revoke_entitlement', { p_email: event.email, p_status: event.eventType });
     return json({ ok: true, ...(out ?? {}) });
   }
@@ -602,4 +610,78 @@ export async function sweepWhop(env: PayEnv): Promise<{ checked: number; granted
     });
   } catch { /* the next run writes it */ }
   return tally;
+}
+
+/* ------------------------------------------------ our own checkout page */
+
+/**
+ * POST /api/pay/charge: the payment from our own checkout page.
+ *
+ * The page sends a plan id and the one-time confirmation token Whop's payment
+ * element made from the buyer's card. Never a price: the plan is read from our
+ * row here, exactly as for the embedded checkout. Whop charges it and returns
+ * the payment; a paid one is switched on before this answers, so the page can
+ * go straight to the account.
+ *
+ * If Whop refuses for want of a permission on the API key (payment:charge),
+ * the answer says so as `fallback`, and the page opens Whop's own checkout
+ * instead. The buyer is not left with a dead button while the key is fixed.
+ */
+export async function charge(request: Request, env: PayEnv, jwt: string | null): Promise<Response> {
+  if (provider(env) !== 'whop' || !env.WHOP_API_KEY || !env.WHOP_COMPANY_ID) {
+    return json({ error: 'Memberships are not open yet. Nothing has been charged.', fallback: true }, 503);
+  }
+  const user = await identify(env, jwt);
+  if (!user) return json({ error: 'Sign in first.' }, 401);
+
+  let body: { plan?: unknown; confirmation_token?: unknown } = {};
+  try { body = await request.json() as typeof body; } catch { /* checked below */ }
+  const planId = typeof body.plan === 'string' && /^[a-z0-9_-]{1,40}$/.test(body.plan) ? body.plan : '';
+  const token = typeof body.confirmation_token === 'string' && /^ctok_[A-Za-z0-9_]{4,200}$/.test(body.confirmation_token) ? body.confirmation_token : '';
+  if (!planId || !token) return json({ error: 'The card details did not come through. Nothing has been charged. Try again.' }, 400);
+
+  const rows = await fetch(
+    new URL(`/rest/v1/plan?id=eq.${encodeURIComponent(planId)}&active=eq.1&select=id,name,amount_minor,currency,days`, env.SUPABASE_URL),
+    { headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_ANON_KEY}`, accept: 'application/json' } },
+  );
+  const plan = (rows.ok ? await rows.json() as any[] : [])[0];
+  if (!plan) return json({ error: 'That plan is not available.' }, 404);
+
+  const site = env.SITE_URL ?? new URL(request.url).origin;
+  try {
+    const paid = await createWhopPayment(env.WHOP_API_KEY, {
+      companyId: env.WHOP_COMPANY_ID,
+      plan: {
+        id: String(plan.id), name: String(plan.name ?? plan.id), amountMinor: Number(plan.amount_minor),
+        currency: String(plan.currency), days: Number(plan.days), renews: String(plan.id) !== 'matchday',
+      },
+      user: { id: user.id, email: user.email },
+      returnUrl: `${site}/#/account?paid=1`,
+    }, token);
+
+    // Paid there and then: switch it on now rather than wait for the sweep.
+    let member = false;
+    if (paid.status === 'paid') {
+      try {
+        const mine = (await listWhopMemberships(env, 1, 1)).filter((m) =>
+          asStr((asRec(m['metadata']) ?? {})['user_id'])?.toLowerCase() === user.id.toLowerCase());
+        for (const m of mine) {
+          const r = await grantFromMembership(env, m);
+          if (r.result === 'granted' || r.result === 'already recorded') member = true;
+        }
+      } catch (err) { console.error('charge grant:', err instanceof Error ? err.message : String(err)); }
+    }
+    return json({ status: paid.status, payment: paid.id, client_secret: paid.clientSecret, member });
+  } catch (err) {
+    if (err instanceof WhopError) {
+      console.error('whop charge:', err.status, err.type, err.message);
+      if (err.status === 401 || err.status === 403) {
+        return json({ error: 'Our card form is being set up. Opening the standard checkout instead.', fallback: true }, 409);
+      }
+      // Whop's own words for a declined or refused card are addressed to the buyer.
+      return json({ error: `${err.message.replace(/\.$/, '')}. Nothing has been charged.` }, 402);
+    }
+    console.error('charge:', err instanceof Error ? err.message : String(err));
+    return json({ error: 'The payment did not go through. Nothing has been charged. Try again.' }, 502);
+  }
 }

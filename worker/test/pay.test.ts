@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkout, confirm, grantFromMembership, sweepWhop, renewal, webhook } from '../src/pay.ts';
+import { charge, checkout, confirm, grantFromMembership, sweepWhop, renewal, webhook } from '../src/pay.ts';
 import { parseWebhook } from '../src/coinflow.ts';
 
 /**
@@ -403,4 +403,65 @@ test('the sweep grants every live membership and notes what it did', async () =>
   const t = await sweepWhop(WHOP);
   assert.deepEqual(t, { checked: 2, granted: 1, errors: 0 });
   assert.ok(find('/rest/v1/kv'), 'the sweep is noted for the status check');
+});
+
+/* ------------------------------------------------ our own checkout page */
+
+test('charge prices from our plan row and passes only the token from the page', async () => {
+  route = (url) => {
+    if (url.includes('/auth/v1/user')) return new Response(JSON.stringify({ id: UID, email: 'o@a.com' }), { status: 200 });
+    if (url.includes('/rest/v1/plan')) return new Response(JSON.stringify([{ id: 'monthly', name: 'Monthly', amount_minor: 900, currency: 'GBP', days: 30 }]), { status: 200 });
+    if (url.endsWith('/api/v1/payments')) return new Response(JSON.stringify({ id: 'pay_1', status: 'paid', client_secret: 'cs_1' }), { status: 200 });
+    if (url.includes('api.whop.com/api/v1/memberships')) return new Response(JSON.stringify({ data: [mem({ metadata: { user_id: UID, plan: 'monthly' }, renewal_period_end: future })], page_info: {} }), { status: 200 });
+    if (url.includes('/auth/v1/admin/users/')) return new Response(JSON.stringify({ email: 'o@a.com' }), { status: 200 });
+    if (url.includes('/rpc/record_entitlement')) return new Response(JSON.stringify({ applied: true }), { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+  const res = await charge(post('/api/pay/charge', { plan: 'monthly', confirmation_token: 'ctok_abc123', amount: 1 }), WHOP, 'jwt');
+  const out = await res.json() as any;
+  assert.equal(res.status, 200);
+  assert.equal(out.status, 'paid');
+  assert.equal(out.member, true, 'a paid charge is switched on before the answer');
+  const body = find('/api/v1/payments')!.body as any;
+  assert.equal(body.confirmation_token, 'ctok_abc123');
+  assert.equal(body.account_id, 'biz_1');
+  assert.equal(body.plan.renewal_price, 9, 'the price comes from the row, not the request');
+  assert.equal(body.plan.plan_type, 'renewal');
+  assert.ok(!('company_id' in body.plan));
+  assert.equal(body.metadata.user_id, UID);
+});
+
+test('charge refuses a malformed token, and falls back when the key may not charge', async () => {
+  route = (url) => {
+    if (url.includes('/auth/v1/user')) return new Response(JSON.stringify({ id: UID, email: 'o@a.com' }), { status: 200 });
+    if (url.includes('/rest/v1/plan')) return new Response(JSON.stringify([{ id: 'matchday', name: 'Matchday pass', amount_minor: 349, currency: 'GBP', days: 7 }]), { status: 200 });
+    if (url.endsWith('/api/v1/payments')) return new Response(JSON.stringify({ error: { type: 'forbidden', message: 'Missing permission payment:charge' } }), { status: 403 });
+    return new Response('{}', { status: 200 });
+  };
+  const bad = await charge(post('/api/pay/charge', { plan: 'matchday', confirmation_token: 'not-a-token' }), WHOP, 'jwt');
+  assert.equal(bad.status, 400);
+  assert.ok(!find('/api/v1/payments'), 'nothing sent to Whop for a malformed token');
+  const res = await charge(post('/api/pay/charge', { plan: 'matchday', confirmation_token: 'ctok_x1234' }), WHOP, 'jwt');
+  const out = await res.json() as any;
+  assert.equal(res.status, 409);
+  assert.equal(out.fallback, true);
+});
+
+test('a Whop membership running out is left to its date; a refund ends it now', async () => {
+  const send = async (payload: unknown) => {
+    const body = JSON.stringify(payload);
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode('plain'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sig = [...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+    const req = new Request('https://offside.win/api/pay/webhook', { method: 'POST', body, headers: { 'x-whop-signature': sig } });
+    return webhook(req, { ...ENV, PAY_PROVIDER: 'whop', WHOP_WEBHOOK_SECRET: 'plain' });
+  };
+  // A matchday pass ending must not take a monthly membership bought after it.
+  let res = await send({ type: 'membership.deactivated', data: { id: 'mem_1', user: { email: 'fan@example.com' } } });
+  assert.equal(res.status, 200);
+  assert.ok(!find('/rpc/revoke_entitlement'), 'a membership ending on its date revoked the entitlement');
+  res = await send({ type: 'membership.cancel_at_period_end_changed', data: { id: 'mem_2', user: { email: 'fan@example.com' } } });
+  assert.ok(!find('/rpc/revoke_entitlement'), 'cancelling for the period end revoked access that was paid for');
+  res = await send({ type: 'payment.refunded', data: { id: 'pay_3', user: { email: 'fan@example.com' } } });
+  assert.equal(res.status, 200);
+  assert.ok(find('/rpc/revoke_entitlement'), 'a refund must end access');
 });

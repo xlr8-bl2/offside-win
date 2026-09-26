@@ -21,7 +21,7 @@ test('postgres schema declares tables', () => {
 //
 // Listing a table here is a decision, and the test below turns it into one that
 // cannot be undone by accident.
-const PRIVATE = new Set(['payment', 'payment_method', 'page_view', 'profile', 'follow']);
+const PRIVATE = new Set(['payment', 'payment_method', 'page_view', 'profile', 'follow', 'entitlement_grant']);
 
 // Tables with paid content in them, readable only through a serving function.
 const SERVED = new Set(['fixture', 'pick', 'kv', 'slip', 'entitlement']);

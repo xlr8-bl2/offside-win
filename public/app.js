@@ -14,9 +14,9 @@ import { describe as market, didItLand, recap } from './js/lib/markets.js';
 import { COUNTRY_NAMES, bookName, cash, country, localPrice, purse } from './js/lib/books.js';
 import { cleanProse } from './js/lib/vocabulary.js';
 import { LEGAL, SUPPORT_EMAIL, UPDATED } from './js/lib/legal.js';
-import { openCheckout } from './js/lib/whop.js';
+import { mountPayment, openCheckout } from './js/lib/whop.js';
 import { absenceReason } from './js/lib/absence.js';
-import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, viewingAsFree } from './js/lib/auth.js';
+import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, siteConfig, viewingAsFree } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
 
@@ -4427,7 +4427,12 @@ async function postJSON(path, body) {
   });
   let data = null;
   try { data = await res.json(); } catch { /* no body */ }
-  if (!res.ok) throw new Error(data?.error ?? 'Something went wrong. Nothing has been charged.');
+  if (!res.ok) {
+    const err = new Error(data?.error ?? 'Something went wrong. Nothing has been charged.');
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
   return data;
 }
 
@@ -4490,51 +4495,50 @@ async function afterSignIn() {
   headerAuth();
 }
 
-async function startCheckout(plan = 'monthly', row = null) {
-  const button = document.querySelector(`[data-buy="${plan}"]`) ?? document.getElementById('buy');
-  const was = button?.textContent;
-  const reset = () => { if (button) { button.disabled = false; button.textContent = was; } };
-  if (button) { button.disabled = true; button.textContent = 'Opening checkout…'; }
-  try {
-    /*
-     * Signed in first, always. The membership is attached to the account
-     * that asked for it (its id travels with the payment), so whatever email
-     * the buyer types into the card form, it lands on the right account. A
-     * reader who is signed out is sent to sign in and comes straight back to
-     * this plan's checkout.
-     */
-    if (!(await currentUser())) {
-      setIntent(`buy:${plan}`);
-      location.hash = '#/signin';
-      return;
-    }
-    const out = await postJSON('/api/pay/checkout', { plan });
-    if (out.checkout) {
-      try {
-        await openCheckout({
-          checkout: out.checkout,
-          returnUrl: out.returnUrl,
-          // The plan and its length only. The price is Whop's to show: it
-          // prices in the buyer's own currency, so "£1" here sat over "$1.35"
-          // in the form for a reader in America.
-          title: PLAN_LINE[plan] ?? row?.name ?? 'Membership',
-          onPaid: () => { location.hash = '#/account?paid=1'; },
-        });
-        reset();
-        return;
-      } catch (err) {
-        // Whop's script would not load (a blocker, a bad connection): its own
-        // checkout page takes the same payment with the same account id on it.
-        if (out.link) { location.href = out.link; return; }
-        throw err;
-      }
-    }
-    if (!out.link) throw new Error('The payment page could not be opened.');
-    location.href = out.link;
-  } catch (err) {
-    reset();
-    alert(err.message);
+async function startCheckout(plan = 'monthly') {
+  /*
+   * Signed in first, always. The membership is attached to the account that
+   * asked for it (its id travels with the payment), so whatever email the
+   * buyer gives the card form, it lands on the right account. A reader who is
+   * signed out is sent to sign in and comes straight back to this plan.
+   */
+  if (!(await currentUser())) {
+    setIntent(`buy:${plan}`);
+    location.hash = '#/signin';
+    return;
   }
+  location.hash = `#/checkout?plan=${encodeURIComponent(plan)}`;
+}
+
+/**
+ * Whop's whole checkout in a sheet, or failing that Whop's own page.
+ *
+ * The fallback for our checkout page: used while the API key cannot take a
+ * payment itself, or if the card fields will not load.
+ */
+async function openEmbeddedCheckout(plan) {
+  const out = await postJSON('/api/pay/checkout', { plan });
+  if (out.checkout) {
+    try {
+      await openCheckout({
+        checkout: out.checkout,
+        returnUrl: out.returnUrl,
+        // The plan and its length only. The price is Whop's to show: it
+        // prices in the buyer's own currency, so "£1" here sat over "$1.35"
+        // in the form for a reader in America.
+        title: PLAN_LINE[plan] ?? 'Membership',
+        onPaid: () => { location.hash = '#/account?paid=1'; },
+      });
+      return;
+    } catch (err) {
+      // Whop's script would not load (a blocker, a bad connection): its own
+      // checkout page takes the same payment with the same account id on it.
+      if (out.link) { location.href = out.link; return; }
+      throw err;
+    }
+  }
+  if (!out.link) throw new Error('The payment page could not be opened.');
+  location.href = out.link;
 }
 
 /** What the card form's heading says, per plan. */
@@ -4594,6 +4598,13 @@ async function viewPricing() {
     getJSON('/api/plans').catch(() => []),
     getJSON('/api/hero').catch(() => null),
   ]);
+  // A member arriving here is shown what they have, not sold it again.
+  let account = null;
+  if (user) {
+    try { account = await getJSON('/api/account', { fresh: true }); } catch { /* shown as signed out */ }
+    if (account) state.account = account;
+  }
+  const mine = liveMembership(account);
   // The free call is its own fixture, chosen by the slate: not the headline
   // match. Pointing this line at the headline sent readers to a locked call
   // under a label that said it was free.
@@ -4617,31 +4628,54 @@ async function viewPricing() {
   };
   const perMonth = (p) => p.days >= 300 ? money(Math.round(p.amount_minor / 12), p.currency) + ' a month' : null;
 
+  // What each plan's button does for this reader: buy it, or, for a member,
+  // nothing (it is theirs), an upgrade, or a switch that has to wait for the
+  // renewing plan to be cancelled so nobody pays for two.
+  const buttonFor = (id, p) => {
+    const buy = p.days === 7 ? 'Get the weekend' : p.days >= 300 ? 'Get the season' : 'Join for the month';
+    if (!mine) return { label: buy };
+    if (mine.plan_id === id) return { label: 'Your plan', mine: true };
+    if (renewsItself(mine)) return { label: 'Switch to this', quiet: true };
+    return { label: mine.plan_id === 'matchday' ? `Upgrade to ${p.days >= 300 ? 'the season' : 'monthly'}` : buy };
+  };
+
   app.innerHTML = `
   <div class="wrap section">
+    ${mine ? `
+    <div class="page-head">
+      <h1 class="display xl">You are in. Every call is open.</h1>
+      <p class="page-sub">Your ${esc((PLAN_NAME[mine.plan_id] ?? 'membership').toLowerCase())} runs to
+        ${esc(longDate(mine.expires_at))}${renewsItself(mine) ? ' and renews by itself' : mine.plan_id === 'matchday' ? ' and then stops' : ''}.</p>
+      <div class="member-actions">
+        <a class="btn btn-accent" href="#/board">Today's calls</a>
+        <a class="btn btn-ghost" href="#/account?tab=membership">Your membership</a>
+      </div>
+    </div>` : `
     <div class="page-head">
       <h1 class="display xl">One call a day is free. Members get all of them.</h1>
       <p class="page-sub">Every preview, every team sheet and the whole record stay free. Membership is
         every open call the moment it goes up, the legs of the bet slip, and the reason behind each call.</p>
     </div>
 
-    ${freeLineHTML(free)}
+    ${freeLineHTML(free)}`}
 
     <div class="plans" data-public-price>
       ${order.map((id) => {
         const p = byId[id];
         const c = COPY[id];
+        const b = buttonFor(id, p);
+        const lead = mine ? mine.plan_id === id : id === 'monthly';
         return `
-        <section class="plan${id === 'monthly' ? ' plan-main' : ''}">
-          ${c.tag ? `<span class="plan-tagline">${esc(c.tag)}</span>` : ''}
+        <section class="plan${lead ? ' plan-main' : ''}${b.mine ? ' plan-mine' : ''}">
+          ${b.mine ? `<span class="plan-tagline is-mine">Yours to ${esc(shortDate(mine.expires_at))}</span>` : !mine && c.tag ? `<span class="plan-tagline">${esc(c.tag)}</span>` : ''}
           <h2>${esc(p.name)}</h2>
           <p class="plan-price"><b>${esc(money(p.amount_minor, p.currency))}</b>
             <span>${p.days === 7 ? 'for the week' : p.days >= 300 ? 'a year' : 'a month'}</span></p>
           ${perMonth(p) ? `<p class="plan-per">${esc(perMonth(p))}</p>` : ''}
           <p class="plan-blurb">${esc(c.blurb)}</p>
-          <button class="btn ${id === 'monthly' ? 'btn-accent' : 'btn-primary'} btn-lg" data-buy="${esc(id)}">
-            ${p.days === 7 ? 'Get the weekend' : p.days >= 300 ? 'Get the season' : 'Join for the month'}
-          </button>
+          ${b.mine
+            ? `<a class="btn btn-ghost btn-lg" href="#/account?tab=membership">Your plan</a>`
+            : `<button class="btn ${b.quiet ? 'btn-ghost' : lead ? 'btn-accent' : 'btn-primary'} btn-lg" data-buy="${esc(id)}">${esc(b.label)}</button>`}
         </section>`;
       }).join('')}
     </div>
@@ -4683,8 +4717,242 @@ async function viewPricing() {
   </div>`;
 
   for (const b of app.querySelectorAll('[data-buy]')) {
-    b.onclick = () => startCheckout(b.dataset.buy, byId[b.dataset.buy]);
+    b.onclick = () => startCheckout(b.dataset.buy);
   }
+}
+
+/* ----------------------------------------------------------------- checkout */
+
+const longDate = (e) => new Date(e * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+const shortDate = (e) => new Date(e * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+/** The membership that is running now, or null. */
+function liveMembership(account) {
+  const m = account?.membership;
+  return m && Number(m.expires_at) * 1000 > Date.now() ? m : null;
+}
+
+/** Does it take money again by itself? A matchday pass never does. */
+function renewsItself(m) {
+  if (!m || m.plan_id === 'matchday' || m.card_brand === 'complimentary') return false;
+  return m.via === 'whop' || Number(m.auto_renew) === 1;
+}
+
+/** Whop's page for this membership, when it is one of Whop's. */
+function whopManageUrl(m) {
+  return m?.manage_url && /^https:\/\/(www\.)?whop\.com\//.test(m.manage_url) ? m.manage_url : null;
+}
+
+/** What each plan is, on the checkout page: how long, and what happens after. */
+const PLAN_TERMS = {
+  matchday: {
+    per: 'for seven days',
+    runs: 'Seven days from when you pay.',
+    after: 'One payment. It stops by itself and nothing renews.',
+  },
+  monthly: {
+    per: 'a month',
+    runs: 'A month from when you pay.',
+    after: 'Then the same again each month until you cancel. Cancel in one tap and keep it to the end of the month you paid for.',
+  },
+  season: {
+    per: 'a year',
+    runs: 'A year from when you pay.',
+    after: 'Then the same again each year until you cancel. Cancel in one tap and keep it to the end of the year you paid for.',
+  },
+};
+
+/**
+ * Why this reader should not pay for this plan right now, if there is a
+ * reason: it is already theirs, or they are on a plan that renews by itself
+ * and paying again would charge them for both.
+ */
+function checkoutBlock(m, planId) {
+  if (!m) return null;
+  const have = PLAN_NAME[m.plan_id] ?? 'membership';
+  const want = PLAN_NAME[planId] ?? 'plan';
+  const until = longDate(m.expires_at);
+  const manage = whopManageUrl(m);
+  if (m.plan_id === planId && m.plan_id === 'matchday') {
+    return {
+      title: 'Your matchday pass is still running',
+      body: `It runs to ${until}. Buy the next one once it has finished, or go monthly now and carry on without a gap.`,
+      actions: `<a class="btn btn-accent" href="#/checkout?plan=monthly">Go monthly</a>
+        <a class="btn btn-ghost" href="#/board">Today's calls</a>`,
+    };
+  }
+  if (m.plan_id === planId) {
+    return {
+      title: 'This one is already yours',
+      body: `Your ${have.toLowerCase()} runs to ${until}${renewsItself(m) ? ' and renews by itself' : ''}. There is nothing to pay.`,
+      actions: `<a class="btn btn-accent" href="#/board">Today's calls</a>
+        <a class="btn btn-ghost" href="#/account?tab=membership">Your membership</a>`,
+    };
+  }
+  if (renewsItself(m)) {
+    return {
+      title: `You are on the ${have.toLowerCase()}`,
+      body: `It renews by itself, so paying here as well would charge you for both. To switch, cancel it first${manage ? ' on Whop' : ''}: you keep it to ${until}. Then come back for the ${want.toLowerCase()}.`,
+      actions: `${manage ? `<a class="btn btn-primary" href="${esc(manage)}" target="_blank" rel="noopener noreferrer">Cancel on Whop</a>` : `<a class="btn btn-primary" href="#/account?tab=membership">Your membership</a>`}
+        <a class="btn btn-ghost" href="#/pricing">Back to the plans</a>`,
+    };
+  }
+  return null;
+}
+
+/**
+ * Our own checkout page.
+ *
+ * The summary, the price and the pay button are ours; the card fields are
+ * Whop's, in frames, so card numbers never touch this page. The button turns
+ * what the buyer entered into a one-time token and the Worker charges it at
+ * the price in our plan row. If the API key is not yet allowed to take a
+ * payment, or the fields will not load, Whop's own checkout takes over in a
+ * sheet, so a buyer is never left with a dead button.
+ */
+async function viewCheckout(params) {
+  const planId = /^[a-z0-9_-]{1,40}$/.test(params.get('plan') ?? '') ? params.get('plan') : 'monthly';
+  // A soft refresh (the header catching up on the account) must not wipe
+  // half-typed card details by drawing the page again.
+  if (state.soft && app.querySelector(`.checkout[data-plan="${planId}"]`)) return;
+  placeholder(skeletonHTML());
+
+  const user = await currentUser();
+  if (!user) { setIntent(`buy:${planId}`); goInstead('#/signin'); return; }
+  const [plans, account, cfg] = await Promise.all([
+    getJSON('/api/plans').catch(() => []),
+    getJSON('/api/account', { fresh: true }).catch(() => null),
+    siteConfig().catch(() => ({})),
+  ]);
+  if (account) state.account = account;
+  const plan = (plans ?? []).find((p) => p.id === planId);
+  const back = `<a class="back" href="#/pricing">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+      All plans</a>`;
+
+  if (!plan) {
+    app.innerHTML = `
+    <div class="wrap section narrow">
+      ${back}
+      <div class="empty-state"><b>That plan is not on sale</b>
+        <span>The link may be old. The plans on sale today are on the pricing page.</span>
+        <p class="member-actions co-center"><a class="btn btn-accent" href="#/pricing">See the plans</a></p></div>
+    </div>`;
+    return;
+  }
+
+  const m = liveMembership(account);
+  const block = checkoutBlock(m, planId);
+  const terms = PLAN_TERMS[planId] ?? { per: '', runs: '', after: '' };
+  const price = money(plan.amount_minor, plan.currency);
+  const name = PLAN_NAME[planId] ?? plan.name;
+  const renews = planId !== 'matchday';
+
+  app.innerHTML = `
+  <div class="wrap section checkout" data-plan="${esc(planId)}">
+    ${back}
+    <div class="co-grid">
+      <section class="co-summary" aria-labelledby="co-name">
+        <h1 class="display" id="co-name">${esc(name)}</h1>
+        <p class="co-price"><b>${esc(price)}</b> <span>${esc(terms.per)}</span></p>
+        <p class="co-terms"><b>${esc(terms.runs)}</b> ${esc(terms.after)}</p>
+        <ul class="ticks co-ticks">
+          <li><b>Every open call</b> the moment it goes up</li>
+          <li><b>The bet slip's legs</b>, before the first one kicks off</li>
+          <li><b>Why this call</b> on every match</li>
+          <li>The board's filters by league and by day</li>
+        </ul>
+        <p class="co-who">It goes on the account you are signed in with:
+          <b>${esc(user.email ?? '')}</b></p>
+        <p class="co-small">Changed your mind? Fourteen days, full refund, whatever you have read.
+          <a href="#/legal/refunds">How refunds work</a>.</p>
+      </section>
+
+      <section class="co-pay" aria-labelledby="co-pay-title">
+        ${block ? `
+        <h2 class="co-pay-title" id="co-pay-title">${esc(block.title)}</h2>
+        <p class="co-block">${esc(block.body)}</p>
+        <div class="member-actions">${block.actions}</div>` : `
+        <h2 class="co-pay-title" id="co-pay-title">Pay by card, Apple Pay or Google Pay</h2>
+        ${m ? `<p class="co-upgrade">Your ${esc((PLAN_NAME[m.plan_id] ?? 'membership').toLowerCase())} runs to
+          ${esc(longDate(m.expires_at))}. The ${esc(name.toLowerCase())} starts as soon as you pay.</p>` : ''}
+        <div class="co-fields">
+          <div id="co-email"></div>
+          <div id="co-payment"><p class="pay-wait">Loading the secure card form…</p></div>
+          <div id="co-branding"></div>
+        </div>
+        <button class="btn btn-accent btn-lg co-button" id="co-pay" type="button" disabled>Pay ${esc(price)}</button>
+        <p class="co-error" role="alert" hidden></p>
+        <p class="co-note">${renews ? `By paying you agree to ${esc(price)} ${esc(terms.per)} until you cancel. ` : ''}Card details go
+          straight to Whop, who take the payment. They never reach offside.win.</p>`}
+      </section>
+    </div>
+  </div>`;
+  if (block) return;
+
+  const button = app.querySelector('#co-pay');
+  const errorLine = app.querySelector('.co-error');
+  const say = (text) => { errorLine.textContent = text; errorLine.hidden = !text; };
+  let complete = false;
+  let busy = false;
+  const idle = () => { busy = false; button.disabled = !complete; button.textContent = `Pay ${price}`; };
+
+  // Whop's own checkout, when ours cannot take this payment.
+  const fallback = async (why) => {
+    if (why) say(why);
+    button.disabled = true;
+    button.textContent = 'Opening the checkout…';
+    try { await openEmbeddedCheckout(planId); } catch (err) { say(err.message); }
+    idle();
+  };
+
+  if (!cfg?.whopAccount) { await fallback(); return; }
+  try {
+    state.payHandle = await mountPayment({
+      accountId: cfg.whopAccount,
+      currency: plan.currency,
+      amount: Number(plan.amount_minor),
+      renews,
+      email: user.email,
+      returnUrl: `${location.origin}/#/account?paid=1`,
+      into: { email: '#co-email', payment: '#co-payment', branding: '#co-branding' },
+      onComplete: (ok) => { complete = ok; if (!busy) button.disabled = !ok; },
+    });
+    const wait = app.querySelector('#co-payment .pay-wait');
+    if (wait) wait.remove();
+  } catch {
+    await fallback('The card form would not load here, so Whop\'s checkout has opened instead.');
+    return;
+  }
+
+  const paid = () => { location.hash = '#/account?paid=1'; };
+  button.onclick = async () => {
+    if (busy || !complete) return;
+    busy = true;
+    say('');
+    button.disabled = true;
+    button.textContent = 'Paying…';
+    try {
+      const token = await state.payHandle.token();
+      if (!token) throw new Error('The card details did not come through. Nothing has been charged. Try again.');
+      const out = await postJSON('/api/pay/charge', { plan: planId, confirmation_token: token });
+      if (out.status === 'paid') { paid(); return; }
+      if (out.client_secret) {
+        // The bank wants a word first (3D Secure): Whop runs that step.
+        const next = await state.payHandle.nextAction(out.client_secret);
+        if (next?.redirected) return;
+        if (next?.status === 'succeeded' || next?.status === 'processing') { paid(); return; }
+        throw new Error(next?.lastPaymentError?.message ?? 'The bank check was not finished. Nothing has been charged. Try again.');
+      }
+      // Taken but not yet settled: the account page waits for it.
+      if (out.status === 'pending' || out.status === 'processing') { paid(); return; }
+      throw new Error('The payment did not go through. Nothing has been charged. Try again.');
+    } catch (err) {
+      if (err?.data?.fallback) { await fallback(); return; }
+      say(err?.message ?? 'The payment did not go through. Nothing has been charged. Try again.');
+      idle();
+    }
+  };
 }
 
 /** Sign in. One email box and one button, because that is the whole of it. */
@@ -5728,7 +5996,9 @@ async function route({ soft = false } = {}) {
   clearInterval(state.tick);
   clearInterval(state.poll);
   if (state.onVisible) { removeEventListener('visibilitychange', state.onVisible); state.onVisible = null; }
-  for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.route === name);
+  for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.route === (name === 'checkout' ? 'pricing' : name));
+  // Whop's card fields belong to the checkout page; leaving it takes them down.
+  if (!soft && state.payHandle) { state.payHandle.destroy(); state.payHandle = null; }
   if (!soft) {
     document.getElementById('nav').classList.remove('open');
     document.getElementById('burger').setAttribute('aria-expanded', 'false');
@@ -5792,6 +6062,7 @@ async function render(name, parts, params) {
     if (name === 'search') return await viewSearch(params);
     if (name === 'results') return await viewResults();
     if (name === 'pricing') return await viewPricing();
+    if (name === 'checkout') return await viewCheckout(params);
     if (name === 'slip') return await viewSlip();
     if (name === 'dev') return await viewDev();
     if (name === 'signin') return await viewSignin();

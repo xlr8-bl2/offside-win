@@ -22,7 +22,7 @@
  */
 
 import { bearer, jsonHeaders } from './http.ts';
-import { checkout, confirm, payStatus, sweepWhop, renewal, webhook, type PayEnv } from './pay.ts';
+import { charge, checkout, confirm, payStatus, sweepWhop, renewal, webhook, type PayEnv } from './pay.ts';
 import { deleteAccount } from './account.ts';
 
 interface Env extends PayEnv {
@@ -152,6 +152,7 @@ export default {
         if (request.method !== 'POST') return fail('method not allowed', 405);
         if (path === '/api/pay/checkout') return await checkout(request, env, jwt);
         if (path === '/api/pay/confirm') return await confirm(request, env, jwt);
+        if (path === '/api/pay/charge') return await charge(request, env, jwt);
         if (path === '/api/pay/renewal') return await renewal(request, env, jwt);
         if (path === '/api/pay/webhook') return await webhook(request, env);
         return fail('not found', 404);
@@ -207,7 +208,7 @@ export default {
  */
 function config(env: Env): Response {
   return new Response(
-    JSON.stringify({ supabaseUrl: env.SUPABASE_URL ?? '', anonKey: env.SUPABASE_ANON_KEY ?? '', googleClientId: env.GOOGLE_CLIENT_ID ?? '', googleRedirect: env.GOOGLE_REDIRECT === '1' }),
+    JSON.stringify({ supabaseUrl: env.SUPABASE_URL ?? '', anonKey: env.SUPABASE_ANON_KEY ?? '', googleClientId: env.GOOGLE_CLIENT_ID ?? '', googleRedirect: env.GOOGLE_REDIRECT === '1', whopAccount: env.WHOP_COMPANY_ID ?? '' }),
     {
       headers: {
         'content-type': 'application/json; charset=utf-8',
