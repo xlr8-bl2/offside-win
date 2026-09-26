@@ -20,6 +20,7 @@
     "settle": "npm -w engine run settle",
     "grant": "npm -w engine run grant --",
     "plans": "npm -w engine run plans --",
+    "whop:check": "npm -w engine run whop:check",
     "backtest": "npm -w engine run backtest",
     "migrate": "npm -w engine run migrate",
     "test": "npm -w engine test && npm -w worker test",
