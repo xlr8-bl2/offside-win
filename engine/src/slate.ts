@@ -12,7 +12,7 @@ import { fillVenues } from './context/venue.ts';
 import { refreshSchedule } from './schedule.ts';
 import { pubFacts } from './narrate/facts.ts';
 import { geminiWriter } from './narrate/gemini.ts';
-import { budgeted, spent, todays, type BudgetState } from './narrate/budget.ts';
+import { budgeted, keyId, spent, todays, type BudgetState } from './narrate/budget.ts';
 import { write, type Writer } from './narrate/write.ts';
 import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
@@ -198,7 +198,9 @@ export async function runSlate(): Promise<SlateReport> {
   // The day's allowance, across every run (see narrate/budget.ts). Set
   // GEMINI_PER_DAY to the model's free requests-per-day, less some headroom.
   const perDay = Number(process.env['GEMINI_PER_DAY'] || 200);
-  const budget: BudgetState = todays(await kvGetJSON<BudgetState>('gemini:budget'));
+  const geminiKey = process.env['GEMINI_API_KEY'];
+  const budget: BudgetState = todays(await kvGetJSON<BudgetState>('gemini:budget'), undefined,
+    geminiKey ? await keyId(geminiKey) : undefined);
   const rawWriter = buildWriter();
   const writer = rawWriter && !spent(budget, perDay) ? budgeted(rawWriter, budget, perDay) : null;
   if (rawWriter && !writer) {
@@ -1020,7 +1022,7 @@ export async function runSlate(): Promise<SlateReport> {
             .map(([k, v]) => `${k} ${v}`).join(', ')})`
         : ''),
     );
-  } else {
+  } else if (!rawWriter) {
     console.log('Narratives: no GEMINI_API_KEY, so the template grammar wrote them all.');
   }
 

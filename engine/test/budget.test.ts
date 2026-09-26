@@ -29,3 +29,16 @@ test('no request is sent past the allowance, and Google saying no is remembered'
   assert.equal(s2.exhausted, true, 'the next run would ask again');
   assert.ok(spent(s2, 100));
 });
+
+test('a new key starts the day fresh, even after the old one was spent', async () => {
+  const { keyId } = await import('../src/narrate/budget.ts');
+  const a = await keyId('old-key');
+  const b = await keyId('new-key');
+  assert.notEqual(a, b);
+  assert.equal(a.length, 12);
+  const spentOld = { day: '2026-09-26', key: a, used: 11, exhausted: true };
+  assert.deepEqual(todays(spentOld, '2026-09-26', b), { day: '2026-09-26', key: b, used: 0, exhausted: false });
+  assert.equal(todays(spentOld, '2026-09-26', a).exhausted, true, 'the same key stays spent');
+  // A count saved before keys were recorded is someone else's.
+  assert.equal(todays({ day: '2026-09-26', used: 11, exhausted: true }, '2026-09-26', b).exhausted, false);
+});
