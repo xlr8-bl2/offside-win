@@ -4485,9 +4485,10 @@ async function startCheckout(plan = 'monthly', row = null) {
         await openCheckout({
           checkout: out.checkout,
           returnUrl: out.returnUrl,
-          title: row?.name && row.amount_minor
-            ? `${row.name}, ${money(row.amount_minor, row.currency)} ${plan === 'matchday' ? `for ${row.days} days` : row.days >= 365 ? 'a year' : 'a month'}`
-            : (PLAN_LINE[plan] ?? 'Membership'),
+          // The plan and its length only. The price is Whop's to show: it
+          // prices in the buyer's own currency, so "£1" here sat over "$1.35"
+          // in the form for a reader in America.
+          title: PLAN_LINE[plan] ?? row?.name ?? 'Membership',
           onPaid: () => { location.hash = '#/account?paid=1'; },
         });
         reset();
@@ -4509,9 +4510,9 @@ async function startCheckout(plan = 'monthly', row = null) {
 
 /** What the card form's heading says, per plan. */
 const PLAN_LINE = {
-  matchday: 'Matchday pass, £3.49 for seven days',
-  monthly: 'Monthly membership, £9 a month',
-  season: 'Season ticket, £49 a year',
+  matchday: 'Matchday pass: seven days, one payment',
+  monthly: 'Monthly membership: renews each month',
+  season: 'Season ticket: renews each year',
 };
 
 /** Turn renewal on or off. Takes effect immediately, both ways. */
@@ -4914,7 +4915,11 @@ async function viewAccount() {
       <div class="ticket-stub">
         ${active
           ? (m.via === 'whop'
-              ? `<span>Renews through Whop</span><a class="btn btn-ghost btn-sm" href="https://whop.com/" target="_blank" rel="noopener">Manage on Whop</a>`
+              // Paid through Whop: renewal and cancelling live on Whop's page for
+              // this membership. A matchday pass is one payment and stops.
+              ? (m.plan_id === 'matchday'
+                  ? `<span>One payment. It stops by itself.</span>`
+                  : `<span>Renews through Whop until you cancel</span><a class="btn btn-ghost btn-sm" href="${esc(m.manage_url && /^https:\/\/(www\.)?whop\.com\//.test(m.manage_url) ? m.manage_url : 'https://whop.com/')}" target="_blank" rel="noopener noreferrer">Manage or cancel</a>`)
               : m.card_brand === 'complimentary'
                 ? `<span>Complimentary</span>`
                 : m.auto_renew

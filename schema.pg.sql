@@ -436,6 +436,9 @@ CREATE TABLE IF NOT EXISTS entitlement (
   created_at   bigint NOT NULL,
   updated_at   bigint NOT NULL
 );
+-- Where the buyer manages a membership sold through Whop (cancel, change
+-- plan): Whop's own page for it, from the membership's `manage_url`.
+ALTER TABLE entitlement ADD COLUMN IF NOT EXISTS manage_url text;
 
 -- The entitlement, and the only one of these four a browser ever reads. It
 -- carries the card's brand and last four so the account page can say "Visa
@@ -738,9 +741,12 @@ $fn$;
 
 -- Grant or extend an entitlement by email. Called by the Whop webhook route
 -- as the service role; idempotent on (source, source_ref) through `payment`.
+-- The signature grew a manage-page argument; drop the old one so the two
+-- cannot both exist as overloads.
+DROP FUNCTION IF EXISTS record_entitlement(text, text, text, text, bigint, bigint, text, text);
 CREATE OR REPLACE FUNCTION record_entitlement(
   p_source text, p_ref text, p_email text, p_plan text, p_expires bigint,
-  p_amount bigint, p_currency text, p_raw text
+  p_amount bigint, p_currency text, p_raw text, p_manage_url text DEFAULT NULL
 ) RETURNS json LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = public AS $fn$
 DECLARE
   v_now   bigint := floor(extract(epoch FROM now()))::bigint;
@@ -767,9 +773,11 @@ BEGIN
     RETURN json_build_object('applied', false, 'reason', 'already recorded');
   END IF;
 
-  -- The receipt, for the account page, when there is an account to hang it on.
+  -- The receipt, for the account page, when there is an account to hang it on
+  -- and money changed hands: a membership event carries no amount, and it is
+  -- the same purchase as its payment, so it is not a second receipt.
   SELECT id INTO v_user FROM auth.users WHERE lower(email) = lower(p_email) LIMIT 1;
-  IF p_ref IS NOT NULL AND v_user IS NOT NULL THEN
+  IF p_ref IS NOT NULL AND v_user IS NOT NULL AND p_amount IS NOT NULL THEN
     INSERT INTO payment (provider, provider_ref, user_id, plan_id, amount_minor, currency, status, raw_json, created_at)
     VALUES (p_source, p_ref, v_user, p_plan, coalesce(p_amount, 0), coalesce(p_currency, 'GBP'), 'succeeded', p_raw, v_now)
     ON CONFLICT (provider, provider_ref) DO NOTHING;
@@ -782,11 +790,12 @@ BEGIN
   -- The processor's own period end when it sent one; otherwise the plan's
   -- length from now, or from the current expiry if that is later.
   v_until := coalesce(p_expires, greatest(v_now, coalesce((SELECT expires_at FROM entitlement WHERE lower(email) = lower(p_email)), v_now)) + v_days * 86400);
-  INSERT INTO entitlement (email, plan_id, expires_at, source, source_ref, status, created_at, updated_at)
-  VALUES (lower(p_email), p_plan, v_until, p_source, p_ref, 'active', v_now, v_now)
+  INSERT INTO entitlement (email, plan_id, expires_at, source, source_ref, status, created_at, updated_at, manage_url)
+  VALUES (lower(p_email), p_plan, v_until, p_source, p_ref, 'active', v_now, v_now, p_manage_url)
   ON CONFLICT (email) DO UPDATE SET
     plan_id = excluded.plan_id, expires_at = greatest(entitlement.expires_at, excluded.expires_at),
     source = excluded.source, source_ref = coalesce(excluded.source_ref, entitlement.source_ref),
+    manage_url = coalesce(excluded.manage_url, entitlement.manage_url),
     status = 'active', updated_at = v_now;
   RETURN json_build_object('applied', true, 'expires_at', v_until);
 END;
@@ -850,7 +859,7 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
               ) m),
              (SELECT to_json(e) FROM (
                 SELECT plan_id, expires_at, 0 AS auto_renew, NULL::bigint AS cancelled_at,
-                       source AS card_brand, NULL::text AS card_last4, source AS via
+                       source AS card_brand, NULL::text AS card_last4, source AS via, manage_url
                 FROM entitlement
                 WHERE auth.email() IS NOT NULL AND lower(email) = lower(auth.email()) AND status = 'active'
                   AND expires_at > floor(extract(epoch FROM now()))::bigint
