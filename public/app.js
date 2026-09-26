@@ -413,8 +413,65 @@ const state = {
  * came back as a single part named `board?league=La%20Liga`, so the router
  * fell through to home. Splitting the query off first is the whole fix.
  */
+/*
+ * Real addresses.
+ *
+ * Every page lives after a `#`, which a search engine reads as one page. The
+ * Worker (worker/src/seo.ts) serves real addresses for the pages worth
+ * finding -- /match/<id>/<teams>, /league/<id>/<name>, /today, /results,
+ * /leagues, /pricing -- and the app reads them as the matching route. Links
+ * are drawn with those addresses too (see crawlable()), so a crawler reading
+ * the rendered page can follow them, and a tap still moves within the app.
+ */
+function pathRoute(pathname = location.pathname) {
+  let m = pathname.match(/^\/match\/(\d+)/);
+  if (m) return `/fixture/${m[1]}`;
+  m = pathname.match(/^\/league\/(\d+)/);
+  if (m) return `/league/${m[1]}`;
+  return { '/today': '/board', '/results': '/results', '/leagues': '/leagues', '/pricing': '/pricing' }[pathname.replace(/\/+$/, '')] ?? null;
+}
+const slugOf = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  .replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+function hashPath(hash) {
+  let m = hash.match(/^#\/fixture\/(\d+)$/);
+  if (m) return `/match/${m[1]}`;
+  m = hash.match(/^#\/league\/(\d+)$/);
+  if (m) return `/league/${m[1]}`;
+  return { '#/board': '/today', '#/results': '/results', '#/leagues': '/leagues', '#/pricing': '/pricing', '#/home': '/' }[hash] ?? null;
+}
+/*
+ * The tab's title, per page, in the same words the Worker writes for a
+ * search engine, so a page reads the same in a result and in the tab.
+ */
+const TITLES = {
+  board: "Today's board", results: 'Our record: every call and how it went', leagues: 'Leagues',
+  pricing: 'Membership', signin: 'Sign in', account: 'Your account', search: 'Find a game',
+  checkout: 'Checkout', slip: 'The bet slip', legal: 'Legal',
+};
+function pageTitle(name) {
+  let t = TITLES[name] ?? null;
+  if (name === 'fixture' && state.titleFor) {
+    const { home, away, score } = state.titleFor;
+    t = Array.isArray(score) ? `${home} ${score[0]}–${score[1]} ${away}` : `${home} v ${away}`;
+  } else if (name === 'league' || name === 'player') {
+    t = app.querySelector('h1')?.textContent.replace(/\s+/g, ' ').trim() || null;
+  }
+  document.title = !t || name === 'home' ? 'offside.win: the picks for the biggest games' : `${t} | offside.win`;
+}
+
+/** Give the app's own links real addresses, keeping the route for the tap. */
+function crawlable(root = document) {
+  for (const a of root.querySelectorAll('a[href^="#/"]')) {
+    const hash = a.getAttribute('href');
+    const path = hashPath(hash);
+    if (!path) continue;
+    a.dataset.hash = hash;
+    a.setAttribute('href', path);
+  }
+}
+
 function parseHash() {
-  const raw = (location.hash || '#/home').slice(1);
+  const raw = (location.hash || (pathRoute() ? `#${pathRoute()}` : '#/home')).slice(1);
   const cut = raw.indexOf('?');
   const path = cut === -1 ? raw : raw.slice(0, cut);
   const query = cut === -1 ? '' : raw.slice(cut + 1);
@@ -834,10 +891,14 @@ function heroHTML(hero = null, venueIds = [], detail = null, free = null, row = 
         <!-- The tie is the page's heading. Without this the home page had no
              h1 at all whenever a hero fixture was set, which is the one case
              it always is. -->
-        <h1 class="fx-stack">
+        <!-- The heading is words only; the stacked lines are its picture.
+             With the crests' initials inside it, the page's heading read
+             "G Germany G Greece" to anything that reads text. -->
+        <h1 class="visually-hidden">The biggest game we have a call on: ${esc(hero.home)} v ${esc(hero.away)}</h1>
+        <div class="fx-stack" aria-hidden="true">
           <span class="fx-line">${crest(hero.home, 'md', hero.home_id)}<span class="name">${esc(hero.home)}</span></span>
           <span class="fx-line">${crest(hero.away, 'md', hero.away_id)}<span class="name">${esc(hero.away)}</span></span>
-        </h1>
+        </div>
         ${heroCallHTML(hero, row)}
         <div class="hero-cta">
           <a class="btn btn-primary" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">Read why</a>
@@ -3265,7 +3326,7 @@ function readsFor(f, verdicts) {
 async function viewFixture(id, params = new URLSearchParams()) {
   placeholder(skeletonHTML());
   let f;
-  try { f = await getJSON(`/api/fixture/${id}`); } catch {
+  try { f = await getJSON(`/api/fixture/${id}`); state.titleFor = f?.home && f?.away ? { home: f.home, away: f.away, score: f.score } : null; } catch {
     /*
      * A fixture we cannot show. The provider's message was printed raw --
      * "fixture not found or not yet analysed" -- under a Back button and
@@ -3500,7 +3561,8 @@ async function viewFixture(id, params = new URLSearchParams()) {
       <div class="hero-copy">
         <span class="timechip${isSoon(f.kickoff) ? ' soon' : ''}">${esc(kickoffLabel(f.kickoff))}</span>
         ${st.kind === 'upcoming' ? '' : liveBadge(st)}${st.kind === 'live' && f.live_minute != null ? `<span class="minute">${esc(f.live_minute)}'</span>` : ''}
-        <h1 class="fx-stack${shown ? ' scored' : ''}">
+        <h1 class="visually-hidden">${esc(shown ? `${f.home} ${shown[0]}–${shown[1]} ${f.away}` : `${f.home} v ${f.away}`)}</h1>
+        <div class="fx-stack${shown ? ' scored' : ''}" aria-hidden="true">
           <span class="fx-line">
             ${crest(f.home, 'md', f.home_id)}
             <span class="name">${esc(f.home)}</span>
@@ -3511,7 +3573,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
             <span class="name">${esc(f.away)}</span>
             ${shown ? `<span class="gf${shown[1] > shown[0] ? ' win' : ''}">${esc(shown[1])}</span>` : formChips(f.form?.away)}
           </span>
-        </h1>
+        </div>
         <p class="hero-blurb">${f.league && f.league_id
           ? `<a class="league-link" href="#/league/${encodeURIComponent(f.league_id)}">${esc(f.league)}</a>${meta.slice(1).length ? `, ${esc(meta.slice(1).join(', '))}` : ''}`
           : esc([f.league, ...meta.slice(1)].filter(Boolean).join(', '))}</p>
@@ -6101,9 +6163,18 @@ document.addEventListener('pointerdown', (e) => {
 }, { passive: true });
 
 document.addEventListener('click', (e) => {
-  const a = e.target.closest?.('a[href^="#/"]');
+  const a = e.target.closest?.('a[href^="#/"], a[data-hash]');
   if (a && !e.defaultPrevented && e.button === 0 && !e.metaKey && !e.ctrlKey) navByLink = true;
 }, true);
+// A link drawn with a real address still moves within the app on a plain tap;
+// a new tab, or a crawler, gets the address.
+document.addEventListener('click', (e) => {
+  const a = e.target.closest?.('a[data-hash]');
+  if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target === '_blank') return;
+  e.preventDefault();
+  if (location.hash === a.dataset.hash && location.pathname === '/') return;
+  location.hash = a.dataset.hash;
+});
 
 /*
  * The placeholder a view shows while it waits. Skipped on a soft redraw,
@@ -6115,6 +6186,11 @@ function placeholder(html) {
 }
 
 async function route({ soft = false } = {}) {
+  // Arrived on a real address and moved on inside the app: the address bar
+  // follows the route, not the page the visit started on.
+  if (location.pathname !== '/' && location.hash.startsWith('#/')) {
+    history.replaceState(history.state, '', `/${location.search}${location.hash}`);
+  }
   const { parts, params } = parseHash();
   const name = parts[0] || 'home';
   const here = location.hash || '#/home';
@@ -6148,6 +6224,8 @@ async function route({ soft = false } = {}) {
     if (!soft) countView();
     state.soft = false;
     smartQuotes(app);
+    crawlable(app);
+    pageTitle(name);
     // After the content is in, so the position is measured against the real
     // page rather than a skeleton. A view that asked for an element in view
     // (a highlighted scorer) gets it, centred.
@@ -6237,7 +6315,6 @@ async function render(name, parts, params) {
  */
 async function headerAuth() {
   const link = document.getElementById('account-link');
-  const tag = document.getElementById('plan-tag');
   const upgrade = document.getElementById('upgrade-link');
   if (!link) return;
 
@@ -6311,11 +6388,10 @@ async function headerAuth() {
   }
   link.href = user ? '#/account' : '#/signin';
 
-  if (tag) {
-    tag.hidden = !user;
-    tag.textContent = member ? 'Member' : 'Free';
-    tag.className = member ? 'plan-tag on' : 'plan-tag';
-    tag.href = member ? '#/account' : '#/pricing';
+  // A member's picture wears the accent as a ring: the plan, without a badge.
+  if (user) {
+    link.classList.toggle('is-member', member);
+    link.title = `${accountName(user, state.account?.profile)}${member ? ', member' : ''}`;
   }
   if (upgrade) {
     upgrade.hidden = member;
@@ -6347,8 +6423,6 @@ function renderRegion() {
 async function health() {
   try {
     const h = await getJSON('/api/health');
-    const live = document.getElementById('live');
-    if (!h.stale) live.classList.add('ok');
     document.getElementById('foot-stats').innerHTML = `
       <div><b>88</b><span>Leagues</span></div>
       <div><b>${(h.fixtures ?? 0).toLocaleString()}</b><span>Games on the board</span></div>
@@ -6440,6 +6514,8 @@ renderRegion();
   }
   await route();
   smartQuotes(document.querySelector('footer'));
+  crawlable(document.querySelector('header'));
+  crawlable(document.querySelector('footer'));
   const settings = document.getElementById('cookie-settings');
   if (settings) settings.onclick = () => cookieNotice({ force: true });
   health();

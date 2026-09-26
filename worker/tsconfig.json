@@ -13,7 +13,9 @@
     // resolves them the same way, so the worker matches rather than inventing
     // a second convention for the same repo.
     "allowImportingTsExtensions": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    // The market wording (public/js/lib/markets.js) is shared with the page.
+    "allowJs": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }
