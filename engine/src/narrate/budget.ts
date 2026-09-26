@@ -19,6 +19,13 @@ import type { Writer } from './write.ts';
 export interface BudgetState {
   /** The Pacific calendar day this count is for, as YYYY-MM-DD. */
   day: string;
+  /**
+   * Which key it counts for: a short hash, never the key. A new key (a new
+   * account, a new quota) starts the day at nothing; without this, a key
+   * swapped in after the old one hit Google's limit was not used until the
+   * next day.
+   */
+  key?: string;
   /** Requests sent today, across every run. */
   used: number;
   /** Google answered with its daily limit: nothing more until tomorrow. */
@@ -29,11 +36,19 @@ export function pacificDay(ms = Date.now()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(ms);
 }
 
-/** Today's state: yesterday's count does not carry over. */
-export function todays(saved: BudgetState | null, day = pacificDay()): BudgetState {
-  return saved && saved.day === day
-    ? { day, used: Number(saved.used) || 0, exhausted: Boolean(saved.exhausted) }
-    : { day, used: 0, exhausted: false };
+/** Today's state for this key: yesterday's count, or another key's, does not carry over. */
+export function todays(saved: BudgetState | null, day = pacificDay(), key?: string): BudgetState {
+  const k = key ?? (saved?.day === day ? saved?.key : undefined);
+  const base = { day, ...(k ? { key: k } : {}) };
+  return saved && saved.day === day && (!key || saved.key === key)
+    ? { ...base, used: Number(saved.used) || 0, exhausted: Boolean(saved.exhausted) }
+    : { ...base, used: 0, exhausted: false };
+}
+
+/** A short, one-way fingerprint of the key, safe to store and to log. */
+export async function keyId(apiKey: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(apiKey));
+  return [...new Uint8Array(buf)].slice(0, 6).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export function spent(state: BudgetState, limit: number): boolean {
