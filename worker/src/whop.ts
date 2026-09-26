@@ -106,6 +106,8 @@ export interface WhopEvent {
   /** Our account id and plan id, from the checkout's metadata, when we made the checkout. */
   userId: string | null;
   ourPlan: string | null;
+  /** Whop's page where the buyer manages this membership. */
+  manageUrl: string | null;
   /** When the current period ends, as Whop states it. */
   periodEnd: number | null;
   amountMinor: number | null;
@@ -169,6 +171,10 @@ export function parseWhop(payload: unknown): WhopEvent {
     // Only a well-formed account id counts; anything else falls back to email.
     userId: uid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uid) ? uid.toLowerCase() : null,
     ourPlan: str(meta['plan']),
+    manageUrl: (() => {
+      const u = str(first(membership?.['manage_url'], data['manage_url']));
+      return u && /^https:\/\/(www\.)?whop\.com\//.test(u) ? u : null;
+    })(),
     periodEnd: epoch(first(
       membership?.['renewal_period_end'], data['renewal_period_end'],
       membership?.['expires_at'], data['expires_at'],

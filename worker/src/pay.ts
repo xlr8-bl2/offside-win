@@ -302,7 +302,50 @@ export async function webhook(request: Request, env: PayEnv): Promise<Response> 
  */
 async function whopWebhook(raw: string, headers: Headers, env: PayEnv): Promise<Response> {
   const verdict = await verifyWhop(raw, headers, env.WHOP_WEBHOOK_SECRET ?? '');
-  if (!verdict.ok) return json({ error: verdict.why }, 401);
+  if (!verdict.ok) {
+    await noteWebhook(env, { verified: false, why: verdict.why, type: eventTypeOf(raw) });
+    return json({ error: verdict.why }, 401);
+  }
+  const res = await handleWhop(raw, verdict.via, env);
+  let outcome: unknown = null;
+  try { outcome = await res.clone().json(); } catch { /* not json */ }
+  await noteWebhook(env, { verified: true, via: verdict.via, type: eventTypeOf(raw), status: res.status, outcome });
+  return res;
+}
+
+const eventTypeOf = (raw: string): string | null => {
+  try {
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    const t = o['type'] ?? o['action'] ?? o['event'];
+    return typeof t === 'string' ? t.slice(0, 60) : null;
+  } catch { return null; }
+};
+
+/**
+ * The last delivery from Whop, kept so the status check can say whether Whop
+ * is reaching the site and what came of it. The event type, whether the
+ * signature held, and the outcome (applied or why not); never the payload,
+ * which carries the buyer's details.
+ */
+async function noteWebhook(env: PayEnv, note: Record<string, unknown>): Promise<void> {
+  if (!env.SUPABASE_SERVICE_KEY) return;
+  const now = Math.floor(Date.now() / 1000);
+  const o = note['outcome'] as Record<string, unknown> | null | undefined;
+  const safe = { ...note, at: now, outcome: o ? { ok: o['ok'], applied: o['applied'], reason: o['reason'], ignored: o['ignored'], skipped: o['skipped'], error: o['error'] } : null };
+  try {
+    await fetch(new URL('/rest/v1/kv', env.SUPABASE_URL), {
+      method: 'POST',
+      headers: {
+        apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        'content-type': 'application/json', prefer: 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify({ k: 'pay:last_webhook', v: JSON.stringify(safe), updated_at: now }),
+    });
+  } catch { /* the delivery still gets its answer */ }
+}
+
+async function handleWhop(raw: string, via: string, env: PayEnv): Promise<Response> {
+  const verdict = { via };
 
   let payload: unknown;
   try { payload = JSON.parse(raw); } catch { return json({ error: 'not json' }, 400); }
@@ -341,6 +384,7 @@ async function whopWebhook(raw: string, headers: Headers, env: PayEnv): Promise<
     p_amount: event.amountMinor,
     p_currency: event.currency ?? 'GBP',
     p_raw: raw.slice(0, 20_000),
+    p_manage_url: event.manageUrl,
   });
   if (out && out.applied === false) console.error('whop: not applied —', out.reason, event.email);
   return json({ ok: true, via: verdict.via, ...(out ?? {}) });
@@ -389,5 +433,17 @@ export async function payStatus(env: PayEnv): Promise<Response> {
       webhook_secret_format: env.WHOP_WEBHOOK_SECRET ? (env.WHOP_WEBHOOK_SECRET.startsWith('ws_') ? 'ws_' : env.WHOP_WEBHOOK_SECRET.startsWith('whsec_') ? 'whsec_' : 'other') : null,
     },
     service_key: Boolean(env.SUPABASE_SERVICE_KEY),
+    last_webhook: await lastWebhook(env),
   });
+}
+
+async function lastWebhook(env: PayEnv): Promise<unknown> {
+  if (!env.SUPABASE_SERVICE_KEY) return null;
+  try {
+    const res = await fetch(new URL('/rest/v1/kv?k=eq.pay:last_webhook&select=v', env.SUPABASE_URL), {
+      headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, accept: 'application/json' },
+    });
+    const rows = res.ok ? await res.json() as Array<{ v: string }> : [];
+    return rows[0] ? JSON.parse(rows[0].v) : null;
+  } catch { return null; }
 }
