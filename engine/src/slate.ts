@@ -9,6 +9,7 @@ import { chooseFreeCall } from './free.ts';
 import { writeMissingReports } from './report.ts';
 import { fillCrestColors } from './images/crest.ts';
 import { fillVenues } from './context/venue.ts';
+import { refreshSchedule } from './schedule.ts';
 import { pubFacts } from './narrate/facts.ts';
 import { geminiWriter } from './narrate/gemini.ts';
 import { write, type Writer } from './narrate/write.ts';
@@ -961,6 +962,14 @@ export async function runSlate(): Promise<SlateReport> {
     if (colored) console.log(`  read ${colored} crest colour${colored === 1 ? '' : 's'}`);
   } catch (err) {
     console.log(`  crest colours skipped: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // The next two weeks of matches, for search. Never allowed to fail the slate.
+  try {
+    const listed = await refreshSchedule(fitted);
+    console.log(`  listed ${listed} upcoming match${listed === 1 ? '' : 'es'} for search`);
+  } catch (err) {
+    console.log(`  schedule skipped: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // The grounds by name, for the match page. Same terms as the colours.

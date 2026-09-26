@@ -1389,6 +1389,159 @@ function rowHTML(f) {
   </a>`;
 }
 
+/* ---------------------------------------------------------------- search */
+
+/*
+ * Find a game.
+ *
+ * The question behind a search is "is there a call on this one?", and there
+ * are three honest answers, so every result says which:
+ *   - a call: the price and the book for a member, the lock for anyone else;
+ *   - no pick: we looked, and nothing was worth backing;
+ *   - not yet: too far off. Games are analysed in the three days before
+ *     kick-off, when line-ups, team news and prices mean something, so the
+ *     result says the day it opens instead of pretending the game is missing.
+ * Played games from the last three days come after, with how the call went.
+ */
+const ANALYSIS_LEAD = 72 * 3600;
+
+function laterRowHTML(g) {
+  const k = new Date(g.kickoff * 1000);
+  const time = k.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const opens = g.kickoff - ANALYSIS_LEAD;
+  const when = opens * 1000 <= Date.now() ? 'Analysis due any time' : `Analysed from ${dayLabel(opens)}`;
+  return `
+  <div class="row is-upcoming is-terse is-later">
+    <div class="row-when"><span class="row-time">${esc(time)}</span><span class="row-day">${esc(dayLabel(g.kickoff))}</span></div>
+    <div class="row-teams">
+      <span class="row-side">${crest(g.home, 'sm', g.home_id)}<span>${esc(g.home)}</span></span>
+      <span class="row-side">${crest(g.away, 'sm', g.away_id)}<span>${esc(g.away)}</span></span>
+    </div>
+    <div class="row-price"><span class="row-later">${esc(when)}</span></div>
+  </div>`;
+}
+
+// A played game's call comes back as `called`, from the record.
+const searchHasCall = (f) => hasCall(f) || Boolean(f.called);
+
+async function viewSearch(params = new URLSearchParams()) {
+  const initial = (params.get('q') ?? '').slice(0, 60);
+  let only = params.get('only') === 'calls';
+  app.innerHTML = `
+  <div class="wrap section narrow search-page">
+    <div class="page-head">
+      <h1 class="display xl">Find a game</h1>
+      <p class="page-sub">Any team or competition we cover, two weeks ahead.</p>
+    </div>
+    <form class="search-box" id="search-form" role="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+      <input id="search-q" type="search" name="q" autocomplete="off" autocapitalize="off" spellcheck="false"
+             enterkeyhint="search" maxlength="60" placeholder="Arsenal, Serie A, Boca…" aria-label="Team or competition"
+             value="${esc(initial)}">
+    </form>
+    <div class="search-out" id="search-out" aria-live="polite"></div>
+  </div>`;
+
+  const input = document.getElementById('search-q');
+  const out = document.getElementById('search-out');
+  let seq = 0;
+  let timer = null;
+
+  const intro = () => `
+    <div class="search-key">
+      <p>What each result tells you:</p>
+      <ul>
+        <li><span class="k-call">A price</span> or <span class="k-lock">Members</span>: we have a call on it.</li>
+        <li><span class="k-pass">No pick</span>: we looked and nothing was worth backing. The reasons are on the game's page.</li>
+        <li><span class="k-later">Analysed from Thu</span>: too far off yet. We read each game in the three days before kick-off.</li>
+      </ul>
+    </div>`;
+
+  const paint = (data) => {
+    const q = data.q;
+    const analysed = data.analysed ?? [];
+    const later = data.later ?? [];
+    const leagues = data.leagues ?? [];
+    const upcoming = analysed.filter((f) => matchState(f).kind !== 'ft');
+    const played = analysed.filter((f) => matchState(f).kind === 'ft').reverse();
+    const calls = upcoming.filter(searchHasCall).length;
+    const passes = upcoming.length - calls;
+    const total = analysed.length + later.length;
+
+    if (!total && !leagues.length) {
+      out.innerHTML = `
+        <div class="search-empty">
+          <p class="search-empty-head">Nothing for “${esc(q)}” in the next two weeks.</p>
+          <p>We only list competitions we analyse, and only two weeks ahead. Try the club’s short name, or look through <a href="#/leagues">the competitions we cover</a>.</p>
+        </div>`;
+      return;
+    }
+
+    // The sentence that answers the question before the list does.
+    const bits = [];
+    if (calls) bits.push(`${calls} with a call`);
+    if (passes) bits.push(`${passes} with no pick`);
+    if (later.length) bits.push(`${later.length} still to be analysed`);
+    if (played.length) bits.push(`${played.length} played in the last few days`);
+    const summary = bits.length ? `${bits.slice(0, -1).join(', ')}${bits.length > 1 ? ' and ' : ''}${bits[bits.length - 1]}.` : '';
+
+    const shownUp = only ? upcoming.filter(searchHasCall) : upcoming;
+    const shownPlayed = only ? played.filter(searchHasCall) : played;
+    const shownLater = only ? [] : later;
+    const item = (f) => `<li class="sr-item"><span class="sr-league">${esc(f.league ?? '')}</span>${rowHTML(f)}</li>`;
+    const laterItem = (g) => `<li class="sr-item"><span class="sr-league">${esc(g.league ?? '')}</span>${laterRowHTML(g)}</li>`;
+
+    out.innerHTML = `
+      ${leagues.length ? `<div class="sr-leagues">${leagues.map((l) =>
+        `<a class="sr-comp" href="#/league/${encodeURIComponent(l.id)}">${crest(l.name, 'sm', l.id, 'league')}<span>${esc(l.name)}</span></a>`).join('')}</div>` : ''}
+      ${summary ? `<p class="sr-summary">${esc(summary)}</p>` : ''}
+      ${total ? `<div class="sr-filter" role="group" aria-label="Show">
+        <button type="button" data-only="" aria-pressed="${!only}">All games</button>
+        <button type="button" data-only="calls" aria-pressed="${only}">Only with a call</button>
+      </div>` : ''}
+      ${shownUp.length || shownLater.length ? `<h2 class="sr-head">Coming up</h2>
+        <ul class="sr-list">${shownUp.map(item).join('')}${shownLater.map(laterItem).join('')}</ul>` : ''}
+      ${only && !shownUp.length && total ? `<p class="sr-none">No calls on these yet. ${later.length ? 'Some are still to be analysed; ' : ''}a call only goes up when we think one is worth making.</p>` : ''}
+      ${shownPlayed.length ? `<h2 class="sr-head">Played</h2><ul class="sr-list">${shownPlayed.map(item).join('')}</ul>` : ''}`;
+
+    for (const b of out.querySelectorAll('[data-only]')) {
+      b.onclick = () => { only = b.dataset.only === 'calls'; remember(input.value); paint(data); };
+    }
+  };
+
+  const remember = (q) => {
+    const sp = new URLSearchParams();
+    if (q.trim()) sp.set('q', q.trim());
+    if (only) sp.set('only', 'calls');
+    const tail = sp.toString();
+    history.replaceState(null, '', `${location.pathname}${location.search}#/search${tail ? `?${tail}` : ''}`);
+  };
+
+  const run = async (q) => {
+    const mine = ++seq;
+    remember(q);
+    if (q.trim().length < 2) { out.innerHTML = intro(); return; }
+    out.classList.add('busy');
+    try {
+      const data = await getJSON(`/api/search?q=${encodeURIComponent(q.trim())}`);
+      if (mine !== seq) return;
+      paint(data);
+    } catch {
+      if (mine !== seq) return;
+      out.innerHTML = '<p class="sr-none">Search is not answering just now. Try again in a moment.</p>';
+    } finally {
+      if (mine === seq) out.classList.remove('busy');
+    }
+  };
+
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => run(input.value), 250); });
+  document.getElementById('search-form').onsubmit = (e) => { e.preventDefault(); clearTimeout(timer); input.blur(); run(input.value); };
+  run(initial);
+  // Straight into the box, except on a phone arriving from a shared link,
+  // where a keyboard over the results is the wrong welcome.
+  if (!initial || matchMedia('(min-width: 700px)').matches) input.focus();
+}
+
 /** "Today", "Tomorrow", or the weekday — nobody reads a date they can infer. */
 function dayLabel(epoch) {
   const k = new Date(epoch * 1000);
@@ -5476,6 +5629,7 @@ async function render(name, parts, params) {
     if (name === 'player' && parts[1]) return await viewPlayer(parts[1], params);
     if (name === 'board') return await viewBoard(params);
     if (name === 'leagues') return await viewLeagues();
+    if (name === 'search') return await viewSearch(params);
     if (name === 'results') return await viewResults();
     if (name === 'pricing') return await viewPricing();
     if (name === 'slip') return await viewSlip();
