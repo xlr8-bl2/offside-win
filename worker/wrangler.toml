@@ -35,12 +35,12 @@ SITE_URL = "https://offside.win"
 # sign-in link, and the "Sign in with Google" button needs it in the page. The
 # client secret is not here and never will be; it lives in Supabase only.
 GOOGLE_CLIENT_ID = "819619713096-r9gvdihj81gjinubr5nqqgd721vcfqud.apps.googleusercontent.com"
-# "1" once https://offside.win/ is an authorised redirect URI on that client.
+# "1": https://offside.win/ is an authorised redirect URI on that client (it is).
 # Then the Google button is a plain link to Google's page, and back: no
 # popup, no frame drawn by Google's script. Until then it stays "0" and the
 # page uses Google's own button, because the redirect would land on Google's
 # "redirect_uri_mismatch" error.
-GOOGLE_REDIRECT = "0"
+GOOGLE_REDIRECT = "1"
 
 # Which processor takes the money. "whop": Whop's card form sits on our
 # pricing page, the billing runs at Whop, and Whop tells us by webhook.
