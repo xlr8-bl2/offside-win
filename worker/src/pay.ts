@@ -434,16 +434,173 @@ export async function payStatus(env: PayEnv): Promise<Response> {
     },
     service_key: Boolean(env.SUPABASE_SERVICE_KEY),
     last_webhook: await lastWebhook(env),
+    last_sweep: await lastKv(env, 'pay:last_sweep'),
   });
 }
 
-async function lastWebhook(env: PayEnv): Promise<unknown> {
+const lastWebhook = (env: PayEnv) => lastKv(env, 'pay:last_webhook');
+async function lastKv(env: PayEnv, key: string): Promise<unknown> {
   if (!env.SUPABASE_SERVICE_KEY) return null;
   try {
-    const res = await fetch(new URL('/rest/v1/kv?k=eq.pay:last_webhook&select=v', env.SUPABASE_URL), {
+    const res = await fetch(new URL(`/rest/v1/kv?k=eq.${encodeURIComponent(key)}&select=v`, env.SUPABASE_URL), {
       headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, accept: 'application/json' },
     });
     const rows = res.ok ? await res.json() as Array<{ v: string }> : [];
     return rows[0] ? JSON.parse(rows[0].v) : null;
   } catch { return null; }
+}
+
+/* ------------------------------------------------------ asking Whop directly */
+
+/*
+ * Whop's webhook is one way a membership switches on. It is not allowed to be
+ * the only one: the first real payment went through, Whop emailed the buyer,
+ * and no delivery ever reached the site, so the account stayed free. So the
+ * site also asks Whop itself:
+ *   - when a buyer comes back from paying (POST /api/pay/confirm), for their
+ *     own memberships;
+ *   - every ten minutes (the Worker's cron), for every recent membership.
+ * Both go through grantFromMembership, which is idempotent: the reference is
+ * the membership and its period end, so asking twice changes nothing and a
+ * renewal (a new period end) extends.
+ */
+
+const VALID_STATUSES = new Set(['trialing', 'active', 'past_due', 'completed', 'canceling']);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type Rec = Record<string, unknown>;
+const asRec = (v: unknown): Rec | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Rec) : null);
+const asStr = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
+const toEpoch = (v: unknown): number | null => {
+  if (typeof v === 'number' && Number.isFinite(v)) return v > 1e12 ? Math.floor(v / 1000) : Math.floor(v);
+  const s = asStr(v);
+  if (!s) return null;
+  if (/^\d+$/.test(s)) return toEpoch(Number(s));
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? Math.floor(t / 1000) : null;
+};
+
+/** Recent memberships of the business, newest first, a few pages at most. */
+export async function listWhopMemberships(env: PayEnv, sinceDays: number, pages = 5): Promise<Rec[]> {
+  if (!env.WHOP_API_KEY || !env.WHOP_COMPANY_ID) return [];
+  const out: Rec[] = [];
+  let after: string | null = null;
+  const since = new Date(Date.now() - sinceDays * 86400_000).toISOString();
+  for (let i = 0; i < pages; i++) {
+    const q = new URLSearchParams({ account_id: env.WHOP_COMPANY_ID, first: '100', created_after: since });
+    if (after) q.set('after', after);
+    const res = await fetch(`https://api.whop.com/api/v1/memberships?${q}`, {
+      headers: { authorization: `Bearer ${env.WHOP_API_KEY}`, accept: 'application/json' },
+    });
+    if (!res.ok) throw new Error(`whop memberships ${res.status}`);
+    const body = asRec(await res.json()) ?? {};
+    for (const m of Array.isArray(body['data']) ? body['data'] : []) { const r = asRec(m); if (r) out.push(r); }
+    const info = asRec(body['page_info']);
+    after = info && info['has_next_page'] ? asStr(info['end_cursor']) : null;
+    if (!after) break;
+  }
+  return out;
+}
+
+let planDays: Record<string, number> | null = null;
+async function daysOf(env: PayEnv, plan: string): Promise<number> {
+  if (!planDays) {
+    const res = await fetch(new URL('/rest/v1/plan?select=id,days', env.SUPABASE_URL), {
+      headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_ANON_KEY}`, accept: 'application/json' },
+    });
+    const rows = res.ok ? await res.json() as Array<{ id: string; days: number }> : [];
+    planDays = Object.fromEntries(rows.map((r) => [r.id, Number(r.days)]));
+  }
+  return planDays[plan] ?? 30;
+}
+
+export type GrantOutcome = { membership: string; result: string; user?: string | null };
+
+/** Switch on the entitlement a Whop membership pays for, if it is live and we can tell whose it is. */
+export async function grantFromMembership(env: PayEnv, m: Rec): Promise<GrantOutcome> {
+  const id = asStr(m['id']) ?? '?';
+  const status = String(m['status'] ?? '').toLowerCase();
+  if (!VALID_STATUSES.has(status)) return { membership: id, result: `not live (${status || 'no status'})` };
+  const meta = asRec(m['metadata']) ?? {};
+  const uid = asStr(meta['user_id']);
+  // Whose it is: the account id our checkout put in the metadata, turned into
+  // that account's sign-in email; failing that, the email the buyer gave Whop.
+  let email: string | null = null;
+  if (uid && UUID_RE.test(uid)) email = await accountEmail(env, uid.toLowerCase());
+  if (!email) email = asStr(asRec(m['user'])?.['email'])?.toLowerCase() ?? null;
+  if (!email) return { membership: id, result: 'no account or email' };
+  const ourPlan = asStr(meta['plan']);
+  const plan = ourPlan && /^[a-z0-9_-]{1,40}$/.test(ourPlan) ? ourPlan : await planForWhop(env, asStr(asRec(m['plan'])?.['id']));
+  const now = Math.floor(Date.now() / 1000);
+  const end = toEpoch(m['renewal_period_end'])
+    ?? ((toEpoch(m['created_at']) ?? toEpoch(m['joined_at']) ?? now) + (await daysOf(env, plan)) * 86400);
+  if (end <= now) return { membership: id, result: 'period over' };
+  const manage = asStr(m['manage_url']);
+  const out = await rpcAsService(env, 'record_entitlement', {
+    p_source: 'whop',
+    p_ref: `${id}:${end}`,
+    p_email: email,
+    p_plan: plan,
+    p_expires: end,
+    p_amount: null,
+    p_currency: asStr(m['currency'])?.toUpperCase() ?? null,
+    p_raw: '',
+    p_manage_url: manage && /^https:\/\/(www\.)?whop\.com\//.test(manage) ? manage : null,
+  });
+  return { membership: id, result: out?.applied ? 'granted' : String(out?.reason ?? 'not applied'), user: uid };
+}
+
+/** POST /api/pay/confirm: the reader is back from paying; ask Whop about their memberships now. */
+export async function confirm(request: Request, env: PayEnv, jwt: string | null): Promise<Response> {
+  const user = await identify(env, jwt);
+  if (!user) return json({ error: 'Sign in first.' }, 401);
+  if (provider(env) !== 'whop' || !env.WHOP_API_KEY) return json({ checked: 0 });
+  let list: Rec[] = [];
+  try { list = await listWhopMemberships(env, 3, 2); } catch (err) {
+    console.error('whop confirm:', err instanceof Error ? err.message : String(err));
+    return json({ error: 'Could not reach Whop just now.' }, 502);
+  }
+  const email = user.email?.toLowerCase() ?? null;
+  const mine = list.filter((m) => {
+    const meta = asRec(m['metadata']) ?? {};
+    return asStr(meta['user_id'])?.toLowerCase() === user.id.toLowerCase()
+      || (email !== null && asStr(asRec(m['user'])?.['email'])?.toLowerCase() === email);
+  });
+  const results: GrantOutcome[] = [];
+  for (const m of mine) results.push(await grantFromMembership(env, m));
+  await noteWebhook(env, { verified: true, via: 'confirm', type: 'confirm', outcome: { ok: true, applied: results.some((r) => r.result === 'granted' || r.result === 'already recorded') } });
+  return json({ checked: mine.length, results: results.map((r) => r.result) });
+}
+
+/** The cron: every recent membership, so nothing paid for stays switched off. */
+export async function sweepWhop(env: PayEnv): Promise<{ checked: number; granted: number; errors: number }> {
+  const tally = { checked: 0, granted: 0, errors: 0 };
+  if (provider(env) !== 'whop' || !env.WHOP_API_KEY || !env.SUPABASE_SERVICE_KEY) return tally;
+  let list: Rec[] = [];
+  try { list = await listWhopMemberships(env, 40, 5); } catch (err) {
+    tally.errors++;
+    console.error('whop sweep:', err instanceof Error ? err.message : String(err));
+  }
+  for (const m of list) {
+    tally.checked++;
+    try {
+      const r = await grantFromMembership(env, m);
+      if (r.result === 'granted') tally.granted++;
+    } catch (err) {
+      tally.errors++;
+      console.error('whop sweep grant:', err instanceof Error ? err.message : String(err));
+    }
+  }
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await fetch(new URL('/rest/v1/kv', env.SUPABASE_URL), {
+      method: 'POST',
+      headers: {
+        apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        'content-type': 'application/json', prefer: 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify({ k: 'pay:last_sweep', v: JSON.stringify({ at: now, ...tally }), updated_at: now }),
+    });
+  } catch { /* the next run writes it */ }
+  return tally;
 }

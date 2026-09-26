@@ -5001,12 +5001,15 @@ async function viewAccount() {
     const onPage = () => location.hash.startsWith('#/account') && location.hash.includes('paid=1');
     const poll = async (n) => {
       if (!onPage()) return;
+      // Ask Whop directly as well as waiting for its webhook: the first real
+      // payment's webhook never arrived, and the membership sat switched off.
+      try { await postJSON('/api/pay/confirm', {}); } catch { /* the sweep catches it */ }
       let a = null;
       try { a = await getJSON('/api/account', { fresh: true }); } catch { /* try again */ }
       if (a?.membership && a.membership.expires_at * 1000 > Date.now()) { viewAccount(); return; }
       if (n >= 15) {
         const note = app.querySelector('.paid-note');
-        if (note) note.textContent = 'Payment received. Whop has not confirmed it to us yet. It will switch on by itself; if it has not within the hour, write to support@offside.win and we will sort it.';
+        if (note) note.textContent = 'Payment received. Whop has not confirmed it to us yet. It switches on by itself within ten minutes; if it has not, write to support@offside.win and we will sort it.';
         return;
       }
       setTimeout(() => poll(n + 1), 3000);
@@ -5015,6 +5018,13 @@ async function viewAccount() {
   } else if (justPaid) {
     cacheClear();
     headerAuth();
+  } else if (!active && !state.confirmedOnce) {
+    // A free account: ask Whop once, in the background, whether this reader
+    // has paid for something that has not switched on. Redraws only if it has.
+    state.confirmedOnce = true;
+    postJSON('/api/pay/confirm', {}).then((r) => {
+      if (Array.isArray(r?.results) && r.results.includes('granted')) { cacheClear(); viewAccount(); headerAuth(); }
+    }).catch(() => {});
   }
 
   for (const t of app.querySelectorAll('.tab')) {
