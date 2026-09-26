@@ -43,6 +43,9 @@ async function config() {
   return cachedConfig;
 }
 
+/** The site's public settings (the anon key, Whop's public account id). */
+export const siteConfig = () => config();
+
 /**
  * Is there a session in this browser at all?
  *

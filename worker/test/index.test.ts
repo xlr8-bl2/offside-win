@@ -118,7 +118,7 @@ test('/api/config serves what the browser needs to reach Supabase Auth', async (
   assert.equal(calls.length, 0, 'it answers from env and must not touch the database');
   // The Google client ID is public too (it is in every Google sign-in link);
   // the client secret is never in the Worker at all.
-  assert.deepEqual(await res.json(), { supabaseUrl: ENV.SUPABASE_URL, anonKey: ANON, googleClientId: '', googleRedirect: false });
+  assert.deepEqual(await res.json(), { supabaseUrl: ENV.SUPABASE_URL, anonKey: ANON, googleClientId: '', googleRedirect: false, whopAccount: '' });
   assert.match(res.headers.get('cache-control')!, /public/, 'it is the same for everyone');
 });
 
