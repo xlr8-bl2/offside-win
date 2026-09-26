@@ -743,6 +743,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 
 .foot-brand { display: inline-flex; align-items: center; gap: var(--space-4); color: var(--chalk-2); }
 .foot-brand .wordmark { font-size: var(--text-2xl); }
+.foot-about { max-width: 60ch; margin: var(--space-4) 0 0; font-size: var(--text-sm); color: var(--chalk-3); }
 .foot-stats { display: flex; gap: var(--space-9); flex-wrap: wrap; }
 .foot-stats div b {
   display: block;
