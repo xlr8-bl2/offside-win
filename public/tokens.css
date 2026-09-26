@@ -341,6 +341,18 @@
      itself: the mobile nav's top edge, scroll-padding for in-page anchors, and
      the sticky filter bar on the board. */
   --header-h: 56px;
+  /* The colours a reader can put behind their initials (account page). Eight,
+     all with white initials legible on them, none of them green or red, which
+     are the site's won and lost. */
+  --avatar-c1: #7a5af8;
+  --avatar-c2: #1f8f8a;
+  --avatar-c3: #c07b1e;
+  --avatar-c4: #3a6fd1;
+  --avatar-c5: #b0478f;
+  --avatar-c6: #5a6474;
+  --avatar-c7: #8a5a3c;
+  --avatar-c8: #3f4bb0;
+
   --z-header: 100;
   --z-overlay: 300;
 }
