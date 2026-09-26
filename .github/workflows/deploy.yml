@@ -111,7 +111,7 @@ jobs:
       # part that actually carries the product.
       - name: Verify the live read path
         env:
-          SITE: ${{ vars.SITE_URL || 'https://offside-win.ashleymbaht.workers.dev' }}
+          SITE: ${{ vars.SITE_URL || 'https://offside.win' }}
         run: |
           set -uo pipefail
           body=""
