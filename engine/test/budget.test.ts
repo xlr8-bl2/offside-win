@@ -26,8 +26,10 @@ test('no request is sent past the allowance, and Google saying no is remembered'
   const s2 = todays(null, '2026-09-26');
   const w2 = budgeted({ name: 'x', generate: async () => { throw new QuotaExhausted('daily'); } }, s2, 100);
   await assert.rejects(w2.generate('a'));
-  assert.equal(s2.exhausted, true, 'the next run would ask again');
-  assert.ok(spent(s2, 100));
+  assert.equal(s2.exhausted, true);
+  assert.ok(spent(s2, 100), 'the next run would ask again straight away');
+  // Two hours on, one request is allowed to find out.
+  assert.ok(!spent({ ...s2, pausedUntil: Math.floor(Date.now() / 1000) - 1 }, 100));
 });
 
 test('a new key starts the day fresh, even after the old one was spent', async () => {
@@ -38,7 +40,9 @@ test('a new key starts the day fresh, even after the old one was spent', async (
   assert.equal(a.length, 12);
   const spentOld = { day: '2026-09-26', key: a, used: 11, exhausted: true };
   assert.deepEqual(todays(spentOld, '2026-09-26', b), { day: '2026-09-26', key: b, used: 0, exhausted: false });
-  assert.equal(todays(spentOld, '2026-09-26', a).exhausted, true, 'the same key stays spent');
+  assert.equal(todays(spentOld, '2026-09-26', a).exhausted, true, 'the same key keeps its record');
   // A count saved before keys were recorded is someone else's.
   assert.equal(todays({ day: '2026-09-26', used: 11, exhausted: true }, '2026-09-26', b).exhausted, false);
+  // A refusal recorded with no pause (before pauses existed) stops nothing.
+  assert.ok(!spent(todays({ day: '2026-09-26', key: b, used: 1, exhausted: true }, '2026-09-26', b), 200));
 });

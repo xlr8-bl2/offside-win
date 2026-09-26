@@ -205,7 +205,7 @@ export async function runSlate(): Promise<SlateReport> {
   const writer = rawWriter && !spent(budget, perDay) ? budgeted(rawWriter, budget, perDay) : null;
   if (rawWriter && !writer) {
     console.log(`Narratives: today's ${rawWriter.name} allowance is spent (${budget.used}/${perDay}`
-      + `${budget.exhausted ? ', and Google has said so' : ''}); it resets at midnight Pacific. The grammar writes until then.`);
+      + `${budget.pausedUntil ? `, paused after Google refused until ${new Date(budget.pausedUntil * 1000).toISOString().slice(11, 16)} UTC` : ''}). The grammar writes until then.`);
   }
 
   // Counted rather than assumed. A silent drift back to template prose is
@@ -427,7 +427,7 @@ export async function runSlate(): Promise<SlateReport> {
 
           if (narrateAttempts >= perRun) break;
           if (spent(budget, perDay)) {
-            writerGaveUp = budget.exhausted ? 'Google says the daily limit is reached' : `today's allowance of ${perDay} is spent`;
+            writerGaveUp = budget.pausedUntil ? 'Google refused for quota; trying again in two hours' : `today's allowance of ${perDay} is spent`;
             break;
           }
           narrateAttempts++;
