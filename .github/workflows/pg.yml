@@ -78,7 +78,6 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           WHOP_API_KEY: ${{ secrets.WHOP_API_KEY }}
           WHOP_COMPANY_ID: biz_u3qYuQLDjOpDZH
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           # Actions expressions have no split(), and using one stops the whole
           # workflow from being dispatched. The shell splits the argument.
