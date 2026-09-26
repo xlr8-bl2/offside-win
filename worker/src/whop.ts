@@ -268,3 +268,22 @@ export async function whopPeriodEnd(apiKey: string, membershipId: string, base =
     return null;
   }
 }
+
+/**
+ * The Whop business the API key belongs to (`biz_...`), asked of Whop, so the
+ * owner does not have to find and copy it. Remembered for the life of the
+ * Worker instance; WHOP_COMPANY_ID, when set, wins.
+ */
+let knownAccount: string | null = null;
+export async function whopAccountId(apiKey: string, base = 'https://api.whop.com/api/v1'): Promise<{ id: string | null; status: number }> {
+  if (knownAccount) return { id: knownAccount, status: 200 };
+  try {
+    const res = await fetch(`${base}/accounts/me`, { headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json' } });
+    if (!res.ok) return { id: null, status: res.status };
+    const id = str((rec(await res.json()) ?? {})['id']);
+    if (id && /^biz_[A-Za-z0-9]+$/.test(id)) knownAccount = id;
+    return { id: knownAccount, status: res.status };
+  } catch {
+    return { id: null, status: 0 };
+  }
+}
