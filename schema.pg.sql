@@ -744,9 +744,11 @@ $fn$;
 -- The signature grew a manage-page argument; drop the old one so the two
 -- cannot both exist as overloads.
 DROP FUNCTION IF EXISTS record_entitlement(text, text, text, text, bigint, bigint, text, text);
+DROP FUNCTION IF EXISTS record_entitlement(text, text, text, text, bigint, bigint, text, text, text);
 CREATE OR REPLACE FUNCTION record_entitlement(
   p_source text, p_ref text, p_email text, p_plan text, p_expires bigint,
-  p_amount bigint, p_currency text, p_raw text, p_manage_url text DEFAULT NULL
+  p_amount bigint, p_currency text, p_raw text, p_manage_url text DEFAULT NULL,
+  p_user uuid DEFAULT NULL
 ) RETURNS json LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = public AS $fn$
 DECLARE
   v_now   bigint := floor(extract(epoch FROM now()))::bigint;
@@ -776,7 +778,10 @@ BEGIN
   -- The receipt, for the account page, when there is an account to hang it on
   -- and money changed hands: a membership event carries no amount, and it is
   -- the same purchase as its payment, so it is not a second receipt.
-  SELECT id INTO v_user FROM auth.users WHERE lower(email) = lower(p_email) LIMIT 1;
+  -- The account comes from the caller, who knows it (the checkout put it in
+  -- Whop's metadata). Not looked up in auth.users: the service role that runs
+  -- this may not read that table, and the first real payment failed on it.
+  v_user := p_user;
   IF p_ref IS NOT NULL AND v_user IS NOT NULL AND p_amount IS NOT NULL THEN
     INSERT INTO payment (provider, provider_ref, user_id, plan_id, amount_minor, currency, status, raw_json, created_at)
     VALUES (p_source, p_ref, v_user, p_plan, coalesce(p_amount, 0), coalesce(p_currency, 'GBP'), 'succeeded', p_raw, v_now)
