@@ -417,6 +417,16 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .nav a.on { color: var(--pitch); background: var(--chalk); }
 
 .top-right { display: flex; align-items: center; gap: var(--tap-gap); flex: none; }
+/* Search, one tap from every page. */
+.search-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--tap); height: var(--tap); border-radius: 50%; color: var(--chalk-2);
+}
+.search-link svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.search-link:hover, .search-link[aria-current="page"] { color: var(--chalk); background: var(--terrace); }
+.search-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* The header's right side is flex: none, so its buttons can hold one line. */
+.top-right .btn { white-space: nowrap; }
 
 /*
  * What tier the reader is on, stated rather than implied.
