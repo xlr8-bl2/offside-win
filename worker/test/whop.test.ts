@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseWhop, verifyWhop } from '../src/whop.ts';
+import { parseWhop, verifyWhop, whopCheckoutBody } from '../src/whop.ts';
 
 const BODY = JSON.stringify({ action: 'membership.went_valid', data: { id: 'mem_1', user: { email: 'Buyer@Example.com' }, plan: { id: 'plan_abc' }, renewal_period_end: '2026-10-24T17:00:00Z' } });
 const NOW = 1_800_000_000;
@@ -64,4 +64,54 @@ test('a membership going invalid, a payment, and an unknown event are told apart
   assert.equal(paid.currency, 'GBP');
   assert.equal(parseWhop({ action: 'something.else', data: {} }).kind, 'ignore');
   assert.equal(parseWhop({ action: 'membership.went_valid', data: {} }).email, null);
+});
+
+/* ------------------------------------------------ Whop's current format */
+
+test("a ws_ secret, Whop's own format, is the HMAC key as written", async () => {
+  // Whop documents the key as the ws_ string itself; it must not be base64-decoded.
+  const secret = 'ws_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd';
+  const body = JSON.stringify({ type: 'payment.succeeded', data: { id: 'pay_1' } });
+  const sig = await standardSig("msg_9", NOW, body, new Uint8Array(new TextEncoder().encode(secret)));
+  const v = await verifyWhop(body, h({ 'webhook-id': 'msg_9', 'webhook-timestamp': String(NOW), 'webhook-signature': sig }), secret, NOW);
+  assert.deepEqual(v, { ok: true, via: 'standard-webhooks' });
+});
+
+test('a payment from our own checkout is read by account id, plan and total', () => {
+  const uid = '3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
+  const e = parseWhop({
+    type: 'payment.succeeded',
+    data: {
+      id: 'pay_9', total: 9, currency: 'gbp',
+      user: { email: 'typed-something-else@example.com' },
+      plan: { id: 'plan_x' }, membership: { id: 'mem_9' },
+      metadata: { user_id: uid, plan: 'monthly' },
+    },
+  });
+  assert.equal(e.kind, 'paid');
+  assert.equal(e.userId, uid);
+  assert.equal(e.ourPlan, 'monthly');
+  assert.equal(e.amountMinor, 900);
+  assert.equal(e.currency, 'GBP');
+});
+
+test('metadata that is not an account id is ignored rather than trusted', () => {
+  const e = parseWhop({ type: 'payment.succeeded', data: { id: 'pay_1', user: { email: 'a@b.co' }, metadata: { user_id: 'admin' } } });
+  assert.equal(e.userId, null);
+  assert.equal(e.email, 'a@b.co');
+});
+
+test('the checkout is priced from our plan row, and a pass does not renew', () => {
+  const base = { companyId: 'biz_1', user: { id: 'u1', email: 'x@y.z' }, returnUrl: 'https://offside.win/#/account?paid=1' };
+  const monthly = whopCheckoutBody({ ...base, plan: { id: 'monthly', name: 'Monthly', amountMinor: 900, currency: 'GBP', days: 30, renews: true } }) as any;
+  assert.equal(monthly.plan.plan_type, 'renewal');
+  assert.equal(monthly.plan.renewal_price, 9);
+  assert.equal(monthly.plan.billing_period, 30);
+  assert.equal(monthly.plan.currency, 'gbp');
+  assert.equal(monthly.plan.company_id, 'biz_1');
+  assert.deepEqual(monthly.metadata, { user_id: 'u1', plan: 'monthly', email: 'x@y.z' });
+  const pass = whopCheckoutBody({ ...base, plan: { id: 'matchday', name: 'Matchday pass', amountMinor: 349, currency: 'GBP', days: 7, renews: false } }) as any;
+  assert.equal(pass.plan.plan_type, 'one_time');
+  assert.equal(pass.plan.initial_price, 3.49);
+  assert.equal(pass.plan.expiration_days, 7);
 });

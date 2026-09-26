@@ -14,6 +14,7 @@ import { describe as market, didItLand, recap } from './js/lib/markets.js';
 import { COUNTRY_NAMES, bookName, cash, country, localPrice, purse } from './js/lib/books.js';
 import { cleanProse } from './js/lib/vocabulary.js';
 import { LEGAL, SUPPORT_EMAIL, UPDATED } from './js/lib/legal.js';
+import { openCheckout } from './js/lib/whop.js';
 import { absenceReason } from './js/lib/absence.js';
 import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, viewingAsFree } from './js/lib/auth.js';
 
@@ -4295,10 +4296,10 @@ async function afterSignIn() {
   state.account = null;
   cacheClear();
   const intent = takeIntent();
-  if (intent === 'buy') {
+  if (intent?.startsWith('buy')) {
     history.replaceState(null, '', `${location.pathname}#/pricing`);
     await route();
-    await startCheckout();
+    await startCheckout(intent.split(':')[1] || 'monthly');
     headerAuth();
     return;
   }
@@ -4310,29 +4311,55 @@ async function afterSignIn() {
 async function startCheckout(plan = 'monthly', row = null) {
   const button = document.querySelector(`[data-buy="${plan}"]`) ?? document.getElementById('buy');
   const was = button?.textContent;
+  const reset = () => { if (button) { button.disabled = false; button.textContent = was; } };
   if (button) { button.disabled = true; button.textContent = 'Opening checkout…'; }
   try {
     /*
-     * Signed in: through the Worker, which puts the account's email on the
-     * checkout so the membership finds it. Signed out: straight to the plan's
-     * own checkout, because a reader with a card out should not be sent to
-     * find their inbox first -- the pricing page tells them to sign in with
-     * the same email afterwards, and the entitlement waits for them.
+     * Signed in first, always. The membership is attached to the account
+     * that asked for it (its id travels with the payment), so whatever email
+     * the buyer types into the card form, it lands on the right account. A
+     * reader who is signed out is sent to sign in and comes straight back to
+     * this plan's checkout.
      */
-    if (await currentUser()) {
-      const { link } = await postJSON('/api/pay/checkout', { plan });
-      if (!link) throw new Error('The payment page could not be opened.');
-      location.href = link;
+    if (!(await currentUser())) {
+      setIntent(`buy:${plan}`);
+      location.hash = '#/signin';
       return;
     }
-    if (row?.checkout_url) { location.href = row.checkout_url; return; }
-    setIntent('buy');
-    location.hash = '#/signin';
+    const out = await postJSON('/api/pay/checkout', { plan });
+    if (out.checkout) {
+      try {
+        await openCheckout({
+          checkout: out.checkout,
+          returnUrl: out.returnUrl,
+          title: row?.name && row.amount_minor
+            ? `${row.name}, ${money(row.amount_minor, row.currency)} ${plan === 'matchday' ? `for ${row.days} days` : row.days >= 365 ? 'a year' : 'a month'}`
+            : (PLAN_LINE[plan] ?? 'Membership'),
+          onPaid: () => { location.hash = '#/account?paid=1'; },
+        });
+        reset();
+        return;
+      } catch (err) {
+        // Whop's script would not load (a blocker, a bad connection): its own
+        // checkout page takes the same payment with the same account id on it.
+        if (out.link) { location.href = out.link; return; }
+        throw err;
+      }
+    }
+    if (!out.link) throw new Error('The payment page could not be opened.');
+    location.href = out.link;
   } catch (err) {
-    if (button) { button.disabled = false; button.textContent = was; }
+    reset();
     alert(err.message);
   }
 }
+
+/** What the card form's heading says, per plan. */
+const PLAN_LINE = {
+  matchday: 'Matchday pass, £3.49 for seven days',
+  monthly: 'Monthly membership, £9 a month',
+  season: 'Season ticket, £49 a year',
+};
 
 /** Turn renewal on or off. Takes effect immediately, both ways. */
 async function setRenewal(on) {
@@ -4458,8 +4485,9 @@ async function viewPricing() {
     </div>
 
     <div class="prose pricing-small">
-      <p><b>Paying and signing in.</b> Payment is taken by Whop. Use the same email address there as you
-        use to sign in here. That is how your membership finds you. Nothing else is needed.</p>
+      <p><b>Paying.</b> You pay on this page, in a card form run by Whop, who take the payment. Your card
+        details go to Whop and never reach us. The membership goes on the account you are signed in with,
+        whatever email you give the card form.</p>
       <p><b>Changed your mind?</b> Fourteen days, full refund, whatever you have read.
         <a href="#/legal/refunds">How refunds work</a>. Cancel a renewing plan from your Whop account in one tap;
         you keep access to the end of what you paid for.</p>
@@ -4488,7 +4516,7 @@ async function viewSignin() {
   // "why am I being asked for my email" and "yes, that is what I was doing".
   let intent = null;
   try { intent = localStorage.getItem(INTENT_KEY); } catch { /* private mode */ }
-  const because = intent === 'buy'
+  const because = intent?.startsWith('buy')
     ? 'Sign in first and your membership will be waiting when you come back.'
     : intent === '#/account'
       ? 'Your account is behind this.'
@@ -4669,7 +4697,11 @@ async function viewAccount() {
 
   const params = new URLSearchParams(location.hash.split('?')[1] ?? '');
   const asked = params.get('tab');
-  const open = ACCOUNT_TABS.some(([k]) => k === asked) ? asked : 'profile';
+  // Back from the card form. Whop's webhook, not the redirect, is what
+  // switches the membership on, so the page says the payment is in and
+  // checks again for a short while rather than showing a free account.
+  const justPaid = params.get('paid') === '1';
+  const open = ACCOUNT_TABS.some(([k]) => k === asked) ? asked : justPaid ? 'membership' : 'profile';
 
   const follows = Array.isArray(account.follows) ? account.follows : [];
 
@@ -4796,11 +4828,36 @@ async function viewAccount() {
           ? `Member until ${esc(when(m.expires_at))}` : 'Free account'}</a>
       </div>
     </div>
+    ${justPaid ? `<p class="paid-note${active ? ' done' : ''}" role="status">${active
+      ? 'Payment received. You are in: every call is open.'
+      : 'Payment received. Switching your membership on, which usually takes a few seconds.'}</p>` : ''}
     <div class="tabs" role="tablist">
       ${ACCOUNT_TABS.map(([k, label]) => `<button class="tab${k === open ? ' on' : ''}" data-tab="${k}" role="tab" aria-selected="${k === open}">${esc(label)}</button>`).join('')}
     </div>
     ${ACCOUNT_TABS.map(([k]) => `<div class="tabpane acct-pane" data-pane="${k}"${k === open ? '' : ' hidden'}>${panes[k]}</div>`).join('')}
   </div>`;
+
+  if (justPaid && !active) {
+    // Quietly, without redrawing the page each time: ask again every three
+    // seconds for three-quarters of a minute, and redraw once it is on.
+    const onPage = () => location.hash.startsWith('#/account') && location.hash.includes('paid=1');
+    const poll = async (n) => {
+      if (!onPage()) return;
+      let a = null;
+      try { a = await getJSON('/api/account', { fresh: true }); } catch { /* try again */ }
+      if (a?.membership && a.membership.expires_at * 1000 > Date.now()) { viewAccount(); return; }
+      if (n >= 15) {
+        const note = app.querySelector('.paid-note');
+        if (note) note.textContent = 'Payment received. Whop has not confirmed it to us yet. It will switch on by itself; if it has not within the hour, write to support@offside.win and we will sort it.';
+        return;
+      }
+      setTimeout(() => poll(n + 1), 3000);
+    };
+    setTimeout(() => poll(1), 3000);
+  } else if (justPaid) {
+    cacheClear();
+    headerAuth();
+  }
 
   for (const t of app.querySelectorAll('.tab')) {
     t.onclick = () => {
@@ -5644,10 +5701,10 @@ renderRegion();
    */
   if (signedInJustNow) {
     const intent = takeIntent();
-    if (intent === 'buy') {
+    if (intent?.startsWith('buy')) {
       location.hash = '#/pricing';
       await route();
-      await startCheckout();
+      await startCheckout(intent.split(':')[1] || 'monthly');
       health();
       headerAuth();
       cookieNotice();
