@@ -50,4 +50,4 @@ PAY_PROVIDER = "whop"
 # The Whop business the plans are made under (Whop dashboard, Settings). An
 # id, not a secret. Empty until set: the checkout falls back to each plan's
 # own Whop link, and with none of those, says memberships are not open yet.
-WHOP_COMPANY_ID = ""
+WHOP_COMPANY_ID = "biz_u3qYuQLDjOpDZH"
