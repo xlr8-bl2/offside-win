@@ -13,7 +13,7 @@
 import { describe as market, didItLand, recap } from './js/lib/markets.js';
 import { COUNTRY_NAMES, bookName, cash, country, localPrice, purse } from './js/lib/books.js';
 import { cleanProse } from './js/lib/vocabulary.js';
-import { accountRpc, authHeaders, completeSignIn, currentUser, setViewAs, signInWithEmail, signInWithGoogle, signOut, viewingAsFree } from './js/lib/auth.js';
+import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, signInWithEmail, signInWithGoogle, signOut, viewingAsFree } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
 
@@ -4206,6 +4206,28 @@ const takeIntent = () => {
   } catch { return null; }
 };
 
+/**
+ * A sign-in that finished on this page (Google's button), rather than on a
+ * return from a link: carry on where the reader was, exactly as the boot
+ * sequence does for a magic link.
+ */
+async function afterSignIn() {
+  state.member = null;
+  state.account = null;
+  cacheClear();
+  const intent = takeIntent();
+  if (intent === 'buy') {
+    history.replaceState(null, '', `${location.pathname}#/pricing`);
+    await route();
+    await startCheckout();
+    headerAuth();
+    return;
+  }
+  history.replaceState(null, '', `${location.pathname}${intent && intent.startsWith('#/') ? intent : '#/home'}`);
+  await route();
+  headerAuth();
+}
+
 async function startCheckout(plan = 'monthly', row = null) {
   const button = document.querySelector(`[data-buy="${plan}"]`) ?? document.getElementById('buy');
   const was = button?.textContent;
@@ -4405,7 +4427,11 @@ async function viewSignin() {
       ${problem ? `<p class="form-error">${esc(problem)}</p>` : ''}
 
       <div class="panel signin" id="signin-panel">
-        <button class="btn btn-primary btn-lg btn-google" id="google">
+        <!-- Google's own button, drawn here by renderGoogleButton; it signs in
+             on offside.win, so Google's window names this site. The button
+             below is the fallback, shown only if Google's script cannot load. -->
+        <div class="gsi-slot" id="google-slot" aria-live="polite"></div>
+        <button class="btn btn-primary btn-lg btn-google" id="google" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.8 3-4.3 3-7.4z" fill="#4285F4"/><path d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853"/><path d="M6.4 14a6 6 0 0 1 0-3.9V7.5H3.1a10 10 0 0 0 0 9z" fill="#FBBC05"/><path d="M12 6c1.5 0 2.8.5 3.8 1.5l2.8-2.8A10 10 0 0 0 3.1 7.5l3.3 2.6C7.2 7.8 9.4 6 12 6z" fill="#EA4335"/></svg>
           Continue with Google
         </button>
@@ -4450,6 +4476,15 @@ async function viewSignin() {
     e.currentTarget.disabled = true;
     try { await signInWithGoogle(); } catch (err) { say(humanise(err), true); e.currentTarget.disabled = false; }
   };
+  const slot = document.getElementById('google-slot');
+  renderGoogleButton(slot, {
+    onSignedIn: afterSignIn,
+    onError: (err) => say(humanise(err), true),
+  }).then((drawn) => {
+    if (drawn) return;
+    slot.remove();
+    document.getElementById('google').hidden = false;
+  });
 
   document.getElementById('magic').onsubmit = async (e) => {
     e.preventDefault();
@@ -4982,7 +5017,8 @@ const LEGAL = {
         <li><b>Supabase</b> stores accounts, memberships and payment records, and runs sign-in.</li>
         <li><b>Whop</b> runs the checkout and the billing, holds your card, and has its own privacy
             policy for the purchase you make with it.</li>
-        <li><b>Google</b>, only if you choose to sign in with Google.</li>
+        <li><b>Google</b>, if you choose to sign in with Google. Its sign-in button is loaded from
+            Google when you open the sign-in page, so Google sees that request as any server would.</li>
         <li><b>jsDelivr</b> serves the sign-in library to your browser when you sign in or open your
             account, so it sees that request as any server would.</li>
         <li>Club crests, league marks, player photographs and stadium photographs load from our
