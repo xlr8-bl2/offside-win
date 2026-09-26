@@ -176,6 +176,76 @@ export async function signInWithGoogle() {
   if (error) throw new Error(error.message);
 }
 
+/*
+ * Google's own "Sign in with Google" button.
+ *
+ * The redirect flow (signInWithGoogle below) sends the reader through
+ * Supabase's address, so Google's window says "continue to
+ * <project>.supabase.co". This button runs on offside.win itself and hands
+ * back a signed ID token, so the window says "Sign in to offside.win"; the
+ * token goes to Supabase, which checks it against the same Google client and
+ * starts the session. Nothing about the account changes, only what the reader
+ * is shown.
+ *
+ * The nonce: Google is given its SHA-256 and signs that into the token;
+ * Supabase is given the original and checks the two match, so a token
+ * lifted from somewhere else cannot be replayed here.
+ *
+ * Google's script is loaded only when the sign-in page asks for the button.
+ */
+const GSI = 'https://accounts.google.com/gsi/client';
+let gsiPromise = null;
+function loadGsi() {
+  gsiPromise ??= new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = GSI;
+    s.async = true;
+    s.onload = () => (window.google?.accounts?.id ? resolve(window.google.accounts.id) : reject(new Error('Google sign-in did not start')));
+    s.onerror = () => reject(new Error('Google sign-in could not load'));
+    setTimeout(() => reject(new Error('Google sign-in took too long to load')), 8000);
+    document.head.append(s);
+  });
+  return gsiPromise;
+}
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Draw Google's button into `el`. Resolves true once it is drawn, false when
+ * it cannot be (no client ID configured, script blocked), so the page can
+ * fall back to the redirect button.
+ */
+export async function renderGoogleButton(el, { onSignedIn, onError } = {}) {
+  let cfg;
+  try { cfg = await config(); } catch { return false; }
+  if (!cfg.googleClientId) return false;
+  let gsi;
+  try { gsi = await loadGsi(); } catch { gsiPromise = null; return false; }
+  const raw = [...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  gsi.initialize({
+    client_id: cfg.googleClientId,
+    nonce: await sha256Hex(raw),
+    ux_mode: 'popup',
+    use_fedcm_for_button: true,
+    callback: async ({ credential }) => {
+      try {
+        const { error } = await (await client()).auth.signInWithIdToken({ provider: 'google', token: credential, nonce: raw });
+        if (error) throw new Error(error.message);
+        await onSignedIn?.();
+      } catch (err) {
+        onError?.(err);
+      }
+    },
+  });
+  gsi.renderButton(el, {
+    type: 'standard', theme: 'filled_black', size: 'large', text: 'continue_with', shape: 'pill',
+    logo_alignment: 'left', width: Math.max(200, Math.min(400, Math.round(el.clientWidth || 320))),
+  });
+  return true;
+}
+
 /**
  * Sign out. `everywhere` ends every session this account holds, on every
  * device, which is what someone wants after using a shared computer.

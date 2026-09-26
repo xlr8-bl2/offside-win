@@ -28,6 +28,7 @@ import { deleteAccount } from './account.ts';
 interface Env extends PayEnv {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
+  GOOGLE_CLIENT_ID?: string;
   ASSETS: Fetcher;
 }
 
@@ -190,7 +191,7 @@ export default {
  */
 function config(env: Env): Response {
   return new Response(
-    JSON.stringify({ supabaseUrl: env.SUPABASE_URL ?? '', anonKey: env.SUPABASE_ANON_KEY ?? '' }),
+    JSON.stringify({ supabaseUrl: env.SUPABASE_URL ?? '', anonKey: env.SUPABASE_ANON_KEY ?? '', googleClientId: env.GOOGLE_CLIENT_ID ?? '' }),
     {
       headers: {
         'content-type': 'application/json; charset=utf-8',
