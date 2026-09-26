@@ -380,7 +380,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .brand:hover .wm-line { background: var(--floodlight); }
 
 /* The mark, where there is room for a symbol: the footer, the icons. */
-.brand-symbol { width: 40px; height: 40px; flex: none; color: var(--chalk); }
+.brand-symbol { width: auto; height: 36px; aspect-ratio: 578 / 462; flex: none; color: var(--chalk); }
 
 /*
  * A pill rail, with the current route as a filled pill.

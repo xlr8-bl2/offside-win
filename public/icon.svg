@@ -1,11 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- The mark on its tile: a ball, the offside line through it, and the
-       sliver beyond the line in violet. Weights opened up from the in-page
-       mark so it still reads at 16 pixels. -->
-  <rect width="64" height="64" rx="14" fill="#16171b"/>
-  <clipPath id="l"><rect width="38.5" height="64"/></clipPath>
-  <clipPath id="r"><rect x="38.5" width="30" height="64"/></clipPath>
-  <circle cx="28" cy="32" r="16.5" fill="none" stroke="#f4f6fa" stroke-width="8.5" clip-path="url(#l)"/>
-  <circle cx="28" cy="32" r="16.5" fill="none" stroke="#7a5af8" stroke-width="8.5" clip-path="url(#r)"/>
-  <rect x="36" y="7" width="5" height="50" rx="2.5" fill="#9e86ff"/>
+<!-- The mark on its tile: an italic O, the offside line, the ball beyond it.
+     The small-size ball (one panel) so it holds at favicon size. Source:
+     the owner's drawing, traced; see public/brand/README.md. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="370.0 120.0 798.0 798.0">
+<defs><radialGradient id="gf" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#7a5af8" stop-opacity="0.28"/><stop offset="1" stop-color="#7a5af8" stop-opacity="0"/></radialGradient></defs>
+<rect x="370.0" y="120.0" width="798.0" height="798.0" rx="175.6" fill="#0c0b09"/>
+<rect x="370.0" y="120.0" width="798.0" height="798.0" rx="175.6" fill="url(#gf)"/>
+<clipPath id="mfc"><circle cx="946" cy="582" r="96"/></clipPath>
+  <path d="M 699 368.969 C 622.149 376.503, 554.702 422.767, 516.720 494 C 480.503 561.921, 490.986 625.681, 543.799 658.704 C 582.904 683.156, 643.733 685.647, 693.718 664.844 C 700.296 662.106, 701.188 661.381, 703.774 656.670 C 705.335 653.826, 715.862 634.850, 727.168 614.500 C 738.475 594.150, 752.685 568.500, 758.748 557.500 C 772.399 532.732, 802.995 477.400, 815.977 454 C 821.317 444.375, 827.830 432.542, 830.449 427.704 L 835.212 418.908 829.308 411.704 C 812.558 391.265, 784.245 376.389, 751 370.558 C 739.966 368.623, 711.424 367.751, 699 368.969 M 689.303 435.990 C 632.321 444.052, 581.689 496.517, 578.412 550.896 C 576.120 588.928, 600.593 613, 641.549 613 C 672.131 613, 699.727 601.820, 726.044 578.770 C 769.671 540.559, 782.539 482.354, 753.729 453.544 C 739.739 439.554, 713.892 432.512, 689.303 435.990 " fill="#f7f4ed" fill-rule="evenodd"/>
+  <path d="M 939.7 309.0 L 981.9 309.0 L 763.6 711.7 Q 753.1 731.0 731.1 731.0 L 688.9 731.0 L 907.2 328.3 Q 917.7 309.0 939.7 309.0 Z" fill="#7a5af8"/>
+  <circle cx="946" cy="582" r="96" fill="#f7f4ed"/><polygon points="946.0,551.4 978.9,575.3 966.3,614.0 925.7,614.0 913.1,575.3" fill="#0c0b09"/>
 </svg>
