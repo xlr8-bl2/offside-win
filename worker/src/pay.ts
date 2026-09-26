@@ -14,7 +14,7 @@
 
 import { createCheckoutLink, parseWebhook, type CoinflowConfig } from './coinflow.ts';
 import { verifyWebhook } from './webhook.ts';
-import { createWhopCheckout, parseWhop, verifyWhop, whopPeriodEnd } from './whop.ts';
+import { createWhopCheckout, parseWhop, verifyWhop, whopAccountId, whopPeriodEnd } from './whop.ts';
 
 export interface PayEnv {
   SUPABASE_URL: string;
@@ -147,10 +147,11 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
     // The card form on our own page: a checkout configuration made here, with
     // the price from our plan row and the account id as metadata, which the
     // page hands to Whop's Checkout element.
-    if (env.WHOP_API_KEY && env.WHOP_COMPANY_ID) {
+    const companyId = env.WHOP_API_KEY ? (env.WHOP_COMPANY_ID || (await whopAccountId(env.WHOP_API_KEY)).id) : null;
+    if (env.WHOP_API_KEY && companyId) {
       try {
         const made = await createWhopCheckout(env.WHOP_API_KEY, {
-          companyId: env.WHOP_COMPANY_ID,
+          companyId,
           plan: {
             id: String(plan.id),
             name: String(plan.name ?? plan.id),
@@ -366,4 +367,27 @@ async function planForWhop(env: PayEnv, planRef: string | null): Promise<string>
   const plans = res.ok ? await res.json() as Array<{ id: string; checkout_url: string | null }> : [];
   const hit = plans.find((p) => typeof p.checkout_url === 'string' && p.checkout_url.includes(planRef));
   return hit?.id ?? 'monthly';
+}
+
+/* ---------------------------------------------------------------- status */
+
+/**
+ * Whether payments are wired up, without saying anything secret: which
+ * secrets are present, whether Whop accepts the key, and the business id
+ * (public, it is in every Whop checkout link).
+ */
+export async function payStatus(env: PayEnv): Promise<Response> {
+  const whop = env.WHOP_API_KEY ? await whopAccountId(env.WHOP_API_KEY) : { id: null, status: 0 };
+  return json({
+    provider: provider(env),
+    whop: {
+      api_key: Boolean(env.WHOP_API_KEY),
+      api_key_accepted: whop.status === 200,
+      api_key_status: whop.status || null,
+      business: env.WHOP_COMPANY_ID || whop.id,
+      webhook_secret: Boolean(env.WHOP_WEBHOOK_SECRET),
+      webhook_secret_format: env.WHOP_WEBHOOK_SECRET ? (env.WHOP_WEBHOOK_SECRET.startsWith('ws_') ? 'ws_' : env.WHOP_WEBHOOK_SECRET.startsWith('whsec_') ? 'whsec_' : 'other') : null,
+    },
+    service_key: Boolean(env.SUPABASE_SERVICE_KEY),
+  });
 }
