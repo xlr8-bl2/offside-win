@@ -3137,13 +3137,17 @@
 .ev.is-sub .ev-body b { font-weight: var(--weight-medium); }
 
 .ev-ico { display: inline-block; flex: none; vertical-align: middle; }
-.ev-ico.ico-goal {
-  width: 11px; height: 11px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #fff 0 25%, var(--chalk-3) 26% 45%, #fff 46%);
-  box-shadow: 0 0 0 1px var(--pitch);
-}
-.ev-ico.ico-goal.ico-own { background: radial-gradient(circle at 35% 35%, var(--lost) 0 25%, var(--stand) 26% 45%, var(--lost) 46%); }
+/*
+ * A real ball for a goal and a boot for an assist, drawn once as SVG and used
+ * wherever either appears: the timeline, the team lists, the pitch, the
+ * report and a player's page. An own goal is the same ball in red.
+ */
+.ev-ico.ico-goal, .pp-goal, .ev-ico.ico-boot, .tl-assist { background-position: center; background-repeat: no-repeat; background-size: contain; }
+.ev-ico.ico-goal, .pp-goal { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3CclipPath id='c'%3E%3Ccircle cx='12' cy='12' r='10.8'/%3E%3C/clipPath%3E%3C/defs%3E%3Ccircle cx='12' cy='12' r='10.8' fill='%23fff'/%3E%3Cg clip-path='url(%23c)'%3E%3Cpath d='M12.00 8.30 L15.52 10.86 L14.17 14.99 L9.83 14.99 L8.48 10.86ZM12.00 5.10 L8.67 2.68 L9.94 -1.23 L14.06 -1.23 L15.33 2.68ZM18.56 9.87 L19.83 5.95 L23.95 5.95 L25.22 9.87 L21.89 12.29ZM16.06 17.58 L20.17 17.58 L21.44 21.50 L18.11 23.91 L14.78 21.50ZM7.94 17.58 L9.22 21.50 L5.89 23.91 L2.56 21.50 L3.83 17.58ZM5.44 9.87 L2.11 12.29 L-1.22 9.87 L0.05 5.95 L4.17 5.95Z' fill='%231b1813'/%3E%3Cpath d='M12.00 8.30L12.00 5.10M15.33 2.68L19.83 5.95M15.52 10.86L18.56 9.87M21.89 12.29L20.17 17.58M14.17 14.99L16.06 17.58M14.78 21.50L9.22 21.50M9.83 14.99L7.94 17.58M3.83 17.58L2.11 12.29M8.48 10.86L5.44 9.87M4.17 5.95L8.67 2.68' stroke='%231b1813' stroke-width='.7' fill='none'/%3E%3C/g%3E%3Ccircle cx='12' cy='12' r='10.8' fill='none' stroke='%23fff' stroke-width='.9'/%3E%3C/svg%3E"); }
+.ev-ico.ico-goal.ico-own { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3CclipPath id='c'%3E%3Ccircle cx='12' cy='12' r='10.8'/%3E%3C/clipPath%3E%3C/defs%3E%3Ccircle cx='12' cy='12' r='10.8' fill='%23fff'/%3E%3Cg clip-path='url(%23c)'%3E%3Cpath d='M12.00 8.30 L15.52 10.86 L14.17 14.99 L9.83 14.99 L8.48 10.86ZM12.00 5.10 L8.67 2.68 L9.94 -1.23 L14.06 -1.23 L15.33 2.68ZM18.56 9.87 L19.83 5.95 L23.95 5.95 L25.22 9.87 L21.89 12.29ZM16.06 17.58 L20.17 17.58 L21.44 21.50 L18.11 23.91 L14.78 21.50ZM7.94 17.58 L9.22 21.50 L5.89 23.91 L2.56 21.50 L3.83 17.58ZM5.44 9.87 L2.11 12.29 L-1.22 9.87 L0.05 5.95 L4.17 5.95Z' fill='%23cb3131'/%3E%3Cpath d='M12.00 8.30L12.00 5.10M15.33 2.68L19.83 5.95M15.52 10.86L18.56 9.87M21.89 12.29L20.17 17.58M14.17 14.99L16.06 17.58M14.78 21.50L9.22 21.50M9.83 14.99L7.94 17.58M3.83 17.58L2.11 12.29M8.48 10.86L5.44 9.87M4.17 5.95L8.67 2.68' stroke='%23cb3131' stroke-width='.7' fill='none'/%3E%3C/g%3E%3Ccircle cx='12' cy='12' r='10.8' fill='none' stroke='%23fff' stroke-width='.9'/%3E%3C/svg%3E"); }
+.ev-ico.ico-boot, .tl-assist { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M2.6 8.6c2 .8 4.6.7 6.6-.6l1.5-1c2.6 1.4 5.6 2.8 8.9 4 1.8.7 2.9 1.8 2.9 3 0 .9-.6 1.5-1.4 1.5H3.1c-.7 0-1.2-.5-1.2-1.2V9.3c0-.5.3-.8.7-.7z' fill='%23f7f4ed'/%3E%3Cpath d='M4 13.3c2.5-.3 4.8-1 6.8-2.2' stroke='%237a5af8' stroke-width='1.7' fill='none' stroke-linecap='round'/%3E%3Cpath d='M11.6 8.2l-.8 1.2M13.3 9l-.8 1.2M15 9.8l-.8 1.2' stroke='%231b1813' stroke-width='.8' stroke-linecap='round'/%3E%3Crect x='1.9' y='15.1' width='20.6' height='1.5' rx='.7' fill='%239b958a'/%3E%3Cg fill='%239b958a'%3E%3Crect x='3' y='16.2' width='1.7' height='2.1' rx='.6'/%3E%3Crect x='6.2' y='16.2' width='1.7' height='2.1' rx='.6'/%3E%3Crect x='12.2' y='16.2' width='1.7' height='2.1' rx='.6'/%3E%3Crect x='15.6' y='16.2' width='1.7' height='2.1' rx='.6'/%3E%3Crect x='19' y='16.2' width='1.7' height='1.9' rx='.6'/%3E%3C/g%3E%3C/svg%3E"); }
+.ev-ico.ico-goal { width: 13px; height: 13px; }
+.ev-ico.ico-boot { width: 16px; height: 16px; }
 .ev-ico.ico-card { width: 9px; height: 12px; border-radius: 2px; }
 .ev-ico.ico-card.c-yellow { background: var(--sodium); }
 .ev-ico.ico-card.c-red { background: var(--lost); }
@@ -3164,22 +3168,41 @@
 
 .rep-numbers { margin-top: var(--space-2); }
 .rep-numbers .rep-heads { margin-bottom: var(--space-4); }
-.rep-highlights {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  margin-top: var(--space-6);
-  padding: var(--space-3);
-  border: var(--border) solid var(--rule);
-  border-radius: var(--radius-sm);
-  background: var(--terrace);
-  color: var(--chalk);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-bold);
-  text-decoration: none;
+/* The highlights: a picture with a play button, at the top of the report. */
+.hl-card {
+  display: grid; grid-template-columns: minmax(0, 190px) minmax(0, 1fr); align-items: center; gap: var(--space-5);
+  margin: 0 0 var(--space-6); padding: var(--space-3);
+  border: var(--border) solid var(--floodlight); border-radius: var(--radius);
+  background: var(--terrace); color: var(--chalk); text-decoration: none;
 }
-.rep-highlights img { width: 72px; height: 44px; object-fit: cover; border-radius: 3px; flex: none; }
-.rep-highlights:hover { border-color: var(--floodlight); }
+.hl-card:hover { border-color: var(--floodlight-hi); }
+.hl-card:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.hl-thumb {
+  position: relative; display: block; aspect-ratio: 16 / 9; overflow: hidden; border-radius: var(--radius-sm);
+  background: linear-gradient(170deg, #143020, #0c1d14);
+}
+.hl-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hl-thumb .hl-play {
+  position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px;
+  border-radius: 50%; background: var(--floodlight); box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+.hl-play { display: inline-block; position: relative; flex: none; }
+.hl-play::after {
+  content: ''; position: absolute; left: 54%; top: 50%; transform: translate(-50%, -50%);
+  border-left: 13px solid #fff; border-top: 8px solid transparent; border-bottom: 8px solid transparent;
+}
+.hl-card:hover .hl-play { background: var(--floodlight-hi); }
+.hl-text { display: grid; gap: var(--space-1); min-width: 0; }
+.hl-text b { font-size: var(--text-lg); font-weight: 600; }
+.hl-text small { font-size: var(--text-sm); color: var(--chalk-2); overflow-wrap: anywhere; }
+@media (max-width: 520px) {
+  .hl-card { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
+}
+/* The masthead's button for the same thing. */
+.hl-btn { gap: var(--space-3); margin: var(--space-4) 0 0; }
+.hl-btn .hl-play { width: 18px; height: 18px; border-radius: 50%; background: rgba(255, 255, 255, 0.22); }
+.hl-btn .hl-play::after { border-left-width: 7px; border-top-width: 4.5px; border-bottom-width: 4.5px; }
+.venue-meta { margin: calc(-1 * var(--space-2)) 0 var(--space-4); font-size: var(--text-sm); color: var(--chalk-2); }
 .rep-att { margin: var(--space-4) 0 0; font-size: var(--text-xs); color: var(--chalk-3); }
 
 /* Scorers under a scoreline, home then away, on the results sheet and the
@@ -3577,13 +3600,11 @@ a.pp:hover .pp-name { color: var(--floodlight-hi); }
 .pp-rating.r-good { background: #2f8f5b; }
 .pp-rating.r-poor { background: var(--lost); }
 .pp-marks { position: absolute; inset: 0; pointer-events: none; }
-.pp-goal {
-  display: grid; place-items: center; width: 13px; height: 13px; border-radius: 50%;
-  background: radial-gradient(circle at 50% 50%, #111 0 22%, #fff 24%);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
-  font-style: normal; font-size: 8px; font-weight: 600; line-height: 1; color: #111;
+.pp-goal { position: relative; display: block; width: 15px; height: 15px; border-radius: 50%; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); }
+.pp-goal b {
+  position: absolute; right: -6px; top: -5px; min-width: 11px; padding: 0 2px; border-radius: 6px;
+  background: var(--chalk); color: var(--pitch); font-size: 8px; font-weight: 600; line-height: 11px; text-align: center;
 }
-.pp-goal:not(:empty) { background: #fff; }
 .pp-marks .pp-goal { position: absolute; left: -5px; bottom: -3px; }
 .pp-card { display: block; width: 8px; height: 11px; border-radius: 1.5px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
 .pp-card.yellow { background: var(--sodium); }
@@ -3654,10 +3675,12 @@ a.pp:hover .pp-name { color: var(--floodlight-hi); }
 .tl-sub { display: inline-flex; align-items: center; gap: 3px; font-size: var(--text-2xs); font-variant-numeric: tabular-nums; }
 .tl-sub.on { color: var(--won); }
 .tl-sub.off { color: var(--lost); }
-.tl-assist, .pl-did .tl-assist {
-  padding: 0 3px; border-radius: 3px; background: var(--terrace); color: var(--chalk-2);
-  font-style: normal; font-size: 9px; font-weight: 700; line-height: 1.5;
+.tl-assist {
+  display: inline-flex; align-items: center; min-width: 16px; height: 16px; padding-left: 17px;
+  background-position: left center; background-size: 16px 16px;
+  font-style: normal; font-size: 10px; font-weight: 600; color: var(--chalk-2);
 }
+.tl-assist:empty { padding-left: 0; }
 .tl-row .rating {
   justify-self: end; min-width: 30px; padding: 1px 5px; border-radius: 4px; text-align: center;
   font-variant-numeric: tabular-nums; font-size: 12px; font-weight: 600;
@@ -3696,7 +3719,10 @@ a.pp:hover .pp-name { color: var(--floodlight-hi); }
 .rep-goal.away .rg-who { grid-column: 3; text-align: left; }
 .rg-who b { font-weight: 600; color: var(--chalk); }
 .rg-who small { font-size: var(--text-xs); color: var(--chalk-3); }
-.rg-who .rep-assist { display: block; }
+.rg-who .rep-assist { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+.rep-goal.home .rg-who .rep-assist { justify-content: flex-end; }
+.ev-assist { display: inline-flex; align-items: center; gap: 4px; }
+.rg-mid em { display: inline-flex; align-items: center; gap: 5px; }
 .rep-none { margin: 0 0 var(--space-5); font-size: var(--text-sm); color: var(--chalk-3); }
 .rep-cards { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-4); margin: 0 0 var(--space-5); }
 .rep-cards > div { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); font-size: var(--text-xs); color: var(--chalk-2); }

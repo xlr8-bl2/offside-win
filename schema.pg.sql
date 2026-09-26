@@ -45,6 +45,18 @@ CREATE TABLE IF NOT EXISTS team_color (
   updated_at bigint NOT NULL
 );
 
+-- A ground, by name (engine/src/context/venue.ts). The provider puts only an
+-- id on each match; this is its name, city and capacity, looked up once. An
+-- empty name means the provider could not describe it, so it is not asked
+-- again every run.
+CREATE TABLE IF NOT EXISTS venue (
+  id         bigint PRIMARY KEY,
+  name       text NOT NULL,
+  city       text NOT NULL DEFAULT '',
+  capacity   integer,
+  updated_at bigint NOT NULL
+);
+
 -- A photograph of a team, re-hosted.
 --
 -- One row per team, holding the best action shot we have found for them. The
@@ -1029,6 +1041,13 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
            || jsonb_build_object('colors', jsonb_build_object(
                 'home', (SELECT nullif(c.color, '') FROM team_color c WHERE c.team_id = f.home_team_id),
                 'away', (SELECT nullif(c.color, '') FROM team_color c WHERE c.team_id = f.away_team_id)))
+           -- The ground by name, when the slate has looked it up.
+           || jsonb_build_object('venue', (
+                SELECT jsonb_build_object('name', v.name, 'city', nullif(v.city, ''), 'capacity', v.capacity)
+                FROM venue v
+                WHERE v.name <> ''
+                  AND v.id = CASE WHEN (f.bundle_json::jsonb->>'venue_id') ~ '^[0-9]+$'
+                                  THEN (f.bundle_json::jsonb->>'venue_id')::bigint END))
            -- The calls, from the record rather than from the write-up.
            --
            -- The write-up is a snapshot, and before the freeze at kick-off it
@@ -1330,6 +1349,10 @@ DROP POLICY IF EXISTS team_shot_read ON team_shot;
 CREATE POLICY team_shot_read ON team_shot FOR SELECT TO anon USING (true);
 GRANT SELECT ON team_shot TO anon;
 
+ALTER TABLE venue ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS venue_read ON venue;
+CREATE POLICY venue_read ON venue FOR SELECT TO anon USING (true);
+GRANT SELECT ON venue TO anon;
 ALTER TABLE team_color ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS team_color_read ON team_color;
 CREATE POLICY team_color_read ON team_color FOR SELECT TO anon USING (true);

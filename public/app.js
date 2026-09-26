@@ -2180,7 +2180,7 @@ function squadHTML(lineups, home, away, report = null, league = null, ids = {}) 
       const events = [
         ...Array.from({ length: m.goals }, () => EV_ICON.goal),
         ...Array.from({ length: m.own }, () => EV_ICON.own),
-        m.assists ? `<i class="tl-assist" title="${m.assists} assist${m.assists === 1 ? '' : 's'}">${m.assists > 1 ? m.assists : ''}A</i>` : '',
+        m.assists ? `<i class="tl-assist" role="img" aria-label="${m.assists} assist${m.assists === 1 ? '' : 's'}" title="${m.assists} assist${m.assists === 1 ? '' : 's'}">${m.assists > 1 ? m.assists : ''}</i>` : '',
         m.card ? EV_ICON[m.card] : '',
         m.off ? `<span class="tl-sub off" title="Went off">${EV_ICON.subOff}${esc(minuteOf(m.off))}</span>` : '',
         sub && m.on ? `<span class="tl-sub on" title="Came on">${EV_ICON.subOn}${esc(minuteOf(m.on))}</span>` : '',
@@ -2300,7 +2300,7 @@ function pitchHTML(lineups, home, away, homeId, awayId, report = null, league = 
     const goals = m.goals + m.own;
     const sentOff = m.card === 'red' || m.card === 'second_yellow';
     const marks = [
-      goals ? `<i class="pp-goal" title="${goals} goal${goals === 1 ? '' : 's'}">${goals > 1 ? goals : ''}</i>` : '',
+      goals ? `<i class="pp-goal" title="${goals} goal${goals === 1 ? '' : 's'}">${goals > 1 ? `<b>${goals}</b>` : ''}</i>` : '',
       sentOff ? '<i class="pp-card red" title="Sent off"></i>' : '',
     ].join('');
     return `
@@ -2474,6 +2474,7 @@ const EV_ICON = {
   sub: '<i class="ev-ico ico-sub" aria-hidden="true"></i>',
   subOn: '<i class="ev-ico ico-arrow up" aria-hidden="true"></i>',
   subOff: '<i class="ev-ico ico-arrow down" aria-hidden="true"></i>',
+  assist: '<i class="ev-ico ico-boot" role="img" aria-label="assist" title="Assist"></i>',
 };
 
 /** How a rating reads: the colour says it before the number does. */
@@ -2515,19 +2516,37 @@ function playerMarks(report, id) {
  * ours: every line is a fact from the match, which is why the page can carry
  * it for everyone.
  */
+/*
+ * The highlights, where the provider has them. They were a small grey strip
+ * at the foot of the report, under the stats, which is the last place anyone
+ * looks: now a picture with a play button at the top of it, and a button in
+ * the masthead.
+ */
+function highlightsOf(f) {
+  return (f.report?.highlights ?? []).find((h) => h?.url && /^https?:\/\//.test(h.url)) ?? null;
+}
+function highlightsCard(hl) {
+  const title = hl.title && !/^highlights?$/i.test(hl.title.trim()) ? hl.title.trim() : 'Every goal and the big moments';
+  return `
+    <a class="hl-card" href="${esc(hl.url)}" target="_blank" rel="noopener noreferrer">
+      <span class="hl-thumb">${hl.thumbnail ? `<img src="${esc(hl.thumbnail)}" alt="" loading="lazy" decoding="async">` : ''}<i class="hl-play" aria-hidden="true"></i></span>
+      <span class="hl-text"><b>Watch the highlights</b><small>${esc(title)}</small></span>
+    </a>`;
+}
+
 function reportHTML(f) {
   const r = f?.report;
   if (!r) return '';
   const events = (r.events ?? []).filter((e) => e && (e.t === 'goal' || e.t === 'card' || e.t === 'sub'));
   const st = r.stats;
-  const hl = (r.highlights ?? []).find((h) => h?.url) ?? null;
+  const hl = highlightsOf(f);
   if (!events.length && !st && !hl) return '';
 
   const line = (e) => {
     if (e.t === 'goal') {
       const kind = /own/i.test(e.kind ?? '') ? '<small>own goal</small>' : /pen/i.test(e.kind ?? '') ? '<small>penalty</small>' : '';
       return `${/own/i.test(e.kind ?? '') ? EV_ICON.own : EV_ICON.goal}<b>${playerLink(e.player_id, e.player ?? 'Goal', f.league_id)}</b>${kind}${
-        e.assist ? `<small>assist ${(f._link ?? ((h) => h))(esc(e.assist))}</small>` : ''}${
+        e.assist ? `<small class="ev-assist">${EV_ICON.assist}${(f._link ?? ((h) => h))(esc(e.assist))}</small>` : ''}${
         e.score ? `<em>${esc(e.score[0])}–${esc(e.score[1])}</em>` : ''}`;
     }
     if (e.t === 'card') {
@@ -2545,10 +2564,10 @@ function reportHTML(f) {
     <ol class="rep-goals">${goals.map((e) => {
       const kind = /own/i.test(e.kind ?? '') ? ' <small>own goal</small>' : /pen/i.test(e.kind ?? '') ? ' <small>pen</small>' : '';
       const who = `<b>${playerLink(e.player_id, e.player ?? 'Goal', f.league_id)}</b>${kind}${
-        e.assist ? `<small class="rep-assist">assist ${(f._link ?? ((h) => h))(esc(e.assist))}</small>` : ''}`;
+        e.assist ? `<small class="rep-assist">${EV_ICON.assist}${(f._link ?? ((h) => h))(esc(e.assist))}</small>` : ''}`;
       return `<li class="rep-goal ${e.side === 'away' ? 'away' : 'home'}">
         <span class="rg-who">${who}</span>
-        <span class="rg-mid"><em>${esc(minuteOf(e))}</em>${e.score ? `<b>${esc(e.score[0])}–${esc(e.score[1])}</b>` : ''}</span>
+        <span class="rg-mid"><em>${/own/i.test(e.kind ?? '') ? EV_ICON.own : EV_ICON.goal}${esc(minuteOf(e))}</em>${e.score ? `<b>${esc(e.score[0])}–${esc(e.score[1])}</b>` : ''}</span>
       </li>`;
     }).join('')}</ol>` : '<p class="rep-none">No goals.</p>';
   const cardsFor = (side) => events.filter((e) => e.t === 'card' && (e.side === 'away' ? 'away' : 'home') === side)
@@ -2590,12 +2609,11 @@ function reportHTML(f) {
   return `
   <div class="panel report">
     <p class="panel-head">Match report${r.ht ? ` <span>Half time ${esc(r.ht[0])}–${esc(r.ht[1])}</span>` : ''}</p>
+    ${hl ? highlightsCard(hl) : ''}
     ${events.length ? goalsHTML : ''}
     ${cardsHTML}
     ${timeline}
     ${numbers}
-    ${hl ? `<a class="rep-highlights" href="${esc(hl.url)}" target="_blank" rel="noopener noreferrer">${
-      hl.thumbnail ? `<img src="${esc(hl.thumbnail)}" alt="" loading="lazy" decoding="async">` : ''}<span>Watch the highlights</span></a>` : ''}
     ${r.attendance ? `<p class="rep-att">Attendance ${Number(r.attendance).toLocaleString()}</p>` : ''}
   </div>`;
 }
@@ -3088,7 +3106,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
   const meta = [
     kickoffLabel(f.kickoff),
     ...String(f.round_label || f.league || '').split(/\s*·\s*/).filter(Boolean),
-    f.neutral ? 'neutral ground' : null,
+    f.venue?.name ? (f.neutral ? `${f.venue.name} (neutral)` : f.venue.name) : f.neutral ? 'neutral ground' : null,
   ].filter(Boolean);
 
   /*
@@ -3156,7 +3174,8 @@ async function viewFixture(id, params = new URLSearchParams()) {
         </div>` : ''}
         ${formPanel(f.form, f.home, f.away)}
         ${f.venue_id ? `<div class="panel venue" data-shot="yes">
-          <p class="panel-head">The ground</p>
+          <p class="panel-head">${esc(f.venue?.name || 'The ground')}</p>
+          ${f.venue?.city || f.venue?.capacity ? `<p class="venue-meta">${esc([f.venue.city ? `In ${f.venue.city}` : '', f.venue.capacity ? `holds ${Number(f.venue.capacity).toLocaleString('en-GB')}` : ''].filter(Boolean).join(', ').replace(/^h/, 'H'))}.</p>` : ''}
           <div class="venue-shot">${venueShot(f.venue_id, '')}</div>
         </div>` : ''}
       </div>
@@ -3218,6 +3237,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
         <p class="hero-blurb">${f.league && f.league_id
           ? `<a class="league-link" href="#/league/${encodeURIComponent(f.league_id)}">${esc(f.league)}</a>${meta.slice(1).length ? `, ${esc(meta.slice(1).join(', '))}` : ''}`
           : esc([f.league, ...meta.slice(1)].filter(Boolean).join(', '))}</p>
+        ${highlightsOf(f) ? `<a class="btn btn-primary hl-btn" href="${esc(highlightsOf(f).url)}" target="_blank" rel="noopener noreferrer"><i class="hl-play" aria-hidden="true"></i>Watch the highlights</a>` : ''}
         <div class="fx-follow">${followButtonHTML('team', f.home_id, f.home, { named: true })}${followButtonHTML('team', f.away_id, f.away, { named: true })}</div>
       </div>
     </div>
@@ -4143,7 +4163,7 @@ async function viewPlayer(id, params = new URLSearchParams()) {
         const sc = Array.isArray(m.score) ? m.score : null;
         const bits = [];
         for (let i = 0; i < (Number(m.goals) || 0); i++) bits.push(EV_ICON.goal);
-        if (m.assists) bits.push(`<i class="tl-assist">${m.assists > 1 ? m.assists : ''}A</i>`);
+        if (m.assists) bits.push(`<i class="tl-assist" role="img" aria-label="${m.assists} assist${m.assists === 1 ? '' : 's'}">${m.assists > 1 ? m.assists : ''}</i>`);
         if (m.red) bits.push(EV_ICON.red); else if (m.yellow) bits.push(EV_ICON.yellow);
         return `
         <a class="pl-match" href="#/fixture/${encodeURIComponent(m.fixture_id)}">
