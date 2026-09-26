@@ -167,6 +167,12 @@ export default {
         if (!Number.isFinite(id)) return fail('bad league id', 400);
         return await passthrough(env, 'get_league', { p_id: id }, jwt);
       }
+      if (path === '/api/search') {
+        // Search is per reader (a member sees calls, anyone else the free
+        // copy), so it carries the token like the board does.
+        const q = (url.searchParams.get('q') ?? '').trim().slice(0, 60);
+        return await passthrough(env, 'search_games', { p_q: q }, jwt);
+      }
       if (path === '/api/picks') return await picks(url, env, jwt);
       if (path === '/api/model') return await passthrough(env, 'get_model', {});
       if (path === '/api/hero') return await passthrough(env, 'get_hero', {});
