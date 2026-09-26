@@ -22,7 +22,7 @@
  */
 
 import { bearer, jsonHeaders } from './http.ts';
-import { checkout, renewal, webhook, type PayEnv } from './pay.ts';
+import { checkout, payStatus, renewal, webhook, type PayEnv } from './pay.ts';
 import { deleteAccount } from './account.ts';
 
 interface Env extends PayEnv {
@@ -145,6 +145,7 @@ export default {
         if (path === '/api/pay/checkout') return await checkout(request, env, jwt);
         if (path === '/api/pay/renewal') return await renewal(request, env, jwt);
         if (path === '/api/pay/webhook') return await webhook(request, env);
+        if (path === '/api/pay/status') return await payStatus(env);
         return fail('not found', 404);
       }
       // A page view, from a reader who accepted analytics. Anonymous by
