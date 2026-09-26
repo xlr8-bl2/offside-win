@@ -3743,7 +3743,8 @@ a.pp:hover .pp-name { color: var(--floodlight-hi); }
  */
 html.pay-open { overflow: hidden; }
 .pay-sheet {
-  position: fixed; inset: 0; z-index: 90;
+  /* Over the site header too: the sheet is the whole task while it is open. */
+  position: fixed; inset: 0; z-index: var(--z-overlay);
   display: flex; align-items: flex-end; justify-content: center;
   background: rgba(0, 0, 0, 0.62);
 }
