@@ -279,12 +279,19 @@ test('with Whop live, an unsigned delivery is refused', async () => {
   const req = new Request('https://offside.win/api/pay/webhook', { method: 'POST', body: '{"action":"membership.went_valid"}' });
   const res = await webhook(req, { ...ENV, PAY_PROVIDER: 'whop', WHOP_WEBHOOK_SECRET: 'plain' });
   assert.equal(res.status, 401);
-  assert.equal(sent.length, 0);
+  assert.ok(!sent.some((c) => c.url.includes('/rpc/')), 'nothing may be recorded from an unsigned delivery');
+  // Only the note that a delivery was refused, and never its payload.
+  const note = sent.find((c) => c.url.includes('/rest/v1/kv'));
+  assert.ok(note, 'the refusal should be noted for the status check');
+  const v = JSON.parse((note!.body as any).v);
+  assert.equal(v.verified, false);
+  assert.equal(v.why, 'no-proof');
+  assert.ok(!('raw' in v) && !JSON.stringify(v).includes('went_valid') || v.type === 'membership.went_valid');
 });
 
 test('a payment from our own checkout lands on the account in its metadata, dated by the membership', async () => {
   const uid = '3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
-  const body = JSON.stringify({ type: 'payment.succeeded', data: { id: 'pay_5', total: 9, currency: 'gbp', user: { email: 'typed@elsewhere.com' }, membership: { id: 'mem_5' }, plan: { id: 'plan_q' }, metadata: { user_id: uid, plan: 'monthly' } } });
+  const body = JSON.stringify({ type: 'payment.succeeded', data: { id: 'pay_5', total: 9, currency: 'gbp', user: { email: 'typed@elsewhere.com' }, membership: { id: 'mem_5', manage_url: 'https://whop.com/billing/manage/mem_5' }, plan: { id: 'plan_q' }, metadata: { user_id: uid, plan: 'monthly' } } });
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode('plain'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const sig = [...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body)))].map((b) => b.toString(16).padStart(2, '0')).join('');
   route = (url) => {
@@ -302,6 +309,7 @@ test('a payment from our own checkout lands on the account in its metadata, date
   assert.equal(call.body.p_ref, 'pay_5');
   assert.equal(call.body.p_amount, 900);
   assert.equal(call.body.p_expires, Math.floor(Date.parse('2026-10-26T10:00:00Z') / 1000));
+  assert.equal(call.body.p_manage_url, 'https://whop.com/billing/manage/mem_5');
 });
 
 test('with an API key, checkout makes a Whop checkout priced from our plan row', async () => {
