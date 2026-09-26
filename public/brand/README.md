@@ -15,5 +15,9 @@ true football pattern so its seams are clean at every size.
 | `../og.png` | the link preview |
 
 Colours are the site's own: chalk `#f7f4ed`, floodlight violet `#7a5af8`,
-ground `#0c0b09`. The glow belongs to large uses only (the link preview);
-every icon is flat.
+ground `#0c0b09`. Flat everywhere: no glow, no gradient, at any size. The
+owner's call.
+
+**The percent sign is on purpose.** O, line, ball reads as "%", a nod to
+confidence levels. Do not "fix" it by moving the ball or breaking the
+diagonal.
