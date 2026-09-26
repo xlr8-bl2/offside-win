@@ -131,7 +131,12 @@ export function geminiWriter(opts: GeminiOptions): Writer {
       const daily = /per\s*day|PerDay|daily/i.test(body);
       const m = body.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
       const delay = m ? Number(m[1]) : Number(res.headers.get('retry-after')) || 30;
-      if (daily || delay > 90) throw new QuotaExhausted(`gemini free-tier ${daily ? 'daily' : 'long'} limit reached`);
+      // Which limit Google named, in its own ids (never anything of ours).
+      const named = [...body.matchAll(/"quotaId"\s*:\s*"([^"]+)"/g)].map((m) => m[1]).join(', ');
+      const value = body.match(/"quotaValue"\s*:\s*"([^"]+)"/)?.[1];
+      if (daily || delay > 90) {
+        throw new QuotaExhausted(`gemini free-tier ${daily ? 'daily' : 'long'} limit reached${named ? ` (${named}${value ? ` = ${value}` : ''})` : ''}`);
+      }
       return { busy: true, waitMs: Math.ceil(delay * 1000) + 1000 };
     }
 

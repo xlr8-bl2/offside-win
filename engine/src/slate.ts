@@ -475,7 +475,7 @@ export async function runSlate(): Promise<SlateReport> {
             // A rejected draft is the writer working. A thrown request is the
             // writer not being reachable, and only the second kind repeats.
             if (result.error && spent(budget, perDay)) {
-              writerGaveUp = budget.exhausted ? 'Google says the daily limit is reached' : `today's allowance of ${perDay} is spent`;
+              writerGaveUp = result.error;
               break;
             }
             if (result.error) {
