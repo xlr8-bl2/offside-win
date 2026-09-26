@@ -563,6 +563,14 @@ CREATE TABLE IF NOT EXISTS profile (
   created_at   bigint NOT NULL,
   updated_at   bigint NOT NULL
 );
+-- How the account looks and how the site reads for this person: which
+-- picture stands for them (Google's, their initials on a colour they chose,
+-- or their club's crest), their club, and a 12- or 24-hour clock.
+ALTER TABLE profile ADD COLUMN IF NOT EXISTS avatar_style text NOT NULL DEFAULT 'auto';
+ALTER TABLE profile ADD COLUMN IF NOT EXISTS avatar_color text;
+ALTER TABLE profile ADD COLUMN IF NOT EXISTS club_id bigint;
+ALTER TABLE profile ADD COLUMN IF NOT EXISTS club_name text;
+ALTER TABLE profile ADD COLUMN IF NOT EXISTS clock text NOT NULL DEFAULT '24';
 
 -- The teams and competitions a reader follows. The label is kept so the
 -- account page can list a follow without a lookup, and so a team that drops
@@ -880,7 +888,9 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
                FROM payment_receipt LIMIT 24
              ) r
            ), '[]'::json),
-           'profile', (SELECT json_build_object('display_name', display_name, 'odds_format', odds_format)
+           'profile', (SELECT json_build_object('display_name', display_name, 'odds_format', odds_format,
+                                                'avatar_style', avatar_style, 'avatar_color', avatar_color,
+                                                'club_id', club_id, 'club_name', club_name, 'clock', clock)
                        FROM profile WHERE user_id = auth.uid()),
            'follows', coalesce((
              SELECT json_agg(json_build_object('kind', kind, 'id', ref_id, 'label', label) ORDER BY created_at)
@@ -892,22 +902,57 @@ $fn$;
 -- The account's own settings. SECURITY DEFINER because the tables grant the
 -- caller nothing; every statement is pinned to auth.uid(), so a caller can
 -- only ever read or write their own row, and an anonymous one is refused.
-CREATE OR REPLACE FUNCTION save_profile(p_name text, p_odds text)
+-- The signature grew; the old two-argument one is dropped so a stale caller
+-- gets a clear error rather than a second function.
+DROP FUNCTION IF EXISTS save_profile(text, text);
+-- Save the account's profile. Every argument after the name is optional and
+-- NULL means "leave it as it is", so the odds switch can save the odds without
+-- knowing about the picture. A club of 0 clears the club.
+CREATE OR REPLACE FUNCTION save_profile(
+  p_name text, p_odds text,
+  p_avatar text DEFAULT NULL, p_color text DEFAULT NULL,
+  p_club_id bigint DEFAULT NULL, p_club_name text DEFAULT NULL,
+  p_clock text DEFAULT NULL
+)
 RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
 DECLARE
   me uuid := auth.uid();
   now_s bigint := floor(extract(epoch FROM now()))::bigint;
   name_clean text := nullif(left(btrim(regexp_replace(coalesce(p_name, ''), '\s+', ' ', 'g')), 60), '');
+  club_clean text := nullif(left(btrim(regexp_replace(coalesce(p_club_name, ''), '\s+', ' ', 'g')), 80), '');
 BEGIN
   IF me IS NULL THEN RAISE EXCEPTION 'sign in first' USING ERRCODE = '28000'; END IF;
   IF coalesce(p_odds, 'decimal') NOT IN ('decimal', 'fractional', 'american') THEN
     RAISE EXCEPTION 'unknown odds format' USING ERRCODE = '22023';
   END IF;
-  INSERT INTO profile (user_id, display_name, odds_format, created_at, updated_at)
-  VALUES (me, name_clean, coalesce(p_odds, 'decimal'), now_s, now_s)
-  ON CONFLICT (user_id) DO UPDATE
-    SET display_name = excluded.display_name, odds_format = excluded.odds_format, updated_at = excluded.updated_at;
-  RETURN (SELECT json_build_object('display_name', display_name, 'odds_format', odds_format)
+  IF p_avatar IS NOT NULL AND p_avatar NOT IN ('auto', 'photo', 'initials', 'crest') THEN
+    RAISE EXCEPTION 'unknown picture style' USING ERRCODE = '22023';
+  END IF;
+  IF p_color IS NOT NULL AND p_color !~ '^c[1-8]$' THEN
+    RAISE EXCEPTION 'unknown colour' USING ERRCODE = '22023';
+  END IF;
+  IF p_clock IS NOT NULL AND p_clock NOT IN ('24', '12') THEN
+    RAISE EXCEPTION 'unknown clock' USING ERRCODE = '22023';
+  END IF;
+  IF p_club_id IS NOT NULL AND p_club_id < 0 THEN
+    RAISE EXCEPTION 'unknown club' USING ERRCODE = '22023';
+  END IF;
+  INSERT INTO profile (user_id, display_name, odds_format, avatar_style, avatar_color, club_id, club_name, clock, created_at, updated_at)
+  VALUES (me, name_clean, coalesce(p_odds, 'decimal'), coalesce(p_avatar, 'auto'), p_color,
+          nullif(p_club_id, 0), CASE WHEN coalesce(p_club_id, 0) = 0 THEN NULL ELSE club_clean END,
+          coalesce(p_clock, '24'), now_s, now_s)
+  ON CONFLICT (user_id) DO UPDATE SET
+    display_name = excluded.display_name,
+    odds_format  = excluded.odds_format,
+    avatar_style = coalesce(p_avatar, profile.avatar_style),
+    avatar_color = coalesce(p_color, profile.avatar_color),
+    club_id      = CASE WHEN p_club_id IS NULL THEN profile.club_id ELSE nullif(p_club_id, 0) END,
+    club_name    = CASE WHEN p_club_id IS NULL THEN profile.club_name WHEN p_club_id = 0 THEN NULL ELSE club_clean END,
+    clock        = coalesce(p_clock, profile.clock),
+    updated_at   = excluded.updated_at;
+  RETURN (SELECT json_build_object('display_name', display_name, 'odds_format', odds_format,
+                                   'avatar_style', avatar_style, 'avatar_color', avatar_color,
+                                   'club_id', club_id, 'club_name', club_name, 'clock', clock)
           FROM profile WHERE user_id = me);
 END;
 $fn$;
@@ -1658,7 +1703,7 @@ GRANT EXECUTE ON FUNCTION try_json(text) TO anon;
 GRANT EXECUTE ON FUNCTION report_goals(text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION has_membership() TO anon;
 GRANT EXECUTE ON FUNCTION get_account() TO anon;
-GRANT EXECUTE ON FUNCTION save_profile(text, text) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION save_profile(text, text, text, text, bigint, text, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION set_follow(text, bigint, text, boolean) TO anon, authenticated;
 REVOKE ALL ON FUNCTION delete_account_data(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint) TO anon;
