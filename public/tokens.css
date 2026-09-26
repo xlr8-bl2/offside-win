@@ -55,6 +55,8 @@
      get_fixture's `colors`; transparent anywhere else. */
   --home-c: transparent;
   --away-c: transparent;
+  --glow-c: transparent;
+  --glow-dy: 0px;
   --pitch:     #0a0a0c;
   --stand:     #16171b;
   --terrace:   #202329;
