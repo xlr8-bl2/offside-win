@@ -2878,9 +2878,27 @@
 /* ============================================================= turnstile */
 
 .turnstile-aside { margin: 0 0 var(--space-2); font-size: var(--text-xl); color: var(--sodium); }
-/* Google's own button sits in this slot; it draws itself at up to 400px. The
-   height is held so the form below does not jump when it appears. */
-.gsi-slot { display: flex; justify-content: center; min-height: 44px; }
+/*
+ * Google's own button sits in this slot and draws itself at up to 400px.
+ * Until it does, a stand-in of the same size and colour holds the place.
+ *
+ * color-scheme: light is what removes the white box. The page declares itself
+ * dark; Google's frame is a light page; and a browser paints an opaque
+ * backdrop behind any frame whose scheme differs from the element holding it.
+ */
+.gsi-slot { display: grid; justify-items: center; align-items: center; min-height: 44px; color-scheme: light; }
+.gsi-slot > * { grid-area: 1 / 1; }
+#google-slot { position: relative; z-index: 1; width: 100%; display: flex; justify-content: center; }
+.gsi-wait {
+  display: flex; align-items: center; justify-content: center; gap: var(--space-3);
+  width: 100%; max-width: 400px; height: 40px; padding: 0 var(--space-4);
+  border: 1px solid #8e918f; border-radius: 999px; background: #131314;
+  color: #e3e3e3; font-size: 14px; font-weight: 500;
+  transition: opacity 0.2s ease;
+}
+.gsi-wait svg { width: 18px; height: 18px; flex: none; }
+.gsi-slot.ready .gsi-wait { opacity: 0; }
+.signin.working #google-wrap, .signin.working #magic { opacity: 0.4; pointer-events: none; transition: opacity 0.2s ease; }
 .btn-google { gap: var(--space-3); }
 .btn-google svg { width: 18px; height: 18px; flex: none; }
 .sent { display: grid; gap: var(--space-3); }

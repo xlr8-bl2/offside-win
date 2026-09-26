@@ -214,16 +214,30 @@ async function sha256Hex(text) {
 }
 
 /**
+ * Start fetching what sign-in needs, on the tap that heads for the sign-in
+ * page rather than once it has drawn. Only then: loading Google's script on
+ * every page would tell Google about every visit.
+ */
+export function warmSignIn() {
+  config().catch(() => {});
+  loadGsi().catch(() => { gsiPromise = null; });
+  client().catch(() => { clientPromise = null; });
+}
+
+/**
  * Draw Google's button into `el`. Resolves true once it is drawn, false when
  * it cannot be (no client ID configured, script blocked), so the page can
  * fall back to the redirect button.
  */
-export async function renderGoogleButton(el, { onSignedIn, onError } = {}) {
-  let cfg;
-  try { cfg = await config(); } catch { return false; }
+export async function renderGoogleButton(el, { onSignedIn, onError, onWorking } = {}) {
+  // The config, Google's script and our auth library are fetched side by side,
+  // not one after the other: in a row they were most of a second on a phone
+  // before the button showed. The library is warmed here, not after Google's
+  // window closes, so the tap does not stall on a download at the last step.
+  client().catch(() => { clientPromise = null; });
+  let cfg, gsi;
+  try { [cfg, gsi] = await Promise.all([config(), loadGsi()]); } catch { gsiPromise = null; return false; }
   if (!cfg.googleClientId) return false;
-  let gsi;
-  try { gsi = await loadGsi(); } catch { gsiPromise = null; return false; }
   const raw = [...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, '0')).join('');
   gsi.initialize({
     client_id: cfg.googleClientId,
@@ -231,6 +245,7 @@ export async function renderGoogleButton(el, { onSignedIn, onError } = {}) {
     ux_mode: 'popup',
     use_fedcm_for_button: true,
     callback: async ({ credential }) => {
+      onWorking?.();
       try {
         const { error } = await (await client()).auth.signInWithIdToken({ provider: 'google', token: credential, nonce: raw });
         if (error) throw new Error(error.message);
@@ -240,11 +255,17 @@ export async function renderGoogleButton(el, { onSignedIn, onError } = {}) {
       }
     },
   });
+  // The site is in English, so the button is too, whatever the phone's language.
   gsi.renderButton(el, {
     type: 'standard', theme: 'filled_black', size: 'large', text: 'continue_with', shape: 'pill',
-    logo_alignment: 'left', width: Math.max(200, Math.min(400, Math.round(el.clientWidth || 320))),
+    logo_alignment: 'left', locale: 'en-GB', width: googleButtonWidth(el),
   });
   return true;
+}
+
+/** Google draws its button between 200 and 400px wide. */
+function googleButtonWidth(el) {
+  return Math.max(200, Math.min(400, Math.round(el.clientWidth || 320)));
 }
 
 /**
