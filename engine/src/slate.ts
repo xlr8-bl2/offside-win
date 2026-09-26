@@ -8,6 +8,7 @@ import { chooseHero, type HeroCandidate } from './feature.ts';
 import { chooseFreeCall } from './free.ts';
 import { writeMissingReports } from './report.ts';
 import { fillCrestColors } from './images/crest.ts';
+import { fillVenues } from './context/venue.ts';
 import { pubFacts } from './narrate/facts.ts';
 import { geminiWriter } from './narrate/gemini.ts';
 import { write, type Writer } from './narrate/write.ts';
@@ -282,7 +283,12 @@ export async function runSlate(): Promise<SlateReport> {
   const standing = new Map<number, Array<{ market: string; outcome: string; line: number | null }>>();
   const heroCandidates: HeroCandidate[] = [];
 
+  // The grounds on this slate, named once each after the loop.
+  const venueIds = new Set<number>();
+
   for (const event of candidates) {
+    const venueId = num(event['venue_id']);
+    if (venueId) venueIds.add(venueId);
     try {
       const ctx = await gatherFixture(event);
       if (!ctx) {
@@ -955,6 +961,14 @@ export async function runSlate(): Promise<SlateReport> {
     if (colored) console.log(`  read ${colored} crest colour${colored === 1 ? '' : 's'}`);
   } catch (err) {
     console.log(`  crest colours skipped: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // The grounds by name, for the match page. Same terms as the colours.
+  try {
+    const named = await fillVenues(venueIds);
+    if (named) console.log(`  named ${named} ground${named === 1 ? '' : 's'}`);
+  } catch (err) {
+    console.log(`  grounds skipped: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   await kvSetJSON('narrate:ledger', ledger.snapshot());
