@@ -385,6 +385,7 @@ async function handleWhop(raw: string, via: string, env: PayEnv): Promise<Respon
     p_currency: event.currency ?? 'GBP',
     p_raw: raw.slice(0, 20_000),
     p_manage_url: event.manageUrl,
+    p_user: event.userId,
   });
   if (out && out.applied === false) console.error('whop: not applied —', out.reason, event.email);
   return json({ ok: true, via: verdict.via, ...(out ?? {}) });
@@ -546,6 +547,7 @@ export async function grantFromMembership(env: PayEnv, m: Rec): Promise<GrantOut
     p_currency: asStr(m['currency'])?.toUpperCase() ?? null,
     p_raw: '',
     p_manage_url: manage && /^https:\/\/(www\.)?whop\.com\//.test(manage) ? manage : null,
+    p_user: uid && UUID_RE.test(uid) ? uid.toLowerCase() : null,
   });
   return { membership: id, result: out?.applied ? 'granted' : String(out?.reason ?? 'not applied'), user: uid };
 }
