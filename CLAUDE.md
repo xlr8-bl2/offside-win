@@ -15,6 +15,9 @@ the owner says the site is going live, and confirm the list with them first.
   `run.ts`, and the `grant` option and `GRANT_*` variables in
   `.github/workflows/pg.yml`). Keep `plans` if checkout links are still set
   from there.
+- The `whop:check` command (`engine/src/whopcheck.ts`, its `run.ts` entry,
+  the npm scripts, and the `whop:check` option and `WHOP_*` variables in
+  `pg.yml`).
 - Preview and probe workflows: `narrate-preview.yml`, `poster-preview.yml`,
   `probe.yml`, `supabase-check.yml` (and `engine/src/probe.ts` if nothing
   else imports it).
