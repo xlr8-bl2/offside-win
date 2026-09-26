@@ -573,23 +573,20 @@ export async function confirm(request: Request, env: PayEnv, jwt: string | null)
 }
 
 /** The cron: every recent membership, so nothing paid for stays switched off. */
-export async function sweepWhop(env: PayEnv): Promise<{ checked: number; granted: number; errors: number }> {
-  const tally = { checked: 0, granted: 0, errors: 0 };
+export async function sweepWhop(env: PayEnv): Promise<{ checked: number; granted: number; errors: number; error?: string }> {
+  const tally: { checked: number; granted: number; errors: number; error?: string } = { checked: 0, granted: 0, errors: 0 };
+  // The first failure's message, for the status check. Messages here are the
+  // database's or Whop's own error text, never a key or a payload.
+  const fail = (err: unknown) => { tally.errors++; tally.error ??= (err instanceof Error ? err.message : String(err)).slice(0, 300); };
   if (provider(env) !== 'whop' || !env.WHOP_API_KEY || !env.SUPABASE_SERVICE_KEY) return tally;
   let list: Rec[] = [];
-  try { list = await listWhopMemberships(env, 40, 5); } catch (err) {
-    tally.errors++;
-    console.error('whop sweep:', err instanceof Error ? err.message : String(err));
-  }
+  try { list = await listWhopMemberships(env, 40, 5); } catch (err) { fail(err); }
   for (const m of list) {
     tally.checked++;
     try {
       const r = await grantFromMembership(env, m);
       if (r.result === 'granted') tally.granted++;
-    } catch (err) {
-      tally.errors++;
-      console.error('whop sweep grant:', err instanceof Error ? err.message : String(err));
-    }
+    } catch (err) { fail(err); }
   }
   const now = Math.floor(Date.now() / 1000);
   try {
