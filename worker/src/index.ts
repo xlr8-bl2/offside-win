@@ -109,6 +109,16 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // One address for readers. Sign-in sessions live in the browser per
+    // address, so a reader split between workers.dev and offside.win would be
+    // signed in on one and not the other. Pages move permanently; the API
+    // keeps answering on both, because payment webhooks and already-open tabs
+    // still call the old one.
+    if (!path.startsWith('/api/') && url.hostname.endsWith('.workers.dev') && env.SITE_URL?.startsWith('https://')) {
+      const to = new URL(url.pathname + url.search, env.SITE_URL);
+      return Response.redirect(to.toString(), 301);
+    }
+
     if (!path.startsWith('/api/')) {
       return env.ASSETS.fetch(request);
     }
