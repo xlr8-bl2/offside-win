@@ -54,6 +54,26 @@ function showOdds(v) {
   return f === '1/1' ? 'evens' : f;
 }
 const oddsOf = (v) => (showOdds(v) === 'evens' ? 'evens' : `odds of ${showOdds(v)}`);
+
+/*
+ * The clock kick-off times are written in: 24-hour ("20:45", the default, the
+ * way a fixture list is printed) or 12-hour ("8:45pm"). A reader's own
+ * setting, kept on the account and mirrored here so the page draws right
+ * before the account has loaded.
+ */
+const CLOCK_KEY = 'ow.clock';
+let clockFormat = (() => { try { return localStorage.getItem(CLOCK_KEY) === '12' ? '12' : '24'; } catch { return '24'; } })();
+function setClock(c) {
+  clockFormat = c === '12' ? '12' : '24';
+  try { if (clockFormat === '24') localStorage.removeItem(CLOCK_KEY); else localStorage.setItem(CLOCK_KEY, '12'); } catch { /* private mode */ }
+}
+function clockTime(d) {
+  if (clockFormat === '12') {
+    const h = d.getHours(); const m = String(d.getMinutes()).padStart(2, '0');
+    return `${h % 12 || 12}:${m}${h < 12 ? 'am' : 'pm'}`;
+  }
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
 const oddsTag = (v) => (showOdds(v) === 'evens' ? 'evens' : `${showOdds(v)} odds`);
 
 /**
@@ -170,7 +190,7 @@ function kickoffLabel(epoch) {
   if (!epoch) return '';
   const d = new Date(epoch * 1000);
   const now = new Date();
-  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const time = clockTime(d);
   if (d.toDateString() === now.toDateString()) return `Today ${time}`;
   if (new Date(now.getTime() + 864e5).toDateString() === d.toDateString()) return `Tomorrow ${time}`;
   return `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} ${time}`;
@@ -853,7 +873,7 @@ function yourGamesHTML(fixtures) {
 /** One match in a fixture list: home, the kick-off (or the score), away. */
 function nextRowHTML(f) {
   const k = new Date(f.kickoff * 1000);
-  const time = k.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const time = clockTime(k);
   const st = matchState(f);
   const score = st.kind === 'live'
     ? (Array.isArray(f.live_score) && f.live_score.length === 2 ? f.live_score : null)
@@ -1017,7 +1037,7 @@ function tickerHTML(fixtures, recent) {
   }
   const next = fixtures.filter((f) => hasCall(f) && f.kickoff > now).sort((a, b) => a.kickoff - b.kickoff).slice(0, 8);
   for (const f of next) {
-    const t = new Date(f.kickoff * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const t = clockTime(new Date(f.kickoff * 1000));
     items.push({ tone: 'next', href: `#/fixture/${f.id}`, text: `${esc(dayLabel(f.kickoff)) === 'Today' ? t : `${dayLabel(f.kickoff)} ${t}`} ${f.home} v ${f.away}` });
   }
   if (!items.length) return '';
@@ -1256,6 +1276,9 @@ function playedHTML(picks, { showOdds = false } = {}) {
  * runs down the left edge to find the game and the right edge to find the
  * price; the reasoning sits between them, read once the fixture is found.
  */
+/** The signed-in reader's club, or 0. */
+function myClubId() { return Number(state.account?.profile?.club_id) || 0; }
+
 function rowHTML(f) {
   const pick = f.top_pick;
   // The price a reader here can actually get on, which is rarely the best
@@ -1268,7 +1291,7 @@ function rowHTML(f) {
   const k = new Date(f.kickoff * 1000);
   // 24-hour: "11:00 PM" wraps in the column, and a board is read the way a
   // fixture list is printed.
-  const time = k.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const time = clockTime(k);
   const state = matchState(f);
   const day = dayLabel(f.kickoff);
 
@@ -1321,8 +1344,13 @@ function rowHTML(f) {
   // does not already say, on the rows a reader is least able to act on.
   const terse = pass || (f.locked && !played);
 
+  // The reader's own club, marked so it can be found at a glance. (Read
+  // through a helper: `state` in this function is the match's state.)
+  const clubId = myClubId();
+  const isClub = clubId && (Number(f.home_id) === clubId || Number(f.away_id) === clubId);
+
   return `
-  <a class="row is-${state.kind}${played ? ' is-played' : ''}${terse ? ' is-terse' : ''}" href="#/fixture/${encodeURIComponent(f.id)}"
+  <a class="row is-${state.kind}${played ? ' is-played' : ''}${terse ? ' is-terse' : ''}${isClub ? ' is-club' : ''}" href="#/fixture/${encodeURIComponent(f.id)}"
      aria-label="${esc(f.home)} versus ${esc(f.away)}">
     <div class="row-when">
       ${state.kind === 'upcoming'
@@ -1344,6 +1372,7 @@ function rowHTML(f) {
         shown ? `<b class="row-goals${shown[0] > shown[1] ? ' won' : ''}">${esc(shown[0])}</b>` : ''}</span>
       <span class="row-side">${crest(f.away, 'sm', f.away_id)}<span>${esc(f.away)}</span>${
         shown ? `<b class="row-goals${shown[1] > shown[0] ? ' won' : ''}">${esc(shown[1])}</b>` : ''}</span>
+      ${isClub ? '<span class="row-club">Your club</span>' : ''}
     </div>
 
     ${d ? `<div class="row-call">
@@ -1407,7 +1436,7 @@ const ANALYSIS_LEAD = 72 * 3600;
 
 function laterRowHTML(g) {
   const k = new Date(g.kickoff * 1000);
-  const time = k.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const time = clockTime(k);
   const opens = g.kickoff - ANALYSIS_LEAD;
   const when = opens * 1000 <= Date.now() ? 'Analysis due any time' : `Analysed from ${dayLabel(opens)}`;
   return `
@@ -4815,14 +4844,25 @@ const PLAN_NAME = { matchday: 'Matchday pass', monthly: 'Monthly membership', se
  */
 const ACCOUNT_TABS = [['profile', 'Profile'], ['following', 'Following'], ['membership', 'Membership'], ['settings', 'Settings']];
 
-/** A face for the account: Google's picture where there is one, else initials. */
-function avatarHTML(user, name, size = 'md') {
+/**
+ * A face for the account, as the reader chose it on the account page:
+ *   photo    -- Google's picture (the default when there is one);
+ *   initials -- their initials on the colour they picked;
+ *   crest    -- their club's crest.
+ * "auto" is photo when there is one, else initials.
+ */
+function avatarHTML(user, name, size = 'md', profile = state.account?.profile) {
   const label = name || user?.email || '';
-  if (user?.avatar) {
+  const style = profile?.avatar_style ?? 'auto';
+  const colour = /^c[1-8]$/.test(profile?.avatar_color ?? '') ? ` av-${profile.avatar_color}` : '';
+  if (style === 'crest' && profile?.club_id) {
+    return `<span class="avatar avatar-${size} is-crest">${crest(profile.club_name ?? label, 'md', profile.club_id, 'team')}</span>`;
+  }
+  if (style !== 'initials' && user?.avatar) {
     return `<span class="avatar avatar-${size}"><img src="${esc(user.avatar)}" alt="" referrerpolicy="no-referrer"
       onerror="this.parentNode.classList.add('noimg');this.remove()"><i>${esc(initials(label))}</i></span>`;
   }
-  return `<span class="avatar avatar-${size} noimg"><i>${esc(initials(label))}</i></span>`;
+  return `<span class="avatar avatar-${size} noimg${colour}"><i>${esc(initials(label))}</i></span>`;
 }
 
 /** The name to call someone by: what they saved, else what Google said, else their email's first part. */
@@ -4839,6 +4879,7 @@ async function viewAccount() {
   try { account = await getJSON('/api/account'); } catch { /* shown as a fresh account */ }
   state.account = account;
   if (account.profile?.odds_format && account.profile.odds_format !== oddsFormat) setOddsFormat(account.profile.odds_format);
+  if (account.profile?.clock && account.profile.clock !== clockFormat) setClock(account.profile.clock);
 
   const m = account.membership;
   const active = m && m.expires_at * 1000 > Date.now();
@@ -4859,6 +4900,17 @@ async function viewAccount() {
 
   const follows = Array.isArray(account.follows) ? account.follows : [];
 
+  // --- profile: picture and club
+  const prof = account.profile ?? {};
+  const club = prof.club_id ? { id: prof.club_id, name: prof.club_name ?? 'Your club' } : null;
+  const picColour = /^c[1-8]$/.test(prof.avatar_color ?? '') ? prof.avatar_color : 'c1';
+  const picStyle = prof.avatar_style === 'crest' && club ? 'crest'
+    : prof.avatar_style === 'initials' || !user.avatar ? 'initials' : 'photo';
+  // The clubs on offer: the teams this account follows, plus the saved club
+  // if it has since been unfollowed.
+  const clubChoices = (account.follows ?? []).filter((f) => f.kind === 'team').map((f) => ({ id: f.id, name: f.label }));
+  if (club && !clubChoices.some((t) => Number(t.id) === Number(club.id))) clubChoices.unshift(club);
+
   // --- profile
   const profileHTML = `
     <form class="acct-form" id="profile-form" novalidate>
@@ -4866,7 +4918,32 @@ async function viewAccount() {
       <input id="display-name" name="name" type="text" maxlength="60" autocomplete="name"
              value="${esc(account.profile?.display_name ?? user.name ?? '')}" placeholder="What should we call you?">
       <p class="acct-hint">Used to greet you on the front page. Nobody else sees it.</p>
-      <div class="acct-actions"><button class="btn btn-primary" type="submit">Save name</button><span class="acct-note" id="profile-note" role="status"></span></div>
+
+      <fieldset class="acct-choice">
+        <legend>Your picture</legend>
+        <div class="pic-opts" role="radiogroup" aria-label="Your picture">
+          ${user.avatar ? `<label class="pic-opt"><input type="radio" name="pic" value="photo"${picStyle === 'photo' ? ' checked' : ''}>
+            <span>${avatarHTML(user, name, 'md', { avatar_style: 'photo' })}<small>Google photo</small></span></label>` : ''}
+          <label class="pic-opt"><input type="radio" name="pic" value="initials"${picStyle === 'initials' ? ' checked' : ''}>
+            <span>${avatarHTML(user, name, 'md', { avatar_style: 'initials', avatar_color: picColour })}<small>Initials</small></span></label>
+          <label class="pic-opt${club ? '' : ' off'}"><input type="radio" name="pic" value="crest"${picStyle === 'crest' ? ' checked' : ''}${club ? '' : ' disabled'}>
+            <span>${club ? avatarHTML(user, name, 'md', { avatar_style: 'crest', club_id: club.id, club_name: club.name }) : '<span class="avatar avatar-md noimg"><i>?</i></span>'}<small>${club ? 'Club crest' : 'Pick a club first'}</small></span></label>
+        </div>
+        <div class="swatches" role="radiogroup" aria-label="Colour behind your initials"${picStyle === 'initials' ? '' : ' hidden'}>
+          ${['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'].map((c) => `<label class="swatch av-${c}"><input type="radio" name="colour" value="${c}"${picColour === c ? ' checked' : ''} aria-label="Colour ${c.slice(1)}"><i></i></label>`).join('')}
+        </div>
+      </fieldset>
+
+      <fieldset class="acct-choice">
+        <legend>Your club</legend>
+        <select id="club" class="acct-select">
+          <option value="0">No club</option>
+          ${clubChoices.map((t) => `<option value="${esc(t.id)}"${club && Number(club.id) === Number(t.id) ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}
+        </select>
+        <p class="acct-hint">Its games are marked on the board, and its crest can be your picture.${
+          clubChoices.length ? '' : ' Follow a team first and it appears here.'}</p>
+      </fieldset>
+      <div class="acct-actions"><button class="btn btn-primary" type="submit">Save changes</button><span class="acct-note" id="profile-note" role="status"></span></div>
     </form>
     <dl class="acct-facts">
       <div><dt>Email</dt><dd>${esc(user.email ?? '')}</dd></div>
@@ -4950,6 +5027,17 @@ async function viewAccount() {
             <span><b>${esc(label)}</b><small>${esc(eg)}</small></span></label>`).join('')}
       </div>
       <span class="acct-note" id="odds-note" role="status"></span>
+    </fieldset>
+
+    <fieldset class="acct-choice">
+      <legend>Clock</legend>
+      <p class="acct-hint">How kick-off times are written.</p>
+      <div class="seg" role="radiogroup" aria-label="Clock">
+        ${[['24', '24-hour', '20:45'], ['12', '12-hour', '8:45pm']].map(([k, label, eg]) => `
+          <label class="seg-opt"><input type="radio" name="clock" value="${k}"${clockFormat === k ? ' checked' : ''}>
+            <span><b>${esc(label)}</b><small>${esc(eg)}</small></span></label>`).join('')}
+      </div>
+      <span class="acct-note" id="clock-note" role="status"></span>
     </fieldset>
 
     <h2 class="acct-sub">Signing in</h2>
@@ -5052,17 +5140,74 @@ async function viewAccount() {
     button.disabled = true;
     note('profile-note', 'Saving…');
     try {
-      const saved = await accountRpc('save_profile', { p_name: document.getElementById('display-name').value, p_odds: oddsFormat });
+      const clubSel = document.getElementById('club');
+      const clubId = Number(clubSel.value) || 0;
+      const pic = app.querySelector('input[name="pic"]:checked')?.value ?? 'auto';
+      const saved = await accountRpc('save_profile', {
+        p_name: document.getElementById('display-name').value,
+        p_odds: oddsFormat,
+        // A crest with no club to show falls back to the ordinary picture.
+        p_avatar: pic === 'crest' && !clubId ? 'auto' : pic,
+        p_color: app.querySelector('input[name="colour"]:checked')?.value ?? null,
+        p_club_id: clubId,
+        p_club_name: clubId ? clubSel.options[clubSel.selectedIndex].text : null,
+      });
       account.profile = saved;
+      if (state.account) state.account.profile = saved;
       note('profile-note', 'Saved');
       const n = accountName(user, saved);
       app.querySelector('.acct-who h1').textContent = n;
+      app.querySelector('.acct-head .avatar').outerHTML = avatarHTML(user, n, 'lg', saved);
+      state.board = null;
       headerAuth();
     } catch (err) {
       note('profile-note', humaneError(err), true);
     }
     button.disabled = false;
   };
+
+  // The picture: preview as it is picked; saved with the name.
+  const preview = () => {
+    const pic = app.querySelector('input[name="pic"]:checked')?.value ?? 'auto';
+    const swatches = app.querySelector('.swatches');
+    if (swatches) swatches.hidden = pic !== 'initials';
+    const clubSel = document.getElementById('club');
+    const clubId = Number(clubSel?.value) || 0;
+    const crestOpt = app.querySelector('input[name="pic"][value="crest"]');
+    if (crestOpt) {
+      crestOpt.disabled = !clubId;
+      crestOpt.closest('.pic-opt').classList.toggle('off', !clubId);
+      if (!clubId && crestOpt.checked) (app.querySelector('input[name="pic"][value="photo"]') ?? app.querySelector('input[name="pic"][value="initials"]')).checked = true;
+      const face = crestOpt.closest('.pic-opt').querySelector('.avatar');
+      if (face) face.outerHTML = clubId
+        ? avatarHTML(user, name, 'md', { avatar_style: 'crest', club_id: clubId, club_name: clubSel.options[clubSel.selectedIndex].text })
+        : '<span class="avatar avatar-md noimg"><i>?</i></span>';
+      crestOpt.closest('.pic-opt').querySelector('small').textContent = clubId ? 'Club crest' : 'Pick a club first';
+    }
+    const colour = app.querySelector('input[name="colour"]:checked')?.value ?? null;
+    const initialsFace = app.querySelector('input[name="pic"][value="initials"]')?.closest('.pic-opt').querySelector('.avatar');
+    if (initialsFace) initialsFace.outerHTML = avatarHTML(user, name, 'md', { avatar_style: 'initials', avatar_color: colour });
+    const look = { avatar_style: app.querySelector('input[name="pic"]:checked')?.value ?? 'auto', avatar_color: colour,
+      club_id: clubId || null, club_name: clubId ? clubSel.options[clubSel.selectedIndex].text : null };
+    app.querySelector('.acct-head .avatar').outerHTML = avatarHTML(user, name, 'lg', look);
+  };
+  for (const el of app.querySelectorAll('input[name="pic"], input[name="colour"], #club')) el.addEventListener('change', preview);
+
+  // Clock: saved the moment it is picked, like the odds.
+  for (const r of app.querySelectorAll('input[name="clock"]')) {
+    r.onchange = async () => {
+      setClock(r.value);
+      note('clock-note', 'Saving…');
+      try {
+        account.profile = await accountRpc('save_profile', { p_name: account.profile?.display_name ?? user.name ?? '', p_odds: oddsFormat, p_clock: r.value });
+        if (state.account) state.account.profile = account.profile;
+        note('clock-note', `Saved. Kick-offs now read like ${clockTime(new Date(2026, 0, 1, 20, 45))}.`);
+        state.board = null;
+      } catch (err) {
+        note('clock-note', humaneError(err), true);
+      }
+    };
+  }
 
   // Odds format: saved the moment it is picked.
   for (const r of app.querySelectorAll('input[name="odds"]')) {
@@ -5728,8 +5873,10 @@ async function headerAuth() {
         state.account = await getJSON('/api/account');
         state.member = Boolean(state.account.membership?.expires_at * 1000 > Date.now());
         const f = state.account.profile?.odds_format;
-        const oddsChanged = f && f !== oddsFormat;
-        if (oddsChanged) setOddsFormat(f);
+        const c = state.account.profile?.clock;
+        const oddsChanged = (f && f !== oddsFormat) || (c && c !== clockFormat);
+        if (f && f !== oddsFormat) setOddsFormat(f);
+        if (c && c !== clockFormat) setClock(c);
         // The page may have drawn before the account arrived: redraw it once
         // so the odds and "Your games" are the reader's own.
         if (oddsChanged || state.account.follows?.length) softRefresh();

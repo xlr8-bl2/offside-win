@@ -3838,3 +3838,68 @@ html.pay-open { overflow: hidden; }
 /* A game not analysed yet: the same row, quieter, and not a link. */
 .row.is-later { opacity: 0.78; cursor: default; }
 .row-later { font-size: var(--text-xs); color: var(--chalk-3); text-align: right; line-height: 1.3; }
+
+/* ======================================================= account: picture */
+
+/* Initials on the colour the reader chose. */
+.avatar.av-c1 { background: var(--avatar-c1); }
+.avatar.av-c2 { background: var(--avatar-c2); }
+.avatar.av-c3 { background: var(--avatar-c3); }
+.avatar.av-c4 { background: var(--avatar-c4); }
+.avatar.av-c5 { background: var(--avatar-c5); }
+.avatar.av-c6 { background: var(--avatar-c6); }
+.avatar.av-c7 { background: var(--avatar-c7); }
+.avatar.av-c8 { background: var(--avatar-c8); }
+.avatar.noimg[class*="av-c"] { color: #fff; }
+/* A club crest as the picture: the crest fills the circle on a light disc,
+   because most crests are drawn for a white shirt. */
+.avatar.is-crest:has(.crest:not(.noimg)) { background: var(--chalk); }
+.avatar.is-crest .crest:not(.noimg) { width: 78%; height: 78%; background: none; box-shadow: none; }
+.avatar.is-crest .crest img { object-fit: contain; }
+/* No crest image to show: the club's own monogram fills the circle instead. */
+.avatar.is-crest .crest.noimg { width: 100%; height: 100%; font-size: inherit; }
+
+.pic-opts { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-2); }
+.pic-opt { position: relative; cursor: pointer; }
+.pic-opt input { position: absolute; opacity: 0; pointer-events: none; }
+.pic-opt > span {
+  display: grid; justify-items: center; gap: var(--space-2);
+  min-width: 96px; padding: var(--space-3) var(--space-4);
+  border: var(--border) solid var(--rule); border-radius: var(--radius);
+  background: var(--stand);
+}
+.pic-opt small { font-size: var(--text-xs); color: var(--chalk-2); }
+.pic-opt input:checked + span { border-color: var(--floodlight); background: var(--terrace); }
+.pic-opt input:checked + span small { color: var(--chalk); }
+.pic-opt input:focus-visible + span { box-shadow: var(--focus-ring); }
+.pic-opt.off { cursor: default; opacity: 0.55; }
+
+.swatches { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); }
+.swatch { position: relative; cursor: pointer; }
+.swatch input { position: absolute; opacity: 0; pointer-events: none; }
+.swatch i { display: block; width: 32px; height: 32px; border-radius: 50%; box-shadow: 0 0 0 1px var(--rule); }
+.swatch.av-c1 i { background: var(--avatar-c1); }
+.swatch.av-c2 i { background: var(--avatar-c2); }
+.swatch.av-c3 i { background: var(--avatar-c3); }
+.swatch.av-c4 i { background: var(--avatar-c4); }
+.swatch.av-c5 i { background: var(--avatar-c5); }
+.swatch.av-c6 i { background: var(--avatar-c6); }
+.swatch.av-c7 i { background: var(--avatar-c7); }
+.swatch.av-c8 i { background: var(--avatar-c8); }
+.swatch input:checked + i { box-shadow: 0 0 0 2px var(--pitch), 0 0 0 4px var(--chalk); }
+.swatch input:focus-visible + i { box-shadow: var(--focus-ring); }
+
+.acct-select {
+  width: 100%; max-width: 360px; min-height: 44px; margin-top: var(--space-2); padding: 0 var(--space-4);
+  border: var(--border) solid var(--rule); border-radius: var(--radius-sm);
+  background: var(--stand); color: var(--chalk); font: inherit; font-size: var(--text-md);
+}
+.acct-select:focus { outline: none; border-color: var(--floodlight); box-shadow: var(--focus-ring); }
+
+/* The reader's club on the board. */
+.row.is-club { box-shadow: inset 3px 0 0 var(--floodlight); }
+.row-club {
+  align-self: flex-start; margin-top: 2px; padding: 0 6px; border-radius: 4px;
+  background: var(--floodlight-dim); color: var(--floodlight-hi);
+  font-size: var(--text-2xs); font-weight: 600; line-height: 1.6;
+}
