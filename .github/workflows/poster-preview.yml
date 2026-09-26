@@ -46,7 +46,7 @@ jobs:
 
       - name: Render
         env:
-          SITE: ${{ vars.SITE_URL || 'https://offside-win.ashleymbaht.workers.dev' }}
+          SITE: ${{ vars.SITE_URL || 'https://offside.win' }}
           POSTER_COUNT: ${{ github.event.inputs.count || '8' }}
         run: npm run poster:preview
 

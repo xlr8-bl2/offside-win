@@ -30,7 +30,7 @@ SUPABASE_ANON_KEY = "REPLACE_WITH_SUPABASE_ANON_KEY"
 COINFLOW_BASE_URL = "https://api-sandbox.coinflow.cash"
 COINFLOW_WALLET = ""
 COINFLOW_BLOCKCHAIN = "solana"
-SITE_URL = "https://offside-win.ashleymbaht.workers.dev"
+SITE_URL = "https://offside.win"
 
 # Which processor takes the money. "whop": Whop runs the checkout and the
 # billing on its own site and tells us by webhook; each plan's checkout link

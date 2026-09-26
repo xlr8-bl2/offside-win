@@ -184,3 +184,16 @@ test('without the service key the route says so instead of half-deleting', async
   assert.equal(res.status, 503);
   assert.equal(calls.length, 0);
 });
+
+/* -------------------------------------------------------- one address */
+
+test('pages on workers.dev move to the real domain; the API does not', async () => {
+  const env = { ...ENV, SITE_URL: 'https://offside.win' };
+  const page = await worker.fetch(new Request('https://offside-win.example.workers.dev/?x=1'), env);
+  assert.equal(page.status, 301);
+  assert.equal(page.headers.get('location'), 'https://offside.win/?x=1');
+  const api = await worker.fetch(new Request('https://offside-win.example.workers.dev/api/board'), env);
+  assert.equal(api.status, 200, 'webhooks and open tabs still reach the API on the old address');
+  const home = await worker.fetch(new Request('https://offside.win/'), env);
+  assert.equal(home.status, 200, 'the real domain serves the page');
+});
