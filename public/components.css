@@ -4029,3 +4029,19 @@ html.pay-open { overflow: hidden; }
 .calls-note { margin: var(--space-4) 0 0; font-size: var(--text-xs); line-height: var(--leading-normal); color: var(--chalk-3); max-width: 70ch; }
 .calls-note b { color: var(--chalk-2); font-weight: var(--weight-medium); }
 .co-moves { margin-bottom: var(--space-5); }
+.account-chip.is-member { box-shadow: 0 0 0 2px var(--floodlight); }
+
+/* ================================================================== seo */
+
+/* The readable summary a real address is served with, shown for the moment
+   before the app draws the full page (and to anything that does not run it). */
+.seo h1 { margin: var(--space-3) 0 var(--space-4); }
+.seo h2 { margin: var(--space-7) 0 var(--space-3); font-size: var(--text-lg); }
+.seo h3 { margin: var(--space-5) 0 var(--space-2); font-size: var(--text-md); }
+.seo p, .seo li { color: var(--chalk-2); line-height: var(--leading-normal); max-width: 70ch; }
+.seo a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--chalk-3); }
+.seo-crumbs { font-size: var(--text-xs); color: var(--chalk-3); }
+.seo-crumbs a { color: var(--chalk-2); }
+.seo-meta { color: var(--chalk-3); font-size: var(--text-sm); }
+.seo-list { padding-left: var(--space-5); }
+.seo-list li { margin-bottom: var(--space-2); }

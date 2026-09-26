@@ -1,0 +1,9 @@
+# Everything a reader can see is open to crawlers. The API stays crawlable
+# because rendering a page needs it; the account and payment routes are not
+# pages, and the sitemap lists the ones that are.
+User-agent: *
+Allow: /
+Disallow: /api/pay/
+Disallow: /api/account
+
+Sitemap: https://offside.win/sitemap.xml
