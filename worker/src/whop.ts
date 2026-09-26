@@ -1,18 +1,16 @@
 /**
  * Whop, behind the same small interface as Coinflow.
  *
- * Whop is a different shape of processor. It runs the checkout, the account
- * and the recurring billing on its own site, under whatever email the buyer
- * uses there, and tells us what happened by webhook. So there is no checkout
- * API to call -- each pricing plan in the Whop dashboard has a checkout link,
- * and that link lives on our `plan` row -- and no card to charge on renewal,
- * because Whop charges it. What is left for this file is the webhook: prove
- * it came from Whop, work out whose entitlement changed and to what, and hand
- * that to the database.
+ * Whop runs the card form, the recurring billing and the payouts. The card
+ * form now sits on our own pricing page (Whop's Checkout element), fed by a
+ * checkout configuration this Worker creates with the secret API key: the
+ * price comes from our `plan` row, never from the browser, and the reader's
+ * account id rides along as metadata. Whop then tells us what happened by
+ * webhook, and this file proves the webhook came from Whop and works out whose
+ * entitlement changed and to what.
  *
- * Attribution is by email. Whop's events carry the buying user's email; we
- * grant an entitlement to that address, and has_membership() honours it once
- * somebody signs in here with the same address. The pricing page says so.
+ * Attribution is by the account id in the metadata when there is one, and by
+ * the buyer's email otherwise (a sale through a plain Whop checkout link).
  *
  * Two signature schemes are accepted, because Whop's webhook signing has been
  * documented both ways and the dashboard does not say which a given endpoint
@@ -64,9 +62,14 @@ export async function verifyWhop(
     if (Math.abs(now - t) > MAX_SKEW_SECONDS) return { ok: false, why: 'stale' };
     // The secret is `whsec_<base64>`; a secret without the prefix is taken as
     // base64 already, and one that will not decode is used as raw bytes.
-    const bare = secret.startsWith('whsec_') ? secret.slice(6) : secret;
+    // Whop's own secrets are `ws_...` and are the HMAC key as written, per
+    // its docs; do not try to decode one as base64.
     let keyBytes: Uint8Array;
-    try { keyBytes = fromB64(bare); } catch { keyBytes = enc.encode(secret); }
+    if (secret.startsWith('ws_')) keyBytes = enc.encode(secret);
+    else {
+      const bare = secret.startsWith('whsec_') ? secret.slice(6) : secret;
+      try { keyBytes = fromB64(bare); } catch { keyBytes = enc.encode(secret); }
+    }
     const expected = b64(await hmacRaw(keyBytes, `${id}.${t}.${rawBody}`));
     // The header may carry several space-separated `v1,<sig>` entries during a
     // secret rotation; any one matching is enough.
@@ -100,6 +103,9 @@ export interface WhopEvent {
   paymentId: string | null;
   /** Whop's plan id, mapped to ours through `plan.checkout_url`. */
   planRef: string | null;
+  /** Our account id and plan id, from the checkout's metadata, when we made the checkout. */
+  userId: string | null;
+  ourPlan: string | null;
   /** When the current period ends, as Whop states it. */
   periodEnd: number | null;
   amountMinor: number | null;
@@ -143,6 +149,8 @@ export function parseWhop(payload: unknown): WhopEvent {
   const payment = rec(data['payment']) ?? (str(data['id'])?.startsWith('pay_') ? data : null);
   const user = rec(data['user']) ?? rec(membership?.['user']) ?? rec(payment?.['user']) ?? null;
   const plan = rec(data['plan']) ?? rec(membership?.['plan']) ?? rec(payment?.['plan']) ?? null;
+  const meta = rec(data['metadata']) ?? rec(membership?.['metadata']) ?? rec(payment?.['metadata']) ?? {};
+  const uid = str(meta['user_id']);
 
   const t = eventType.toLowerCase();
   const kind: WhopEvent['kind'] =
@@ -158,6 +166,9 @@ export function parseWhop(payload: unknown): WhopEvent {
     membershipId: str(first(membership?.['id'], data['membership_id'], data['membership'])) ?? null,
     paymentId: str(first(payment?.['id'], data['payment_id'], kind === 'paid' ? data['id'] : null)) ?? null,
     planRef: str(first(plan?.['id'], data['plan_id'], data['plan'])) ?? null,
+    // Only a well-formed account id counts; anything else falls back to email.
+    userId: uid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uid) ? uid.toLowerCase() : null,
+    ourPlan: str(meta['plan']),
     periodEnd: epoch(first(
       membership?.['renewal_period_end'], data['renewal_period_end'],
       membership?.['expires_at'], data['expires_at'],
@@ -168,9 +179,92 @@ export function parseWhop(payload: unknown): WhopEvent {
       // payloads carry cents under `amount_cents`/`subtotal_cents`.
       const cents = num(first(payment?.['amount_cents'], data['amount_cents'], payment?.['subtotal_cents']));
       if (cents !== null) return Math.round(cents);
-      const major = num(first(payment?.['final_amount'], payment?.['amount'], payment?.['subtotal'], data['final_amount'], data['amount']));
+      const major = num(first(payment?.['total'], payment?.['final_amount'], payment?.['amount'], payment?.['subtotal'], data['total'], data['final_amount'], data['amount']));
       return major === null ? null : Math.round(major * 100);
     })(),
     currency: str(first(payment?.['currency'], data['currency']))?.toUpperCase() ?? null,
   };
+}
+
+/* ------------------------------------------------------------ the checkout */
+
+export interface WhopCheckoutInput {
+  companyId: string;
+  plan: { id: string; name: string; amountMinor: number; currency: string; days: number; renews: boolean };
+  user: { id: string; email: string | null };
+  returnUrl: string;
+}
+
+/**
+ * The checkout configuration for one reader buying one plan.
+ *
+ * The plan is described inline rather than made by hand in Whop's dashboard,
+ * so the price on our `plan` row is the price charged and there is nothing to
+ * keep in step. Whop finds or creates it under one product, found by its
+ * external identifier, and keeps it hidden so it is only reachable from here.
+ */
+export function whopCheckoutBody(input: WhopCheckoutInput): Record<string, unknown> {
+  const { plan, user } = input;
+  const price = Math.round(plan.amountMinor) / 100;
+  return {
+    mode: 'payment',
+    plan: {
+      company_id: input.companyId,
+      currency: plan.currency.toLowerCase(),
+      title: plan.name,
+      visibility: 'hidden',
+      product: { external_identifier: 'offside-win-membership', title: 'offside.win membership' },
+      ...(plan.renews
+        ? { plan_type: 'renewal', billing_period: plan.days, renewal_price: price, initial_price: 0 }
+        : { plan_type: 'one_time', initial_price: price, expiration_days: plan.days }),
+    },
+    metadata: { user_id: user.id, plan: plan.id, ...(user.email ? { email: user.email } : {}) },
+    redirect_url: input.returnUrl,
+  };
+}
+
+/** Create it. The API key never leaves the Worker; the browser gets only the id. */
+export async function createWhopCheckout(
+  apiKey: string,
+  input: WhopCheckoutInput,
+  base = 'https://api.whop.com/api/v1',
+): Promise<{ id: string; link: string | null }> {
+  const res = await fetch(`${base}/checkout_configurations`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(whopCheckoutBody(input)),
+  });
+  const text = await res.text();
+  let out: Record<string, unknown> = {};
+  try { out = JSON.parse(text); } catch { /* reported below */ }
+  const id = str(out['id']);
+  if (!res.ok || !id) {
+    // The shape of the refusal, not its content: logs on a public repo.
+    const err = rec(out['error']);
+    throw new Error(`whop checkout ${res.status}${err?.['type'] ? ` ${String(err['type'])}` : ''}`);
+  }
+  const url = str(out['purchase_url']);
+  return { id, link: url ? new URL(url, 'https://whop.com').toString() : null };
+}
+
+/**
+ * When a Whop membership's current period ends, asked of Whop.
+ *
+ * A payment event does not carry the period end, and the membership event
+ * that does can arrive before or after it. Without this, one purchase was two
+ * grants: the membership event set the period end, and the payment event
+ * then added a whole plan's length on top. With it, both set the same date.
+ */
+export async function whopPeriodEnd(apiKey: string, membershipId: string, base = 'https://api.whop.com/api/v1'): Promise<number | null> {
+  if (!/^mem_[A-Za-z0-9]+$/.test(membershipId)) return null;
+  try {
+    const res = await fetch(`${base}/memberships/${membershipId}`, {
+      headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    const m = rec(await res.json()) ?? {};
+    return epoch(first(m['renewal_period_end'], m['expires_at'], m['current_period_end']));
+  } catch {
+    return null;
+  }
 }

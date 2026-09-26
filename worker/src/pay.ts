@@ -14,7 +14,7 @@
 
 import { createCheckoutLink, parseWebhook, type CoinflowConfig } from './coinflow.ts';
 import { verifyWebhook } from './webhook.ts';
-import { parseWhop, verifyWhop } from './whop.ts';
+import { createWhopCheckout, parseWhop, verifyWhop, whopPeriodEnd } from './whop.ts';
 
 export interface PayEnv {
   SUPABASE_URL: string;
@@ -27,6 +27,10 @@ export interface PayEnv {
    */
   PAY_PROVIDER?: string;
   WHOP_WEBHOOK_SECRET?: string;
+  /** Secret. Creates the checkout configurations; never sent to a browser. */
+  WHOP_API_KEY?: string;
+  /** Public. The Whop business the plans are made under (`biz_...`). */
+  WHOP_COMPANY_ID?: string;
   COINFLOW_API_KEY?: string;
   COINFLOW_WEBHOOK_SECRET?: string;
   COINFLOW_BASE_URL?: string;
@@ -131,7 +135,7 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
   } catch { /* an empty body means the default plan */ }
 
   const rows = await fetch(
-    new URL(`/rest/v1/plan?id=eq.${encodeURIComponent(planId)}&active=eq.1&select=id,amount_minor,currency,days,checkout_url`, env.SUPABASE_URL),
+    new URL(`/rest/v1/plan?id=eq.${encodeURIComponent(planId)}&active=eq.1&select=id,name,amount_minor,currency,days,checkout_url`, env.SUPABASE_URL),
     { headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_ANON_KEY}`, accept: 'application/json' } },
   );
   const plans = rows.ok ? await rows.json() as any[] : [];
@@ -139,9 +143,34 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
   if (!plan) return json({ error: 'That plan is not available.' }, 404);
 
   if (provider(env) === 'whop') {
-    // Whop's own checkout for this plan. The email goes along so the buyer's
-    // Whop account and their account here share an address, which is what
-    // the entitlement is keyed on.
+    const site = env.SITE_URL ?? new URL(request.url).origin;
+    // The card form on our own page: a checkout configuration made here, with
+    // the price from our plan row and the account id as metadata, which the
+    // page hands to Whop's Checkout element.
+    if (env.WHOP_API_KEY && env.WHOP_COMPANY_ID) {
+      try {
+        const made = await createWhopCheckout(env.WHOP_API_KEY, {
+          companyId: env.WHOP_COMPANY_ID,
+          plan: {
+            id: String(plan.id),
+            name: String(plan.name ?? plan.id),
+            amountMinor: Number(plan.amount_minor),
+            currency: String(plan.currency),
+            days: Number(plan.days),
+            // A matchday pass is a week and stops; the others renew until cancelled.
+            renews: String(plan.id) !== 'matchday',
+          },
+          user: { id: user.id, email: user.email },
+          returnUrl: `${site}/#/account?paid=1`,
+        });
+        return json({ checkout: made.id, link: made.link, returnUrl: `${site}/#/account?paid=1` });
+      } catch (err) {
+        console.error('whop checkout:', err instanceof Error ? err.message : String(err));
+        if (!plan.checkout_url) return json({ error: 'The payment page could not be opened. Nothing has been charged. Try again in a minute.' }, 502);
+      }
+    }
+    // No API key yet: the plan's own Whop checkout link, with the email on it
+    // so the webhook can find the account.
     if (typeof plan.checkout_url !== 'string' || !plan.checkout_url) {
       return json({ error: 'That plan has no checkout yet.' }, 503);
     }
@@ -278,6 +307,12 @@ async function whopWebhook(raw: string, headers: Headers, env: PayEnv): Promise<
   try { payload = JSON.parse(raw); } catch { return json({ error: 'not json' }, 400); }
   const event = parseWhop(payload);
   if (event.kind === 'ignore') return json({ ok: true, ignored: event.eventType, via: verdict.via });
+  // A checkout we made carries the account id: the entitlement goes to that
+  // account's own email, whatever address the buyer typed into Whop's form.
+  if (event.userId) {
+    const own = await accountEmail(env, event.userId);
+    if (own) event.email = own;
+  }
   if (!event.email) {
     console.error('whop: event with no email', event.eventType, event.membershipId ?? event.paymentId);
     return json({ ok: true, skipped: 'no email' });
@@ -288,7 +323,12 @@ async function whopWebhook(raw: string, headers: Headers, env: PayEnv): Promise<
     return json({ ok: true, ...(out ?? {}) });
   }
 
-  const planId = await planForWhop(env, event.planRef);
+  // A payment names its membership but not when the period ends; ask Whop, so
+  // the payment and the membership event set the same date rather than two.
+  if (event.kind === 'paid' && event.periodEnd === null && event.membershipId && env.WHOP_API_KEY) {
+    event.periodEnd = await whopPeriodEnd(env.WHOP_API_KEY, event.membershipId);
+  }
+  const planId = event.ourPlan && /^[a-z0-9_-]{1,40}$/.test(event.ourPlan) ? event.ourPlan : await planForWhop(env, event.planRef);
   const out = await rpcAsService(env, 'record_entitlement', {
     p_source: 'whop',
     // A payment id when there is one, else the membership id plus the period
@@ -303,6 +343,17 @@ async function whopWebhook(raw: string, headers: Headers, env: PayEnv): Promise<
   });
   if (out && out.applied === false) console.error('whop: not applied —', out.reason, event.email);
   return json({ ok: true, via: verdict.via, ...(out ?? {}) });
+}
+
+/** The sign-in email of an account, asked of GoTrue with the service key. */
+async function accountEmail(env: PayEnv, userId: string): Promise<string | null> {
+  if (!env.SUPABASE_SERVICE_KEY) return null;
+  const res = await fetch(new URL(`/auth/v1/admin/users/${userId}`, env.SUPABASE_URL), {
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
+  });
+  if (!res.ok) return null;
+  const u = await res.json() as { email?: unknown };
+  return typeof u.email === 'string' && u.email ? u.email.toLowerCase() : null;
 }
 
 /** Our plan id for Whop's, matched on the checkout link the plan row carries. */
