@@ -13,7 +13,7 @@ on:
       command:
         description: 'Engine command to run against Postgres'
         type: choice
-        options: [migrate, history, ratings, slate, settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players', grant, plans]
+        options: [migrate, history, ratings, slate, settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players', grant, plans, 'whop:check']
         default: migrate
       arg:
         # Free text for the commands that take one. `grant` reads an email and
@@ -76,6 +76,8 @@ jobs:
           SPORTRADAR_GETTY_KEY: ${{ secrets.SPORTRADAR_GETTY_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          WHOP_API_KEY: ${{ secrets.WHOP_API_KEY }}
+          WHOP_COMPANY_ID: biz_u3qYuQLDjOpDZH
           # Actions expressions have no split(), and using one stops the whole
           # workflow from being dispatched. The shell splits the argument.
           ARG: ${{ inputs.arg }}
