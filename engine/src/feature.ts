@@ -109,17 +109,17 @@ export function scoreCandidate(f: HeroCandidate, now: number): number {
 
 export function chooseHero(fixtures: HeroCandidate[], now = Math.floor(Date.now() / 1000)): HeroPick | null {
   /*
-   * The biggest game, whether or not we called it.
+   * The biggest game we have a call on.
    *
-   * For a while the masthead required a call, because it promised one ("Our
-   * call on it, the argument for it") and had led with a match we passed on.
-   * That promise has moved: the free call is chosen separately (free.ts) and
-   * the masthead is the occasion, so on a night when Netherlands v Germany
-   * is a pass and Liechtenstein v Lithuania is called, the front page still
-   * leads with Netherlands v Germany. A call is a bonus in the score, not a
-   * gate.
+   * For a while it was the biggest game whether or not we called it, with the
+   * free call (usually a different match) printed underneath. Readers took the
+   * call under the headline to be the call on the headline, and a front page
+   * leading with a match we passed on was selling nothing. So a call is a
+   * gate again: the masthead is always a match with a call on it, and the free
+   * call has its own place below it. With nothing called ahead, the page
+   * falls back to its own masthead.
    */
-  const live = fixtures.filter((f) => f.kickoff > now - 2 * 3600);
+  const live = fixtures.filter((f) => f.kickoff > now - 2 * 3600 && f.called);
   if (live.length === 0) return null;
 
   const best = live.reduce((a, b) => (scoreCandidate(b, now) > scoreCandidate(a, now) ? b : a));
