@@ -33,4 +33,15 @@ export async function whopCheck(): Promise<void> {
   console.log('whop status:', res.status);
   if (res.ok) console.log('checkout id:', out?.id, 'purchase url:', out?.purchase_url);
   else console.log('whop error:', JSON.stringify(out?.error ?? out ?? text.slice(0, 500)));
+
+  // Can the key read a membership? After a payment the webhook asks Whop when
+  // the membership ends. 404 for a made-up id means the key may read
+  // memberships; 403 means it may not.
+  const m = await fetch('https://api.whop.com/api/v1/memberships/mem_doesnotexist000', {
+    headers: { authorization: `Bearer ${key}`, accept: 'application/json' },
+  });
+  const mt = await m.text();
+  let me: any = null;
+  try { me = JSON.parse(mt); } catch { /* not json */ }
+  console.log('membership read:', m.status, m.status === 403 ? 'NOT ALLOWED - add member:basic:read' : 'allowed', JSON.stringify(me?.error ?? '').slice(0, 200));
 }
