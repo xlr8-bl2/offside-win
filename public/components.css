@@ -1656,19 +1656,35 @@
 }
 .fx-top .back { grid-column: 1 / -1; align-self: flex-start; margin-bottom: auto; }
 /*
- * The two clubs' colours across the masthead: home from the left, away from
- * the right, meeting in the dark middle so neither colour sits under the
- * names. Above the photograph's scrim, at a strength the type still reads on.
+ * The two clubs' colours, each glowing from behind its own crest: the home
+ * side's from above its row, the away side's from below its own. Soft and
+ * low on purpose -- the first version washed the whole masthead in two flat
+ * bands, which shouted. Drawn on the rows rather than the masthead, so the
+ * glow follows the crest at any width, and sized to the viewport so it fills
+ * a desktop banner without swamping a phone.
  */
+.fx-top.has-colors .fx-line { position: relative; }
+.fx-top.has-colors .fx-line::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  left: 17px;
+  top: 50%;
+  width: clamp(440px, 80vw, 1150px);
+  height: clamp(440px, 34vw, 500px);
+  transform: translate(-50%, calc(-50% + var(--glow-dy)));
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--glow-c) 28%, transparent), transparent);
+}
+.fx-top.has-colors .fx-line:nth-child(1) { --glow-c: var(--home-c); --glow-dy: -50px; }
+.fx-top.has-colors .fx-line:nth-child(2) { --glow-c: var(--away-c); --glow-dy: 50px; }
+/* The masthead's foot fades into the page, so the glows never end in an edge. */
 .fx-wash {
   position: absolute;
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background:
-    linear-gradient(105deg, color-mix(in srgb, var(--home-c) 55%, transparent) 0%, transparent 52%),
-    linear-gradient(285deg, color-mix(in srgb, var(--away-c) 55%, transparent) 0%, transparent 52%),
-    linear-gradient(to top, var(--pitch) 0%, transparent 60%);
+  background: linear-gradient(to top, var(--pitch) 0%, transparent 45%);
 }
 .fx-top.has-colors[data-shot="none"] .hero-media { background: var(--terrace); }
 .fx-top .fx-line .chips { margin-left: var(--space-2); }
