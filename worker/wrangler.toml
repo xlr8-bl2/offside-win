@@ -51,3 +51,9 @@ PAY_PROVIDER = "whop"
 # id, not a secret. Empty until set: the checkout falls back to each plan's
 # own Whop link, and with none of those, says memberships are not open yet.
 WHOP_COMPANY_ID = "biz_u3qYuQLDjOpDZH"
+
+# Every ten minutes the Worker asks Whop for paid memberships and switches on
+# any the webhook missed (sweepWhop in src/pay.ts). The webhook is fast; this
+# is what makes a payment certain to count even when a delivery never comes.
+[triggers]
+crons = ["*/10 * * * *"]
