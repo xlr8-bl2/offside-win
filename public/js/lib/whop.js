@@ -88,3 +88,51 @@ export async function openCheckout({ checkout, returnUrl, title, onPaid }) {
   }
   return close;
 }
+
+/**
+ * Whop's card fields on our own checkout page.
+ *
+ * Unlike the sheet above, the page around the fields is ours: the summary, the
+ * price and the pay button. Whop's elements are three hosted frames (email,
+ * the card or wallet, and the merchant-of-record line every form must carry),
+ * and card numbers stay inside them. What leaves the page is a one-time
+ * confirmation token, which the Worker turns into a charge at the price in our
+ * plan row.
+ *
+ * A renewing plan asks for the card to be kept for later charges
+ * (`setupFutureUsage`), because that is what renewing means; a matchday pass
+ * does not.
+ */
+export async function mountPayment({ accountId, currency, amount, renews, email, returnUrl, into, onComplete }) {
+  const WhopElements = await loadElements();
+  const whop = WhopElements();
+  const payments = whop.payments.create({
+    accountId,
+    currency: String(currency).toLowerCase(),
+    amount,
+    returnUrl,
+    ...(renews ? { setupFutureUsage: 'off_session' } : {}),
+    paymentMethodConfiguration: { enabled: ['card', 'apple_pay', 'google_pay'], include_platform_defaults: false },
+    locale: 'en',
+    appearance: {
+      theme: { appearance: 'dark', accentColor: 'violet', grayColor: 'sand' },
+      variables: { '--radius': '10px' },
+    },
+  });
+  payments.create('email', email ? { defaultValue: email } : {}).mount(into.email);
+  payments.create('payment', { onChange: (e) => onComplete?.(Boolean(e?.complete)) }).mount(into.payment);
+  payments.create('branding').mount(into.branding);
+
+  return {
+    /** The single-use token for what the buyer entered. Opens a wallet sheet if they chose one. */
+    async token() {
+      const out = await payments.createConfirmationToken({});
+      return out?.confirmationToken;
+    },
+    /** A 3D Secure step or a bank redirect, when the charge needs one. */
+    nextAction(clientSecret) {
+      return whop.payments.handleNextAction({ clientSecret });
+    },
+    destroy() { try { payments.destroy(); } catch { /* already gone */ } },
+  };
+}

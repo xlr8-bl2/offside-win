@@ -440,6 +440,18 @@ CREATE TABLE IF NOT EXISTS entitlement (
 -- plan): Whop's own page for it, from the membership's `manage_url`.
 ALTER TABLE entitlement ADD COLUMN IF NOT EXISTS manage_url text;
 
+-- Every processor reference an entitlement has been granted from, so a grant
+-- is applied once however many times it is replayed. The entitlement row only
+-- remembers its latest reference: a reader who bought a matchday pass and then
+-- went monthly has two, and with only the latest remembered the sweep kept
+-- re-applying the other one, flipping the plan back and forth.
+CREATE TABLE IF NOT EXISTS entitlement_grant (
+  ref        text PRIMARY KEY,
+  email      text NOT NULL,
+  plan_id    text NOT NULL,
+  created_at bigint NOT NULL
+);
+
 -- The entitlement, and the only one of these four a browser ever reads. It
 -- carries the card's brand and last four so the account page can say "Visa
 -- ending 4242" without going anywhere near the credential table.
@@ -777,8 +789,9 @@ BEGIN
   -- here yet: the reference is remembered on the entitlement itself. Whop
   -- retries a webhook it has not had a 200 for, and each retry must not be
   -- another month.
-  IF p_ref IS NOT NULL AND EXISTS (
-    SELECT 1 FROM entitlement WHERE lower(email) = lower(p_email) AND source_ref = p_ref
+  IF p_ref IS NOT NULL AND (
+    EXISTS (SELECT 1 FROM entitlement_grant WHERE ref = p_ref)
+    OR EXISTS (SELECT 1 FROM entitlement WHERE lower(email) = lower(p_email) AND source_ref = p_ref)
   ) THEN
     RETURN json_build_object('applied', false, 'reason', 'already recorded');
   END IF;
@@ -805,11 +818,24 @@ BEGIN
   v_until := coalesce(p_expires, greatest(v_now, coalesce((SELECT expires_at FROM entitlement WHERE lower(email) = lower(p_email)), v_now)) + v_days * 86400);
   INSERT INTO entitlement (email, plan_id, expires_at, source, source_ref, status, created_at, updated_at, manage_url)
   VALUES (lower(p_email), p_plan, v_until, p_source, p_ref, 'active', v_now, v_now, p_manage_url)
+  -- Two grants at once (a matchday pass, then an upgrade to monthly): the one
+  -- that runs longest names the plan and where it is managed. A live row that
+  -- was ended early (a refund) is replaced outright.
   ON CONFLICT (email) DO UPDATE SET
-    plan_id = excluded.plan_id, expires_at = greatest(entitlement.expires_at, excluded.expires_at),
-    source = excluded.source, source_ref = coalesce(excluded.source_ref, entitlement.source_ref),
-    manage_url = coalesce(excluded.manage_url, entitlement.manage_url),
+    plan_id    = CASE WHEN entitlement.status <> 'active' OR excluded.expires_at >= entitlement.expires_at
+                      THEN excluded.plan_id ELSE entitlement.plan_id END,
+    source     = CASE WHEN entitlement.status <> 'active' OR excluded.expires_at >= entitlement.expires_at
+                      THEN excluded.source ELSE entitlement.source END,
+    manage_url = CASE WHEN entitlement.status <> 'active' OR excluded.expires_at >= entitlement.expires_at
+                      THEN coalesce(excluded.manage_url, entitlement.manage_url) ELSE entitlement.manage_url END,
+    expires_at = CASE WHEN entitlement.status <> 'active' THEN excluded.expires_at
+                      ELSE greatest(entitlement.expires_at, excluded.expires_at) END,
+    source_ref = coalesce(excluded.source_ref, entitlement.source_ref),
     status = 'active', updated_at = v_now;
+  IF p_ref IS NOT NULL THEN
+    INSERT INTO entitlement_grant (ref, email, plan_id, created_at)
+    VALUES (p_ref, lower(p_email), p_plan, v_now) ON CONFLICT (ref) DO NOTHING;
+  END IF;
   RETURN json_build_object('applied', true, 'expires_at', v_until);
 END;
 $fn$;
@@ -1554,6 +1580,11 @@ REVOKE ALL ON slip FROM anon, authenticated;
 ALTER TABLE entitlement ENABLE ROW LEVEL SECURITY;
 -- Who has paid is nobody's business but theirs; read through get_account.
 REVOKE ALL ON entitlement FROM anon, authenticated;
+
+ALTER TABLE entitlement_grant ENABLE ROW LEVEL SECURITY;
+-- A ledger for the service role only, which Supabase's default privileges
+-- already give it, exactly as for entitlement.
+REVOKE ALL ON entitlement_grant FROM anon, authenticated;
 
 ALTER TABLE calibration ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS calibration_read ON calibration;

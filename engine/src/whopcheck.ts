@@ -8,7 +8,7 @@
  * checkout's own address).
  */
 
-import { whopCheckoutBody } from '../../worker/src/whop.ts';
+import { whopCheckoutBody, whopPaymentBody } from '../../worker/src/whop.ts';
 
 export async function whopCheck(): Promise<void> {
   const key = process.env['WHOP_API_KEY'] ?? '';
@@ -44,6 +44,26 @@ export async function whopCheck(): Promise<void> {
   let me: any = null;
   try { me = JSON.parse(mt); } catch { /* not json */ }
   console.log('membership read:', m.status, m.status === 403 ? 'NOT ALLOWED - add member:basic:read' : 'allowed', JSON.stringify(me?.error ?? '').slice(0, 200));
+
+  // Can the key take a payment from our own checkout page? A made-up token
+  // cannot charge anything: 403 means the key lacks payment:charge (the page
+  // then falls back to Whop's checkout), anything else means it has it.
+  const pay = await fetch('https://api.whop.com/api/v1/payments', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(whopPaymentBody({
+      companyId: company,
+      plan: { id: 'matchday', name: 'Matchday pass', amountMinor: 100, currency: 'GBP', days: 7, renews: false },
+      user: { id: '00000000-0000-4000-8000-000000000000', email: null },
+      returnUrl: 'https://offside.win/#/account?paid=1',
+    }, 'ctok_doesnotexist000')),
+  });
+  const pt = await pay.text();
+  let pj: any = null;
+  try { pj = JSON.parse(pt); } catch { /* not json */ }
+  console.log('own checkout charge:', pay.status, pay.status === 403 || pay.status === 401
+    ? 'NOT ALLOWED - add payment:charge, plan:basic:read, access_pass:basic:read' : 'allowed (the fake token is refused, as it should be)',
+    JSON.stringify(pj?.error ?? '').slice(0, 300));
 
   // The last few days' memberships, as the site's sweep will see them: id,
   // status, whether our account id rode along, the plan, the dates. No emails.

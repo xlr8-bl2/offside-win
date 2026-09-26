@@ -210,23 +210,73 @@ export interface WhopCheckoutInput {
  * external identifier, and keeps it hidden so it is only reachable from here.
  */
 export function whopCheckoutBody(input: WhopCheckoutInput): Record<string, unknown> {
-  const { plan, user } = input;
-  const price = Math.round(plan.amountMinor) / 100;
   return {
     mode: 'payment',
-    plan: {
-      company_id: input.companyId,
-      currency: plan.currency.toLowerCase(),
-      title: plan.name,
-      visibility: 'hidden',
-      product: { external_identifier: 'offside-win-membership', title: 'offside.win membership' },
-      ...(plan.renews
-        ? { plan_type: 'renewal', billing_period: plan.days, renewal_price: price, initial_price: 0 }
-        : { plan_type: 'one_time', initial_price: price, expiration_days: plan.days }),
-    },
-    metadata: { user_id: user.id, plan: plan.id, ...(user.email ? { email: user.email } : {}) },
+    plan: inlinePlan(input),
+    metadata: whopMetadata(input),
     redirect_url: input.returnUrl,
   };
+}
+
+/** The plan, described inline from our own plan row (see whopCheckoutBody). */
+export function inlinePlan(input: WhopCheckoutInput): Record<string, unknown> {
+  const { plan } = input;
+  const price = Math.round(plan.amountMinor) / 100;
+  return {
+    company_id: input.companyId,
+    currency: plan.currency.toLowerCase(),
+    title: plan.name,
+    visibility: 'hidden',
+    product: { external_identifier: 'offside-win-membership', title: 'offside.win membership' },
+    ...(plan.renews
+      ? { plan_type: 'renewal', billing_period: plan.days, renewal_price: price, initial_price: 0 }
+      : { plan_type: 'one_time', initial_price: price, expiration_days: plan.days }),
+  };
+}
+
+const whopMetadata = (input: WhopCheckoutInput) =>
+  ({ user_id: input.user.id, plan: input.plan.id, ...(input.user.email ? { email: input.user.email } : {}) });
+
+/**
+ * A payment on our own checkout page: the buyer's card, from Whop's payment
+ * element, as a one-time confirmation token; the plan from our row; our
+ * account id as metadata. The inline plan has no company_id here: the
+ * payment's account_id says whose it is.
+ */
+export function whopPaymentBody(input: WhopCheckoutInput, confirmationToken: string): Record<string, unknown> {
+  const { company_id: _company, ...plan } = inlinePlan(input);
+  return {
+    account_id: input.companyId,
+    confirmation_token: confirmationToken,
+    plan,
+    metadata: whopMetadata(input),
+    return_url: input.returnUrl,
+  };
+}
+
+export class WhopError extends Error {
+  constructor(public status: number, public type: string | null, message: string) { super(message); }
+}
+
+/** Charge it. Returns what the page needs to finish: the status and, for a
+ *  3D Secure step, the client secret (safe in a browser; the key is not). */
+export async function createWhopPayment(
+  apiKey: string, input: WhopCheckoutInput, confirmationToken: string, base = 'https://api.whop.com/api/v1',
+): Promise<{ id: string; status: string; clientSecret: string | null }> {
+  const res = await fetch(`${base}/payments`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(whopPaymentBody(input, confirmationToken)),
+  });
+  const text = await res.text();
+  let out: Record<string, unknown> = {};
+  try { out = JSON.parse(text); } catch { /* reported below */ }
+  const id = str(out['id']);
+  if (!res.ok || !id) {
+    const err = rec(out['error']);
+    throw new WhopError(res.status, str(err?.['type']), str(err?.['message']) ?? `whop payment ${res.status}`);
+  }
+  return { id, status: str(out['status']) ?? 'unknown', clientSecret: str(out['client_secret']) };
 }
 
 /** Create it. The API key never leaves the Worker; the browser gets only the id. */

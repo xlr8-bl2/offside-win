@@ -3903,3 +3903,82 @@ html.pay-open { overflow: hidden; }
   background: var(--floodlight-dim); color: var(--floodlight-hi);
   font-size: var(--text-2xs); font-weight: 600; line-height: 1.6;
 }
+
+/* ============================================================== checkout */
+
+/*
+ * Our own checkout: what you are buying on the left, Whop's card fields and
+ * our pay button on the right; stacked on a phone, summary first, so the
+ * price and what renews are read before the card goes in.
+ */
+.checkout .back { margin-bottom: var(--space-5); text-decoration: none; }
+.co-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-7);
+  align-items: start;
+}
+@media (min-width: 900px) {
+  .co-grid { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--space-9); }
+  .co-pay { position: sticky; top: calc(var(--header-h, 64px) + var(--space-5)); }
+}
+.co-summary h1 { margin: 0; }
+.co-price { display: flex; align-items: baseline; gap: var(--space-3); margin: var(--space-3) 0 var(--space-5); }
+.co-price b {
+  font-family: var(--display);
+  font-weight: var(--weight-black);
+  font-size: var(--text-board);
+  line-height: 1;
+  letter-spacing: var(--tracking-num);
+  font-variant-numeric: tabular-nums;
+  color: var(--chalk);
+}
+.co-price span { font-size: var(--text-md); color: var(--chalk-3); }
+.co-terms {
+  margin: 0 0 var(--space-6);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--floodlight);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--chalk-2);
+  max-width: 52ch;
+}
+.co-terms b { color: var(--chalk); font-weight: var(--weight-medium); }
+.co-ticks { margin-bottom: var(--space-6); }
+.co-who { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--chalk-2); overflow-wrap: anywhere; }
+.co-who b { color: var(--chalk); font-weight: var(--weight-medium); }
+.co-small { margin: 0; font-size: var(--text-xs); color: var(--chalk-3); line-height: var(--leading-normal); }
+
+.co-pay {
+  padding: var(--space-6);
+  border: var(--border) solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--stand);
+}
+.co-pay-title {
+  margin: 0 0 var(--space-5);
+  font-family: var(--display);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-lg);
+  letter-spacing: var(--tracking-xl);
+}
+.co-fields { display: grid; gap: var(--space-4); min-height: 280px; }
+.co-fields .pay-wait { margin: var(--space-7) 0; }
+.co-button { width: 100%; justify-content: center; margin-top: var(--space-5); font-variant-numeric: tabular-nums; }
+.co-error {
+  margin: var(--space-4) 0 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  border: var(--border) solid var(--lost);
+  font-size: var(--text-sm);
+  color: var(--chalk);
+}
+.co-note { margin: var(--space-4) 0 0; font-size: var(--text-xs); color: var(--chalk-3); line-height: var(--leading-normal); }
+.co-upgrade, .co-block { margin: 0 0 var(--space-5); font-size: var(--text-sm); color: var(--chalk-2); line-height: var(--leading-normal); }
+.co-center { justify-content: center; margin-top: var(--space-5); }
+
+/* A member on the pricing page: what they can do instead of buying. */
+.member-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-5); }
+.plan-mine { border-color: var(--won); }
+.plan-tagline.is-mine { background: var(--won); }
+.co-small a { color: var(--chalk-2); text-decoration: underline; text-underline-offset: 2px; }
