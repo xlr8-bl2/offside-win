@@ -16,7 +16,7 @@ import { cleanProse } from './js/lib/vocabulary.js';
 import { LEGAL, SUPPORT_EMAIL, UPDATED } from './js/lib/legal.js';
 import { mountPayment, openCheckout } from './js/lib/whop.js';
 import { absenceReason } from './js/lib/absence.js';
-import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, siteConfig, viewingAsFree } from './js/lib/auth.js';
+import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, prepareGoogleRedirect, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, siteConfig, viewingAsFree } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
 
@@ -138,7 +138,10 @@ function cacheClear({ keepMemory = false } = {}) {
 }
 
 async function fetchText(path, headers) {
-  const res = await fetch(path, { headers });
+  // A signed-in read never takes a preloaded (anonymous) response: Chrome
+  // matches a preload on the address and credentials mode, not the headers,
+  // and the token is a header. We use no cookies, so omitting them is free.
+  const res = await fetch(path, headers.authorization ? { headers, credentials: 'omit' } : { headers });
   const text = await res.text();
   if (!res.ok) {
     let msg = 'Something went wrong loading this.';
@@ -729,7 +732,62 @@ function freeCallHTML(hero, detail, free = null) {
   </div>`;
 }
 
-function heroHTML(hero = null, venueIds = [], detail = null, free = null) {
+/**
+ * The headline match's own call, under its name.
+ *
+ * The masthead is always a match we have a call on (see chooseHero), so this
+ * says what that call is: open for a member or when it is today's free call,
+ * a lock for everyone else. Once the match is under way the call is no
+ * longer on sale, so the lock gives way to a line saying it closed at
+ * kick-off; the full-time result is the fixture page's to tell.
+ */
+/*
+ * How calls move, in one place so every page says it the same way. The slate
+ * looks at every match again every fifteen minutes until kick-off; a call can
+ * change or be taken down in that time, and kick-off closes it.
+ */
+const CALLS_NOTE = `<p class="calls-note"><b>Calls move until kick-off.</b> We look at every match again every
+  fifteen minutes as team news and prices come in, so a call can change, or come down if we stop backing
+  it. At kick-off it closes: nothing is sold once a match is on, and it is graded at full time.</p>`;
+
+const LOCK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>';
+function heroCallHTML(hero, row) {
+  if (!row) return '';
+  const st = matchState(row);
+  const v = row.top_pick ?? null;
+  if (v) {
+    const d = market({ market: v.market, outcome: v.outcome, line: v.line, home: hero.home, away: hero.away, odds: v.odds });
+    return `
+    <div class="freecall hero-call">
+      <span class="freecall-tag${row.free_call ? '' : ' is-ours'}">${row.free_call ? 'Our call, free today' : 'Our call'}</span>
+      <p class="freecall-sel">${esc(d.name)}</p>
+      <p class="freecall-meta" data-public-price>${st.kind === 'live' ? `${trackHTML(liveTrack(v, row))} ` : ''}<b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
+    </div>`;
+  }
+  if (!row.locked) return '';
+  if (st.kind !== 'upcoming') {
+    return `<p class="hero-closed">${liveBadge(st)} Our call closed at kick-off. It is not sold once a match is on;
+      it goes up here with how it went at full time.</p>`;
+  }
+  return `
+    <div class="hero-lock">
+      ${LOCK_SVG}
+      <p><b>We have a call on this one.</b> Which market, the odds and the book are for members.</p>
+      <a class="btn btn-accent btn-sm" href="#/pricing" data-public-price>From £3.49</a>
+    </div>`;
+}
+
+/**
+ * Today's free call, when it is a different match from the headline: in its
+ * own box under the masthead, named as its own match, so it can never be read
+ * as the call on the headline.
+ */
+function freeBandHTML(free, hero) {
+  if (!free?.top_pick || !hero?.fixture_id || Number(free.id) === Number(hero.fixture_id)) return '';
+  return `<div class="wrap free-band">${freeCallHTML(null, null, free)}</div>`;
+}
+
+function heroHTML(hero = null, venueIds = [], detail = null, free = null, row = null) {
   const queue = hero?.venue_id ? [hero.venue_id, ...venueIds] : [].concat(venueIds).filter(Boolean);
 
   // A hero answer without a fixture is the day with no headline; the free
@@ -780,7 +838,7 @@ function heroHTML(hero = null, venueIds = [], detail = null, free = null) {
           <span class="fx-line">${crest(hero.home, 'md', hero.home_id)}<span class="name">${esc(hero.home)}</span></span>
           <span class="fx-line">${crest(hero.away, 'md', hero.away_id)}<span class="name">${esc(hero.away)}</span></span>
         </h1>
-        ${freeCallHTML(hero, detail, free)}
+        ${heroCallHTML(hero, row)}
         <div class="hero-cta">
           <a class="btn btn-primary" href="#/fixture/${encodeURIComponent(hero.fixture_id)}">Read why</a>
           <a class="btn btn-ghost" href="#/board">Today's calls</a>
@@ -885,6 +943,7 @@ function nextRowHTML(f) {
   // accent, with a lock where it is for members.
   const lock = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>';
   const mark = f.top_pick ? '<small class="next-pick">Pick</small>'
+    : f.locked && st.kind === 'live' ? '<small class="next-pick is-closed" title="Calls close at kick-off">Closed</small>'
     : f.locked ? `<small class="next-pick" title="A pick for members">${lock}Pick</small>` : '';
   return `
   <li><a class="next-row" href="#/fixture/${encodeURIComponent(f.id)}">
@@ -1410,6 +1469,7 @@ function rowHTML(f) {
         : pick && p ? `
         <span class="odds-tile${p.local ? '' : ' away'}"><span class="odds">${showOdds(p.odds)}</span><span class="odds-unit">odds</span></span>
         <span class="odds-book">${pick.lean ? 'lean, ' : ''}${esc(p.book)}</span>`
+        : f.locked && state.kind === 'live' ? `<span class="row-closed" title="Calls close at kick-off and are shown at full time">Closed at kick-off</span>`
         : f.locked ? `<span class="row-locked-mark">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>
                         Members</span>`
@@ -1621,17 +1681,18 @@ async function viewHome() {
   const picksReq = getJSON('/api/picks?limit=40&settled=true').then((r) => r.picks ?? []).catch(() => []);
   const slipReq = getJSON('/api/slip').catch(() => null);
   let board;
+  // The hero endpoint carries the fixture id and little else. The bundle
+  // behind it has the table, the form and the head-to-head, none of which is
+  // behind the wall. It is asked for the moment the id is known, and the page
+  // no longer waits for it: a third round trip before anything drew was most
+  // of a cold front page's wait on a phone. It is slotted in when it lands.
+  const heroReq = getJSON('/api/hero').catch(() => null);
+  const detailReq = heroReq.then((h) => (h?.fixture_id
+    ? getJSON(`/api/fixture/${h.fixture_id}`).catch(() => null) : null));
   try {
-    [board, state.hero] = await Promise.all([
-      loadBoard(),
-      getJSON('/api/hero').catch(() => null),
-    ]);
-    // The hero endpoint carries the fixture id and little else. The bundle
-    // behind it has the table, the form and the head-to-head, none of which is
-    // behind the wall, and all of which the masthead was leaving on the floor.
-    state.heroDetail = state.hero?.fixture_id
-      ? await getJSON(`/api/fixture/${state.hero.fixture_id}`).catch(() => null)
-      : null;
+    [board, state.hero] = await Promise.all([loadBoard(), heroReq]);
+    // Already here (a cached read, usually): draw with it. Otherwise without.
+    state.heroDetail = await Promise.race([detailReq, new Promise((r) => setTimeout(() => r(null), 60))]);
   } catch (err) {
     return errorState(err);
     return;
@@ -1656,9 +1717,19 @@ async function viewHome() {
   const rail = () => fixtures.filter((f) => hasCall(f) && f.id !== state.hero?.fixture_id);
   // The free call's row, flagged by the board itself.
   const freeFx = fixtures.find((f) => f.free_call && f.top_pick) ?? null;
+  let heroRow = state.hero?.fixture_id ? fixtures.find((f) => Number(f.id) === Number(state.hero.fixture_id)) ?? null : null;
+  // A headline whose call was withdrawn since the slate chose it (calls are
+  // looked at again every fifteen minutes) stands down for the plain
+  // masthead rather than lead with a match we no longer have a call on.
+  if (heroRow && !hasCall(heroRow) && !heroRow.called && matchState(heroRow).kind === 'upcoming') {
+    state.hero = null;
+    state.heroDetail = null;
+    heroRow = null;
+  }
   app.innerHTML =
     `<div data-live="ticker">${tickerHTML(fixtures, recent)}</div>` +
-    heroHTML(state.hero, state.heroVenue, state.heroDetail, freeFx) +
+    heroHTML(state.hero, state.heroVenue, state.heroDetail, freeFx, heroRow) +
+    freeBandHTML(freeFx, state.hero) +
     `<div data-live="today">${todayStripHTML(fixtures, recent)}</div>` +
     `<div data-live="mine">${yourGamesHTML(fixtures)}</div>` +
     `<div data-live="rail">${nextRailHTML(rail())}</div>` +
@@ -1682,6 +1753,17 @@ async function viewHome() {
 
   paintTally(fixtures, recent);
   tickCountdowns();
+
+  if (!state.heroDetail && state.hero?.fixture_id) {
+    const heroId = state.hero.fixture_id;
+    detailReq.then((d) => {
+      const inner = app.querySelector('.hero .hero-inner');
+      if (!d || !inner || state.hero?.fixture_id !== heroId || inner.querySelector('.matchcentre')) return;
+      state.heroDetail = d;
+      inner.insertAdjacentHTML('beforeend', matchCentreHTML(state.hero, d));
+      tickCountdowns();
+    });
+  }
 
   /*
    * The front page, kept alive while there is something to keep up with.
@@ -1962,6 +2044,7 @@ async function viewBoard(params = new URLSearchParams()) {
         <h1 class="display">The board</h1>
         <!-- Written by paint(), from what is actually on screen. See ledeFor. -->
         <p id="board-lede"></p>
+        ${CALLS_NOTE}
       </div>
       <div class="filters">
         <!--
@@ -2192,6 +2275,17 @@ async function viewBoard(params = new URLSearchParams()) {
  * and it does not nag.
  */
 function lockedHTML(fixture = null) {
+  // Kick-off closes the call. Nothing is sold once a match is on, so the offer
+  // gives way to what happens next: it is graded, and shown, at full time.
+  if (fixture?.kickoff && matchState(fixture).kind === 'live') {
+    return `
+  <div class="locked is-closed">
+    <div class="locked-body">
+      <b>Closed at kick-off.</b>
+      <p>Calls are not sold once a match is on. This one goes up here at full time, with whether it landed.</p>
+    </div>
+  </div>`;
+  }
   const n = Number(fixture?.locked_calls) || 0;
   const tie = fixture?.home && fixture?.away
     ? `${fixture.home} v ${fixture.away}`
@@ -3323,6 +3417,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
           ${verdicts.length
             ? verdicts.map((v) => verdictHTML(v, f.home, f.away, f, { played, hg, ag })).join('')
               + (anyLocked ? lockedHTML(f) : '')
+              + (played ? '' : CALLS_NOTE)
             // Older pass notes were written for us ("the 58.1 needed against a
             // 109.1% margin"); the gate withholds those and the plain line
             // stands in.
@@ -4461,6 +4556,36 @@ async function postJSON(path, body) {
  * out of the pair without closing the tab. Replacing the entry rather than
  * pushing one means Back goes to wherever they actually came from.
  */
+/**
+ * Put a button into its working state: disabled, a turning wheel, and words
+ * for what is happening. Returns the undo, which reports whether there was
+ * anything to undo.
+ *
+ * Every busy button is also undone when the browser restores the page from
+ * its back/forward cache. Back from Google's sign-in brought the page back
+ * exactly as it was left: a button frozen on "Taking you to Google".
+ */
+const busyButtons = new Set();
+function busy(button, label) {
+  if (!button) return () => false;
+  const was = button.innerHTML;
+  button.disabled = true;
+  button.classList.add('is-busy');
+  button.setAttribute('aria-busy', 'true');
+  button.innerHTML = `<span class="spin" aria-hidden="true"></span><span>${esc(label)}</span>`;
+  const undo = () => {
+    if (!busyButtons.delete(undo)) return false;
+    button.disabled = false;
+    button.classList.remove('is-busy');
+    button.removeAttribute('aria-busy');
+    button.innerHTML = was;
+    return true;
+  };
+  busyButtons.add(undo);
+  return undo;
+}
+addEventListener('pageshow', (e) => { if (e.persisted) for (const undo of [...busyButtons]) undo(); });
+
 const goInstead = (hash) => location.replace(`${location.pathname}${location.search}${hash}`);
 
 const INTENT_KEY = 'ow.after-signin';
@@ -4705,6 +4830,9 @@ async function viewPricing() {
       <p><b>Paying.</b> You pay on this page, in a card form run by Whop, who take the payment. Your card
         details go to Whop and never reach us. The membership goes on the account you are signed in with,
         whatever email you give the card form.</p>
+      <p><b>Calls move until kick-off.</b> Every match is looked at again every fifteen minutes as team news
+        and prices come in, so a call can change, or come down if we stop backing it. At kick-off it closes:
+        calls are not sold once a match is on, and each one is graded at full time.</p>
       <p><b>Changed your mind?</b> Fourteen days, full refund, whatever you have read.
         <a href="#/legal/refunds">How refunds work</a>. Cancel a renewing plan from your Whop account in one tap;
         you keep access to the end of what you paid for.</p>
@@ -4862,6 +4990,8 @@ async function viewCheckout(params) {
           <li><b>Why this call</b> on every match</li>
           <li>The board's filters by league and by day</li>
         </ul>
+        <p class="co-small co-moves">Calls can change until kick-off, as we look at every match again every
+          fifteen minutes, and close when the match starts.</p>
         <p class="co-who">It goes on the account you are signed in with:
           <b>${esc(user.email ?? '')}</b></p>
         <p class="co-small">Changed your mind? Fourteen days, full refund, whatever you have read.
@@ -4894,14 +5024,14 @@ async function viewCheckout(params) {
   const errorLine = app.querySelector('.co-error');
   const say = (text) => { errorLine.textContent = text; errorLine.hidden = !text; };
   let complete = false;
-  let busy = false;
-  const idle = () => { busy = false; button.disabled = !complete; button.textContent = `Pay ${price}`; };
+  let working = null;
+  const idle = () => { working?.(); working = null; button.disabled = !complete; };
 
   // Whop's own checkout, when ours cannot take this payment.
   const fallback = async (why) => {
     if (why) say(why);
-    button.disabled = true;
-    button.textContent = 'Opening the checkout…';
+    working?.();
+    working = busy(button, 'Opening the checkout…');
     try { await openEmbeddedCheckout(planId); } catch (err) { say(err.message); }
     idle();
   };
@@ -4916,7 +5046,7 @@ async function viewCheckout(params) {
       email: user.email,
       returnUrl: `${location.origin}/#/account?paid=1`,
       into: { email: '#co-email', payment: '#co-payment', branding: '#co-branding' },
-      onComplete: (ok) => { complete = ok; if (!busy) button.disabled = !ok; },
+      onComplete: (ok) => { complete = ok; if (!working) button.disabled = !ok; },
     });
     const wait = app.querySelector('#co-payment .pay-wait');
     if (wait) wait.remove();
@@ -4927,11 +5057,9 @@ async function viewCheckout(params) {
 
   const paid = () => { location.hash = '#/account?paid=1'; };
   button.onclick = async () => {
-    if (busy || !complete) return;
-    busy = true;
+    if (working || !complete) return;
     say('');
-    button.disabled = true;
-    button.textContent = 'Paying…';
+    working = busy(button, 'Paying…');
     try {
       const token = await state.payHandle.token();
       if (!token) throw new Error('The card details did not come through. Nothing has been charged. Try again.');
@@ -5037,12 +5165,20 @@ async function viewSignin() {
   const working = () => { panel.classList.add('working'); say('Signing you in…'); };
   const failed = (err) => { panel.classList.remove('working'); googleBtn.disabled = false; say(humanise(err), true); };
 
+  // Ready before the tap, so the tap goes straight to Google.
+  prepareGoogleRedirect();
   googleBtn.onclick = async () => {
-    googleBtn.disabled = true;
+    say('');
+    const undo = busy(googleBtn, 'Opening Google…');
+    // Still here after ten seconds with the page in view: the browser did not
+    // go (a blocker, no connection). Say so rather than spin for ever.
+    setTimeout(() => {
+      if (document.visibilityState === 'visible' && undo()) say('Google did not open. Check your connection and try again.', true);
+    }, 10000);
     try {
-      if (await googleRedirectReady()) { say('Taking you to Google…'); await signInWithGoogleRedirect(); }
+      if (await googleRedirectReady()) await signInWithGoogleRedirect();
       else await signInWithGoogle();
-    } catch (err) { failed(err); }
+    } catch (err) { undo(); failed(err); }
   };
 
   // Google's own button only while the redirect is not switched on.
@@ -5063,8 +5199,8 @@ async function viewSignin() {
     const email = document.getElementById('email').value.trim();
     if (!email) return say('Put your email address in first.', true);
     const button = e.currentTarget.querySelector('button');
-    button.disabled = true;
-    say('Sending…');
+    say('');
+    const undo = busy(button, 'Sending the link…');
     try {
       await signInWithEmail(email);
       /*
@@ -5090,8 +5226,8 @@ async function viewSignin() {
       }, 1000);
       if (again) again.onclick = () => viewSignin();
     } catch (err) {
+      undo();
       say(humanise(err), true);
-      button.disabled = false;
     }
   };
 }
@@ -6250,7 +6386,10 @@ renderRegion();
   let signedInJustNow = false;
   // Back from Google: say what is happening while the session is started,
   // rather than a blank page for the second it takes.
-  if (isGoogleReturn()) app.innerHTML = '<div class="wrap section narrow"><p class="page-sub">Signing you in…</p></div>';
+  if (isGoogleReturn()) {
+    app.innerHTML = `<div class="wrap section narrow"><div class="signing" role="status">
+      <span class="spin" aria-hidden="true"></span><p>Signing you in with Google…</p></div></div>`;
+  }
   try {
     signedInJustNow = await completeSignIn();
   } catch (err) {

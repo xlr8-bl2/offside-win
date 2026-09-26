@@ -5,7 +5,7 @@ import { chooseHero } from '../src/feature.ts';
 const NOW = 1_700_000_000;
 const fx = (o: Partial<Parameters<typeof chooseHero>[0][number]>) =>
   ({ id: 1, league_id: 1, league: 'Premier League', kickoff: NOW + 4 * 3600,
-     home: 'A', away: 'B', ...o }) as Parameters<typeof chooseHero>[0][number];
+     home: 'A', away: 'B', called: true, ...o }) as Parameters<typeof chooseHero>[0][number];
 
 test('a marquee competition leads over a more confident minor one', () => {
   // The complaint this answers: the page led with whatever the model liked best,
@@ -113,4 +113,15 @@ test('the Champions League still leads over anything', () => {
     fx({ id: 2, league_id: 7, league: 'Champions League', kickoff: NOW + 2 * 3600, confidence: 0.4 }),
   ], NOW)!;
   assert.equal(hero.fixture_id, 2);
+});
+
+test('a bigger game with no call does not lead over a smaller one we called', () => {
+  // The masthead's call was read as the call on the masthead's match. A match
+  // we passed on is not the front page, however big.
+  const hero = chooseHero([
+    fx({ id: 1, league_id: 7, league: 'Champions League', confidence: 0.4, called: false }),
+    fx({ id: 2, league_id: 91, league: 'National League', confidence: 0.8 }),
+  ], NOW)!;
+  assert.equal(hero.fixture_id, 2);
+  assert.equal(chooseHero([fx({ called: false })], NOW), null, 'nothing called: no hero');
 });

@@ -580,6 +580,21 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .btn[disabled] { opacity: 0.5; pointer-events: none; }
 
 /*
+ * A button that is doing something: it keeps its colour, says what it is
+ * doing, and turns a small wheel so a tap that takes a second does not read as
+ * a tap that did nothing. Any button can wear it (see `busy()` in app.js).
+ */
+.btn.is-busy[disabled], .btn-gsi.is-busy:disabled { opacity: 1; cursor: progress; }
+.spin {
+  display: inline-block; flex: none;
+  width: 1em; height: 1em;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2s; } }
+
+/*
  * The default action carries the accent, as the reference's "watch live" does.
  * A colourless page needs one place the eye is told to go, and on a dark ground
  * a solid accent is that place.
