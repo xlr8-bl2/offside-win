@@ -61,7 +61,7 @@ test("a reader's token is forwarded in place of the anon key", async () => {
 });
 
 test('every reader-facing route carries the token', async () => {
-  for (const path of ['/api/board', '/api/fixture/1', '/api/picks']) {
+  for (const path of ['/api/board', '/api/fixture/1', '/api/picks', '/api/search?q=arsenal']) {
     calls = [];
     respond = () => new Response('{"id":1}', { status: 200 });
     const res = await get(path, { authorization: 'Bearer reader.jwt.here' });
@@ -198,4 +198,12 @@ test('pages on workers.dev move to the real domain; the API does not', async () 
   assert.equal(api.status, 200, 'webhooks and open tabs still reach the API on the old address');
   const home = await worker.fetch(new Request('https://offside.win/'), env);
   assert.equal(home.status, 200, 'the real domain serves the page');
+});
+
+test('search passes the words through, trimmed and capped', async () => {
+  await get('/api/search?q=' + encodeURIComponent('  Atlético Madrid  ' + 'x'.repeat(100)));
+  const u = new URL(calls[0]!.url);
+  assert.match(u.pathname, /\/rpc\/search_games$/);
+  assert.equal(u.searchParams.get('p_q')!.length, 60);
+  assert.ok(u.searchParams.get('p_q')!.startsWith('Atlético Madrid'));
 });

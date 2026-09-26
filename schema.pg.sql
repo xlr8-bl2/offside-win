@@ -57,6 +57,25 @@ CREATE TABLE IF NOT EXISTS venue (
   updated_at bigint NOT NULL
 );
 
+-- What is coming up, beyond what has been analysed.
+--
+-- The slate reads matches three days ahead; search has to know about the
+-- ones after that too, or a reader looking for next week's derby is told it
+-- does not exist. One row per upcoming match in a covered competition, for
+-- two weeks, written by the slate (engine/src/schedule.ts). No analysis and
+-- no calls, so it is public.
+CREATE TABLE IF NOT EXISTS schedule (
+  id            bigint PRIMARY KEY,
+  league_id     bigint NOT NULL,
+  kickoff       bigint NOT NULL,
+  home_team     text NOT NULL,
+  away_team     text NOT NULL,
+  home_team_id  bigint,
+  away_team_id  bigint,
+  updated_at    bigint NOT NULL
+);
+CREATE INDEX IF NOT EXISTS schedule_kickoff ON schedule (kickoff);
+
 -- A photograph of a team, re-hosted.
 --
 -- One row per team, holding the best action shot we have found for them. The
@@ -923,22 +942,17 @@ RETURNS void LANGUAGE sql VOLATILE SET search_path = public AS $fn$
   UPDATE payment SET raw_json = '{"redacted": true}' WHERE user_id = p_user;
 $fn$;
 
-CREATE OR REPLACE FUNCTION get_board(p_from bigint, p_to bigint, p_league bigint DEFAULT NULL)
-RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
-  WITH m AS MATERIALIZED (SELECT has_membership() AS ok)
-  SELECT json_build_object(
-           'generated_at', floor(extract(epoch FROM now()))::bigint,
-           'count', count(*),
-           'member', (SELECT ok FROM m),
-           'fixtures', coalesce(json_agg(b.card ORDER BY (b.kickoff / 86400) ASC, b.rank ASC, b.kickoff ASC), '[]'::json)
-         )
-  FROM (
-    SELECT (
+-- One fixture's card on the board, walled or not. Shared by get_board and
+-- search_games so the two cannot disagree about what a reader may see:
+-- p_member is has_membership(), decided once by the caller.
+CREATE OR REPLACE FUNCTION board_card(f fixture, p_member boolean)
+RETURNS jsonb LANGUAGE sql STABLE SET search_path = public AS $fn$
+  SELECT (
              -- Finished matches are not walled, for the reason set out on
              -- get_fixture below: the settled call is already published free
              -- on the results page, so hiding it here hid the evidence and
              -- sold the promise.
-             (CASE WHEN (SELECT ok FROM m)
+             (CASE WHEN p_member
                      OR (f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL)
                      OR f.id = free_fixture_id()
                    THEN f.board_json
@@ -986,7 +1000,20 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
                             -- the goals.
                             'goals', report_goals(f.report_json))
                      ELSE '{}'::jsonb END
-           )::json AS card,
+           );
+$fn$;
+
+CREATE OR REPLACE FUNCTION get_board(p_from bigint, p_to bigint, p_league bigint DEFAULT NULL)
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  WITH m AS MATERIALIZED (SELECT has_membership() AS ok)
+  SELECT json_build_object(
+           'generated_at', floor(extract(epoch FROM now()))::bigint,
+           'count', count(*),
+           'member', (SELECT ok FROM m),
+           'fixtures', coalesce(json_agg(b.card ORDER BY (b.kickoff / 86400) ASC, b.rank ASC, b.kickoff ASC), '[]'::json)
+         )
+  FROM (
+    SELECT board_card(f, (SELECT ok FROM m))::json AS card,
            f.kickoff, f.rank
     FROM fixture f
     WHERE f.kickoff BETWEEN p_from AND p_to
@@ -994,6 +1021,65 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
     ORDER BY (f.kickoff / 86400) ASC, f.rank ASC, f.kickoff ASC
     LIMIT 300
   ) b;
+$fn$;
+
+-- Text folded for matching: lower case, accents off, so "atletico" finds
+-- "Atlético" and "munchen" finds "München".
+CREATE OR REPLACE FUNCTION fold(p text)
+RETURNS text LANGUAGE sql IMMUTABLE SET search_path = public AS $fn$
+  SELECT translate(lower(coalesce(p, '')),
+    'áàâäãåāçćčéèêëēęíìîïīñńóòôöõøōúùûüūýÿšśžźżđłőűğışțß',
+    'aaaaaaaccceeeeeeiiiiinnoooooooouuuuuyysszzzdlougistb');
+$fn$;
+
+-- Search the games we know about, for a team or a competition.
+--
+-- Three kinds of answer, because not every game has a call and not every game
+-- has been looked at yet:
+--   analysed  -- on the board: a call (walled for non-members exactly as the
+--                board walls it), a deliberate no-pick, a live score or a result.
+--   later     -- in a covered competition but too far off to have been
+--                analysed; the page says when it will be.
+--   leagues   -- competitions whose name matches, to jump to their page.
+CREATE OR REPLACE FUNCTION search_games(p_q text)
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  WITH q AS (
+         SELECT '%' || replace(replace(replace(fold(trim(p_q)), '\', '\\'), '%', '\%'), '_', '\_') || '%' AS pat,
+                length(trim(coalesce(p_q, ''))) AS n,
+                floor(extract(epoch FROM now()))::bigint AS now),
+       m AS MATERIALIZED (SELECT has_membership() AS ok),
+       hits AS (
+         SELECT f.* FROM fixture f, q
+         WHERE q.n >= 2 AND q.n <= 60
+           AND f.kickoff BETWEEN q.now - 3 * 86400 AND q.now + 14 * 86400
+           AND (fold(f.home_team) LIKE q.pat OR fold(f.away_team) LIKE q.pat
+                OR fold(f.board_json::jsonb->>'league') LIKE q.pat)
+         ORDER BY f.kickoff ASC
+         LIMIT 60),
+       later AS (
+         SELECT s.*, l.name AS league FROM schedule s LEFT JOIN league l ON l.id = s.league_id, q
+         WHERE q.n >= 2 AND q.n <= 60
+           AND s.kickoff > q.now AND s.kickoff <= q.now + 14 * 86400
+           AND NOT EXISTS (SELECT 1 FROM fixture f WHERE f.id = s.id)
+           AND (fold(s.home_team) LIKE q.pat OR fold(s.away_team) LIKE q.pat OR fold(l.name) LIKE q.pat)
+         ORDER BY s.kickoff ASC
+         LIMIT 60)
+  SELECT json_build_object(
+    'q', trim(coalesce(p_q, '')),
+    'member', (SELECT ok FROM m),
+    'analysed', coalesce((SELECT json_agg(board_card(h, (SELECT ok FROM m)) ORDER BY h.kickoff) FROM hits h), '[]'::json),
+    'later', coalesce((SELECT json_agg(json_build_object(
+                'id', x.id, 'league_id', x.league_id, 'league', x.league, 'kickoff', x.kickoff,
+                'home', x.home_team, 'away', x.away_team, 'home_id', x.home_team_id, 'away_id', x.away_team_id)
+              ORDER BY x.kickoff) FROM later x), '[]'::json),
+    'leagues', coalesce((
+      SELECT json_agg(json_build_object('id', l.id, 'name', l.name, 'country', l.country) ORDER BY l.name)
+      FROM (SELECT l.* FROM league l, q
+            WHERE q.n >= 2 AND fold(l.name) LIKE q.pat
+              AND (EXISTS (SELECT 1 FROM schedule s WHERE s.league_id = l.id)
+                   OR EXISTS (SELECT 1 FROM fixture f WHERE f.league_id = l.id AND f.kickoff > q.now - 3 * 86400))
+            LIMIT 6) l), '[]'::json)
+  );
 $fn$;
 
 CREATE OR REPLACE FUNCTION get_fixture(p_id bigint)
@@ -1349,6 +1435,10 @@ DROP POLICY IF EXISTS team_shot_read ON team_shot;
 CREATE POLICY team_shot_read ON team_shot FOR SELECT TO anon USING (true);
 GRANT SELECT ON team_shot TO anon;
 
+ALTER TABLE schedule ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS schedule_read ON schedule;
+CREATE POLICY schedule_read ON schedule FOR SELECT TO anon USING (true);
+GRANT SELECT ON schedule TO anon;
 ALTER TABLE venue ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS venue_read ON venue;
 CREATE POLICY venue_read ON venue FOR SELECT TO anon USING (true);
@@ -1558,6 +1648,9 @@ GRANT EXECUTE ON FUNCTION save_profile(text, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION set_follow(text, bigint, text, boolean) TO anon, authenticated;
 REVOKE ALL ON FUNCTION delete_account_data(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint) TO anon;
+GRANT EXECUTE ON FUNCTION board_card(fixture, boolean) TO anon;
+GRANT EXECUTE ON FUNCTION fold(text) TO anon;
+GRANT EXECUTE ON FUNCTION search_games(text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_fixture(bigint) TO anon;
 GRANT EXECUTE ON FUNCTION get_picks(integer, text) TO anon;
 GRANT EXECUTE ON FUNCTION get_model() TO anon;
