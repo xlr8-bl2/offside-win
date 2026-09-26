@@ -24,6 +24,8 @@
  * use jargon competes with the jargon sitting in its input, and loses.
  */
 
+import { absenceReason } from '../context/absence.ts';
+
 export interface PubFact {
   /** The sayable line. */
   text: string;
@@ -184,13 +186,23 @@ function absenceFacts(ev: Record<string, unknown>, team: string, side: 'home' | 
   if (top) {
     // The feed says "Unknown" when it has no reason, which read as "out with a
     // unknown problem" -- wrong article, and naming a non-reason at all.
-    const raw = top.reason?.toLowerCase().replace(/\s*injury$/, '').trim();
-    const reason = raw && !/^(unknown|other|undisclosed|n\/a)$/.test(raw) ? raw : null;
-    const article = reason && /^[aeiou]/.test(reason) ? 'an' : 'a';
+    // The feed's reasons arrive as "Hamstring Injury" but also as raw codes
+    // ("national_team", "red_card_suspension"); absenceReason turns both into
+    // words, and each kind of absence gets the sentence a person would use.
+    const why = absenceReason(top.reason);
+    const injury = why && !/^(With the national team|Suspended|Ill$|Personal reasons|Paternity leave|Left out|Rested|Not eligible|Doubtful)/.test(why)
+      ? why.toLowerCase().replace(/\s*injury$/, '').trim() : null;
+    const article = injury && /^[aeiou]/.test(injury) ? 'an' : 'a';
+    const text = !why ? `${top.name} is out for ${team}`
+      : why === 'With the national team' ? `${top.name} is away with the national team and misses this one for ${team}`
+      : why === 'Suspended (red card)' ? `${top.name} is suspended for ${team} after a red card`
+      : why === 'Suspended (bookings)' ? `${top.name} is suspended for ${team} after too many bookings`
+      : why === 'Suspended' ? `${top.name} is suspended for ${team}`
+      : why === 'Ill' ? `${top.name} is out ill for ${team}`
+      : injury ? `${top.name} is out for ${team} with ${article} ${injury} problem`
+      : `${top.name} is out for ${team} (${why.toLowerCase()})`;
     out.push({
-      text: reason
-        ? `${top.name} is out for ${team} with ${article} ${reason} problem`
-        : `${top.name} is out for ${team}`,
+      text,
       side,
       weight: top.share > 0.15 ? 95 : 70,
     });
