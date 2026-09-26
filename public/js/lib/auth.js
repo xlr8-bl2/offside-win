@@ -219,10 +219,72 @@ async function sha256Hex(text) {
  * every page would tell Google about every visit.
  */
 export function warmSignIn() {
-  config().catch(() => {});
-  loadGsi().catch(() => { gsiPromise = null; });
+  config().then((cfg) => { if (!cfg.googleRedirect) loadGsi().catch(() => { gsiPromise = null; }); }).catch(() => {});
   client().catch(() => { clientPromise = null; });
 }
+
+/*
+ * Google by redirect: the page goes to Google and Google sends it back.
+ *
+ * On a phone this is what reads as native. Google's own button is a frame its
+ * script draws after the page has loaded, and on iOS it opens a second tab
+ * for the account picker and closes it again; both showed as a button that
+ * arrived late, flickered, and hung after the tap. Here the button is ours,
+ * drawn with the page, and the tap is an ordinary page load.
+ *
+ * Google returns a signed ID token in the address fragment; Supabase checks it
+ * against the same client, exactly as for the frame's token. The nonce works
+ * the same way (Google signs its hash; Supabase is given the original), and
+ * the state value ties the answer to the tab that asked.
+ */
+const GOOGLE_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
+const PENDING = 'offside-google-pending';
+const randomHex = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+export async function googleRedirectReady() {
+  try { const cfg = await config(); return Boolean(cfg.googleClientId && cfg.googleRedirect); } catch { return false; }
+}
+
+export async function signInWithGoogleRedirect() {
+  const cfg = await config();
+  const raw = randomHex(24);
+  const state = randomHex(16);
+  sessionStorage.setItem(PENDING, JSON.stringify({ raw, state }));
+  const url = new URL(GOOGLE_AUTH);
+  url.search = new URLSearchParams({
+    client_id: cfg.googleClientId,
+    redirect_uri: `${location.origin}/`,
+    response_type: 'id_token',
+    scope: 'openid email profile',
+    nonce: await sha256Hex(raw),
+    state,
+    prompt: 'select_account',
+  }).toString();
+  location.assign(url.toString());
+}
+
+/** Is this page load Google handing back an answer? */
+export function isGoogleReturn() {
+  if (!location.hash.includes('state=')) return false;
+  const back = new URLSearchParams(location.hash.slice(1));
+  return back.has('state') && (back.has('id_token') || back.has('error'));
+}
+
+async function completeGoogleReturn() {
+  const back = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, '', `${location.pathname}${location.search}`);
+  let pending = null;
+  try { pending = JSON.parse(sessionStorage.getItem(PENDING) ?? 'null'); sessionStorage.removeItem(PENDING); } catch { /* private mode */ }
+  const fail = (message) => Object.assign(new Error(message), { google: true });
+  if (back.get('error')) throw fail(back.get('error') === 'access_denied' ? 'cancelled' : back.get('error'));
+  if (!pending || pending.state !== back.get('state')) throw fail('state');
+  const token = back.get('id_token');
+  if (!token) throw fail('no token');
+  const { error } = await (await client()).auth.signInWithIdToken({ provider: 'google', token, nonce: pending.raw });
+  if (error) throw fail(error.message);
+  return true;
+}
+
 
 /**
  * Draw Google's button into `el`. Resolves true once it is drawn, false when
@@ -295,6 +357,7 @@ export async function accountRpc(fn, args) {
  * Returns true when a session was established, so the caller can re-render.
  */
 export async function completeSignIn() {
+  if (isGoogleReturn()) return completeGoogleReturn();
   const url = new URL(location.href);
   const code = url.searchParams.get('code');
   const failed = url.searchParams.get('error_description') ?? url.searchParams.get('error');

@@ -29,6 +29,7 @@ interface Env extends PayEnv {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   GOOGLE_CLIENT_ID?: string;
+  GOOGLE_REDIRECT?: string;
   ASSETS: Fetcher;
 }
 
@@ -191,7 +192,7 @@ export default {
  */
 function config(env: Env): Response {
   return new Response(
-    JSON.stringify({ supabaseUrl: env.SUPABASE_URL ?? '', anonKey: env.SUPABASE_ANON_KEY ?? '', googleClientId: env.GOOGLE_CLIENT_ID ?? '' }),
+    JSON.stringify({ supabaseUrl: env.SUPABASE_URL ?? '', anonKey: env.SUPABASE_ANON_KEY ?? '', googleClientId: env.GOOGLE_CLIENT_ID ?? '', googleRedirect: env.GOOGLE_REDIRECT === '1' }),
     {
       headers: {
         'content-type': 'application/json; charset=utf-8',
