@@ -67,6 +67,32 @@ export function hasStoredSession() {
   return false;
 }
 
+/**
+ * The session Supabase saved in this browser, if its token has more than a
+ * minute left. Read, never written: refreshing it is the library's job.
+ */
+function storedSession() {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith('sb-') || !k.endsWith('-auth-token')) continue;
+      const raw = JSON.parse(localStorage.getItem(k) ?? 'null');
+      const s = raw?.access_token ? raw : raw?.currentSession;
+      if (s?.access_token && s?.user?.id && Number(s.expires_at) * 1000 > Date.now() + 60_000) return s;
+    }
+  } catch { /* private mode, or a value we do not recognise: ask the library */ }
+  return null;
+}
+
+let warmed = false;
+function warmLater() {
+  if (warmed) return;
+  warmed = true;
+  const go = () => client().catch(() => { clientPromise = null; warmed = false; });
+  if ('requestIdleCallback' in window) requestIdleCallback(go, { timeout: 4000 });
+  else setTimeout(go, 1500);
+}
+
 /** The Supabase client, imported on first genuine need and then reused. */
 export async function client() {
   if (!clientPromise) {
@@ -96,6 +122,16 @@ export async function client() {
  */
 export async function session() {
   if (!hasStoredSession()) return null;
+  // A saved token that is still good is used as it is. Loading the auth
+  // library to hand back the same token was a CDN download, a parse and a
+  // round trip for the config in front of every signed-in reader's first
+  // read of the board. The library is still loaded, after the page has drawn,
+  // so it can refresh the token before it runs out.
+  const saved = storedSession();
+  if (saved) {
+    warmLater();
+    return saved;
+  }
   try {
     const { data } = await (await client()).auth.getSession();
     return data.session ?? null;
@@ -222,7 +258,10 @@ async function sha256Hex(text) {
  * every page would tell Google about every visit.
  */
 export function warmSignIn() {
-  config().then((cfg) => { if (!cfg.googleRedirect) loadGsi().catch(() => { gsiPromise = null; }); }).catch(() => {});
+  config().then((cfg) => {
+    if (cfg.googleRedirect) prepareGoogleRedirect();
+    else loadGsi().catch(() => { gsiPromise = null; });
+  }).catch(() => {});
   client().catch(() => { clientPromise = null; });
 }
 
@@ -248,22 +287,41 @@ export async function googleRedirectReady() {
   try { const cfg = await config(); return Boolean(cfg.googleClientId && cfg.googleRedirect); } catch { return false; }
 }
 
+/*
+ * Google's address is worked out while the sign-in page draws (the config, a
+ * nonce and its hash), not after the tap. Done after, it was a network round
+ * trip and a hash between the tap and anything happening, which on a phone
+ * read as a dead button.
+ */
+let preparedGoogle = null;
+export function prepareGoogleRedirect() {
+  preparedGoogle ??= (async () => {
+    const cfg = await config();
+    if (!cfg.googleClientId || !cfg.googleRedirect) return null;
+    const raw = randomHex(24);
+    const state = randomHex(16);
+    const url = new URL(GOOGLE_AUTH);
+    url.search = new URLSearchParams({
+      client_id: cfg.googleClientId,
+      redirect_uri: `${location.origin}/`,
+      response_type: 'id_token',
+      scope: 'openid email profile',
+      nonce: await sha256Hex(raw),
+      state,
+      prompt: 'select_account',
+    }).toString();
+    return { url: url.toString(), raw, state };
+  })().catch(() => { preparedGoogle = null; return null; });
+  return preparedGoogle;
+}
+
 export async function signInWithGoogleRedirect() {
-  const cfg = await config();
-  const raw = randomHex(24);
-  const state = randomHex(16);
-  sessionStorage.setItem(PENDING, JSON.stringify({ raw, state }));
-  const url = new URL(GOOGLE_AUTH);
-  url.search = new URLSearchParams({
-    client_id: cfg.googleClientId,
-    redirect_uri: `${location.origin}/`,
-    response_type: 'id_token',
-    scope: 'openid email profile',
-    nonce: await sha256Hex(raw),
-    state,
-    prompt: 'select_account',
-  }).toString();
-  location.assign(url.toString());
+  const p = await prepareGoogleRedirect();
+  if (!p) throw new Error('Google sign-in is not available at the moment.');
+  // One use: a nonce is never sent to Google twice.
+  preparedGoogle = null;
+  sessionStorage.setItem(PENDING, JSON.stringify({ raw: p.raw, state: p.state }));
+  location.assign(p.url);
 }
 
 /** Is this page load Google handing back an answer? */
