@@ -15,7 +15,7 @@ import { COUNTRY_NAMES, bookName, cash, country, localPrice, purse } from './js/
 import { cleanProse } from './js/lib/vocabulary.js';
 import { LEGAL, SUPPORT_EMAIL, UPDATED } from './js/lib/legal.js';
 import { absenceReason } from './js/lib/absence.js';
-import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, signInWithEmail, signInWithGoogle, signOut, viewingAsFree } from './js/lib/auth.js';
+import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, signInWithEmail, signInWithGoogle, signOut, viewingAsFree } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
 
@@ -4483,7 +4483,12 @@ async function viewSignin() {
         <!-- Google's own button, drawn here by renderGoogleButton; it signs in
              on offside.win, so Google's window names this site. The button
              below is the fallback, shown only if Google's script cannot load. -->
-        <div class="gsi-slot" id="google-slot" aria-live="polite"></div>
+        <div class="gsi-slot" id="google-wrap">
+          <!-- Held in place while Google's button loads, the same size and
+               colour, so it arrives without the form jumping under it. -->
+          <div class="gsi-wait" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.8 3-4.3 3-7.4z" fill="#4285F4"/><path d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853"/><path d="M6.4 14a6 6 0 0 1 0-3.9V7.5H3.1a10 10 0 0 0 0 9z" fill="#FBBC05"/><path d="M12 6c1.5 0 2.8.5 3.8 1.5l2.8-2.8A10 10 0 0 0 3.1 7.5l3.3 2.6C7.2 7.8 9.4 6 12 6z" fill="#EA4335"/></svg><span>Continue with Google</span></div>
+          <div id="google-slot"></div>
+        </div>
         <button class="btn btn-primary btn-lg btn-google" id="google" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.8 3-4.3 3-7.4z" fill="#4285F4"/><path d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853"/><path d="M6.4 14a6 6 0 0 1 0-3.9V7.5H3.1a10 10 0 0 0 0 9z" fill="#FBBC05"/><path d="M12 6c1.5 0 2.8.5 3.8 1.5l2.8-2.8A10 10 0 0 0 3.1 7.5l3.3 2.6C7.2 7.8 9.4 6 12 6z" fill="#EA4335"/></svg>
           Continue with Google
@@ -4530,12 +4535,26 @@ async function viewSignin() {
     try { await signInWithGoogle(); } catch (err) { say(humanise(err), true); e.currentTarget.disabled = false; }
   };
   const slot = document.getElementById('google-slot');
+  const wrap = document.getElementById('google-wrap');
+  const panel = document.getElementById('signin-panel');
+  // The stand-in goes once Google's own frame has painted over it.
+  const settle = () => wrap.classList.add('ready');
+  new MutationObserver((_, obs) => {
+    const frame = slot.querySelector('iframe');
+    if (!frame) return;
+    obs.disconnect();
+    frame.addEventListener('load', settle, { once: true });
+  }).observe(slot, { childList: true, subtree: true });
+  setTimeout(settle, 4000);
   renderGoogleButton(slot, {
+    // Google's window has closed and the session is being started: say so at
+    // once, rather than leave the page looking as if the tap did nothing.
+    onWorking: () => { panel.classList.add('working'); say('Signing you in…'); },
     onSignedIn: afterSignIn,
-    onError: (err) => say(humanise(err), true),
+    onError: (err) => { panel.classList.remove('working'); say(humanise(err), true); },
   }).then((drawn) => {
     if (drawn) return;
-    slot.remove();
+    wrap.remove();
     document.getElementById('google').hidden = false;
   });
 
@@ -5281,6 +5300,11 @@ let routed = 0;
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 const scrollMemory = new Map();
 let navByLink = false;
+// A finger on a sign-in link is a head start on Google's button.
+document.addEventListener('pointerdown', (e) => {
+  if (e.target.closest?.('a[href="#/signin"]')) warmSignIn();
+}, { passive: true });
+
 document.addEventListener('click', (e) => {
   const a = e.target.closest?.('a[href^="#/"]');
   if (a && !e.defaultPrevented && e.button === 0 && !e.metaKey && !e.ctrlKey) navByLink = true;
