@@ -15,7 +15,7 @@ import { COUNTRY_NAMES, bookName, cash, country, localPrice, purse } from './js/
 import { cleanProse } from './js/lib/vocabulary.js';
 import { LEGAL, SUPPORT_EMAIL, UPDATED } from './js/lib/legal.js';
 import { absenceReason } from './js/lib/absence.js';
-import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, signInWithEmail, signInWithGoogle, signOut, viewingAsFree } from './js/lib/auth.js';
+import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, viewingAsFree } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
 
@@ -2294,10 +2294,14 @@ function pitchHTML(lineups, home, away, homeId, awayId, report = null, league = 
   const player = (p, keyMan) => {
     const m = playerMarks(report, p.id);
     const tag = isNotable(p.id) && league ? 'a' : 'div';
+    // Two marks at most, and only the ones that change a match: goals and a
+    // red card. Bookings and substitutions are in the lists under the pitch;
+    // on it they were the clutter.
+    const goals = m.goals + m.own;
+    const sentOff = m.card === 'red' || m.card === 'second_yellow';
     const marks = [
-      m.goals + m.own ? `<i class="pp-goal" title="${m.goals + m.own} goal${m.goals + m.own === 1 ? '' : 's'}">${m.goals + m.own > 1 ? m.goals + m.own : ''}</i>` : '',
-      m.card ? `<i class="pp-card ${m.card}" title="${m.card === 'yellow' ? 'Booked' : 'Sent off'}"></i>` : '',
-      m.off ? `<i class="pp-off" title="Went off ${esc(minuteOf(m.off))}"></i>` : '',
+      goals ? `<i class="pp-goal" title="${goals} goal${goals === 1 ? '' : 's'}">${goals > 1 ? goals : ''}</i>` : '',
+      sentOff ? '<i class="pp-card red" title="Sent off"></i>' : '',
     ].join('');
     return `
     <${tag}${tag === 'a' ? ` href="${esc(playerHref(p.id, league))}"` : ''} class="pp${p.id === keyMan ? ' key' : ''}" title="${esc(p.name)}">
@@ -2342,7 +2346,7 @@ function pitchHTML(lineups, home, away, homeId, awayId, report = null, league = 
       ${sideHTML(lineups.away, 'away')}
       ${sideHTML(lineups.home, 'home')}
     </div>
-    ${report ? `<p class="lineup-key"><span><i class="pp-goal"></i> goal</span><span><i class="pp-card yellow"></i> booked</span><span><i class="pp-card red"></i> sent off</span><span><i class="pp-off"></i> went off</span><span><b class="pp-rating good">7.2</b> rating</span></p>` : ''}
+    ${report ? `<p class="lineup-key"><span><b class="pp-rating r-good">7.2</b> match rating</span><span><i class="pp-goal"></i> scored</span><span><i class="pp-card red"></i> sent off</span><span>Cards and subs are in the lists below</span></p>` : ''}
   </div>`;
 }
 
@@ -2473,7 +2477,9 @@ const EV_ICON = {
 };
 
 /** How a rating reads: the colour says it before the number does. */
-const ratingClass = (r) => (r >= 8 ? 'top' : r >= 7 ? 'good' : r < 6 ? 'poor' : '');
+// Prefixed: a bare `top` is the site header's class, and a rating of 8 or more
+// picked up the whole header's styling with it.
+const ratingClass = (r) => (r >= 8 ? 'r-top' : r >= 7 ? 'r-good' : r < 6 ? 'r-poor' : '');
 
 /**
  * What one player did, from the report: goals, assists, cards, when they
@@ -4480,19 +4486,14 @@ async function viewSignin() {
       ${problem ? `<p class="form-error">${esc(problem)}</p>` : ''}
 
       <div class="panel signin" id="signin-panel">
-        <!-- Google's own button, drawn here by renderGoogleButton; it signs in
-             on offside.win, so Google's window names this site. The button
-             below is the fallback, shown only if Google's script cannot load. -->
+        <!-- Our own button, drawn with the page. With the redirect switched on
+             (GOOGLE_REDIRECT) it is the whole thing; until then Google's own
+             button is drawn over it by renderGoogleButton once it has loaded,
+             and this one is what shows while it does. -->
         <div class="gsi-slot" id="google-wrap">
-          <!-- Held in place while Google's button loads, the same size and
-               colour, so it arrives without the form jumping under it. -->
-          <div class="gsi-wait" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.8 3-4.3 3-7.4z" fill="#4285F4"/><path d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853"/><path d="M6.4 14a6 6 0 0 1 0-3.9V7.5H3.1a10 10 0 0 0 0 9z" fill="#FBBC05"/><path d="M12 6c1.5 0 2.8.5 3.8 1.5l2.8-2.8A10 10 0 0 0 3.1 7.5l3.3 2.6C7.2 7.8 9.4 6 12 6z" fill="#EA4335"/></svg><span>Continue with Google</span></div>
+          <button class="btn-gsi" id="google" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.8 3-4.3 3-7.4z" fill="#4285F4"/><path d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853"/><path d="M6.4 14a6 6 0 0 1 0-3.9V7.5H3.1a10 10 0 0 0 0 9z" fill="#FBBC05"/><path d="M12 6c1.5 0 2.8.5 3.8 1.5l2.8-2.8A10 10 0 0 0 3.1 7.5l3.3 2.6C7.2 7.8 9.4 6 12 6z" fill="#EA4335"/></svg><span>Continue with Google</span></button>
           <div id="google-slot"></div>
         </div>
-        <button class="btn btn-primary btn-lg btn-google" id="google" hidden>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.8 3-4.3 3-7.4z" fill="#4285F4"/><path d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853"/><path d="M6.4 14a6 6 0 0 1 0-3.9V7.5H3.1a10 10 0 0 0 0 9z" fill="#FBBC05"/><path d="M12 6c1.5 0 2.8.5 3.8 1.5l2.8-2.8A10 10 0 0 0 3.1 7.5l3.3 2.6C7.2 7.8 9.4 6 12 6z" fill="#EA4335"/></svg>
-          Continue with Google
-        </button>
         <div class="or"><span>or by email</span></div>
         <form id="magic" novalidate>
           <label for="email">Email address</label>
@@ -4530,32 +4531,32 @@ async function viewSignin() {
     return 'That did not work. Try again, or use the other button.';
   };
 
-  document.getElementById('google').onclick = async (e) => {
-    e.currentTarget.disabled = true;
-    try { await signInWithGoogle(); } catch (err) { say(humanise(err), true); e.currentTarget.disabled = false; }
-  };
-  const slot = document.getElementById('google-slot');
-  const wrap = document.getElementById('google-wrap');
   const panel = document.getElementById('signin-panel');
-  // The stand-in goes once Google's own frame has painted over it.
-  const settle = () => wrap.classList.add('ready');
-  new MutationObserver((_, obs) => {
-    const frame = slot.querySelector('iframe');
-    if (!frame) return;
-    obs.disconnect();
-    frame.addEventListener('load', settle, { once: true });
-  }).observe(slot, { childList: true, subtree: true });
-  setTimeout(settle, 4000);
-  renderGoogleButton(slot, {
-    // Google's window has closed and the session is being started: say so at
-    // once, rather than leave the page looking as if the tap did nothing.
-    onWorking: () => { panel.classList.add('working'); say('Signing you in…'); },
-    onSignedIn: afterSignIn,
-    onError: (err) => { panel.classList.remove('working'); say(humanise(err), true); },
-  }).then((drawn) => {
-    if (drawn) return;
-    wrap.remove();
-    document.getElementById('google').hidden = false;
+  const wrap = document.getElementById('google-wrap');
+  const slot = document.getElementById('google-slot');
+  const googleBtn = document.getElementById('google');
+  const working = () => { panel.classList.add('working'); say('Signing you in…'); };
+  const failed = (err) => { panel.classList.remove('working'); googleBtn.disabled = false; say(humanise(err), true); };
+
+  googleBtn.onclick = async () => {
+    googleBtn.disabled = true;
+    try {
+      if (await googleRedirectReady()) { say('Taking you to Google…'); await signInWithGoogleRedirect(); }
+      else await signInWithGoogle();
+    } catch (err) { failed(err); }
+  };
+
+  // Google's own button only while the redirect is not switched on.
+  googleRedirectReady().then((ready) => {
+    if (ready) { slot.remove(); return; }
+    new MutationObserver((_, obs) => {
+      const frame = slot.querySelector('iframe');
+      if (!frame) return;
+      obs.disconnect();
+      frame.addEventListener('load', () => wrap.classList.add('ready'), { once: true });
+    }).observe(slot, { childList: true, subtree: true });
+    renderGoogleButton(slot, { onWorking: working, onSignedIn: afterSignIn, onError: failed })
+      .then((drawn) => { if (!drawn) slot.remove(); });
   });
 
   document.getElementById('magic').onsubmit = async (e) => {
@@ -5583,6 +5584,9 @@ renderRegion();
  */
 (async () => {
   let signedInJustNow = false;
+  // Back from Google: say what is happening while the session is started,
+  // rather than a blank page for the second it takes.
+  if (isGoogleReturn()) app.innerHTML = '<div class="wrap section narrow"><p class="page-sub">Signing you in…</p></div>';
   try {
     signedInJustNow = await completeSignIn();
   } catch (err) {
@@ -5593,7 +5597,9 @@ renderRegion();
      * auth code and code verifier should be non-empty", which is about its
      * internals and not about anything the reader did or can fix.
      */
-    state.authError = /expired|invalid|verifier|code/i.test(String(err?.message ?? ''))
+    state.authError = err?.google
+      ? (err.message === 'cancelled' ? 'Google sign-in was cancelled. Try again whenever you like.' : 'Google did not sign you in that time. Try again.')
+      : /expired|invalid|verifier|code/i.test(String(err?.message ?? ''))
       ? 'That sign-in link has already been used, or it has expired. Ask for a new one below.'
       : 'That sign-in link did not work. Ask for a new one below.';
     /*

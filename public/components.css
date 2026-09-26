@@ -2888,19 +2888,21 @@
  */
 .gsi-slot { display: grid; justify-items: center; align-items: center; min-height: 44px; color-scheme: light; }
 .gsi-slot > * { grid-area: 1 / 1; }
-#google-slot { position: relative; z-index: 1; width: 100%; display: flex; justify-content: center; }
-.gsi-wait {
+#google-slot { position: relative; z-index: 1; width: 100%; max-width: 400px; display: flex; justify-content: center; }
+/* Our button, in Google's own dark style so the swap to theirs is invisible. */
+.btn-gsi {
   display: flex; align-items: center; justify-content: center; gap: var(--space-3);
   width: 100%; max-width: 400px; height: 40px; padding: 0 var(--space-4);
   border: 1px solid #8e918f; border-radius: 999px; background: #131314;
-  color: #e3e3e3; font-size: 14px; font-weight: 500;
-  transition: opacity 0.2s ease;
+  color: #e3e3e3; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
-.gsi-wait svg { width: 18px; height: 18px; flex: none; }
-.gsi-slot.ready .gsi-wait { opacity: 0; }
+.btn-gsi:hover { background: #1f1f20; }
+.btn-gsi:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.btn-gsi:disabled { cursor: default; opacity: 0.7; }
+.btn-gsi svg { width: 18px; height: 18px; flex: none; }
+.gsi-slot.ready .btn-gsi { visibility: hidden; }
 .signin.working #google-wrap, .signin.working #magic { opacity: 0.4; pointer-events: none; transition: opacity 0.2s ease; }
-.btn-google { gap: var(--space-3); }
-.btn-google svg { width: 18px; height: 18px; flex: none; }
 .sent { display: grid; gap: var(--space-3); }
 .sent-head {
   margin: 0;
@@ -3320,9 +3322,9 @@ a.pp:hover .pp-name { color: var(--floodlight-hi); }
   padding: 1px 5px; border-radius: 3px; background: var(--chalk-3); color: var(--pitch);
   font-family: var(--display-figures); font-weight: var(--weight-black); font-size: var(--text-sm);
 }
-.pl-did .rating.top { background: var(--won); color: #fff; }
-.pl-did .rating.good { background: var(--floodlight-hi); color: #fff; }
-.pl-did .rating.poor { background: var(--lost); color: #fff; }
+.pl-did .rating.r-top { background: var(--won); color: #fff; }
+.pl-did .rating.r-good { background: var(--floodlight-hi); color: #fff; }
+.pl-did .rating.r-poor { background: var(--lost); color: #fff; }
 @media (max-width: 560px) { .pl-match { grid-template-columns: minmax(0, 1fr) auto; } .pl-when { grid-column: 1 / -1; flex-direction: row; gap: var(--space-2); } }
 .player-body > .stack { order: 1; } .player-body > .home-side { order: 2; }
 /* The scorer a reader followed a link to: highlighted, and a brief pulse so
@@ -3526,7 +3528,8 @@ a.follow-name:hover { text-decoration: underline; text-underline-offset: 3px; }
   position: relative;
   display: flex;
   flex-direction: column;
-  aspect-ratio: 68 / 100;
+  /* Tall enough for five rows a side (a 4-2-3-1) without names touching the faces below. */
+  aspect-ratio: 68 / 112;
   padding: var(--space-3) var(--space-1);
   border-radius: var(--radius);
   background:
@@ -3559,30 +3562,33 @@ a.follow-name:hover { text-decoration: underline; text-underline-offset: 3px; }
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
 }
 a.pp:hover .pp-name { color: var(--floodlight-hi); }
-/* The rating sits on the face, bottom right; the marks stack on its left. */
+/*
+ * Around the face, each thing in its own corner so nothing spills onto the
+ * next player: the rating top right, a goal bottom left, a red card top left.
+ */
 .pp-rating {
-  position: absolute; right: -14px; bottom: -3px;
+  position: absolute; right: -15px; top: -5px;
   padding: 0 4px; border-radius: 4px;
   font-variant-numeric: tabular-nums; font-size: 10px; font-weight: 600; line-height: 1.5;
-  background: #6b7280; color: #fff;
+  background: #5b616b; color: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
-.pp-rating.top { background: var(--won); }
-.pp-rating.good { background: #2f8f5b; }
-.pp-rating.poor { background: var(--lost); }
-.pp-marks { position: absolute; left: -12px; top: -4px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.pp-rating.r-top { background: var(--won); }
+.pp-rating.r-good { background: #2f8f5b; }
+.pp-rating.r-poor { background: var(--lost); }
+.pp-marks { position: absolute; inset: 0; pointer-events: none; }
 .pp-goal {
   display: grid; place-items: center; width: 13px; height: 13px; border-radius: 50%;
   background: radial-gradient(circle at 50% 50%, #111 0 22%, #fff 24%);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
-  font-style: normal; font-size: 8px; font-weight: 700; line-height: 1; color: #111;
+  font-style: normal; font-size: 8px; font-weight: 600; line-height: 1; color: #111;
 }
 .pp-goal:not(:empty) { background: #fff; }
+.pp-marks .pp-goal { position: absolute; left: -5px; bottom: -3px; }
 .pp-card { display: block; width: 8px; height: 11px; border-radius: 1.5px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
 .pp-card.yellow { background: var(--sodium); }
 .pp-card.red { background: var(--lost); }
-.pp-card.second_yellow { background: linear-gradient(135deg, var(--sodium) 50%, var(--lost) 50%); }
-.pp-off { position: relative; display: block; width: 13px; height: 13px; border-radius: 50%; background: var(--lost); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
-.pp-off::after { content: ''; position: absolute; left: 3.5px; top: 4.5px; border-left: 3px solid transparent; border-right: 3px solid transparent; border-top: 5px solid #fff; }
+.pp-marks .pp-card { position: absolute; left: -3px; top: -4px; }
 .lineup-key { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); margin: var(--space-4) 0 0; font-size: var(--text-2xs); color: var(--chalk-3); }
 .lineup-key span { display: inline-flex; align-items: center; gap: 5px; }
 .lineup-key .pp-rating { position: static; }
@@ -3657,9 +3663,9 @@ a.pp:hover .pp-name { color: var(--floodlight-hi); }
   font-variant-numeric: tabular-nums; font-size: 12px; font-weight: 600;
   background: #6b7280; color: #fff;
 }
-.tl-row .rating.top { background: var(--won); }
-.tl-row .rating.good { background: #2f8f5b; }
-.tl-row .rating.poor { background: var(--lost); }
+.tl-row .rating.r-top { background: var(--won); }
+.tl-row .rating.r-good { background: #2f8f5b; }
+.tl-row .rating.r-poor { background: var(--lost); }
 .tl-row .rating.none { background: transparent; }
 .tl-line { margin: var(--space-4) 0 0; font-size: var(--text-xs); line-height: 1.55; color: var(--chalk-2); }
 .tl-line span { margin-right: 4px; font-weight: 600; color: var(--chalk-3); }
