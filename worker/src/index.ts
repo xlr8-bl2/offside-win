@@ -195,8 +195,10 @@ function config(env: Env): Response {
     {
       headers: {
         'content-type': 'application/json; charset=utf-8',
-        // Same for everyone and changes only on deploy.
-        'cache-control': 'public, max-age=3600',
+        // Same for everyone, but checked every time: an hour's cache kept
+        // phones on a copy from before the Google client ID was added, and
+        // the sign-in page fell back to the old Google flow without saying.
+        'cache-control': 'public, no-cache',
       },
     },
   );
