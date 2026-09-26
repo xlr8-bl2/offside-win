@@ -3039,6 +3039,9 @@
 /* ============================================================= turnstile */
 
 .turnstile-aside { margin: 0 0 var(--space-2); font-size: var(--text-xl); color: var(--sodium); }
+/* Google's own button sits in this slot; it draws itself at up to 400px. The
+   height is held so the form below does not jump when it appears. */
+.gsi-slot { display: flex; justify-content: center; min-height: 44px; }
 .btn-google { gap: var(--space-3); }
 .btn-google svg { width: 18px; height: 18px; flex: none; }
 .sent { display: grid; gap: var(--space-3); }
