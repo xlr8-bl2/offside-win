@@ -21,6 +21,7 @@
     "grant": "npm -w engine run grant --",
     "plans": "npm -w engine run plans --",
     "whop:check": "npm -w engine run whop:check",
+    "gemini:check": "npm -w engine run gemini:check",
     "backtest": "npm -w engine run backtest",
     "migrate": "npm -w engine run migrate",
     "test": "npm -w engine test && npm -w worker test",

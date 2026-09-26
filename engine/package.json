@@ -11,6 +11,7 @@
     "grant": "tsx src/run.ts grant",
     "plans": "tsx src/run.ts plans",
     "whop:check": "tsx src/run.ts whop:check",
+    "gemini:check": "tsx src/run.ts gemini:check",
     "backtest": "tsx src/run.ts backtest",
     "migrate": "tsx src/run.ts migrate",
     "test": "tsx --test test/*.test.ts",

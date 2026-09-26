@@ -30,6 +30,14 @@ export interface BudgetState {
   used: number;
   /** Google answered with its daily limit: nothing more until tomorrow. */
   exhausted: boolean;
+  /**
+   * When to ask again after Google refused for quota. Not the end of the day:
+   * the first refusal a brand-new key got was a one-off (the same key answered
+   * at once a few minutes later), and treating it as final kept the writer
+   * off until midnight Pacific. One request every two hours is what finding
+   * out costs when the day really is spent.
+   */
+  pausedUntil?: number;
 }
 
 export function pacificDay(ms = Date.now()): string {
@@ -41,7 +49,8 @@ export function todays(saved: BudgetState | null, day = pacificDay(), key?: stri
   const k = key ?? (saved?.day === day ? saved?.key : undefined);
   const base = { day, ...(k ? { key: k } : {}) };
   return saved && saved.day === day && (!key || saved.key === key)
-    ? { ...base, used: Number(saved.used) || 0, exhausted: Boolean(saved.exhausted) }
+    ? { ...base, used: Number(saved.used) || 0, exhausted: Boolean(saved.exhausted),
+        ...(Number(saved.pausedUntil) ? { pausedUntil: Number(saved.pausedUntil) } : {}) }
     : { ...base, used: 0, exhausted: false };
 }
 
@@ -51,8 +60,12 @@ export async function keyId(apiKey: string): Promise<string> {
   return [...new Uint8Array(buf)].slice(0, 6).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** How long a quota refusal pauses the writer. */
+export const PAUSE = 2 * 3600;
+
 export function spent(state: BudgetState, limit: number): boolean {
-  return state.exhausted || state.used >= limit;
+  // A refusal saved before pauses existed has no pausedUntil, and does not stop anything.
+  return state.used >= limit || (state.pausedUntil ?? 0) > Math.floor(Date.now() / 1000);
 }
 
 /**
@@ -69,7 +82,10 @@ export function budgeted(writer: Writer, state: BudgetState, limit: number): Wri
       try {
         return await writer.generate(prompt);
       } catch (err) {
-        if (err instanceof QuotaExhausted) state.exhausted = true;
+        if (err instanceof QuotaExhausted) {
+          state.exhausted = true;
+          state.pausedUntil = Math.floor(Date.now() / 1000) + PAUSE;
+        }
         throw err;
       }
     },
