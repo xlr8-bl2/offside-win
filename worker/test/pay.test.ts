@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkout, renewal, webhook } from '../src/pay.ts';
+import { checkout, confirm, grantFromMembership, sweepWhop, renewal, webhook } from '../src/pay.ts';
 import { parseWebhook } from '../src/coinflow.ts';
 
 /**
@@ -327,4 +327,80 @@ test('with an API key, checkout makes a Whop checkout priced from our plan row',
   assert.equal(whopBody.plan.renewal_price, 9);
   assert.equal(whopBody.metadata.user_id, 'user-1');
   assert.equal(whopBody.redirect_url, 'https://offside.win/#/account?paid=1');
+});
+
+/* ------------------------------------------------ asking Whop directly */
+
+const UID = '3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
+const WHOP = { ...ENV, PAY_PROVIDER: 'whop', WHOP_API_KEY: 'k', WHOP_COMPANY_ID: 'biz_1', WHOP_WEBHOOK_SECRET: 'x' };
+const future = new Date(Date.now() + 5 * 86400_000).toISOString();
+const mem = (o: Record<string, unknown> = {}) => ({
+  id: 'mem_9', status: 'active', created_at: new Date().toISOString(), renewal_period_end: null,
+  metadata: { user_id: UID, plan: 'matchday' }, user: { email: 'typed@elsewhere.com' },
+  manage_url: 'https://whop.com/billing/manage/mem_9', ...o,
+});
+
+test('a live membership from our checkout is granted to its account, dated from the plan when it does not renew', async () => {
+  route = (url) => {
+    if (url.includes(`/auth/v1/admin/users/${UID}`)) return new Response(JSON.stringify({ id: UID, email: 'Owner@Account.com' }), { status: 200 });
+    if (url.includes('/rest/v1/plan')) return new Response(JSON.stringify([{ id: 'matchday', days: 7 }, { id: 'monthly', days: 30 }]), { status: 200 });
+    if (url.includes('/rpc/record_entitlement')) return new Response(JSON.stringify({ applied: true }), { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+  const out = await grantFromMembership(WHOP, mem());
+  assert.equal(out.result, 'granted');
+  const call = find('/rpc/record_entitlement')!;
+  assert.equal(call.body.p_email, 'owner@account.com');
+  assert.equal(call.body.p_plan, 'matchday');
+  assert.equal(call.body.p_amount, null, 'not a second receipt');
+  const expect = Math.floor(Date.now() / 1000) + 7 * 86400;
+  assert.ok(Math.abs(call.body.p_expires - expect) < 60, 'seven days from purchase');
+  assert.match(call.body.p_ref, /^mem_9:\d+$/);
+});
+
+test('a renewing membership is dated by Whop, and a dead one is left alone', async () => {
+  route = (url) => {
+    if (url.includes('/auth/v1/admin/users/')) return new Response(JSON.stringify({ email: 'o@a.com' }), { status: 200 });
+    if (url.includes('/rpc/record_entitlement')) return new Response(JSON.stringify({ applied: true }), { status: 200 });
+    return new Response('[]', { status: 200 });
+  };
+  await grantFromMembership(WHOP, mem({ renewal_period_end: future, metadata: { user_id: UID, plan: 'monthly' } }));
+  assert.equal(find('/rpc/record_entitlement')!.body.p_expires, Math.floor(Date.parse(future) / 1000));
+  sent = [];
+  for (const status of ['canceled', 'expired', 'drafted', 'unresolved']) {
+    const r = await grantFromMembership(WHOP, mem({ status }));
+    assert.match(r.result, /not live/);
+  }
+  assert.ok(!find('/rpc/record_entitlement'), 'nothing granted for a dead membership');
+});
+
+test('confirm grants only the caller\'s own memberships', async () => {
+  route = (url) => {
+    if (url.includes('/auth/v1/user')) return new Response(JSON.stringify({ id: UID, email: 'o@a.com' }), { status: 200 });
+    if (url.includes('api.whop.com/api/v1/memberships')) return new Response(JSON.stringify({ data: [mem(), mem({ id: 'mem_other', metadata: { user_id: '11111111-2222-4333-8444-555555555555', plan: 'monthly' }, user: { email: 'someone@else.com' } })], page_info: { has_next_page: false } }), { status: 200 });
+    if (url.includes('/auth/v1/admin/users/')) return new Response(JSON.stringify({ email: 'o@a.com' }), { status: 200 });
+    if (url.includes('/rest/v1/plan')) return new Response(JSON.stringify([{ id: 'matchday', days: 7 }]), { status: 200 });
+    if (url.includes('/rpc/record_entitlement')) return new Response(JSON.stringify({ applied: true }), { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+  const res = await confirm(post('/api/pay/confirm', {}), WHOP, 'jwt');
+  const out = await res.json() as any;
+  assert.equal(out.checked, 1);
+  assert.deepEqual(out.results, ['granted']);
+  const grants = sent.filter((c) => c.url.includes('/rpc/record_entitlement'));
+  assert.equal(grants.length, 1);
+  assert.match(String(grants[0]!.body.p_ref), /^mem_9:/);
+});
+
+test('the sweep grants every live membership and notes what it did', async () => {
+  route = (url) => {
+    if (url.includes('api.whop.com/api/v1/memberships')) return new Response(JSON.stringify({ data: [mem(), mem({ id: 'mem_old', status: 'expired' })], page_info: { has_next_page: false } }), { status: 200 });
+    if (url.includes('/auth/v1/admin/users/')) return new Response(JSON.stringify({ email: 'o@a.com' }), { status: 200 });
+    if (url.includes('/rest/v1/plan')) return new Response(JSON.stringify([{ id: 'matchday', days: 7 }]), { status: 200 });
+    if (url.includes('/rpc/record_entitlement')) return new Response(JSON.stringify({ applied: true }), { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+  const t = await sweepWhop(WHOP);
+  assert.deepEqual(t, { checked: 2, granted: 1, errors: 0 });
+  assert.ok(find('/rest/v1/kv'), 'the sweep is noted for the status check');
 });

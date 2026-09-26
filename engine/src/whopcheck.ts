@@ -44,4 +44,19 @@ export async function whopCheck(): Promise<void> {
   let me: any = null;
   try { me = JSON.parse(mt); } catch { /* not json */ }
   console.log('membership read:', m.status, m.status === 403 ? 'NOT ALLOWED - add member:basic:read' : 'allowed', JSON.stringify(me?.error ?? '').slice(0, 200));
+
+  // The last few days' memberships, as the site's sweep will see them: id,
+  // status, whether our account id rode along, the plan, the dates. No emails.
+  const since = new Date(Date.now() - 3 * 86400_000).toISOString();
+  const l = await fetch(`https://api.whop.com/api/v1/memberships?${new URLSearchParams({ account_id: company, first: '20', created_after: since })}`, {
+    headers: { authorization: `Bearer ${key}`, accept: 'application/json' },
+  });
+  const lt = await l.text();
+  let lj: any = null;
+  try { lj = JSON.parse(lt); } catch { /* not json */ }
+  console.log('memberships list:', l.status, l.ok ? `${lj?.data?.length ?? 0} found` : JSON.stringify(lj?.error ?? lt.slice(0, 200)));
+  for (const m of lj?.data ?? []) {
+    console.log('  membership', m.id, 'status', m.status, 'account id on it', /^[0-9a-f-]{36}$/i.test(m.metadata?.user_id ?? '') ? 'yes' : 'no',
+      'plan', m.metadata?.plan ?? '-', 'created', m.created_at, 'period end', m.renewal_period_end, 'manage url', Boolean(m.manage_url), 'buyer email present', Boolean(m.user?.email));
+  }
 }
