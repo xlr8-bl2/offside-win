@@ -22,7 +22,7 @@
  */
 
 import { bearer, jsonHeaders } from './http.ts';
-import { checkout, payStatus, renewal, webhook, type PayEnv } from './pay.ts';
+import { checkout, confirm, payStatus, sweepWhop, renewal, webhook, type PayEnv } from './pay.ts';
 import { deleteAccount } from './account.ts';
 
 interface Env extends PayEnv {
@@ -107,6 +107,12 @@ async function passthrough(
 }
 
 export default {
+  // Every ten minutes: ask Whop for paid memberships and switch on any the
+  // webhook did not. See sweepWhop in pay.ts.
+  async scheduled(_event: unknown, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<void> {
+    ctx.waitUntil(sweepWhop(env));
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -145,6 +151,7 @@ export default {
         if (path === '/api/pay/status' && request.method === 'GET') return await payStatus(env);
         if (request.method !== 'POST') return fail('method not allowed', 405);
         if (path === '/api/pay/checkout') return await checkout(request, env, jwt);
+        if (path === '/api/pay/confirm') return await confirm(request, env, jwt);
         if (path === '/api/pay/renewal') return await renewal(request, env, jwt);
         if (path === '/api/pay/webhook') return await webhook(request, env);
         return fail('not found', 404);
