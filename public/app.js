@@ -14,6 +14,7 @@ import { describe as market, didItLand, recap } from './js/lib/markets.js';
 import { COUNTRY_NAMES, bookName, cash, country, localPrice, purse } from './js/lib/books.js';
 import { cleanProse } from './js/lib/vocabulary.js';
 import { LEGAL, SUPPORT_EMAIL, UPDATED } from './js/lib/legal.js';
+import { absenceReason } from './js/lib/absence.js';
 import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, signInWithEmail, signInWithGoogle, signOut, viewingAsFree } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
@@ -2154,42 +2155,83 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
  * the size this needs — the same art would fall apart blown up in a masthead.
  */
 const POSITION = { G: 'Goalkeeper', D: 'Defender', M: 'Midfielder', F: 'Forward' };
-
-function squadHTML(lineups, home, away, report = null, league = null) {
-  const side = (label, s) => {
-    const players = (s?.players ?? []).filter((x) => x?.name);
-    if (!players.length) return '';
-    // Starters first, then the bench, each in the order the sheet lists them.
-    const ordered = [...players.filter((x) => x.starting !== false), ...players.filter((x) => x.starting === false)];
-    const row = (x) => {
-      const m = playerMarks(report, x.id);
-      // After the match the last column says what the player did: the
-      // rating, the goals and cards, and when a substitute came on. An
-      // unused substitute says so. Before it, the column only marks the bench.
-      const tail = report
-        ? `${m.html}${m.rating != null ? `<b class="rating ${ratingClass(m.rating)}">${Number(m.rating).toFixed(1)}</b>`
-            : x.starting === false && !m.on ? '<span class="unused">unused</span>' : ''}`
-        : (x.starting === false ? 'sub' : '');
-      return `
-          <div class="squad-row${x.starting === false ? ' bench' : ''}">
-            ${crest(x.name, 'sm', x.id, 'player')}
-            <span class="name">${playerLink(x.id, x.name, league)}${x.captain ? ' <small>(c)</small>' : ''}</span>
-            <span class="pos">${esc(POSITION[x.position] ?? x.position ?? '')}</span>
-            <span class="no">${tail}</span>
-          </div>`;
-    };
-    return `
-    <div class="panel">
-      <p class="panel-head">${esc(label)}${s.formation ? ` <span>${esc(s.formation)}</span>` : ''}</p>
-      <div class="squad">${ordered.map(row).join('')}</div>
-    </div>`;
-  };
-  const both = side(home, lineups?.home) + side(away, lineups?.away);
-  return both ? `<div class="grid-2">${both}</div>` : '';
-}
+const POS_SHORT = { G: 'GK', D: 'DF', M: 'MF', F: 'FW' };
 
 /*
- * The surname, which is not always the last word.
+ * The team lists, beside or under the pitch.
+ *
+ * They used to be every name on both squads in one long column each, with a
+ * rating, a position, cards, goals and a minute on every row -- forty-odd
+ * rows of equal weight, twice. Now each team reads in the order a fan asks
+ * the questions: who started, who came on and when, who sat out (one line),
+ * who was missing and why. On a phone a switch shows one team at a time;
+ * on a desktop the two sit side by side.
+ */
+function squadHTML(lineups, home, away, report = null, league = null, ids = {}) {
+  const out = (lineups?.unavailable ?? []).filter((u) => u?.name);
+  const side = (key, label, teamId) => {
+    const s = lineups?.[key];
+    const players = (s?.players ?? []).filter((x) => x?.name);
+    if (!players.length) return '';
+    const starters = players.filter((x) => x.starting !== false);
+    const bench = players.filter((x) => x.starting === false);
+    const row = (x, { sub = false } = {}) => {
+      const m = playerMarks(report, x.id);
+      const events = [
+        ...Array.from({ length: m.goals }, () => EV_ICON.goal),
+        ...Array.from({ length: m.own }, () => EV_ICON.own),
+        m.assists ? `<i class="tl-assist" title="${m.assists} assist${m.assists === 1 ? '' : 's'}">${m.assists > 1 ? m.assists : ''}A</i>` : '',
+        m.card ? EV_ICON[m.card] : '',
+        m.off ? `<span class="tl-sub off" title="Went off">${EV_ICON.subOff}${esc(minuteOf(m.off))}</span>` : '',
+        sub && m.on ? `<span class="tl-sub on" title="Came on">${EV_ICON.subOn}${esc(minuteOf(m.on))}</span>` : '',
+      ].join('');
+      return `
+        <li class="tl-row">
+          ${crest(x.name, 'sm', x.id, 'player')}
+          <span class="tl-name">${playerLink(x.id, x.name, league)}${x.captain ? ' <small>(c)</small>' : ''}</span>
+          <span class="tl-pos" title="${esc(POSITION[x.position] ?? '')}">${esc(POS_SHORT[x.position] ?? '')}</span>
+          <span class="tl-ev">${events}</span>
+          ${m.rating != null ? `<b class="rating ${ratingClass(m.rating)}">${Number(m.rating).toFixed(1)}</b>` : report ? '<span class="rating none"></span>' : ''}
+        </li>`;
+    };
+    // After the match the bench splits in two: who came on (with the minute)
+    // and who did not, as one line. Before it, the bench is one line of names.
+    const cameOn = report ? bench.filter((x) => playerMarks(report, x.id).on) : [];
+    const unused = report ? bench.filter((x) => !playerMarks(report, x.id).on) : bench;
+    const mine = out.filter((u) => u.side === key);
+    return `
+      <section class="tl" data-side="${key}">
+        <header class="tl-head">${crest(label, 'sm', teamId)}<b>${esc(label)}</b>${s.formation ? `<span class="formation">${esc(s.formation)}</span>` : ''}</header>
+        <p class="tl-sub-head">Starting XI</p>
+        <ol class="tl-list">${starters.map((x) => row(x)).join('')}</ol>
+        ${cameOn.length ? `<p class="tl-sub-head">Came on</p><ol class="tl-list">${cameOn.map((x) => row(x, { sub: true })).join('')}</ol>` : ''}
+        ${unused.length ? `<p class="tl-line"><span>${report ? 'Unused' : 'Bench'}</span> ${unused.map((x) => esc(x.name)).join(', ')}</p>` : ''}
+        ${mine.length ? `<p class="tl-sub-head">Out</p><ul class="tl-out">${mine.map((u) => {
+          const why = absenceReason(u.reason);
+          return `<li>${playerLink(u.id, u.name, league)}${why ? `<small>${esc(why)}</small>` : ''}</li>`;
+        }).join('')}</ul>` : ''}
+      </section>`;
+  };
+  const h = side('home', home, ids.home);
+  const a = side('away', away, ids.away);
+  if (!h && !a) return '';
+  // Absences the feed could not place on a side.
+  const loose = out.filter((u) => u.side !== 'home' && u.side !== 'away');
+  return `
+  <div class="teamlists">
+    <div class="tl-switch" role="tablist" aria-label="Team">
+      <button type="button" role="tab" data-show="home" aria-selected="true">${esc(home)}</button>
+      <button type="button" role="tab" data-show="away" aria-selected="false">${esc(away)}</button>
+    </div>
+    <div class="tl-pair" data-showing="home">${h}${a}</div>
+    ${loose.length ? `<p class="tl-line tl-loose"><span>Also out</span> ${loose.map((u) => {
+      const why = absenceReason(u.reason);
+      return `${esc(u.name)}${why ? ` (${esc(why.toLowerCase())})` : ''}`;
+    }).join(', ')}</p>` : ''}
+  </div>`;
+}
+
+/* The surname, which is not always the last word.
  *
  * "David De Gea" is not "Gea" and "Kevin De Bruyne" is not "Bruyne", which is
  * what taking the final word gave us on a team sheet full of them. Spanish,
@@ -2214,17 +2256,16 @@ function surname(full) {
 /*
  * The team sheet, on one pitch.
  *
- * It used to be two stacked half-pitches, both teams laid out in the same
- * direction, which is not how a team sheet has ever been drawn: the whole
- * point of the picture is that the two sides face each other, so you can see
- * a back four against a front three. Two blocks pointing the same way is a
- * list with a green background.
+ * One pitch with the two sides facing each other, the markings drawn. Upright
+ * on a phone (away attacking down from the top, home up from the bottom) and
+ * on its side on a wider screen (home from the left), because an upright
+ * pitch at desktop width was fifteen hundred pixels tall.
  *
- * So: one pitch, home attacking up from the bottom, away attacking down from
- * the top, and the markings actually drawn -- halfway line, centre circle,
- * both boxes, penalty spots, corner arcs. The markings are the thing that
- * makes it read as a pitch rather than as a green panel, and they cost one
- * inline SVG.
+ * Each player is a face and a surname. After the match, one rating on the
+ * face and at most three small marks (goals, a card, went off); the minutes
+ * and the rest live in the team lists, where there is room to read them. The
+ * pitch used to carry all of it and was the hardest thing on the page to
+ * read.
  */
 function pitchHTML(lineups, home, away, homeId, awayId, report = null, league = null) {
   if (!lineups?.home?.players?.length || !lineups?.away?.players?.length) return '';
@@ -2235,92 +2276,73 @@ function pitchHTML(lineups, home, away, homeId, awayId, report = null, league = 
       .split(/[-–]/)
       .map((n) => parseInt(n, 10))
       .filter((n) => Number.isFinite(n) && n > 0);
-    // No formation on record: an even spread still reads as a team sheet.
     const bands = shape.length ? shape : [4, 4, 2];
     const out = [[starters[0]].filter(Boolean)];
     let i = 1;
-    for (const n of bands) {
-      out.push(starters.slice(i, i + n));
-      i += n;
-    }
+    for (const n of bands) { out.push(starters.slice(i, i + n)); i += n; }
     if (i < starters.length) out.push(starters.slice(i));
     return out.filter((r) => r.length);
   };
 
-  // The best-rated starter per side, ringed. Not labelled with the rating --
-  // that is our own score and stays ours -- but worth pointing at.
+  // Before the match: the provider's pick of each side's key player, ringed.
   const keyManOf = (side) => {
+    if (report) return null;
     const rated = (side.players ?? []).filter((p) => p.starting !== false && typeof p.ai_score === 'number');
-    if (!rated.length) return null;
-    return rated.reduce((a, b) => (b.ai_score > a.ai_score ? b : a)).id;
+    return rated.length ? rated.reduce((a, b) => (b.ai_score > a.ai_score ? b : a)).id : null;
   };
 
-  // After the match each chip carries what the player did: goals, assists,
-  // cards, the minute they went off, and the rating in the corner.
   const player = (p, keyMan) => {
     const m = playerMarks(report, p.id);
+    const tag = isNotable(p.id) && league ? 'a' : 'div';
+    const marks = [
+      m.goals + m.own ? `<i class="pp-goal" title="${m.goals + m.own} goal${m.goals + m.own === 1 ? '' : 's'}">${m.goals + m.own > 1 ? m.goals + m.own : ''}</i>` : '',
+      m.card ? `<i class="pp-card ${m.card}" title="${m.card === 'yellow' ? 'Booked' : 'Sent off'}"></i>` : '',
+      m.off ? `<i class="pp-off" title="Went off ${esc(minuteOf(m.off))}"></i>` : '',
+    ].join('');
     return `
-    <${isNotable(p.id) && league ? `a href="${esc(playerHref(p.id, league))}"` : 'div'} class="pp${p.id === keyMan ? ' key' : ''}${m.rating != null ? ' rated' : ''}${isNotable(p.id) ? ' notable' : ''}" title="${esc(p.name)}">
-      ${crest(p.name, 'md', p.id, 'player')}
-      ${m.rating != null ? `<b class="pp-rating ${ratingClass(m.rating)}">${Number(m.rating).toFixed(1)}</b>` : ''}
-      ${m.html}
+    <${tag}${tag === 'a' ? ` href="${esc(playerHref(p.id, league))}"` : ''} class="pp${p.id === keyMan ? ' key' : ''}" title="${esc(p.name)}">
+      <span class="pp-face">${crest(p.name, 'md', p.id, 'player')}${marks ? `<span class="pp-marks">${marks}</span>` : ''}${
+        m.rating != null ? `<b class="pp-rating ${ratingClass(m.rating)}">${Number(m.rating).toFixed(1)}</b>` : ''}</span>
       <span class="pp-name">${esc(surname(p.name))}</span>
-    </${isNotable(p.id) && league ? 'a' : 'div'}>`;
+    </${tag}>`;
   };
 
-  const sideHTML = (side, atTop) => {
+  const sideHTML = (side, key) => {
     const keyMan = keyManOf(side);
-    // Drawn from each side's own goal outwards, so the keepers end up at the
-    // two ends and the forwards meet in the middle.
     const rows = rowsFor(side);
-    const ordered = atTop ? rows : [...rows].reverse();
-    return `<div class="pitch-side ${atTop ? 'away' : 'home'}">
-      ${ordered.map((row) => `<div class="pitch-row">${row.map((x) => player(x, keyMan)).join('')}</div>`).join('')}
-    </div>`;
+    const ordered = key === 'away' ? rows : [...rows].reverse();
+    return `<div class="pitch-side ${key}">${ordered.map((row) => `<div class="pitch-row">${row.map((x) => player(x, keyMan)).join('')}</div>`).join('')}</div>`;
   };
 
-  const head = (teamName, teamId, side) => `
-    <div class="sheet-team">
+  const head = (teamName, teamId, side, cls) => `
+    <div class="sheet-team ${cls}">
       ${crest(teamName, 'sm', teamId)}<b>${esc(teamName)}</b>
       ${side?.formation ? `<span class="formation">${esc(side.formation)}</span>` : ''}
     </div>`;
 
-  const out = (lineups.unavailable ?? []).filter((u) => u.name);
   return `
-  <div class="panel">
-    <p class="panel-head">Team sheet ${lineups.status === 'confirmed'
-      ? '<span class="tag ok">confirmed</span>'
-      : '<span class="tag prov">predicted</span>'}</p>
-
-    <div class="sheet-heads">
-      ${head(away, awayId, lineups.away)}
-      ${head(home, homeId, lineups.home)}
+  <div class="panel lineup">
+    <div class="lineup-top">
+      <p class="panel-head">Team sheet</p>
+      ${lineups.status === 'confirmed' ? '<span class="tag ok">Confirmed</span>' : '<span class="tag prov">Predicted</span>'}
     </div>
-
+    <div class="sheet-heads">${head(home, homeId, lineups.home, 'home')}${head(away, awayId, lineups.away, 'away')}</div>
     <div class="pitch">
-      <!-- The markings, drawn to a 68x105 pitch so the boxes are the right
-           size relative to it rather than eyeballed. -->
-      <svg class="pitch-lines" viewBox="0 0 68 105" preserveAspectRatio="none" aria-hidden="true">
-        <rect x="1" y="1" width="66" height="103" />
-        <line x1="1" y1="52.5" x2="67" y2="52.5" />
-        <circle cx="34" cy="52.5" r="9.15" />
-        <circle class="spot" cx="34" cy="52.5" r="0.6" />
-        <rect x="20.15" y="1" width="27.7" height="16.5" />
-        <rect x="26.85" y="1" width="14.3" height="5.5" />
-        <circle class="spot" cx="34" cy="12" r="0.6" />
-        <rect x="20.15" y="87.5" width="27.7" height="16.5" />
-        <rect x="26.85" y="98.5" width="14.3" height="5.5" />
-        <circle class="spot" cx="34" cy="93" r="0.6" />
-      </svg>
-      ${sideHTML(lineups.away, true)}
-      ${sideHTML(lineups.home, false)}
+      <!-- Markings to a real 68x105 pitch, upright and on its side; CSS shows the one that fits. -->
+      <svg class="pitch-lines upright" viewBox="0 0 68 105" preserveAspectRatio="none" aria-hidden="true">
+        <rect x="1" y="1" width="66" height="103"/><line x1="1" y1="52.5" x2="67" y2="52.5"/>
+        <circle cx="34" cy="52.5" r="9.15"/><rect x="13.85" y="1" width="40.3" height="16.5"/>
+        <rect x="24.85" y="1" width="18.3" height="5.5"/><rect x="13.85" y="87.5" width="40.3" height="16.5"/>
+        <rect x="24.85" y="98.5" width="18.3" height="5.5"/></svg>
+      <svg class="pitch-lines sideways" viewBox="0 0 105 68" preserveAspectRatio="none" aria-hidden="true">
+        <rect x="1" y="1" width="103" height="66"/><line x1="52.5" y1="1" x2="52.5" y2="67"/>
+        <circle cx="52.5" cy="34" r="9.15"/><rect x="1" y="13.85" width="16.5" height="40.3"/>
+        <rect x="1" y="24.85" width="5.5" height="18.3"/><rect x="87.5" y="13.85" width="16.5" height="40.3"/>
+        <rect x="98.5" y="24.85" width="5.5" height="18.3"/></svg>
+      ${sideHTML(lineups.away, 'away')}
+      ${sideHTML(lineups.home, 'home')}
     </div>
-
-    ${out.length
-      ? `<div class="outlist"><b>Unavailable</b>${out.map((u) => `
-          <span class="also-call out-chip">${crest(u.name, 'sm', u.id, 'player')}<span class="out-name">${playerLink(u.id, u.name, league)}${
-            u.reason ? `<small>${esc(unshout(u.reason))}</small>` : ''}</span></span>`).join('')}</div>`
-      : ''}
+    ${report ? `<p class="lineup-key"><span><i class="pp-goal"></i> goal</span><span><i class="pp-card yellow"></i> booked</span><span><i class="pp-card red"></i> sent off</span><span><i class="pp-off"></i> went off</span><span><b class="pp-rating good">7.2</b> rating</span></p>` : ''}
   </div>`;
 }
 
@@ -2446,6 +2468,8 @@ const EV_ICON = {
   second_yellow: '<i class="ev-ico ico-card c-second" aria-hidden="true"></i>',
   red: '<i class="ev-ico ico-card c-red" aria-hidden="true"></i>',
   sub: '<i class="ev-ico ico-sub" aria-hidden="true"></i>',
+  subOn: '<i class="ev-ico ico-arrow up" aria-hidden="true"></i>',
+  subOff: '<i class="ev-ico ico-arrow down" aria-hidden="true"></i>',
 };
 
 /** How a rating reads: the colour says it before the number does. */
@@ -2456,30 +2480,22 @@ const ratingClass = (r) => (r >= 8 ? 'top' : r >= 7 ? 'good' : r < 6 ? 'poor' : 
  * came on or off, and the rating. Drawn on the pitch chip and the squad row.
  */
 function playerMarks(report, id) {
-  if (!report) return { html: '', rating: null, line: null, on: null, off: null };
+  const none = { goals: 0, own: 0, assists: 0, card: null, on: null, off: null, rating: null, line: null };
+  if (!report) return none;
   const pid = Number(id);
   const line = (report.players ?? []).find((p) => Number(p.id) === pid) ?? null;
   const evs = report.events ?? [];
   const mine = (e) => Number(e.player_id) === pid;
-  const goals = evs.filter((e) => e.t === 'goal' && mine(e) && !/own/i.test(e.kind ?? '')).length;
+  const goals = Math.max(evs.filter((e) => e.t === 'goal' && mine(e) && !/own/i.test(e.kind ?? '')).length, line?.goals ?? 0);
   const own = evs.filter((e) => e.t === 'goal' && mine(e) && /own/i.test(e.kind ?? '')).length;
   const cards = evs.filter((e) => e.t === 'card' && mine(e)).map((e) => e.card);
-  const off = evs.find((e) => e.t === 'sub' && Number(e.out_id) === pid) ?? null;
-  const on = evs.find((e) => e.t === 'sub' && Number(e.in_id) === pid) ?? null;
-  const bits = [];
-  for (let i = 0; i < Math.max(goals, line?.goals ?? 0); i++) bits.push(EV_ICON.goal);
-  for (let i = 0; i < own; i++) bits.push(EV_ICON.own);
-  const assists = line?.assists ?? 0;
-  if (assists > 0) bits.push(`<i class="pp-assist" title="${assists} assist${assists === 1 ? '' : 's'}">${assists > 1 ? assists : ''}A</i>`);
-  if (cards.includes('red')) bits.push(EV_ICON.red);
-  else if (cards.includes('second_yellow')) bits.push(EV_ICON.second_yellow);
-  else if (cards.includes('yellow')) bits.push(EV_ICON.yellow);
-  if (off) bits.push(`<i class="pp-sub off" title="off ${esc(minuteOf(off))}">${esc(minuteOf(off))}</i>`);
-  if (on) bits.push(`<i class="pp-sub on" title="on ${esc(minuteOf(on))}">${esc(minuteOf(on))}</i>`);
+  const card = cards.includes('red') ? 'red' : cards.includes('second_yellow') ? 'second_yellow' : cards.includes('yellow') ? 'yellow' : null;
   return {
-    html: bits.length ? `<span class="pp-marks">${bits.join('')}</span>` : '',
+    goals, own, assists: line?.assists ?? 0, card,
+    off: evs.find((e) => e.t === 'sub' && Number(e.out_id) === pid) ?? null,
+    on: evs.find((e) => e.t === 'sub' && Number(e.in_id) === pid) ?? null,
     rating: typeof line?.rating === 'number' ? line.rating : null,
-    line, on, off,
+    line,
   };
 }
 
@@ -2514,12 +2530,38 @@ function reportHTML(f) {
     }
     return `${EV_ICON.sub}<b>${playerLink(e.in_id, e.in ?? '', f.league_id)}</b><small>for ${playerLink(e.out_id, e.out ?? '', f.league_id)}</small>`;
   };
-  const timeline = events.length ? `
-    <div class="rep-heads"><span>${esc(f.home)}</span><span>${esc(f.away)}</span></div>
-    <div class="timeline">
-      ${events.map((e) => `<div class="ev ${e.side === 'away' ? 'away' : 'home'} is-${e.t}">
-          <span class="ev-min">${esc(minuteOf(e))}</span><span class="ev-body">${line(e)}</span></div>`).join('')}
+  // What a reader wants first after the whistle: the goals, big, with the
+  // minute, the scorer, the assist and the score they made. Then the cards,
+  // one line a team. Everything else (every substitution, every booking in
+  // order) is one tap away rather than in the way.
+  const goals = events.filter((e) => e.t === 'goal');
+  const goalsHTML = goals.length ? `
+    <ol class="rep-goals">${goals.map((e) => {
+      const kind = /own/i.test(e.kind ?? '') ? ' <small>own goal</small>' : /pen/i.test(e.kind ?? '') ? ' <small>pen</small>' : '';
+      const who = `<b>${playerLink(e.player_id, e.player ?? 'Goal', f.league_id)}</b>${kind}${
+        e.assist ? `<small class="rep-assist">assist ${(f._link ?? ((h) => h))(esc(e.assist))}</small>` : ''}`;
+      return `<li class="rep-goal ${e.side === 'away' ? 'away' : 'home'}">
+        <span class="rg-who">${who}</span>
+        <span class="rg-mid"><em>${esc(minuteOf(e))}</em>${e.score ? `<b>${esc(e.score[0])}–${esc(e.score[1])}</b>` : ''}</span>
+      </li>`;
+    }).join('')}</ol>` : '<p class="rep-none">No goals.</p>';
+  const cardsFor = (side) => events.filter((e) => e.t === 'card' && (e.side === 'away' ? 'away' : 'home') === side)
+    .map((e) => `<span class="rep-card">${EV_ICON[e.card] ?? EV_ICON.yellow}${esc(surname(e.player ?? ''))} ${esc(minuteOf(e))}</span>`).join('');
+  const hc = cardsFor('home'), ac = cardsFor('away');
+  const cardsHTML = hc || ac ? `
+    <div class="rep-cards">
+      <div><span class="rep-team">${esc(f.home)}</span>${hc || '<span class="rep-card none">none</span>'}</div>
+      <div><span class="rep-team">${esc(f.away)}</span>${ac || '<span class="rep-card none">none</span>'}</div>
     </div>` : '';
+  const timeline = events.length ? `
+    <details class="rep-all">
+      <summary>Every event <span>${events.length}</span></summary>
+      <div class="rep-heads"><span>${esc(f.home)}</span><span>${esc(f.away)}</span></div>
+      <div class="timeline">
+        ${events.map((e) => `<div class="ev ${e.side === 'away' ? 'away' : 'home'} is-${e.t}">
+            <span class="ev-min">${esc(minuteOf(e))}</span><span class="ev-body">${line(e)}</span></div>`).join('')}
+      </div>
+    </details>` : '';
 
   const pct = (v) => `${Math.round(v)}%`;
   const rows = st ? [
@@ -2541,7 +2583,9 @@ function reportHTML(f) {
 
   return `
   <div class="panel report">
-    <p class="panel-head">Match report${r.ht ? ` <span>half time ${esc(r.ht[0])}–${esc(r.ht[1])}</span>` : ''}</p>
+    <p class="panel-head">Match report${r.ht ? ` <span>Half time ${esc(r.ht[0])}–${esc(r.ht[1])}</span>` : ''}</p>
+    ${events.length ? goalsHTML : ''}
+    ${cardsHTML}
     ${timeline}
     ${numbers}
     ${hl ? `<a class="rep-highlights" href="${esc(hl.url)}" target="_blank" rel="noopener noreferrer">${
@@ -2732,8 +2776,8 @@ const andList = (a) => (a.length <= 1 ? (a[0] ?? '') : `${a.slice(0, -1).join(',
 const LINE_OF = { ATT: 'up front', MID: 'in midfield', DEF: 'at the back', GK: 'in goal' };
 const LINE_ORDER = ['up front', 'in midfield', 'at the back', 'in goal', ''];
 const injury = (r) => {
-  const t = String(r ?? '').toLowerCase().replace(/\s*injury$/, '').trim();
-  return t && !/^(unknown|other|undisclosed|n\/a|missing)$/.test(t) ? t : null;
+  const t = absenceReason(r);
+  return t ? t.toLowerCase().replace(/\s*injury$/, '').trim() : null;
 };
 
 function storyFor(f) {
@@ -3119,7 +3163,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
     ['overview', 'Overview', overview],
     ['lineups', 'Line-ups',
       pitchHTML(sheet, f.home, f.away, f.home_id, f.away_id, report, f.league_id)
-      + squadHTML(sheet, f.home, f.away, report, f.league_id)],
+      + squadHTML(sheet, f.home, f.away, report, f.league_id, { home: f.home_id, away: f.away_id })],
     ['h2h', 'Head to head', h2hHTML(f.h2h, f.home, f.away)],
     ['table', 'Table', standingsHTML(f.standings, f.home, f.away, f.home_id, f.away_id)],
   ].filter(([, , html]) => html);
@@ -3194,6 +3238,14 @@ async function viewFixture(id, params = new URLSearchParams()) {
     if (state.cameFromInApp) history.back(); else location.hash = '#/board';
   };
   wireFollowButtons();
+  // The team lists on a phone: one team at a time.
+  for (const b of app.querySelectorAll('.tl-switch button')) {
+    b.onclick = () => {
+      const pair = app.querySelector('.tl-pair');
+      if (pair) pair.dataset.showing = b.dataset.show;
+      for (const o of app.querySelectorAll('.tl-switch button')) o.setAttribute('aria-selected', String(o === b));
+    };
+  }
   for (const t of app.querySelectorAll('.tab')) {
     t.onclick = () => {
       for (const o of app.querySelectorAll('.tab')) {
@@ -4085,7 +4137,7 @@ async function viewPlayer(id, params = new URLSearchParams()) {
         const sc = Array.isArray(m.score) ? m.score : null;
         const bits = [];
         for (let i = 0; i < (Number(m.goals) || 0); i++) bits.push(EV_ICON.goal);
-        if (m.assists) bits.push(`<i class="pp-assist">${m.assists > 1 ? m.assists : ''}A</i>`);
+        if (m.assists) bits.push(`<i class="tl-assist">${m.assists > 1 ? m.assists : ''}A</i>`);
         if (m.red) bits.push(EV_ICON.red); else if (m.yellow) bits.push(EV_ICON.yellow);
         return `
         <a class="pl-match" href="#/fixture/${encodeURIComponent(m.fixture_id)}">
