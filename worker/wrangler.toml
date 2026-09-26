@@ -42,8 +42,12 @@ GOOGLE_CLIENT_ID = "819619713096-r9gvdihj81gjinubr5nqqgd721vcfqud.apps.googleuse
 # "redirect_uri_mismatch" error.
 GOOGLE_REDIRECT = "0"
 
-# Which processor takes the money. "whop": Whop runs the checkout and the
-# billing on its own site and tells us by webhook; each plan's checkout link
-# lives on its `plan` row. "coinflow": the card-and-USDC path above. The only
-# secret Whop needs is WHOP_WEBHOOK_SECRET, pushed by deploy.yml.
+# Which processor takes the money. "whop": Whop's card form sits on our
+# pricing page, the billing runs at Whop, and Whop tells us by webhook.
+# "coinflow": the card-and-USDC path above. Whop's two secrets,
+# WHOP_API_KEY and WHOP_WEBHOOK_SECRET, are pushed by deploy.yml.
 PAY_PROVIDER = "whop"
+# The Whop business the plans are made under (Whop dashboard, Settings). An
+# id, not a secret. Empty until set: the checkout falls back to each plan's
+# own Whop link, and with none of those, says memberships are not open yet.
+WHOP_COMPANY_ID = ""

@@ -3733,3 +3733,47 @@ a.pp:hover .pp-name { color: var(--floodlight-hi); }
 .rep-all { margin: 0 0 var(--space-6); }
 .rep-all summary { cursor: pointer; font-size: var(--text-sm); font-weight: 600; color: var(--floodlight-hi); margin-bottom: var(--space-4); }
 .rep-all summary span { font-weight: 400; color: var(--chalk-3); margin-left: 4px; }
+
+/* ============================================================ card form */
+
+/*
+ * Whop's checkout, in a sheet over the pricing page: up from the bottom on a
+ * phone, a centred panel on a wide screen. The page behind stays where it was,
+ * so closing the sheet puts the reader back on the plan they chose.
+ */
+html.pay-open { overflow: hidden; }
+.pay-sheet {
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0, 0, 0, 0.62);
+}
+.pay-panel {
+  display: flex; flex-direction: column;
+  width: 100%; max-height: 94dvh; overflow: auto;
+  padding: var(--space-5) var(--space-5) var(--space-6);
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--stand); border-top: var(--border) solid var(--hairline);
+  overscroll-behavior: contain;
+}
+.pay-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); }
+.pay-title { margin: 0; font-size: var(--text-md); font-weight: 600; color: var(--chalk); }
+.pay-close {
+  flex: none; width: 40px; height: 40px; border: 0; border-radius: 50%;
+  background: var(--terrace); color: var(--chalk); font-size: 22px; line-height: 1; cursor: pointer;
+}
+.pay-close:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.pay-body { min-height: 320px; }
+.pay-wait { margin: var(--space-8) 0; text-align: center; font-size: var(--text-sm); color: var(--chalk-3); }
+.pay-note { margin: var(--space-4) 0 0; font-size: var(--text-xs); color: var(--chalk-3); }
+@media (min-width: 700px) {
+  .pay-sheet { align-items: center; padding: var(--space-6); }
+  .pay-panel { max-width: 520px; border-radius: var(--radius); border: var(--border) solid var(--hairline); }
+}
+
+/* Back from paying: said at the top of the account page. */
+.paid-note {
+  margin: 0 0 var(--space-5); padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius); border: var(--border) solid var(--floodlight);
+  background: var(--terrace); color: var(--chalk); font-size: var(--text-sm);
+}
+.paid-note.done { border-color: var(--won); }
