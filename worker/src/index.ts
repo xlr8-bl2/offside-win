@@ -113,7 +113,8 @@ export default {
     // address, so a reader split between workers.dev and offside.win would be
     // signed in on one and not the other. Pages move permanently; the API
     // keeps answering on both, because payment webhooks and already-open tabs
-    // still call the old one.
+    // still call the old one. Cloudflare serves static files before this code
+    // runs, so index.html does the same move itself; this catches the rest.
     if (!path.startsWith('/api/') && url.hostname.endsWith('.workers.dev') && env.SITE_URL?.startsWith('https://')) {
       const to = new URL(url.pathname + url.search, env.SITE_URL);
       return Response.redirect(to.toString(), 301);
