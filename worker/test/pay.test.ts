@@ -281,3 +281,42 @@ test('with Whop live, an unsigned delivery is refused', async () => {
   assert.equal(res.status, 401);
   assert.equal(sent.length, 0);
 });
+
+test('a payment from our own checkout lands on the account in its metadata, dated by the membership', async () => {
+  const uid = '3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
+  const body = JSON.stringify({ type: 'payment.succeeded', data: { id: 'pay_5', total: 9, currency: 'gbp', user: { email: 'typed@elsewhere.com' }, membership: { id: 'mem_5' }, plan: { id: 'plan_q' }, metadata: { user_id: uid, plan: 'monthly' } } });
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode('plain'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = [...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  route = (url) => {
+    if (url.includes(`/auth/v1/admin/users/${uid}`)) return new Response(JSON.stringify({ id: uid, email: 'Account@Owner.com' }), { status: 200 });
+    if (url.includes('/memberships/mem_5')) return new Response(JSON.stringify({ id: 'mem_5', renewal_period_end: '2026-10-26T10:00:00Z' }), { status: 200 });
+    if (url.includes('/rpc/record_entitlement')) return new Response(JSON.stringify({ applied: true }), { status: 200 });
+    return new Response('[]', { status: 200 });
+  };
+  const req = new Request('https://offside.win/api/pay/webhook', { method: 'POST', body, headers: { 'x-whop-signature': sig } });
+  const res = await webhook(req, { ...ENV, PAY_PROVIDER: 'whop', WHOP_WEBHOOK_SECRET: 'plain', WHOP_API_KEY: 'k' });
+  assert.equal(res.status, 200);
+  const call = find('/rpc/record_entitlement')!;
+  assert.equal(call.body.p_email, 'account@owner.com', 'the account in the metadata, not the address typed into the card form');
+  assert.equal(call.body.p_plan, 'monthly');
+  assert.equal(call.body.p_ref, 'pay_5');
+  assert.equal(call.body.p_amount, 900);
+  assert.equal(call.body.p_expires, Math.floor(Date.parse('2026-10-26T10:00:00Z') / 1000));
+});
+
+test('with an API key, checkout makes a Whop checkout priced from our plan row', async () => {
+  route = (url) => {
+    if (url.includes('/auth/v1/user')) return new Response(JSON.stringify({ id: 'user-1', email: 'a@b.c' }), { status: 200 });
+    if (url.includes('/rest/v1/plan')) return new Response(JSON.stringify([{ id: 'monthly', name: 'Monthly', amount_minor: 900, currency: 'GBP', days: 30, checkout_url: null }]), { status: 200 });
+    if (url.includes('/checkout_configurations')) return new Response(JSON.stringify({ id: 'ch_1', purchase_url: '/checkout/ch_1/' }), { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+  const res = await checkout(post('/api/pay/checkout', { plan: 'monthly' }), { ...ENV, PAY_PROVIDER: 'whop', WHOP_WEBHOOK_SECRET: 'x', WHOP_API_KEY: 'k', WHOP_COMPANY_ID: 'biz_1', SITE_URL: 'https://offside.win' }, 'jwt');
+  const out = await res.json() as any;
+  assert.equal(out.checkout, 'ch_1');
+  assert.equal(out.link, 'https://whop.com/checkout/ch_1/');
+  const whopBody = find('/checkout_configurations')!.body as any;
+  assert.equal(whopBody.plan.renewal_price, 9);
+  assert.equal(whopBody.metadata.user_id, 'user-1');
+  assert.equal(whopBody.redirect_url, 'https://offside.win/#/account?paid=1');
+});

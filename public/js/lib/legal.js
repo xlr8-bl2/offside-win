@@ -56,8 +56,9 @@ export const LEGAL = {
          ends, and a record of each payment: the amount, the currency, the date, whether it went
          through, and the reference our payment provider gave it. We hold this to provide what you
          paid for, and we keep the payment records because tax law requires it.</p>
-      <p><b>Your card never reaches us.</b> It is typed into Whop's checkout, on Whop's site, and
-         Whop keeps it. We are told that a payment happened, and to which email address.</p>
+      <p><b>Your card never reaches us.</b> It is typed into Whop's card form, which appears on our
+         pricing page but is served and run by Whop, and Whop keeps it. We are told that a payment
+         happened, for which of our accounts, and the email address given to Whop.</p>
       <p><b>If you say yes to visit counting</b>, each page you open adds one to a daily count for that
          kind of page (the front page, a fixture page, the results and so on). The count records the
          day and the kind of page. It does not record which fixture, your IP address, your browser or
@@ -183,8 +184,8 @@ export const LEGAL = {
          membership and the <b>season ticket</b> renew automatically at the end of each period, at the
          price you bought at, until you cancel. We will tell you before a price changes, and a new
          price only applies from your next renewal after we have told you.</p>
-      <p>Payment is taken by Whop on its own checkout. Your membership is linked to the email address
-         you pay with, so sign in here with that address. You can cancel a renewing membership at any
+      <p>Payment is taken by Whop, in a card form on our pricing page that Whop runs. You sign in
+         before paying, and the membership goes on that account. You can cancel a renewing membership at any
          time from your Whop account; you keep access until the end of the period you have paid for
          and are not charged again.</p>
       <p>You have 14 days from your first payment to change your mind and get a full refund, whatever
