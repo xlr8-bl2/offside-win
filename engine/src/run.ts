@@ -6,6 +6,7 @@ import { backfillHistory } from './history.ts';
 import { probe, probePlayers, probeReport } from './probe.ts';
 import { grant, plans } from './grant.ts';
 import { whopCheck } from './whopcheck.ts';
+import { geminiCheck } from './geminicheck.ts';
 import { fitAllLeagues } from './ratings/fit.ts';
 import { syncTeamShots } from './images/sync.ts';
 import { coinflowCharger, renewDue } from './membership/renew.ts';
@@ -152,6 +153,10 @@ const commands: Record<string, () => Promise<unknown>> = {
 
   async 'whop:check'() {
     return whopCheck();
+  },
+
+  async 'gemini:check'() {
+    return geminiCheck();
   },
 
   async grant() {

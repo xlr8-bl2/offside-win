@@ -18,6 +18,9 @@ the owner says the site is going live, and confirm the list with them first.
 - The `whop:check` command (`engine/src/whopcheck.ts`, its `run.ts` entry,
   the npm scripts, and the `whop:check` option and `WHOP_*` variables in
   `pg.yml`).
+- The `gemini:check` command (`engine/src/geminicheck.ts`, its `run.ts` entry,
+  the npm scripts, and the `gemini:check` option and `GEMINI_*` variables in
+  `pg.yml`; the slate's own `GEMINI_*` settings stay).
 - Preview and probe workflows: `narrate-preview.yml`, `poster-preview.yml`,
   `probe.yml`, `supabase-check.yml` (and `engine/src/probe.ts` if nothing
   else imports it).
