@@ -519,3 +519,41 @@ export async function probeProfiles(ids: number[] = []): Promise<void> {
     }
   }
 }
+
+/**
+ * `probe:reds`: are the stored red card counts right? For recent finished
+ * matches, the stored counts beside the stats payload's and the incidents'
+ * own count. Counts only.
+ */
+export async function probeReds(): Promise<void> {
+  const { select } = await import('./store.ts');
+  const now = Math.floor(Date.now() / 1000);
+  const rows = await select<{ id: number; home_team_id: number; home_reds: number | null; away_reds: number | null; home_yellows: number | null; away_yellows: number | null }>(
+    `SELECT id, home_team_id, home_reds, away_reds, home_yellows, away_yellows FROM match
+      WHERE home_goals IS NOT NULL AND kickoff BETWEEN $1 AND $2 ORDER BY kickoff DESC LIMIT 400`,
+    [now - 20 * 86400, now - 6 * 3600],
+  );
+  const withRed = rows.filter((r) => (r.home_reds ?? 0) + (r.away_reds ?? 0) > 0);
+  const nulls = rows.filter((r) => r.home_reds === null).length;
+  console.log(`${rows.length} recent matches: ${withRed.length} stored with a red (${Math.round((100 * withRed.length) / Math.max(1, rows.length))}%), ${nulls} with no count`);
+  let agree = 0, disagree = 0;
+  for (const r of [...withRed.slice(0, 15), ...rows.filter((x) => !withRed.includes(x)).slice(0, 5)]) {
+    const [stats, inc] = await Promise.all([
+      bsdOrNull<Record<string, unknown>>(`/api/v2/events/${r.id}/stats/`),
+      bsdOrNull<Record<string, unknown>>(`/api/v2/events/${r.id}/incidents/`),
+    ]);
+    const list = Array.isArray(inc?.['incidents']) ? inc!['incidents'] as Array<Record<string, unknown>> : [];
+    const cards = list.filter((x) => x['type'] === 'card');
+    const reds = cards.filter((x) => /red/i.test(String(x['card_type'] ?? ''))).length;
+    const st = stats?.['stats'] as Record<string, any> | undefined;
+    const sh = st?.['home'] ?? st?.['full_time']?.['home'];
+    const sa = st?.['away'] ?? st?.['full_time']?.['away'];
+    const statKeys = st ? Object.keys(st).join(',') : 'none';
+    const statReds = sh && sa ? `${sh['red_cards'] ?? '?'}+${sa['red_cards'] ?? '?'}` : 'n/a';
+    const statYellows = sh && sa ? `${sh['yellow_cards'] ?? '?'}+${sa['yellow_cards'] ?? '?'}` : 'n/a';
+    const stored = (r.home_reds ?? 0) + (r.away_reds ?? 0);
+    if (stored === reds) agree++; else disagree++;
+    console.log(`  event ${r.id}: stored reds ${r.home_reds}+${r.away_reds}, yellows ${r.home_yellows}+${r.away_yellows} | stats keys [${statKeys}] reds ${statReds} yellows ${statYellows} | incidents: ${cards.length} cards, ${reds} red (${[...new Set(cards.map((x) => String(x['card_type'])))].join('/')})`);
+  }
+  console.log(`stored count matches the incidents on ${agree}, not on ${disagree}`);
+}

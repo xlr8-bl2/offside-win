@@ -5,6 +5,7 @@
   "scripts": {
     "probe": "tsx src/run.ts probe",
     "probe:profile": "tsx src/run.ts probe:profile",
+    "probe:reds": "tsx src/run.ts probe:reds",
     "history": "tsx src/run.ts history",
     "ratings": "tsx src/run.ts ratings",
     "slate": "tsx src/run.ts slate",

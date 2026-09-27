@@ -14,6 +14,7 @@
     "probe:players": "npm -w engine run probe:players",
     "probe:report": "npm -w engine run probe:report",
     "probe:profile": "npm -w engine run probe:profile",
+    "probe:reds": "npm -w engine run probe:reds",
     "history": "npm -w engine run history",
     "ratings": "npm -w engine run ratings",
     "slate": "npm -w engine run slate",
