@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { runBacktest } from './backtest.ts';
-import { stats as bsdStats } from './bsd.ts';
+import { clearCache, stats as bsdStats } from './bsd.ts';
 import { config, requireEnv } from './config.ts';
 import { backfillHistory } from './history.ts';
 import { probe, probePlayers, probeProfiles, probeReport } from './probe.ts';
@@ -148,6 +148,47 @@ const commands: Record<string, () => Promise<unknown>> = {
     const report = await runSlate();
     await pruneBoard();
     return report;
+  },
+
+  /**
+   * The slate, every fifteen minutes, for most of a job's six hours.
+   *
+   * GitHub runs a fifteen-minute schedule when it has capacity to, which in
+   * practice was every three to six hours: the board said "re-analysed every
+   * fifteen minutes" and was often an afternoon old. One job that keeps
+   * going, started again by the schedule when it ends, is the cadence the
+   * board promises. Each pass starts from a clean provider cache, so it sees
+   * the prices and team news as they are now.
+   */
+  async 'slate:loop'() {
+    requireEnv();
+    await ensureSchema();
+    const every = config.slate.loopEveryMinutes * 60_000;
+    const end = Date.now() + config.slate.loopForMinutes * 60_000;
+    // Leave room for one more pass to finish inside the job's limit.
+    const lastStart = end - 25 * 60_000;
+    let pass = 0;
+    let failures = 0;
+    for (;;) {
+      const t0 = Date.now();
+      pass++;
+      clearCache();
+      try {
+        await commands.slate!();
+        failures = 0;
+      } catch (err) {
+        // One bad pass (a provider outage, a dropped connection) is not a
+        // reason to stop the board updating; three in a row is.
+        failures++;
+        console.error(`slate:loop: pass ${pass} failed:`, err instanceof Error ? err.message : err);
+        if (failures >= 3) throw err;
+      }
+      console.log(`slate:loop: pass ${pass} took ${((Date.now() - t0) / 60_000).toFixed(1)} min`);
+      const next = t0 + every;
+      if (next > lastStart) break;
+      if (next > Date.now()) await new Promise((r) => setTimeout(r, next - Date.now()));
+    }
+    console.log(`slate:loop: ${pass} passes`);
   },
 
   async settle() {

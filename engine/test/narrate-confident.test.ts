@@ -210,9 +210,10 @@ test('a 94% call at 1.04 is not published', () => {
   // Correct, unusable, and it makes every other call on the page look like
   // padding. The live board offered exactly this.
   const short = cand('double_chance', '1X', null, 0.94, 1.04);
-  const usable = cand('over_under_15', 'over', 1.5, 0.83, 1.18);
+  // Priced at or above fair, so it clears the price condition too.
+  const usable = cand('over_under_15', 'over', 1.5, 0.83, 1.22);
   const out = selectConfident([short, usable]);
-  assert.deepEqual(out.map((c) => c.odds), [1.18], 'published a call at 1.04');
+  assert.deepEqual(out.map((c) => c.odds), [1.22], 'published a call at 1.04');
 });
 
 test('the backed side is never called "the better side" when it is not', () => {

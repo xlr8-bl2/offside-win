@@ -270,8 +270,17 @@ export const config = {
   },
 
   confident: {
-    /** Publish a call at or above this probability. */
-    floor: num('CONF_FLOOR', 0.8),
+    /**
+     * Publish a call at or above this probability.
+     *
+     * It was 0.8 on the provider's numbers: 82% landed at an average of 1.16
+     * and lost 2.7% a call on the fixtures the lab held back. On the consensus
+     * with the best price at or above fair (minEv 0 below) and the market mix,
+     * 0.7 landed 75% at 1.33 and returned +3.3% on the older fixtures and +4.3%
+     * on the newer ones it never saw, across seventeen markets instead of ten
+     * (npm run lab, 2,298 fixtures, September 2026).
+     */
+    floor: num('CONF_FLOOR', 0.7),
     /**
      * One call per fixture.
      *
@@ -338,10 +347,11 @@ export const config = {
     diversity: num('CONF_DIVERSITY', 0.3),
     /**
      * Never a call whose best price returns less than this per pound on its
-     * own probability; -1 turns it off. Keeps a likely call at a poor price
-     * off the board when a book is offering far less than the rest.
+     * own probability; -1 turns it off. At 0 the best price has to be at or
+     * above the consensus's fair price: the one condition that separated the
+     * rules that earned in the lab from the ones that did not.
      */
-    minEv: num('CONF_MIN_EV', -0.05),
+    minEv: num('CONF_MIN_EV', 0),
     /**
      * A best price this far above the consensus's fair odds (odds × fair
      * probability) is a book that has not moved, not an opportunity anyone
@@ -419,6 +429,11 @@ export const config = {
   },
 
   slate: {
+    /** Fixtures whose data is fetched ahead of the one being analysed. */
+    gatherAhead: num('SLATE_GATHER_AHEAD', 6),
+    /** slate:loop: minutes between the starts of two passes, and how long one job keeps going. */
+    loopEveryMinutes: num('SLATE_LOOP_EVERY', 15),
+    loopForMinutes: num('SLATE_LOOP_FOR', 330),
     /** How far ahead to price. */
     horizonHours: num('SLATE_HORIZON_HOURS', 72),
     /** Keep finished fixtures on the board briefly so results are visible. */
