@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "probe": "tsx src/run.ts probe",
+    "probe:profile": "tsx src/run.ts probe:profile",
     "history": "tsx src/run.ts history",
     "ratings": "tsx src/run.ts ratings",
     "slate": "tsx src/run.ts slate",

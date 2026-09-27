@@ -3,7 +3,7 @@ import { runBacktest } from './backtest.ts';
 import { stats as bsdStats } from './bsd.ts';
 import { config, requireEnv } from './config.ts';
 import { backfillHistory } from './history.ts';
-import { probe, probePlayers, probeReport } from './probe.ts';
+import { probe, probePlayers, probeProfiles, probeReport } from './probe.ts';
 import { grant, plans } from './grant.ts';
 import { whopCheck } from './whopcheck.ts';
 import { geminiCheck } from './geminicheck.ts';
@@ -54,6 +54,13 @@ const commands: Record<string, () => Promise<unknown>> = {
   async 'probe:players'() {
     if (!config.bsd.key) throw new Error('BSD_API_KEY is required to probe.');
     return probePlayers();
+  },
+
+  async 'probe:profile'() {
+    requireEnv();
+    const ids = [process.env['GRANT_EMAIL'], process.env['GRANT_ARG'], ...process.argv.slice(3)]
+      .map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0);
+    return probeProfiles(ids);
   },
 
   async 'probe:report'() {

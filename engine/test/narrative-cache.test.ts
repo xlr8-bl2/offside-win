@@ -36,3 +36,13 @@ test('a null line and a zero line are not confused', () => {
   // shape. Collapsing them would serve one fixture another's paragraph.
   assert.notEqual(narrativeKey(7, c({ line: null })), narrativeKey(7, c({ line: 0 })));
 });
+
+test('team news is worth a rewrite; nothing else about the sheet is', async () => {
+  const { teamNews } = await import('../src/slate.ts');
+  const base = narrativeKey(7, c(), teamNews({ status: 'predicted', unavailable: [{ id: 3 }, { id: 1 }] }));
+  // Same absentees in another order: the same news.
+  assert.equal(base, narrativeKey(7, c(), teamNews({ status: 'predicted', unavailable: [{ id: 1 }, { id: 3 }] })));
+  // A new absentee, or the sheets confirmed: different news.
+  assert.notEqual(base, narrativeKey(7, c(), teamNews({ status: 'predicted', unavailable: [{ id: 1 }, { id: 3 }, { id: 9 }] })));
+  assert.notEqual(base, narrativeKey(7, c(), teamNews({ status: 'confirmed', unavailable: [{ id: 1 }, { id: 3 }] })));
+});
