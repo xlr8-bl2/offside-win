@@ -221,6 +221,22 @@ export function runTune(rows: HistRow[]): Record<string, unknown> {
     }
   }
 
+  // Is the red card record believable? The books expect a red in about one
+  // match in five; a record far from that is a data fault, not a finding.
+  {
+    const withReds = sorted.filter((r) => r.reds !== null);
+    const any = withReds.filter((r) => (r.reds ?? 0) > 0).length;
+    let said = 0, n = 0;
+    for (const r of withReds) {
+      const m = r.markets.find((x) => x.market === 'red_card');
+      const y = m?.book?.['yes'];
+      if (typeof y === 'number') { said += y; n++; }
+    }
+    const src = (r: HistRow) => (r.lambda ? 'board' : 'backfill');
+    const by = (k: string) => { const d = withReds.filter((r) => src(r) === k); return `${d.filter((r) => (r.reds ?? 0) > 0).length}/${d.length}`; };
+    console.log(`\nRed cards: ${any} of ${withReds.length} matches recorded one or more (${pct(any / Math.max(1, withReds.length))}); the books expected ${n ? pct(said / n) : 'n/a'} on ${n} they priced. Board rows ${by('board')}, backfilled ${by('backfill')}.`);
+  }
+
   console.log('\nHow often the consensus is right, by what it says (A):');
   for (const r of calibration(labelled(a, cache), (o) => o.book)) {
     console.log(`  ${r.band.padEnd(8)} n ${String(r.n).padStart(5)}  says ${pct(r.said)}  landed ${pct(r.landed)}`);
