@@ -219,6 +219,16 @@ const commands: Record<string, () => Promise<unknown>> = {
     await runLab();
   },
 
+  // Search for the rule that lands most and still earns, on a three-way split.
+  async 'lab:tune'() {
+    requireEnv({ provider: false });
+    const { loadHistory } = await import('./lab/run.ts');
+    const { runTune } = await import('./lab/tune.ts');
+    const { kvSetJSON } = await import('./store.ts');
+    const report = runTune(await loadHistory());
+    await kvSetJSON('lab:tune', { at: Math.floor(Date.now() / 1000), ...report });
+  },
+
   async 'lab:backfill'() {
     requireEnv();
     await ensureSchema();

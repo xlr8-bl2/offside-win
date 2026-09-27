@@ -18,6 +18,7 @@
     "cards": "tsx src/run.ts cards",
     "lab": "tsx src/run.ts lab",
     "lab:odds": "tsx src/run.ts lab:odds",
+    "lab:tune": "tsx src/run.ts lab:tune",
     "lab:backfill": "tsx src/run.ts lab:backfill",
     "trace": "tsx src/run.ts trace",
     "backtest": "tsx src/run.ts backtest",

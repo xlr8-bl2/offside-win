@@ -28,6 +28,7 @@
     "cards": "npm -w engine run cards",
     "lab": "npm -w engine run lab",
     "lab:odds": "npm -w engine run lab:odds",
+    "lab:tune": "npm -w engine run lab:tune",
     "lab:backfill": "npm -w engine run lab:backfill",
     "trace": "npm -w engine run trace",
     "backtest": "npm -w engine run backtest",
