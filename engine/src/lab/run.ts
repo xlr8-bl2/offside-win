@@ -121,3 +121,27 @@ export async function runLab(): Promise<void> {
     },
   });
 }
+
+/**
+ * `npm run lab:odds`: does the provider still hold odds for matches already
+ * played, and how far back? The answer decides whether the lab can be run on
+ * thousands of matches from the history table rather than on the week the
+ * fixture table keeps. Prints counts only.
+ */
+export async function probeHistoricOdds(): Promise<void> {
+  const { bsdList, bsdOrNull } = await import('../bsd.ts');
+  const now = Math.floor(Date.now() / 1000);
+  for (const days of [3, 14, 30, 90, 200, 400]) {
+    const ids = await select<{ id: number; kickoff: number }>(
+      `SELECT id, kickoff FROM match WHERE home_goals IS NOT NULL AND kickoff < $1 ORDER BY kickoff DESC LIMIT 3`,
+      [now - days * 86400],
+    );
+    for (const m of ids) {
+      const rows = await bsdList<Record<string, unknown>>('/api/v2/odds/', { event_id: m.id, updated_after: '2015-01-01T00:00:00Z' }, { limit: 200, max: 2000 });
+      const markets = new Set(rows.map((r) => String(r['market'])));
+      const books = new Set(rows.map((r) => String(r['bookmaker_slug'] ?? r['bookmaker'])));
+      const consensus = await bsdOrNull<Record<string, unknown>>(`/api/v2/events/${m.id}/odds/`);
+      console.log(`  ${days}d ago  event ${m.id}  ${rows.length} quotes, ${markets.size} markets [${[...markets].join(',')}], ${books.size} books; consensus endpoint: ${consensus ? Object.keys(consensus).slice(0, 8).join(',') : 'none'}`);
+    }
+  }
+}
