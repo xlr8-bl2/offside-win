@@ -22,7 +22,7 @@
  * probability. If it is no better than the consensus on B, the report says so.
  */
 
-import { CURRENT, grade, optionsFor, simulate, stackFeatures, stackProb, type HistRow, type Option, type Policy, type SimResult } from './markets.ts';
+import { bucketOf, chooseDay, CURRENT, grade, optionsFor, simulate, stackFeatures, stackProb, type HistRow, type Option, type Policy, type SimResult } from './markets.ts';
 import { MARKET_FAMILY, type MarketFamily } from '../types.ts';
 
 const sigmoid = (z: number) => 1 / (1 + Math.exp(-z));
@@ -162,6 +162,16 @@ export function tuneGrid(stack: StackWeights): TunedPolicy[] {
 
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
+/** Rows grouped by day, as simulate groups them. */
+function byDay(rows: HistRow[]): HistRow[][] {
+  const m = new Map<number, HistRow[]>();
+  for (const r of rows) {
+    const d = Math.floor((r.kickoff + 3600) / 86400);
+    m.set(d, [...(m.get(d) ?? []), r]);
+  }
+  return [...m.values()];
+}
+
 function line(label: string, r: SimResult): string {
   return `  ${label.padEnd(3)} ${String(r.n).padStart(4)} calls ${r.perDay.toFixed(1).padStart(5)}/day  ${pct(r.hitRate).padStart(6)} landed  odds ${r.avgOdds.toFixed(2)}  return ${pct(r.roi).padStart(6)}  top ${pct(r.topShare)} of ${r.markets}`;
 }
@@ -257,5 +267,46 @@ export function runTune(rows: HistRow[]): Record<string, unknown> {
     finalists.push({ policy: { ...s.p, stack: undefined }, a: s.ra, b: s.rb, c: rc });
   }
   report['finalists'] = finalists;
+
+  // Where the production rule loses. A segment is dropped only if it lost in
+  // both A and B on a real number of calls; C then says whether that helped
+  // or was noise.
+  const segs = (rows0: HistRow[]) => {
+    const out = new Map<string, { n: number; pnl: number; won: number }>();
+    for (const day of byDay(rows0)) {
+      for (const pick of chooseDay(PROD, day, cacheFor(PROD))) {
+        const g = grade(pick.row, pick.option);
+        if (!g || g.result === 'VOID') continue;
+        for (const k of [`market ${bucketOf(pick.option)}`, `rank ${pick.row.rank}`]) {
+          const e = out.get(k) ?? { n: 0, pnl: 0, won: 0 };
+          e.n++; e.pnl += g.pnl; if (g.result === 'WON' || g.result === 'HALF_WON') e.won++;
+          out.set(k, e);
+        }
+      }
+    }
+    return out;
+  };
+  const sa = segs(a), sb = segs(b);
+  console.log('\nThe production rule by segment (A | B): calls, landed, return');
+  const losers: string[] = [];
+  for (const k of [...new Set([...sa.keys(), ...sb.keys()])].sort()) {
+    const x = sa.get(k), y = sb.get(k);
+    const f = (e?: { n: number; pnl: number; won: number }) => e ? `${String(e.n).padStart(4)} ${pct(e.won / e.n).padStart(6)} ${pct(e.pnl / e.n).padStart(7)}` : '     -';
+    const lose = !!x && !!y && x.n >= 25 && y.n >= 12 && x.pnl < 0 && y.pnl < 0;
+    if (lose) losers.push(k);
+    console.log(`  ${k.padEnd(34)} ${f(x)} | ${f(y)}${lose ? '   <- lost in both' : ''}`);
+  }
+  if (losers.length) {
+    const pruned: Policy = {
+      ...PROD, name: 'production without the losing segments',
+      excludeBuckets: losers.filter((k) => k.startsWith('market ')).map((k) => k.slice(7)),
+      excludeRanks: losers.filter((k) => k.startsWith('rank ')).map((k) => Number(k.slice(5))),
+    };
+    console.log(`\n  ${pruned.name}: leaves out ${losers.join(', ')}`);
+    console.log(line('A', simulate(pruned, a, cacheFor(pruned))));
+    console.log(line('B', simulate(pruned, b, cacheFor(pruned))));
+    console.log(line('C', simulate(pruned, c, cacheFor(pruned))));
+    report['pruned'] = { losers, c: simulate(pruned, c, cacheFor(pruned)) };
+  }
   return report;
 }

@@ -306,6 +306,9 @@ export interface Policy {
   noQuarters?: boolean;
   /** The biggest handicap line a call may use, either way; -2.5 is a call on a rout. */
   maxHandicap?: number;
+  /** Markets (bucketOf) and league ranks this rule leaves alone. */
+  excludeBuckets?: string[];
+  excludeRanks?: number[];
   /** Only markets at least this many books priced in full. */
   minBooks?: number;
   /** Only where the sharp book priced the market too. */
@@ -384,6 +387,8 @@ export function ranked(policy: Policy, row: HistRow, options?: Option[]): Pick[]
     if (policy.noQuarters && o.line !== null && Math.abs((o.line * 4) % 2) === 1) continue;
     if (policy.maxHandicap !== undefined && o.family === 'handicap' && o.line !== null && Math.abs(o.line) > policy.maxHandicap) continue;
     if (policy.minBooks !== undefined && (o.books ?? 0) < policy.minBooks) continue;
+    if (policy.excludeBuckets?.includes(bucketOf(o))) continue;
+    if (policy.excludeRanks?.includes(row.rank)) continue;
     if (policy.requireSharp && o.sharp === null) continue;
     if (policy.minSharpEv !== undefined && o.sharp !== null && evOf(o.sharp, o) < policy.minSharpEv) continue;
     // A price far beyond what the consensus thinks is fair is almost always a
