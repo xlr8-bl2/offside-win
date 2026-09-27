@@ -26,6 +26,10 @@ the owner says the site is going live, and confirm the list with them first.
   else imports it).
 - Stray local preview helpers are not in the repo; nothing to do there.
 
+Not dev tooling, and stays at launch: the `#/trace` page (`viewTrace()`) and
+the `trace` command (`engine/src/trace.ts`, the `trace` option in `pg.yml`).
+They turn a leaked pick's hidden code back into the account that copied it.
+
 ## Standing rules
 
 - The owner works from a phone only. Trigger workflows and read logs yourself;

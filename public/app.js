@@ -772,7 +772,12 @@ function freeCallHTML(hero, detail, free = null) {
     <p class="freecall-sel">${esc(d.name)}</p>
     <p class="freecall-meta" data-public-price>${landed
       ? `<span class="mark ${landed}">${WORD[landed] ?? ''}</span>`
-      : trackHTML(liveTrack(v, free))} <b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
+      : trackHTML(liveTrack(v, free))} <b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}
+      ${shareButtonHTML({
+        text: landed && shown
+          ? `Today's free call ${landed === 'won' ? 'landed' : 'is in'}: ${d.name}, at odds of ${Number(v.odds).toFixed(2)}. ${tie.home} ${shown[0]}–${shown[1]} ${tie.away}.`
+          : `Today's free call on ${tie.home} v ${tie.away}: ${d.name}, at odds of ${Number(v.odds).toFixed(2)}.`,
+        url: matchUrl(tie.id, tie.home, tie.away), title: `${tie.home} v ${tie.away}` })}</p>
     <p class="hero-blurb">${landed
       ? `Free for everyone, as one call is every day.${isMember() ? '' : ' Members had every other call on the board.'}`
       : `Free for everyone, and under way.${isMember() ? '' : ' Members get every other call the moment it goes up.'}`}</p>
@@ -784,7 +789,9 @@ function freeCallHTML(hero, detail, free = null) {
     <span class="freecall-tag">Today's free call</span>
     ${elsewhere ? `<a class="freecall-tie" href="#/fixture/${encodeURIComponent(tie.id)}">${crest(tie.home, 'xs', tie.home_id)}${esc(tie.home)} v ${crest(tie.away, 'xs', tie.away_id)}${esc(tie.away)}<span>${esc(kickoffLabel(tie.kickoff))}</span></a>` : ''}
     <p class="freecall-sel">${elsewhere ? `<a href="#/fixture/${encodeURIComponent(tie.id)}">${esc(d.name)}</a>` : esc(d.name)}</p>
-    <p class="freecall-meta" data-public-price><b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
+    <p class="freecall-meta" data-public-price><b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}
+      ${shareButtonHTML({ text: `Today's free call on ${tie.home} v ${tie.away}: ${d.name}, at odds of ${Number(v.odds).toFixed(2)}.`,
+        url: matchUrl(tie.id, tie.home, tie.away), title: `${tie.home} v ${tie.away}` })}</p>
     <p class="hero-blurb">The call we are surest of today, free for everyone.${isMember() ? '' : ' Members get every other call the moment it goes up.'}</p>
   </div>`;
 }
@@ -807,6 +814,92 @@ const CALLS_NOTE = `<p class="calls-note"><b>Calls move until kick-off.</b> We l
   fifteen minutes as team news and prices come in, so a call can change, or come down if we stop backing
   it. At kick-off it closes: nothing is sold once a match is on, and it is graded at full time. The bet
   slip is the exception: once it is posted, it stays exactly as it is.</p>`;
+
+/*
+ * Sharing.
+ *
+ * One button, on a call, on the free call and on the slip. On a phone it is
+ * the phone's own share sheet; anywhere else it copies the link. The link is
+ * the match's own address (/match/<id>/<teams>), whose preview says what
+ * state the match is in. What is shared never gives away a members' call:
+ * an open call that is not the free one is shared as the match and the fact
+ * that we have a call on it. Free calls and results are shared in full.
+ */
+const SHARE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>';
+const matchUrl = (id, home, away) => `${location.origin}/match/${Number(id)}/${slugOf(home) || 'home'}-v-${slugOf(away) || 'away'}`;
+function shareButtonHTML({ text, url, title = 'offside.win', label = 'Share' }) {
+  return `<button class="btn btn-quiet btn-sm share-btn" type="button" data-share
+    data-share-text="${esc(text)}" data-share-url="${esc(url)}" data-share-title="${esc(title)}">${SHARE_SVG}<span>${esc(label)}</span></button>`;
+}
+/** Is this match today's free call? Then its call can be shared by anyone. */
+const isFreeFixture = (id) => Boolean(state.board?.fixtures?.some((f) => Number(f.id) === Number(id) && f.free_call));
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest?.('[data-share]');
+  if (!b) return;
+  e.preventDefault();
+  const { shareText: text, shareUrl: url, shareTitle: title } = b.dataset;
+  if (navigator.share) {
+    try { await navigator.share({ title, text, url }); } catch { /* closed the sheet */ }
+    return;
+  }
+  const label = b.querySelector('span');
+  try {
+    await navigator.clipboard.writeText(`${text} ${url}`);
+    if (label) { label.textContent = 'Link copied'; setTimeout(() => { label.textContent = 'Share'; }, 2000); }
+  } catch {
+    window.prompt('Copy this link', url);
+  }
+});
+
+/*
+ * Leaks.
+ *
+ * A member can see every call; that is what they pay for, and nothing stops
+ * one being retyped. What stops a member's calls being resold is that a leak
+ * says whose it was:
+ *   - a faint "for @name" across every members' call and the slip, which is
+ *     what a screenshot posted in a group carries;
+ *   - an invisible code, the first eight characters of the account's id in
+ *     zero-width characters, written into any call text a member copies,
+ *     which survives a paste into most apps. #/trace reads it back.
+ * Neither touches the free call or anything a free reader sees.
+ */
+const ZW = ['\u200b', '\u200c', '\u200d', '\u2060'];
+const ZW_MARK = '\u2063';
+const memberCode = () => String(state.user?.id ?? '').replace(/-/g, '').slice(0, 8);
+function zwEncode(hex) {
+  return ZW_MARK + [...hex].map((h) => { const n = parseInt(h, 16) || 0; return ZW[n >> 2] + ZW[n & 3]; }).join('') + ZW_MARK;
+}
+function zwDecode(text) {
+  const m = String(text).match(/\u2063([\u200b\u200c\u200d\u2060]{2,})\u2063/);
+  if (!m) return null;
+  const c = [...m[1]];
+  let out = '';
+  for (let i = 0; i + 1 < c.length; i += 2) out += ((ZW.indexOf(c[i]) << 2) | ZW.indexOf(c[i + 1])).toString(16);
+  return out;
+}
+const markLabel = () => (state.account?.profile?.username ? `@${state.account.profile.username}` : `member ${memberCode()}`);
+/** The faint repeated "for @name", as a tile the members' boxes lay over themselves. */
+function paintMemberMark() {
+  const root = document.documentElement;
+  if (!isMember() || !state.user) { root.style.removeProperty('--member-mark'); return; }
+  const label = `for ${markLabel()}`.replace(/[<&>"']/g, '');
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='240' height='120'><text x='12' y='70' transform='rotate(-16 120 60)' font-family='sans-serif' font-size='12' fill='white' fill-opacity='0.07'>${label}</text></svg>`;
+  root.style.setProperty('--member-mark', `url("data:image/svg+xml,${encodeURIComponent(svg)}")`);
+}
+document.addEventListener('copy', (e) => {
+  if (!isMember() || !state.user) return;
+  const sel = document.getSelection();
+  if (!sel || sel.isCollapsed) return;
+  const at = sel.anchorNode?.nodeType === 1 ? sel.anchorNode : sel.anchorNode?.parentElement;
+  if (!at?.closest?.('.is-members')) return;
+  const text = sel.toString();
+  const code = zwEncode(memberCode());
+  // After the first word, so trimming either end of the paste keeps it.
+  const i = text.indexOf(' ');
+  e.clipboardData?.setData('text/plain', i > 0 ? text.slice(0, i) + code + text.slice(i) : text + code);
+  e.preventDefault();
+});
 
 const LOCK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>';
 function heroCallHTML(hero, row) {
@@ -1133,8 +1226,12 @@ function slipHTML(data, fixtures = []) {
     return '';
   };
   return `
-  <section class="panel slip">
+  <section class="panel slip${legs ? ' is-members' : ''}">
     <p class="panel-head">Today's bet slip <a href="#/slip">Every slip</a></p>
+    <div class="slip-share">${shareButtonHTML({
+      // The slip's size and odds only: its legs are the members' own.
+      text: `Today's bet slip on offside.win: ${cur.legs_count} legs at total odds of ${Number(cur.odds).toFixed(2)}.`,
+      url: `${location.origin}/#/slip`, title: 'Today\'s bet slip' })}</div>
     <div class="slip-total">
       <span class="slip-odds">${showOdds(cur.odds)}<small>total odds</small></span>
       <span class="slip-legs">${cur.legs_count} legs</span>
@@ -2472,7 +2569,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
     : null;
 
   return `
-  <div class="verdict${landed ? ` settled ${landed}` : ''}">
+  <div class="verdict${landed ? ` settled ${landed}` : ''}${!played && isMember() && !isFreeFixture(fixture?.id) ? ' is-members' : ''}">
     <div class="verdict-head">
       <span class="sel">${esc(d.name)}</span>
       ${landed
@@ -2488,6 +2585,16 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
     ${why ? `<div class="why"><p class="why-head">Why this call</p><p>${link(esc(why))}</p></div>` : ''}
     ${played && (prose || why) ? `<p class="aside">Written before kick-off, and left as it was.</p>` : ''}
     <div class="verdict-meta">
+      ${fixture?.id ? (() => {
+        const url = matchUrl(fixture.id, home, away);
+        const tie = `${home} v ${away}`;
+        const text = landed
+          ? `${VERDICT_WORD[landed] ?? 'Settled'}: ${d.name}, at odds of ${Number(c.odds).toFixed(2)}. ${home} ${hg}–${ag} ${away}.`
+          : isFreeFixture(fixture.id) || !isMember()
+            ? `Today's free call on ${tie}: ${d.name}, at odds of ${Number(odds).toFixed(2)}.`
+            : `${tie}: we have a call on this one.`;
+        return shareButtonHTML({ text, url, title: tie });
+      })() : ''}
       ${played
         ? `<span>We put it up at ${oddsOf(c.odds)}${c.bookmaker ? ` with ${esc(bookName(c.bookmaker))}` : ''}.</span>`
         : `${p ? (p.local
@@ -5961,6 +6068,34 @@ function money(minor, currency) {
  * "view as" switch, so both sides of the wall can be checked from one account
  * without a second browser or a second login.
  */
+/*
+ * Whose copy is this? Paste a leaked call and read the account code out of it
+ * (see zwDecode). Unlinked from anywhere; the code alone identifies nobody,
+ * and the trace command in pg.yml turns it into an account.
+ */
+function viewTrace() {
+  app.innerHTML = `
+  <div class="wrap section narrow">
+    <div class="page-head">
+      <h1 class="display">Trace a leaked call</h1>
+      <p class="page-sub">Paste the text exactly as it was posted. Calls copied from the site carry the copying
+        account's code, invisibly.</p>
+    </div>
+    <div class="acct-form">
+      <label for="leak">The leaked text</label>
+      <textarea id="leak" rows="6" class="trace-box" placeholder="Paste it here"></textarea>
+      <p class="acct-note" id="trace-out" role="status"></p>
+    </div>
+  </div>`;
+  const out = document.getElementById('trace-out');
+  document.getElementById('leak').oninput = (e) => {
+    const code = zwDecode(e.target.value);
+    out.textContent = !e.target.value ? ''
+      : code ? `Account code ${code}. Run the trace command with it (pg workflow, argument ${code}) to see whose account it is.`
+        : 'No code in this text. It was retyped, or copied from somewhere other than a members\' call.';
+  };
+}
+
 async function viewDev() {
   const me = await currentUser({ real: true });
   let account = null;
@@ -6348,6 +6483,7 @@ async function render(name, parts, params) {
     if (name === 'checkout') return await viewCheckout(params);
     if (name === 'slip') return await viewSlip();
     if (name === 'dev') return await viewDev();
+    if (name === 'trace') return viewTrace();
     if (name === 'signin') return await viewSignin();
     if (name === 'account') return await viewAccount();
     if (name === 'legal' && parts[1]) return viewLegal(parts[1]);
@@ -6508,11 +6644,13 @@ async function headerAuth() {
     if (state.member === null || !state.account) {
       try {
         state.account = await getJSON('/api/account');
-        const was = state.board ? Boolean(state.board.member) : null;
+        // What the page drew with: the board's answer, or "not a member" when
+        // nothing had said yet (a fixture page opened directly).
+        const was = isMember();
         state.member = Boolean(state.account.membership?.expires_at * 1000 > Date.now());
-        // The page drew on the board's answer; if the account says otherwise
-        // (an advert shown to a member), draw it again with the right one.
-        if (was !== null && was !== state.member) softRefresh();
+        // If the account says otherwise (an advert shown to a member, a call
+        // drawn without its member marks), draw it again with the right one.
+        if (was !== state.member) softRefresh();
         const f = state.account.profile?.odds_format;
         const c = state.account.profile?.clock;
         const oddsChanged = (f && f !== oddsFormat) || (c && c !== clockFormat);
@@ -6558,6 +6696,8 @@ async function headerAuth() {
     if (a.dataset.hash) { a.dataset.hash = hash; a.setAttribute('href', member ? '/#/account?tab=membership' : '/pricing'); }
     else a.setAttribute('href', hash);
   }
+
+  paintMemberMark();
 
   // A member's picture wears the accent as a ring: the plan, without a badge.
   if (user) {
