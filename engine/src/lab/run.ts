@@ -113,7 +113,7 @@ export async function runLab(): Promise<void> {
   }
 
   const all = simulate(CURRENT, rows);
-  console.log(`\nToday's rule over everything: ${all.n} calls, ${pct(all.hitRate)} landed, average odds ${all.avgOdds.toFixed(2)}, return ${pct(all.roi)} per call`);
+  console.log(`\nThe old rule over everything: ${all.n} calls, ${pct(all.hitRate)} landed, average odds ${all.avgOdds.toFixed(2)}, return ${pct(all.roi)} per call`);
 
   const wf = walkForward(rows, 0.6, Math.max(40, Math.round(rows.length * 0.04)));
   console.log(`\nWalk-forward: tuned on the first ${wf.trainRows} fixtures, scored on the last ${wf.testRows}`);

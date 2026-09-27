@@ -227,6 +227,27 @@ function buildWriters(): Array<{ model: string; writer: Writer }> | null {
   }));
 }
 
+/**
+ * Run `fn` over `items` up to `window` ahead of the one being asked for.
+ * Each result is handed out once, in order; a failure surfaces when its turn
+ * comes, not before.
+ */
+export function ahead<T, R>(items: T[], fn: (t: T) => Promise<R>, window: number): (i: number) => Promise<R> {
+  const started = new Map<number, Promise<R>>();
+  const start = (i: number) => {
+    if (i >= items.length || started.has(i)) return;
+    const p = fn(items[i]!);
+    p.catch(() => undefined); // observed when its turn comes
+    started.set(i, p);
+  };
+  return (i: number) => {
+    for (let k = i; k < i + Math.max(1, window); k++) start(k);
+    const p = started.get(i)!;
+    started.delete(i);
+    return p;
+  };
+}
+
 export async function runSlate(): Promise<SlateReport> {
   const now = Math.floor(Date.now() / 1000);
 
@@ -368,11 +389,18 @@ export async function runSlate(): Promise<SlateReport> {
   // The grounds on this slate, named once each after the loop.
   const venueIds = new Set<number>();
 
-  for (const event of candidates) {
+  // Gathering is nearly all waiting on the provider, and one fixture at a
+  // time made a pass of a hundred-odd fixtures take twenty minutes, longer
+  // than the fifteen between passes. So the next few fixtures' data is
+  // fetched while this one is being analysed; everything after the fetch
+  // stays in order, because the day mix, the writer's budget and the
+  // repetition ledger all depend on it.
+  const gatherAt = ahead(candidates, (e) => gatherFixture(e), config.slate.gatherAhead);
+  for (const [index, event] of candidates.entries()) {
     const venueId = num(event['venue_id']);
     if (venueId) venueIds.add(venueId);
     try {
-      const ctx = await gatherFixture(event);
+      const ctx = await gatherAt(index);
       if (!ctx) {
         report.skipped++;
         continue;

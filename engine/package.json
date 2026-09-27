@@ -8,6 +8,7 @@
     "history": "tsx src/run.ts history",
     "ratings": "tsx src/run.ts ratings",
     "slate": "tsx src/run.ts slate",
+    "slate:loop": "tsx src/run.ts slate:loop",
     "settle": "tsx src/run.ts settle",
     "grant": "tsx src/run.ts grant",
     "plans": "tsx src/run.ts plans",

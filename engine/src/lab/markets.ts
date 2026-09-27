@@ -446,9 +446,9 @@ export function simulate(policy: Policy, rows: HistRow[], cache?: Map<number, Op
   };
 }
 
-/** Today's rule: the provider's most likely outcome at 80% or more, at 1.13 or longer. */
+/** The rule before the lab: the provider's most likely outcome at 80% or more, at 1.13 or longer. */
 export const CURRENT: Policy = {
-  name: 'current (most likely, provider, 80%+)',
+  name: 'old rule (most likely, provider, 80%+)',
   source: 'provider', modelWeight: 0, minProb: 0.8, maxProb: 0.95, minOdds: 1.13, maxOdds: 100,
   minEv: -1, maxGap: 99, rankBy: 'prob',
 };
@@ -504,15 +504,16 @@ export function confidentGrid(): Policy[] {
  */
 export function productionRules(): Policy[] {
   const base: Policy = {
-    name: 'production', source: 'best', modelWeight: 0.5, minProb: 0.8, maxProb: 0.95, minOdds: 1.13, maxOdds: 3.5,
-    minEv: -0.05, maxGap: 1.12, rankBy: 'growth', diversity: 0.3, noQuarters: true,
+    name: 'production', source: 'best', modelWeight: 0.5, minProb: 0.7, maxProb: 0.95, minOdds: 1.13, maxOdds: 3.5,
+    minEv: 0, maxGap: 1.12, rankBy: 'growth', diversity: 0.3, noQuarters: true,
   };
   const v = (name: string, o: Partial<Policy>): Policy => ({ ...base, ...o, name });
   return [
     base,
-    v('production, ev >= 0', { minEv: 0 }),
-    v('production, ev >= 0, p >= 0.75', { minEv: 0, minProb: 0.75 }),
-    v('production, ev >= 0, p >= 0.7', { minEv: 0, minProb: 0.7 }),
+    v('production, p >= 0.8', { minProb: 0.8 }),
+    v('production, p >= 0.75', { minProb: 0.75 }),
+    v('production, p >= 0.65', { minProb: 0.65 }),
+    v('production, ev >= -0.05', { minEv: -0.05 }),
     v('production, ranked by probability', { rankBy: 'prob' }),
     v('production, no cap', { diversity: null }),
     v('production, quarter lines allowed', { noQuarters: false }),
