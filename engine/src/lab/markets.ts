@@ -357,7 +357,8 @@ export function choose(policy: Policy, row: HistRow, options?: Option[]): Pick |
 export function chooseDay(policy: Policy, rows: HistRow[], cache?: Map<number, Option[]>): Pick[] {
   const lists = rows.map((r) => ranked(policy, r, cache?.get(r.id))).filter((l) => l.length);
   if (!policy.diversity) return lists.map((l) => l[0]!);
-  const cap = Math.max(1, Math.ceil(policy.diversity * lists.length));
+  // As DayMix in production: a share of the day's fixtures, never below two.
+  const cap = Math.max(2, Math.ceil(policy.diversity * rows.length));
   const used = new Map<string, number>();
   const out: Pick[] = [];
   for (const l of lists.sort((a, b) => b[0]!.p - a[0]!.p)) {
