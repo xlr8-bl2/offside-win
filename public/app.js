@@ -774,8 +774,8 @@ function freeCallHTML(hero, detail, free = null) {
       ? `<span class="mark ${landed}">${WORD[landed] ?? ''}</span>`
       : trackHTML(liveTrack(v, free))} <b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
     <p class="hero-blurb">${landed
-      ? 'Free for everyone, as one call is every day. Members had every other call on the board.'
-      : 'Free for everyone, and under way. Members get every other call the moment it goes up.'}</p>
+      ? `Free for everyone, as one call is every day.${isMember() ? '' : ' Members had every other call on the board.'}`
+      : `Free for everyone, and under way.${isMember() ? '' : ' Members get every other call the moment it goes up.'}`}</p>
   </div>`;
   }
 
@@ -785,7 +785,7 @@ function freeCallHTML(hero, detail, free = null) {
     ${elsewhere ? `<a class="freecall-tie" href="#/fixture/${encodeURIComponent(tie.id)}">${crest(tie.home, 'xs', tie.home_id)}${esc(tie.home)} v ${crest(tie.away, 'xs', tie.away_id)}${esc(tie.away)}<span>${esc(kickoffLabel(tie.kickoff))}</span></a>` : ''}
     <p class="freecall-sel">${elsewhere ? `<a href="#/fixture/${encodeURIComponent(tie.id)}">${esc(d.name)}</a>` : esc(d.name)}</p>
     <p class="freecall-meta" data-public-price><b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
-    <p class="hero-blurb">The call we are surest of today, free for everyone. Members get every other call the moment it goes up.</p>
+    <p class="hero-blurb">The call we are surest of today, free for everyone.${isMember() ? '' : ' Members get every other call the moment it goes up.'}</p>
   </div>`;
 }
 
@@ -1015,15 +1015,36 @@ function nextRowHTML(f) {
   </a></li>`;
 }
 
-/** The one block of solid colour on the site, and it sells the membership. */
+/** Is the reader a member? The account says so once it has loaded; the board's own answer until then. */
+const isMember = () => Boolean(state.member ?? state.board?.member);
+
+/**
+ * The membership, offered once on the front page, as a ticket: what it adds
+ * on the left, what it costs on the stub. The same shape as the ticket a
+ * member holds on their account page, so buying one looks like getting one.
+ * It used to be a purple gradient with a chevron flight across it, the only
+ * block of solid colour on the site, and it was shown to members too.
+ * A member is never sold what they have: for them this is nothing.
+ */
 function promoHTML(user) {
+  if (isMember()) return '';
   return `
-  <section class="promo">
-    <p class="hand promo-aside">nobody else prints the losses</p>
-    <h2>Members see every call the moment it goes up.</h2>
-    <p>The analysis stays free. Membership adds the call itself on every match we cover: the
-       market, the side, the price and the bookmaker offering it.</p>
-    <a class="btn btn-light" href="#/pricing">${user ? 'See what membership costs' : 'Become a member'}</a>
+  <section class="promo" aria-labelledby="promo-h">
+    <div class="promo-main">
+      <h2 id="promo-h">Every call, the moment it goes up.</h2>
+      <ul class="ticks promo-points">
+        <li><b>The call on every match we cover:</b> the market, the side, the odds and the bookmaker</li>
+        <li><b>The bet slip's legs</b> before the first one kicks off</li>
+        <li><b>Why we're making each one</b>, in a paragraph on every match</li>
+      </ul>
+      <p class="promo-note">The previews and the full record, the losses included, stay free.</p>
+    </div>
+    <div class="promo-stub">
+      <span class="promo-from">From</span>
+      <b class="promo-price" data-public-price>£3.49</b>
+      <span class="promo-per">for the weekend</span>
+      <a class="btn btn-accent" href="#/pricing">See the plans</a>
+    </div>
   </section>`;
 }
 
@@ -5390,12 +5411,43 @@ async function viewAccount() {
   if (club && !clubChoices.some((t) => Number(t.id) === Number(club.id))) clubChoices.unshift(club);
 
   // --- profile
+  /*
+   * The profile is shown, not handed over as a form. It used to open straight
+   * into editable fields, so glancing at your own account meant looking at a
+   * half-filled form with a Save button under it. Now it reads as a profile,
+   * with one button that opens the editor, and the editor closes again on
+   * Save or Cancel.
+   */
+  const handle = prof.username ? `@${prof.username}` : null;
+  const PIC_WORD = { photo: 'Your Google photo', initials: 'Your initials', crest: club ? `The ${club.name} crest` : 'Your initials' };
+  const editing = params.get('edit') === '1';
   const profileHTML = `
-    <form class="acct-form" id="profile-form" novalidate>
+    <section class="prof-view" id="prof-view"${editing ? ' hidden' : ''}>
+      <dl class="acct-facts prof-facts">
+        <div><dt>Name</dt><dd>${esc(prof.display_name || user.name || 'Not set')}</dd></div>
+        <div><dt>Username</dt><dd>${handle ? esc(handle) : '<span class="muted">Not chosen yet</span>'}</dd></div>
+        <div><dt>Picture</dt><dd>${esc(PIC_WORD[picStyle] ?? 'Your initials')}</dd></div>
+        <div><dt>Club</dt><dd>${club ? `<span class="prof-club">${crest(club.name, 'xs', club.id)}${esc(club.name)}</span>` : '<span class="muted">None</span>'}</dd></div>
+        <div><dt>Email</dt><dd>${esc(user.email ?? '')}</dd></div>
+        <div><dt>Sign-in</dt><dd>${esc(how)}. There is no password to forget.</dd></div>
+        ${since ? `<div><dt>Joined</dt><dd>${esc(since)}</dd></div>` : ''}
+      </dl>
+      <div class="acct-actions"><button class="btn btn-primary" type="button" id="prof-edit">Edit profile</button></div>
+    </section>
+
+    <form class="acct-form prof-edit" id="profile-form" novalidate${editing ? '' : ' hidden'}>
+      <h2 class="acct-sub">Edit profile</h2>
       <label for="display-name">Your name</label>
       <input id="display-name" name="name" type="text" maxlength="60" autocomplete="name"
-             value="${esc(account.profile?.display_name ?? user.name ?? '')}" placeholder="What should we call you?">
-      <p class="acct-hint">Used to greet you on the front page. Nobody else sees it.</p>
+             value="${esc(prof.display_name ?? user.name ?? '')}" placeholder="What should we call you?">
+      <p class="acct-hint">Used to greet you on the front page.</p>
+
+      <label for="username">Username</label>
+      <div class="handle-field"><span aria-hidden="true">@</span>
+        <input id="username" name="username" type="text" maxlength="21" autocomplete="username" spellcheck="false"
+               autocapitalize="none" value="${esc(prof.username ?? '')}" placeholder="yourname"
+               pattern="[A-Za-z0-9_]{3,20}" aria-describedby="username-hint"></div>
+      <p class="acct-hint" id="username-hint">Three to twenty letters, numbers or underscores. One per person.</p>
 
       <fieldset class="acct-choice">
         <legend>Your picture</legend>
@@ -5421,13 +5473,12 @@ async function viewAccount() {
         <p class="acct-hint">Its games are marked on the board, and its crest can be your picture.${
           clubChoices.length ? '' : ' Follow a team first and it appears here.'}</p>
       </fieldset>
-      <div class="acct-actions"><button class="btn btn-primary" type="submit">Save changes</button><span class="acct-note" id="profile-note" role="status"></span></div>
-    </form>
-    <dl class="acct-facts">
-      <div><dt>Email</dt><dd>${esc(user.email ?? '')}</dd></div>
-      <div><dt>Sign-in</dt><dd>${esc(how)}. There is no password to forget.</dd></div>
-      ${since ? `<div><dt>Joined</dt><dd>${esc(since)}</dd></div>` : ''}
-    </dl>`;
+      <div class="acct-actions">
+        <button class="btn btn-primary" type="submit">Save changes</button>
+        <button class="btn btn-ghost" type="button" id="prof-cancel">Cancel</button>
+        <span class="acct-note" id="profile-note" role="status"></span>
+      </div>
+    </form>`;
 
   // --- following
   const followRow = (f) => `
@@ -5547,7 +5598,7 @@ async function viewAccount() {
       ${avatarHTML(user, name, 'lg')}
       <div class="acct-who">
         <h1 class="display">${esc(name)}</h1>
-        <p>${esc(user.email ?? '')}</p>
+        <p>${prof.username ? `<span class="acct-handle">@${esc(prof.username)}</span> ` : ''}${esc(user.email ?? '')}</p>
         <a class="acct-plan${active ? ' on' : ''}" href="#/account?tab=membership">${active
           ? `Member until ${esc(when(m.expires_at))}` : 'Free account'}</a>
       </div>
@@ -5629,20 +5680,36 @@ async function viewAccount() {
         p_color: app.querySelector('input[name="colour"]:checked')?.value ?? null,
         p_club_id: clubId,
         p_club_name: clubId ? clubSel.options[clubSel.selectedIndex].text : null,
+        // '' clears it; the database checks the shape and that nobody has it.
+        p_username: document.getElementById('username').value.trim().replace(/^@/, ''),
       });
       account.profile = saved;
       if (state.account) state.account.profile = saved;
-      note('profile-note', 'Saved');
-      const n = accountName(user, saved);
-      app.querySelector('.acct-who h1').textContent = n;
-      app.querySelector('.acct-head .avatar').outerHTML = avatarHTML(user, n, 'lg', saved);
       state.board = null;
       headerAuth();
+      // Saved: back to the profile, showing what was saved.
+      history.replaceState(null, '', `${location.pathname}#/account`);
+      await viewAccount();
+      return;
     } catch (err) {
-      note('profile-note', humaneError(err), true);
+      const raw = String(err?.message ?? '');
+      note('profile-note', /^username:/.test(raw)
+        ? `That username will not work: ${raw.replace(/^username:\s*/, '')}.`
+        : humaneError(err), true);
     }
     button.disabled = false;
   };
+
+  // Edit and Cancel: one pane or the other, and the address says which, so a
+  // refresh keeps the editor open.
+  const showEditor = (on) => {
+    document.getElementById('prof-view').hidden = on;
+    document.getElementById('profile-form').hidden = !on;
+    history.replaceState(null, '', `${location.pathname}#/account${on ? '?tab=profile&edit=1' : ''}`);
+    if (on) document.getElementById('display-name')?.focus({ preventScroll: true });
+  };
+  document.getElementById('prof-edit').onclick = () => showEditor(true);
+  document.getElementById('prof-cancel').onclick = () => { document.getElementById('profile-form').reset(); showEditor(false); };
 
   // The picture: preview as it is picked; saved with the name.
   const preview = () => {
@@ -5706,18 +5773,8 @@ async function viewAccount() {
   wireFollowing(account);
 
   // Sign out, here or everywhere.
-  const leave = async (everywhere) => {
-    await signOut({ everywhere });
-    cacheClear();
-    state.member = null;
-    state.board = null;
-    state.account = null;
-    location.hash = '#/home';
-    await route();
-    headerAuth();
-  };
-  document.getElementById('out').onclick = () => leave(false);
-  document.getElementById('out-all').onclick = () => leave(true);
+  document.getElementById('out').onclick = () => leaveAccount(false);
+  document.getElementById('out-all').onclick = () => leaveAccount(true);
 
   // Take your data: one JSON file, built from what the account page already holds.
   document.getElementById('export').onclick = () => {
@@ -6325,6 +6382,90 @@ async function render(name, parts, params) {
  * time at the moment you are refused something is the worst way to meet it, and
  * it is the complaint this answers.
  */
+/** Sign out, here or on every device, and land on the front page. */
+async function leaveAccount(everywhere = false) {
+  await signOut({ everywhere });
+  cacheClear();
+  state.member = null;
+  state.board = null;
+  state.account = null;
+  closeAccountMenu();
+  location.hash = '#/home';
+  await route();
+  headerAuth();
+}
+
+/*
+ * The account menu, from the reader's picture in the header.
+ *
+ * The picture used to go straight to the account page, so a member checking
+ * when their membership runs out, or wanting to sign out, went through a full
+ * page. Now it opens this: who you are, your plan and when it runs to, the
+ * four parts of the account, and signing out.
+ */
+function closeAccountMenu() {
+  const menu = document.getElementById('acct-menu');
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  document.getElementById('account-link')?.setAttribute('aria-expanded', 'false');
+}
+function accountMenuHTML() {
+  const user = state.user;
+  if (!user) return '';
+  const name = accountName(user, state.account?.profile);
+  const m = liveMembership(state.account);
+  const until = m ? new Date(m.expires_at * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' }) : '';
+  return `
+    <div class="am-who">
+      ${avatarHTML(user, name, 'md')}
+      <div><b>${esc(name)}</b><span>${state.account?.profile?.username ? `@${esc(state.account.profile.username)}` : esc(user.email ?? '')}</span></div>
+    </div>
+    <a class="am-plan${m ? ' on' : ''}" href="#/account?tab=membership" role="menuitem">
+      ${m ? `<b>${esc(PLAN_NAME[m.plan_id] ?? 'Membership')}</b><span>Runs to ${esc(until)}${renewsItself(m) ? ', renews by itself' : ''}</span>`
+          : `<b>Free account</b><span>One call a day. See the plans for every call.</span>`}
+    </a>
+    <nav class="am-links" aria-label="Your account">
+      <a href="#/account?tab=profile" role="menuitem">Your profile</a>
+      <a href="#/account?tab=following" role="menuitem">Teams you follow</a>
+      <a href="#/account?tab=membership" role="menuitem">${m ? 'Membership and payments' : 'Membership'}</a>
+      <a href="#/account?tab=settings" role="menuitem">Settings</a>
+      ${m ? '' : '<a class="am-cta" href="#/pricing" role="menuitem">See the plans</a>'}
+    </nav>
+    <button class="am-out" type="button" id="am-out" role="menuitem">Sign out</button>`;
+}
+function toggleAccountMenu(e) {
+  e.preventDefault();
+  const link = document.getElementById('account-link');
+  let menu = document.getElementById('acct-menu');
+  if (!menu) {
+    menu = document.createElement('div');
+    menu.id = 'acct-menu';
+    menu.className = 'acct-menu';
+    menu.setAttribute('role', 'menu');
+    menu.hidden = true;
+    link.after(menu);
+    menu.addEventListener('click', (ev) => {
+      if (ev.target.closest('#am-out')) { leaveAccount(false); return; }
+      if (ev.target.closest('a')) closeAccountMenu();
+    });
+  }
+  if (!menu.hidden) { closeAccountMenu(); return; }
+  menu.innerHTML = accountMenuHTML();
+  menu.hidden = false;
+  link.setAttribute('aria-expanded', 'true');
+  menu.querySelector('a')?.focus({ preventScroll: true });
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest?.('#acct-menu, #account-link')) closeAccountMenu();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !document.getElementById('acct-menu')?.hidden) {
+    closeAccountMenu();
+    document.getElementById('account-link')?.focus();
+  }
+});
+addEventListener('hashchange', closeAccountMenu);
+
 async function headerAuth() {
   const link = document.getElementById('account-link');
   const upgrade = document.getElementById('upgrade-link');
@@ -6367,7 +6508,11 @@ async function headerAuth() {
     if (state.member === null || !state.account) {
       try {
         state.account = await getJSON('/api/account');
+        const was = state.board ? Boolean(state.board.member) : null;
         state.member = Boolean(state.account.membership?.expires_at * 1000 > Date.now());
+        // The page drew on the board's answer; if the account says otherwise
+        // (an advert shown to a member), draw it again with the right one.
+        if (was !== null && was !== state.member) softRefresh();
         const f = state.account.profile?.odds_format;
         const c = state.account.profile?.clock;
         const oddsChanged = (f && f !== oddsFormat) || (c && c !== clockFormat);
@@ -6399,6 +6544,20 @@ async function headerAuth() {
     link.removeAttribute('title');
   }
   link.href = user ? '#/account' : '#/signin';
+  // Signed in, the picture opens the account menu; signed out, it is the
+  // sign-in link it looks like.
+  link.onclick = user ? toggleAccountMenu : null;
+  if (user) { link.setAttribute('aria-haspopup', 'menu'); link.setAttribute('aria-expanded', 'false'); }
+  else { link.removeAttribute('aria-haspopup'); link.removeAttribute('aria-expanded'); closeAccountMenu(); }
+
+  // "Membership" in the menu and the footer is the member's own plan for a
+  // member, and the plans for anyone else.
+  for (const a of document.querySelectorAll('a[data-member-link]')) {
+    const hash = member ? '#/account?tab=membership' : '#/pricing';
+    a.textContent = member ? 'Your membership' : 'Membership';
+    if (a.dataset.hash) { a.dataset.hash = hash; a.setAttribute('href', member ? '/#/account?tab=membership' : '/pricing'); }
+    else a.setAttribute('href', hash);
+  }
 
   // A member's picture wears the accent as a ring: the plan, without a badge.
   if (user) {
