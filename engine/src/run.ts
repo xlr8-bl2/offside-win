@@ -9,6 +9,7 @@ import { whopCheck } from './whopcheck.ts';
 import { geminiCheck } from './geminicheck.ts';
 import { mailSetup } from './mailsetup.ts';
 import { syncCards } from './cards/sync.ts';
+import { runLab } from './lab/run.ts';
 import { trace } from './trace.ts';
 import { fitAllLeagues } from './ratings/fit.ts';
 import { syncTeamShots } from './images/sync.ts';
@@ -160,6 +161,13 @@ const commands: Record<string, () => Promise<unknown>> = {
 
   async 'gemini:check'() {
     return geminiCheck();
+  },
+
+  // The market lab: which probability is most accurate and which selection
+  // rule earns, replayed on the prices we actually saw. See lab/markets.ts.
+  async lab() {
+    requireEnv({ provider: false });
+    await runLab();
   },
 
   // The share card of every match on the board, redrawn when it changes.

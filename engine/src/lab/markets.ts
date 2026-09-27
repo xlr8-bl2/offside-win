@@ -1,0 +1,448 @@
+/**
+ * The market lab: replay the calls we could have made, on the prices we
+ * actually saw.
+ *
+ * Every fixture's bundle is frozen at kick-off with, for each market and line,
+ * our model's probabilities, the de-vigged consensus, the best price on offer
+ * and the margin. With the final score (and the corners and red cards from the
+ * match report) that is a real price history, not a reconstructed one: the
+ * numbers the engine had in front of it when it had to choose.
+ *
+ * The lab answers three questions, in this order, and the engine is changed
+ * only on what they say:
+ *
+ *   1. Which probability is most accurate, market by market: the bookmakers'
+ *      consensus, our model, the data provider's, or a blend? Scored by log
+ *      loss on what happened.
+ *   2. Which selection rule earns, across every market we price, when it is
+ *      tuned on the older half of the history and scored on the newer half it
+ *      never saw?
+ *   3. How does that compare with the rule in production today?
+ */
+
+import { priceAsianHandicap, priceBtts, priceDoubleChance, priceDrawNoBet, priceEuropeanHandicap, priceOverUnder, priceResult, type ScoreMatrix } from '../price.ts';
+import { blendRates, impliedRates, matrixFor, type ImpliedTargets } from '../implied.ts';
+import { settleSelection } from '../settle.ts';
+import { parsePrediction, providerMarkets } from '../provider-model.ts';
+import { MARKET_FAMILY, type MarketCode, type MarketFamily, type Outcome } from '../types.ts';
+
+/* ------------------------------------------------------------------ data */
+
+export interface Snap {
+  market: MarketCode;
+  line: number | null;
+  model: Record<string, number>;
+  book: Record<string, number>;
+  best: Record<string, { odds: number; bookmaker?: string }>;
+  overround: number;
+}
+
+export interface HistRow {
+  id: number;
+  league_id: number;
+  rank: number;
+  kickoff: number;
+  score: [number, number];
+  corners: [number, number] | null;
+  reds: number | null;
+  lambda: [number, number] | null;
+  confidence: number;
+  markets: Snap[];
+  /** The data provider's probabilities, keyed market::line. */
+  provider: Map<string, Map<Outcome, number>> | null;
+}
+
+export const keyOf = (market: string, line: number | null) => `${market}::${line === null ? 'x' : Number(line).toFixed(2)}`;
+
+/**
+ * Double chance is not a partition -- its three outcomes cover the result
+ * twice over -- so de-vigging it as if the implied probabilities should sum to
+ * one halved every one of them: 1X at 1.06 went down as 45% instead of 94%.
+ * Draw-no-bet is the result with the draw taken out. Both are rebuilt from the
+ * result market's own fair prices wherever it was quoted.
+ */
+export function fixBookFair(markets: Snap[]): Snap[] {
+  const r = markets.find((m) => m.market === '1x2' && m.line === null)?.book;
+  if (!r || !(r['HOME']! > 0) || !(r['DRAW']! > 0) || !(r['AWAY']! > 0)) return markets;
+  const H = r['HOME']!, D = r['DRAW']!, A = r['AWAY']!;
+  return markets.map((m) => {
+    if (m.market === 'double_chance') return { ...m, book: { '1X': H + D, '12': H + A, 'X2': D + A } };
+    if (m.market === 'draw_no_bet') return { ...m, book: { HOME: H / (H + A), AWAY: A / (H + A) } };
+    return m;
+  });
+}
+
+function providerMap(raw: unknown): Map<string, Map<Outcome, number>> | null {
+  const p = parsePrediction(raw);
+  if (!p) return null;
+  const out = new Map<string, Map<Outcome, number>>();
+  for (const m of providerMarkets(p)) out.set(keyOf(m.market, m.line), m.probs);
+  return out.size ? out : null;
+}
+
+/** From the public fixture JSON or a database row's bundle; both carry the same fields. */
+export function toHistRow(r: Record<string, any>): HistRow | null {
+  const score = Array.isArray(r.score) ? r.score : null;
+  const markets: Snap[] = Array.isArray(r.markets) ? r.markets : [];
+  if (!score || score.length !== 2 || !markets.length) return null;
+  const c = Array.isArray(r.corners) && r.corners.every((x: unknown) => typeof x === 'number') ? r.corners : null;
+  const lam = Array.isArray(r.lambda) && r.lambda.every((x: unknown) => typeof x === 'number' && x > 0) ? r.lambda : null;
+  return {
+    id: Number(r.id),
+    league_id: Number(r.league_id),
+    rank: Number(r.rank ?? 6),
+    kickoff: Number(r.kickoff),
+    score: [Number(score[0]), Number(score[1])],
+    corners: c ? [Number(c[0]), Number(c[1])] : null,
+    reds: typeof r.reds === 'number' ? r.reds : null,
+    lambda: lam ? [Number(lam[0]), Number(lam[1])] : null,
+    confidence: Number(r.confidence ?? 0),
+    markets: fixBookFair(markets.filter((m) => m && m.market && m.book && m.best)),
+    provider: providerMap(r.provider),
+  };
+}
+
+/* --------------------------------------------------------- probabilities */
+
+/** One (market, line, outcome) the engine could call, with every source's view of it. */
+export interface Option {
+  market: MarketCode;
+  family: MarketFamily;
+  line: number | null;
+  outcome: Outcome;
+  odds: number;
+  book: number;
+  model: number | null;
+  provider: number | null;
+  /** From the blended score matrix, for goals markets. */
+  blend: number | null;
+  /** Probability the stake comes back (draw-no-bet draw, whole handicap lines). */
+  push: number;
+}
+
+const GOALS_MARKETS = new Set<MarketCode>(['1x2', 'double_chance', 'draw_no_bet', 'btts', 'over_under_05', 'over_under_15', 'over_under_25', 'over_under_35', 'asian_handicap', 'european_handicap']);
+
+export function targetsOf(row: HistRow): ImpliedTargets {
+  const t: ImpliedTargets = { over: {} };
+  for (const m of row.markets) {
+    if (m.market === '1x2' && m.book['HOME'] && m.book['DRAW'] && m.book['AWAY']) {
+      t.result = { HOME: m.book['HOME'], DRAW: m.book['DRAW'], AWAY: m.book['AWAY'] };
+    } else if (/^over_under_\d\d$/.test(m.market) && typeof m.book['over'] === 'number') {
+      const line = m.line ?? Number(m.market.slice(-2)) / 10;
+      // The half-goal line is near-certain and says little about the rates.
+      if (line >= 1.5) t.over![String(line)] = m.book['over'];
+    } else if (m.market === 'btts' && typeof m.book['yes'] === 'number') {
+      t.btts = m.book['yes'];
+    }
+  }
+  return t;
+}
+
+function pricesFromMatrix(mx: ScoreMatrix, market: MarketCode, line: number | null): { probs: Map<Outcome, number>; push: Map<Outcome, number> } | null {
+  const none = new Map<Outcome, number>();
+  switch (market) {
+    case '1x2': return { probs: priceResult(mx), push: none };
+    case 'double_chance': return { probs: priceDoubleChance(mx), push: none };
+    case 'draw_no_bet': {
+      const draw = priceResult(mx).get('DRAW') ?? 0;
+      return { probs: priceDrawNoBet(mx), push: new Map([['HOME', draw], ['AWAY', draw]]) };
+    }
+    case 'btts': return { probs: priceBtts(mx), push: none };
+    case 'over_under_05': case 'over_under_15': case 'over_under_25': case 'over_under_35':
+      return { probs: priceOverUnder(mx, line ?? Number(market.slice(-2)) / 10), push: none };
+    case 'european_handicap': return line === null ? null : { probs: priceEuropeanHandicap(mx, line), push: none };
+    case 'asian_handicap': {
+      if (line === null) return null;
+      const a = priceAsianHandicap(mx, line);
+      return { probs: a.effective, push: a.push };
+    }
+    default: return null;
+  }
+}
+
+/**
+ * Every option on a fixture, with the book's, the model's, the provider's and
+ * the blend's probability of it. `modelWeight` is how far the blend moves from
+ * the market's rates toward our model's.
+ */
+export function optionsFor(row: HistRow, modelWeight: number): Option[] {
+  const implied = impliedRates(targetsOf(row));
+  const blendMx = implied
+    ? matrixFor(blendRates(implied, row.lambda ? { home: row.lambda[0], away: row.lambda[1] } : null, modelWeight))
+    : null;
+  const out: Option[] = [];
+  for (const m of row.markets) {
+    const fromMx = blendMx && GOALS_MARKETS.has(m.market) ? pricesFromMatrix(blendMx, m.market, m.line) : null;
+    const prov = row.provider?.get(keyOf(m.market, m.line)) ?? null;
+    for (const [o, q] of Object.entries(m.best)) {
+      const odds = Number(q?.odds);
+      const book = m.book[o];
+      if (!(odds > 1) || !(typeof book === 'number' && book > 0 && book < 1)) continue;
+      out.push({
+        market: m.market,
+        family: MARKET_FAMILY[m.market],
+        line: m.line,
+        outcome: o as Outcome,
+        odds,
+        book,
+        model: typeof m.model[o] === 'number' ? m.model[o]! : null,
+        provider: prov?.get(o as Outcome) ?? null,
+        blend: fromMx?.probs.get(o as Outcome) ?? null,
+        push: fromMx?.push.get(o as Outcome) ?? 0,
+      });
+    }
+  }
+  return out;
+}
+
+/** The graded result of an option against what happened, on a one-unit stake. */
+export function grade(row: HistRow, o: { market: MarketCode; outcome: Outcome; line: number | null; odds: number }) {
+  if ((o.market === 'total_corners' || o.market === 'corners_1x2') && !row.corners) return null;
+  if ((o.market === 'total_red_cards' || o.market === 'red_card') && row.reds === null) return null;
+  return settleSelection(o.market, o.outcome, o.line, o.odds, {
+    homeGoals: row.score[0],
+    awayGoals: row.score[1],
+    homeCorners: row.corners?.[0] ?? null,
+    awayCorners: row.corners?.[1] ?? null,
+    reds: row.reds,
+  });
+}
+
+/* --------------------------------------------------------------- scoring */
+
+export interface Score { n: number; logLoss: number; brier: number }
+
+const clampP = (p: number) => Math.min(1 - 1e-6, Math.max(1e-6, p));
+
+/**
+ * Log loss and Brier per family for each source, over every outcome that
+ * resolved cleanly (pushes and half results say nothing about a probability).
+ * Only options every compared source has a view on are counted, so the sources
+ * are scored on identical questions.
+ */
+export function scoreSources(rows: HistRow[], modelWeight: number) {
+  type Src = 'book' | 'model' | 'provider' | 'blend';
+  const acc = new Map<string, { n: number; ll: number; br: number }>();
+  const add = (fam: string, src: Src, p: number, y: number) => {
+    const k = `${fam}|${src}`;
+    const a = acc.get(k) ?? { n: 0, ll: 0, br: 0 };
+    a.n++;
+    a.ll += -(y * Math.log(clampP(p)) + (1 - y) * Math.log(clampP(1 - p)));
+    a.br += (p - y) ** 2;
+    acc.set(k, a);
+  };
+  for (const row of rows) {
+    for (const o of optionsFor(row, modelWeight)) {
+      const g = grade(row, o);
+      if (!g || (g.result !== 'WON' && g.result !== 'LOST')) continue;
+      // Handicaps and draw-no-bet carry the conditional probability, which is
+      // not the chance of a win; score them only where no push was possible.
+      if (o.push > 1e-9) continue;
+      const y = g.result === 'WON' ? 1 : 0;
+      const fam = o.family;
+      add(fam, 'book', o.book, y);
+      if (o.model !== null) add(fam, 'model', o.model, y);
+      if (o.provider !== null) add(fam, 'provider', o.provider, y);
+      if (o.blend !== null) add(fam, 'blend', o.blend, y);
+    }
+  }
+  const out: Record<string, Record<string, Score>> = {};
+  for (const [k, a] of acc) {
+    const [fam, src] = k.split('|') as [string, string];
+    out[fam] ??= {};
+    out[fam]![src] = { n: a.n, logLoss: a.ll / a.n, brier: a.br / a.n };
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------ selection */
+
+export interface Policy {
+  name: string;
+  /** Which probability the policy believes. */
+  source: 'book' | 'model' | 'provider' | 'blend' | 'mix';
+  modelWeight: number;
+  minProb: number;
+  maxProb: number;
+  minOdds: number;
+  maxOdds: number;
+  /** Expected return per unit staked, at the best price, before a call is made. */
+  minEv: number;
+  /**
+   * A best price this far above the consensus's fair odds is treated as a
+   * stale or erroneous quote rather than an opportunity.
+   */
+  maxGap: number;
+  /** How the one call per fixture is chosen among those that qualify. */
+  rankBy: 'ev' | 'prob' | 'evprob';
+  families?: MarketFamily[] | null;
+}
+
+export interface Pick { row: HistRow; option: Option; p: number; ev: number }
+
+/** The probability a policy believes for an option, or null when it has none. */
+export function probOf(policy: Policy, o: Option): number | null {
+  switch (policy.source) {
+    case 'book': return o.book;
+    case 'model': return o.model;
+    case 'provider': return o.provider;
+    case 'blend': return o.blend ?? o.book;
+    // The blend where there is one, and the book's own view elsewhere, with the
+    // provider's opinion averaged in where it has one.
+    case 'mix': {
+      const base = o.blend ?? o.book;
+      return o.provider !== null ? 0.8 * base + 0.2 * o.provider : base;
+    }
+  }
+}
+
+export function evOf(p: number, o: Option): number {
+  // Expected profit per unit: the push hands the stake back.
+  return (1 - o.push) * (p * o.odds - 1);
+}
+
+export function choose(policy: Policy, row: HistRow, options?: Option[]): Pick | null {
+  const opts = options ?? optionsFor(row, policy.modelWeight);
+  let best: Pick | null = null;
+  let bestScore = -Infinity;
+  for (const o of opts) {
+    if (policy.families && !policy.families.includes(o.family)) continue;
+    if (o.odds < policy.minOdds || o.odds > policy.maxOdds) continue;
+    // A price far beyond what the consensus thinks is fair is almost always a
+    // book that has not updated, not an opportunity anyone could take.
+    if (o.odds * o.book > policy.maxGap) continue;
+    const p = probOf(policy, o);
+    if (p === null || p < policy.minProb || p > policy.maxProb) continue;
+    const ev = evOf(p, o);
+    if (ev < policy.minEv) continue;
+    const score = policy.rankBy === 'ev' ? ev : policy.rankBy === 'prob' ? p : ev * Math.sqrt(p);
+    if (score > bestScore) {
+      bestScore = score;
+      best = { row, option: o, p, ev };
+    }
+  }
+  return best;
+}
+
+export interface SimResult {
+  policy: string;
+  n: number;
+  won: number;
+  lost: number;
+  staked: number;
+  pnl: number;
+  roi: number;
+  hitRate: number;
+  avgOdds: number;
+  /** Largest peak-to-trough fall in units. */
+  drawdown: number;
+  byFamily: Record<string, { n: number; pnl: number; roi: number }>;
+  byMarket: Record<string, { n: number; pnl: number }>;
+}
+
+export function simulate(policy: Policy, rows: HistRow[], cache?: Map<number, Option[]>): SimResult {
+  let n = 0, won = 0, lost = 0, pnl = 0, odds = 0, peak = 0, dd = 0;
+  const byFamily: SimResult['byFamily'] = {};
+  const byMarket: SimResult['byMarket'] = {};
+  for (const row of [...rows].sort((a, b) => a.kickoff - b.kickoff)) {
+    const opts = cache?.get(row.id) ?? optionsFor(row, policy.modelWeight);
+    const pick = choose(policy, row, opts);
+    if (!pick) continue;
+    const g = grade(row, pick.option);
+    if (!g || g.result === 'VOID') continue;
+    n++;
+    pnl += g.pnl;
+    odds += pick.option.odds;
+    if (g.result === 'WON' || g.result === 'HALF_WON') won++;
+    if (g.result === 'LOST' || g.result === 'HALF_LOST') lost++;
+    peak = Math.max(peak, pnl);
+    dd = Math.max(dd, peak - pnl);
+    const f = (byFamily[pick.option.family] ??= { n: 0, pnl: 0, roi: 0 });
+    f.n++;
+    f.pnl += g.pnl;
+    const mk = `${pick.option.market}${pick.option.line === null ? '' : ` ${pick.option.line}`} ${pick.option.outcome}`;
+    const m = (byMarket[mk] ??= { n: 0, pnl: 0 });
+    m.n++;
+    m.pnl += g.pnl;
+  }
+  for (const f of Object.values(byFamily)) f.roi = f.n ? f.pnl / f.n : 0;
+  return {
+    policy: policy.name,
+    n, won, lost, staked: n, pnl,
+    roi: n ? pnl / n : 0,
+    hitRate: n ? won / n : 0,
+    avgOdds: n ? odds / n : 0,
+    drawdown: dd,
+    byFamily,
+    byMarket,
+  };
+}
+
+/** Today's rule: the provider's most likely outcome at 80% or more, at 1.13 or longer. */
+export const CURRENT: Policy = {
+  name: 'current (most likely, provider, 80%+)',
+  source: 'provider', modelWeight: 0, minProb: 0.8, maxProb: 0.95, minOdds: 1.13, maxOdds: 100,
+  minEv: -1, maxGap: 99, rankBy: 'prob',
+};
+
+export function policyGrid(): Policy[] {
+  const out: Policy[] = [];
+  for (const source of ['book', 'blend', 'mix'] as const) {
+    for (const modelWeight of source === 'book' ? [0] : [0, 0.15, 0.3, 0.5]) {
+      for (const minProb of [0.45, 0.55, 0.65]) {
+        for (const minEv of [0, 0.02, 0.04, 0.07]) {
+          for (const maxGap of [1.06, 1.12]) {
+            for (const rankBy of ['ev', 'evprob'] as const) {
+              out.push({
+                name: `${source} w=${modelWeight} p>=${minProb} ev>=${minEv} gap<=${maxGap} ${rankBy}`,
+                source, modelWeight, minProb, maxProb: 0.92, minOdds: 1.3, maxOdds: 4, minEv, maxGap, rankBy,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Tune on the older part of the history, report on the newer part the tuning
+ * never saw. A rule is only eligible if it made enough calls in training to
+ * mean something, and it is ranked on a lower confidence bound of its return
+ * rather than the return itself, which is what stops a lucky dozen from
+ * winning the grid.
+ */
+export function walkForward(rows: HistRow[], trainShare = 0.6, minCalls = 40) {
+  const sorted = [...rows].sort((a, b) => a.kickoff - b.kickoff);
+  const cut = Math.floor(sorted.length * trainShare);
+  const train = sorted.slice(0, cut);
+  const test = sorted.slice(cut);
+  const caches = new Map<number, Map<number, Option[]>>();
+  const cacheFor = (w: number) => {
+    let c = caches.get(w);
+    if (!c) {
+      c = new Map(sorted.map((r) => [r.id, optionsFor(r, w)]));
+      caches.set(w, c);
+    }
+    return c;
+  };
+  const scored = policyGrid().map((p) => {
+    const r = simulate(p, train, cacheFor(p.modelWeight));
+    // Return minus one standard error of it, per call.
+    const se = r.n > 1 ? Math.sqrt(Math.max(1e-9, r.avgOdds - 1) / r.n) : 1;
+    return { p, r, lcb: r.n >= minCalls ? r.roi - se : -Infinity };
+  }).sort((a, b) => b.lcb - a.lcb);
+  const top = scored.slice(0, 5);
+  return {
+    trainRows: train.length,
+    testRows: test.length,
+    current: { train: simulate(CURRENT, train), test: simulate(CURRENT, test) },
+    best: top.map(({ p, r, lcb }) => ({
+      policy: p,
+      train: r,
+      lcb,
+      test: simulate(p, test, cacheFor(p.modelWeight)),
+    })),
+  };
+}
