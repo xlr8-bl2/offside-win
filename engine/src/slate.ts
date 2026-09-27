@@ -1076,10 +1076,44 @@ export async function runSlate(): Promise<SlateReport> {
   return report;
 }
 
-/** Drop fixtures that have fallen out of the board window. */
+/**
+ * Drop fixtures that have fallen out of the board window, keeping the market
+ * snapshot of every finished one first (see market_snapshot in the schema):
+ * the prices, our probabilities, the provider's and the result are the lab's
+ * whole history, and this used to delete them every week.
+ */
 export async function pruneBoard(): Promise<void> {
   const cutoff = Math.floor(Date.now() / 1000) - 7 * 86400;
+  await archiveSnapshots(cutoff);
   await dbSelect('DELETE FROM fixture WHERE kickoff < ?', [cutoff]);
+}
+
+/** Copy finished fixtures' snapshots older than `before` into market_snapshot. */
+export async function archiveSnapshots(before: number): Promise<void> {
+  if (config.dbBackend !== 'postgres') return;
+  await dbExec(
+    `INSERT INTO market_snapshot (fixture_id, league_id, kickoff, home_goals, away_goals, snapshot, archived_at)
+     SELECT f.id, f.league_id, f.kickoff, f.home_goals, f.away_goals,
+            jsonb_build_object(
+              'rank', f.rank,
+              'markets', b.j->'markets',
+              'lambda', jsonb_build_array(b.j->'lambda_home', b.j->'lambda_away'),
+              'confidence', b.j->'confidence',
+              'provider', b.j->'external'->'bsd_prediction',
+              'corners', CASE WHEN r.j->'stats'->'home'->>'corners' IS NOT NULL AND r.j->'stats'->'away'->>'corners' IS NOT NULL
+                              THEN jsonb_build_array((r.j->'stats'->'home'->>'corners')::int, (r.j->'stats'->'away'->>'corners')::int) END,
+              'reds', CASE WHEN r.j->'stats'->'home' IS NOT NULL
+                           THEN coalesce((r.j->'stats'->'home'->>'red')::int, 0) + coalesce((r.j->'stats'->'away'->>'red')::int, 0) END
+            )::text,
+            floor(extract(epoch FROM now()))::bigint
+       FROM fixture f
+       CROSS JOIN LATERAL (SELECT try_json(f.bundle_json)::jsonb AS j) b
+       CROSS JOIN LATERAL (SELECT try_json(f.report_json)::jsonb AS j) r
+      WHERE f.kickoff < $1 AND f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
+        AND jsonb_typeof(b.j->'markets') = 'array'
+     ON CONFLICT (fixture_id) DO NOTHING`,
+    [before],
+  );
 }
 
 

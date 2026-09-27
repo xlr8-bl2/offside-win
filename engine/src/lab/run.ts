@@ -65,7 +65,28 @@ export async function loadHistory(): Promise<HistRow[]> {
     }
     if (page.length < 400) break;
   }
-  return out;
+  // And everything the board has since let go of (market_snapshot, filled by
+  // pruneBoard), which is what lets the history outgrow the board's week.
+  const seen = new Set(out.map((r) => r.id));
+  let from = 0;
+  for (;;) {
+    const page = await select<{ fixture_id: number; league_id: number; kickoff: number; home_goals: number; away_goals: number; snapshot: string }>(
+      `SELECT fixture_id, league_id, kickoff, home_goals, away_goals, snapshot
+         FROM market_snapshot WHERE kickoff > $1 ORDER BY kickoff LIMIT 1000`,
+      [from],
+    );
+    if (!page.length) break;
+    for (const r of page) {
+      from = Math.max(from, Number(r.kickoff));
+      if (seen.has(Number(r.fixture_id))) continue;
+      let s: Record<string, any>;
+      try { s = JSON.parse(r.snapshot); } catch { continue; }
+      const h = toHistRow({ ...s, id: r.fixture_id, league_id: r.league_id, kickoff: r.kickoff, score: [r.home_goals, r.away_goals] });
+      if (h) out.push(h);
+    }
+    if (page.length < 1000) break;
+  }
+  return out.sort((a, b) => a.kickoff - b.kickoff);
 }
 
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
