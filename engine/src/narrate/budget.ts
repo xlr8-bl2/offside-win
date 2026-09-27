@@ -65,6 +65,8 @@ export async function keyId(apiKey: string): Promise<string> {
 
 /** How long a quota refusal pauses a model. */
 export const PAUSE = 2 * 3600;
+/** How long a model that answered "busy" is left alone. */
+export const BUSY_PAUSE = 10 * 60;
 
 export interface ModelState {
   used: number;
@@ -122,8 +124,16 @@ export function budgeted(
             m.pausedUntil = now + PAUSE;
             continue;
           }
-          if (/gemini 404/.test(err instanceof Error ? err.message : '')) {
+          const msg = err instanceof Error ? err.message : '';
+          if (/gemini 404/.test(msg)) {
             m.gone = true;
+            continue;
+          }
+          // Google's "busy" (503) is about that model at that moment. The next
+          // model takes this request; this one is asked again in ten minutes.
+          // It used to end the writing for the whole run.
+          if (/gemini is busy/.test(msg)) {
+            m.pausedUntil = now + BUSY_PAUSE;
             continue;
           }
           throw err;
