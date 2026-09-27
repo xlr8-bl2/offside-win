@@ -308,6 +308,8 @@ export interface Policy {
   noQuarters?: boolean;
   /** The biggest handicap line a call may use, either way; -2.5 is a call on a rout. */
   maxHandicap?: number;
+  /** A higher floor for some league ranks: rank -> minimum probability. */
+  rankFloor?: Record<number, number>;
   /** Markets (bucketOf) and league ranks this rule leaves alone. */
   excludeBuckets?: string[];
   excludeRanks?: number[];
@@ -397,7 +399,7 @@ export function ranked(policy: Policy, row: HistRow, options?: Option[]): Pick[]
     // book that has not updated, not an opportunity anyone could take.
     if (o.odds * o.book > policy.maxGap) continue;
     const p = probOf(policy, o);
-    if (p === null || p < policy.minProb || p > policy.maxProb) continue;
+    if (p === null || p < Math.max(policy.minProb, policy.rankFloor?.[row.rank] ?? 0) || p > policy.maxProb) continue;
     const ev = evOf(p, o);
     if (ev < policy.minEv) continue;
     const score = policy.rankBy === 'ev' ? ev

@@ -266,6 +266,9 @@ export function runTune(rows: HistRow[]): Record<string, unknown> {
     ['consensus 72%+, within 1% of fair', CONSENSUS72],
     ['production (78%+, at or above the sharp book\'s fair price)', PROD],
     ['production at 80%+', STRICT],
+    ['production, rank 3 at 85%+', { ...PROD, name: 'rank3 85', rankFloor: { 3: 0.85 } }],
+    ['production, rank 3 at 82%+', { ...PROD, name: 'rank3 82', rankFloor: { 3: 0.82 } }],
+    ['production, rank 3 left out', { ...PROD, name: 'rank3 out', excludeRanks: [3] }],
   ];
   const report: Record<string, unknown> = { split: { a: a.length, b: b.length, c: c.length }, stack };
   for (const [label, p] of refs) {
