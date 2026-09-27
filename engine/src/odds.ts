@@ -69,10 +69,12 @@ function isOutcome(v: string): v is Outcome {
   return ['HOME', 'DRAW', 'AWAY', '1X', '12', 'X2', 'over', 'under', 'yes', 'no'].includes(v);
 }
 
-export async function fetchQuotes(eventId: number): Promise<Quote[]> {
+export async function fetchQuotes(eventId: number, since?: string): Promise<Quote[]> {
   const raw = await bsdList<Record<string, unknown>>(
     '/api/v2/odds/',
-    { event_id: eventId },
+    // `since` reaches past the feed's default window, for matches already
+    // played (the lab's backfill); the slate never needs it.
+    since ? { event_id: eventId, updated_after: since } : { event_id: eventId },
     { limit: 200, max: 4000 },
   );
 
@@ -243,7 +245,45 @@ export function buildBookMarkets(quotes: Quote[]): BookMarket[] {
     });
   }
 
-  return out;
+  return deriveFromResult(out);
+}
+
+/**
+ * Double chance is the result market's outcomes taken two at a time, so its
+ * implied probabilities sum to about two, not one. De-vigging it like a
+ * partition halved every probability -- 1X at 1.06 went down as 45% rather
+ * than 94% -- and every comparison against the book on that market was wrong
+ * by a factor of two. Its fair prices are the result market's, added in pairs;
+ * its margin is the implied total over two. Draw-no-bet likewise comes from the
+ * result market with the draw taken out, so the two agree with each other.
+ */
+export function deriveFromResult(markets: BookMarket[]): BookMarket[] {
+  const r = markets.find((m) => m.market === '1x2' && m.line === null);
+  const H = r?.fair.get('HOME');
+  const D = r?.fair.get('DRAW');
+  const A = r?.fair.get('AWAY');
+  for (const m of markets) {
+    if (m.market === 'double_chance') {
+      const implied = ['1X', '12', 'X2'].map((o) => m.best.get(o as Outcome)?.odds).filter((x): x is number => !!x);
+      if (implied.length === 3) m.overround = implied.reduce((a, o) => a + 1 / o, 0) / 2;
+      if (H !== undefined && D !== undefined && A !== undefined) {
+        m.fair = new Map<Outcome, number>([['1X', H + D], ['12', H + A], ['X2', D + A]]);
+      } else {
+        // No result market: the pairs still sum to two, so halve the margin
+        // rather than the probabilities.
+        const imp = new Map<Outcome, number>();
+        for (const o of ['1X', '12', 'X2'] as Outcome[]) {
+          const q = m.best.get(o)?.odds;
+          if (q) imp.set(o, 1 / q);
+        }
+        const tot = [...imp.values()].reduce((a, b) => a + b, 0);
+        if (imp.size === 3 && tot > 0) m.fair = new Map([...imp].map(([o, v]) => [o, (2 * v) / tot]));
+      }
+    } else if (m.market === 'draw_no_bet' && H !== undefined && A !== undefined && H + A > 0) {
+      m.fair = new Map<Outcome, number>([['HOME', H / (H + A)], ['AWAY', A / (H + A)]]);
+    }
+  }
+  return markets;
 }
 
 /** Prices from one named book, for the sharp-reference comparison in §7.1. */

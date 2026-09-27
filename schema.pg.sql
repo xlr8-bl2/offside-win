@@ -278,6 +278,23 @@ ALTER TABLE fixture ADD COLUMN IF NOT EXISTS report_json text;
 ALTER TABLE fixture ADD COLUMN IF NOT EXISTS home_team_id bigint;
 ALTER TABLE fixture ADD COLUMN IF NOT EXISTS away_team_id bigint;
 
+-- Every finished fixture's market snapshot, kept after the fixture itself
+-- leaves the board. The fixture table holds a week; the bundle inside it is
+-- the only record of the prices the engine saw and what it made of them, and
+-- deleting it weekly threw away the one dataset that can say which markets and
+-- which selection rules actually earn (engine/src/lab). pruneBoard copies a
+-- fixture here before deleting it. Private: read by the lab, nothing else.
+CREATE TABLE IF NOT EXISTS market_snapshot (
+  fixture_id   bigint PRIMARY KEY,
+  league_id    bigint NOT NULL,
+  kickoff      bigint NOT NULL,
+  home_goals   integer NOT NULL,
+  away_goals   integer NOT NULL,
+  snapshot     text NOT NULL,
+  archived_at  bigint NOT NULL
+);
+CREATE INDEX IF NOT EXISTS market_snapshot_kickoff ON market_snapshot(kickoff);
+
 CREATE TABLE IF NOT EXISTS pick (
   id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   fixture_id   bigint NOT NULL,
@@ -1622,6 +1639,10 @@ REVOKE ALL ON slip FROM anon, authenticated;
 ALTER TABLE entitlement ENABLE ROW LEVEL SECURITY;
 -- Who has paid is nobody's business but theirs; read through get_account.
 REVOKE ALL ON entitlement FROM anon, authenticated;
+
+ALTER TABLE market_snapshot ENABLE ROW LEVEL SECURITY;
+-- The lab's history: service role only.
+REVOKE ALL ON market_snapshot FROM anon, authenticated;
 
 ALTER TABLE purchase_consent ENABLE ROW LEVEL SECURITY;
 -- Service role only, like the grant ledger: nobody reads another's consent,

@@ -10,6 +10,7 @@ import { geminiCheck } from './geminicheck.ts';
 import { mailSetup } from './mailsetup.ts';
 import { syncCards } from './cards/sync.ts';
 import { probeHistoricOdds, runLab } from './lab/run.ts';
+import { backfillSnapshots } from './lab/backfill.ts';
 import { trace } from './trace.ts';
 import { fitAllLeagues } from './ratings/fit.ts';
 import { syncTeamShots } from './images/sync.ts';
@@ -168,6 +169,12 @@ const commands: Record<string, () => Promise<unknown>> = {
   async lab() {
     requireEnv({ provider: false });
     await runLab();
+  },
+
+  async 'lab:backfill'() {
+    requireEnv();
+    await ensureSchema();
+    await backfillSnapshots();
   },
 
   async 'lab:odds'() {
