@@ -6282,10 +6282,6 @@ function viewLegal(which) {
     ${choice}
   </div>`;
   for (const b of app.querySelectorAll('[data-consent-set]')) b.onclick = () => applyConsent(b.dataset.consentSet);
-  // Twenty-odd sections is a long list to scroll past on a phone before the
-  // first word: there it starts closed.
-  const toc = app.querySelector('.legal-toc');
-  if (toc && matchMedia('(max-width: 900px)').matches) toc.open = false;
   // Contents links scroll rather than change the address, which the router
   // would read as a page of its own.
   for (const a of app.querySelectorAll('[data-jump]')) {

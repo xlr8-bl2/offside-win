@@ -40,11 +40,11 @@ export const TERMS_VERSION = '2026-09-27';
 
 export const LEGAL = {
   privacy: {
-    title: 'Privacy policy',
-    kicker: 'what we know about you',
-    standfirst: `What Offside.win holds about you, why it holds it, who else touches it, how long it
-      stays, and how to make us hand it over or delete it. Written to be read, because a privacy
-      policy nobody can follow protects nobody.`,
+    title: 'Privacy Policy',
+    version: '2.0',
+    standfirst: `This Privacy Policy explains what personal data Offside.win collects, why it is
+      collected, the legal basis for using it, who it is shared with, how long it is kept, and the
+      rights you have in relation to it. Please read it together with the Terms of Use.`,
     summary: [
       'You can read every free page without telling us anything.',
       'An account holds your email address and the settings you choose. A membership adds a record of what you bought and when.',
@@ -352,12 +352,11 @@ export const LEGAL = {
          treat it as a no without asking.</p>`,
   },
   terms: {
-    title: 'Terms of use',
-    kicker: 'the rules of the game',
-    standfirst: `The agreement between you and Offside.win: what the site is and is not, what a
-      membership buys, how paying and cancelling work, what you may do with what you read, and
-      what happens when something goes wrong. Nothing here takes away a right the law gives you
-      as a consumer.`,
+    title: 'Terms of Use',
+    version: '2.0',
+    standfirst: `These Terms of Use govern your use of offside.win and any membership you buy from
+      Offside.win. Please read them carefully before using the site or making a purchase. Nothing in
+      them affects your statutory rights as a consumer.`,
     summary: [
       'You must be 18 or over. Offside.win gives opinions about football matches. It is not a bookmaker, it takes no bets, and nothing here is advice to bet.',
       'No call is a promise. The whole record is public, the losses included, and following the calls can lose you money.',
@@ -791,55 +790,57 @@ export const LEGAL = {
 };
 
 /**
- * A legal page as an article: a kicker, the title, a standfirst, the date it
- * took effect and how long it takes to read, the plain-English summary in a
- * box of its own, then numbered sections with a contents list beside them.
- *
- * The numbers are real references (the terms cite "section 9"), so they are
- * the one decoration that earns its place. Pages still written as a single
- * body (cookies, contact) come out as plain prose under the same head.
+ * A legal page, set as a formal document rather than as a web page: a white
+ * sheet, serif text, a header with the version and the date it took effect,
+ * a plain contents list, numbered clauses (1.1, 1.2) with lettered points
+ * ((a), (b)), a summary marked as not forming part of the terms, and an end
+ * line. The clause numbers are added by the stylesheet, from the order of
+ * the sections and paragraphs, so the text itself stays plain.
  *
  * Shared by the app and scripts/legal-pages.mjs so /terms and #/legal/terms
- * are one page. Contents links carry data-jump: in the app a hash link would
- * be read as a route, so the app scrolls instead; on the static page the
- * plain #anchor works as it is.
+ * are one document. Contents links carry data-jump: in the app a hash link
+ * would be read as a route, so the app scrolls instead; on the static page
+ * the plain #anchor works as it is.
  */
 export function legalHTML(which) {
   const page = LEGAL[which];
   if (!page) return '';
-  const text = page.sections ? page.sections.map((s) => s.body).join(' ') : page.body;
-  const words = text.replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
-  const minutes = Math.max(1, Math.round(words / 230));
+  const meta = [
+    page.version ? ['Version', page.version] : null,
+    ['Effective', UPDATED],
+    ['Contact', `<a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>`],
+  ].filter(Boolean);
   const head = `
-  <header class="legal-head">
-    ${page.kicker ? `<p class="hand legal-kicker">${page.kicker}</p>` : ''}
-    <h1 class="display xl">${page.title}</h1>
-    ${page.standfirst ? `<p class="legal-standfirst">${page.standfirst}</p>` : ''}
-    <p class="legal-meta"><span>In force from ${UPDATED}</span><span>About ${minutes} minute${minutes === 1 ? '' : 's'} to read</span>${
-      page.sections ? `<span>${page.sections.length} sections</span>` : ''}</p>
+  <header class="doc-head">
+    <p class="doc-issuer">Offside.win</p>
+    <h1 class="doc-title">${page.title}</h1>
+    <dl class="doc-meta">${meta.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>
   </header>`;
-  if (!page.sections) return `<article class="legal legal-plain">${head}<div class="prose legal-text">${page.body}</div></article>`;
+  const end = `<p class="doc-end">End of document. ${page.title}, ${page.version ? `version ${page.version}, ` : ''}effective ${UPDATED}.</p>`;
+  if (!page.sections) {
+    return `<article class="doc doc-plain">${head}<div class="doc-body doc-free">${page.body}</div>${end}</article>`;
+  }
   return `
-<article class="legal">
+<article class="doc">
   ${head}
+  ${page.standfirst ? `<p class="doc-preamble">${page.standfirst}</p>` : ''}
   ${page.summary ? `
-  <aside class="legal-short" aria-labelledby="legal-short-h">
-    <h2 id="legal-short-h">In short</h2>
+  <section class="doc-summary" aria-labelledby="doc-summary-h">
+    <h2 id="doc-summary-h">Summary of key points</h2>
+    <p class="doc-note">This summary is provided for convenience only and does not form part of this document. The full text below applies.</p>
     <ul>${page.summary.map((x) => `<li>${x}</li>`).join('')}</ul>
-    <p class="legal-short-note">A guide to finding your way, not a replacement: the full text below is what applies.</p>
-  </aside>` : ''}
-  <div class="legal-body">
-    <details class="legal-toc" open>
-      <summary>Contents</summary>
-      <ol>${page.sections.map((s, i) => `<li><a href="#s-${s.id}" data-jump="s-${s.id}"><span>${i + 1}</span>${s.title}</a></li>`).join('')}</ol>
-    </details>
-    <div class="legal-text prose">
-      ${page.sections.map((s, i) => `
-      <section class="legal-sec" id="s-${s.id}" aria-labelledby="h-${s.id}">
-        <h2 id="h-${s.id}"><span class="legal-no" aria-hidden="true">${i + 1}</span><span class="visually-hidden">Section ${i + 1}: </span>${s.title}</h2>
-        ${s.body}
-      </section>`).join('')}
-    </div>
+  </section>` : ''}
+  <nav class="doc-toc" aria-labelledby="doc-toc-h">
+    <h2 id="doc-toc-h">Contents</h2>
+    <ol>${page.sections.map((s, i) => `<li><a href="#s-${s.id}" data-jump="s-${s.id}"><span>${i + 1}.</span> ${s.title}</a></li>`).join('')}</ol>
+  </nav>
+  <div class="doc-body">
+    ${page.sections.map((s, i) => `
+    <section class="doc-sec" id="s-${s.id}" aria-labelledby="h-${s.id}">
+      <h2 id="h-${s.id}"><span class="doc-no">${i + 1}.</span> ${s.title}</h2>
+      ${s.body}
+    </section>`).join('')}
   </div>
+  ${end}
 </article>`;
 }
