@@ -583,6 +583,10 @@ ALTER TABLE profile ADD COLUMN IF NOT EXISTS avatar_color text;
 ALTER TABLE profile ADD COLUMN IF NOT EXISTS club_id bigint;
 ALTER TABLE profile ADD COLUMN IF NOT EXISTS club_name text;
 ALTER TABLE profile ADD COLUMN IF NOT EXISTS clock text NOT NULL DEFAULT '24';
+-- A handle the reader chooses: lower-case letters, digits and underscores,
+-- three to twenty of them, one per person whatever the capitals.
+ALTER TABLE profile ADD COLUMN IF NOT EXISTS username text;
+CREATE UNIQUE INDEX IF NOT EXISTS profile_username ON profile (lower(username)) WHERE username IS NOT NULL;
 
 -- The teams and competitions a reader follows. The label is kept so the
 -- account page can list a follow without a lookup, and so a team that drops
@@ -916,7 +920,8 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
            ), '[]'::json),
            'profile', (SELECT json_build_object('display_name', display_name, 'odds_format', odds_format,
                                                 'avatar_style', avatar_style, 'avatar_color', avatar_color,
-                                                'club_id', club_id, 'club_name', club_name, 'clock', clock)
+                                                'club_id', club_id, 'club_name', club_name, 'clock', clock,
+                                                'username', username)
                        FROM profile WHERE user_id = auth.uid()),
            'follows', coalesce((
              SELECT json_agg(json_build_object('kind', kind, 'id', ref_id, 'label', label) ORDER BY created_at)
@@ -931,6 +936,7 @@ $fn$;
 -- The signature grew; the old two-argument one is dropped so a stale caller
 -- gets a clear error rather than a second function.
 DROP FUNCTION IF EXISTS save_profile(text, text);
+DROP FUNCTION IF EXISTS save_profile(text, text, text, text, bigint, text, text);
 -- Save the account's profile. Every argument after the name is optional and
 -- NULL means "leave it as it is", so the odds switch can save the odds without
 -- knowing about the picture. A club of 0 clears the club.
@@ -938,11 +944,14 @@ CREATE OR REPLACE FUNCTION save_profile(
   p_name text, p_odds text,
   p_avatar text DEFAULT NULL, p_color text DEFAULT NULL,
   p_club_id bigint DEFAULT NULL, p_club_name text DEFAULT NULL,
-  p_clock text DEFAULT NULL
+  p_clock text DEFAULT NULL,
+  p_username text DEFAULT NULL
 )
 RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
 DECLARE
   me uuid := auth.uid();
+  -- NULL keeps the username; '' clears it.
+  handle text := CASE WHEN p_username IS NULL THEN NULL ELSE lower(btrim(p_username, ' @')) END;
   now_s bigint := floor(extract(epoch FROM now()))::bigint;
   name_clean text := nullif(left(btrim(regexp_replace(coalesce(p_name, ''), '\s+', ' ', 'g')), 60), '');
   club_clean text := nullif(left(btrim(regexp_replace(coalesce(p_club_name, ''), '\s+', ' ', 'g')), 80), '');
@@ -963,10 +972,21 @@ BEGIN
   IF p_club_id IS NOT NULL AND p_club_id < 0 THEN
     RAISE EXCEPTION 'unknown club' USING ERRCODE = '22023';
   END IF;
-  INSERT INTO profile (user_id, display_name, odds_format, avatar_style, avatar_color, club_id, club_name, clock, created_at, updated_at)
+  IF handle IS NOT NULL AND handle <> '' THEN
+    IF handle !~ '^[a-z0-9_]{3,20}$' THEN
+      RAISE EXCEPTION 'username: 3 to 20 letters, numbers or underscores' USING ERRCODE = '22023';
+    END IF;
+    IF handle IN ('admin', 'administrator', 'offside', 'offsidewin', 'support', 'help', 'staff', 'moderator', 'mod', 'root', 'system', 'official') THEN
+      RAISE EXCEPTION 'username: that one is taken' USING ERRCODE = '23505';
+    END IF;
+    IF EXISTS (SELECT 1 FROM profile WHERE lower(username) = handle AND user_id <> me) THEN
+      RAISE EXCEPTION 'username: that one is taken' USING ERRCODE = '23505';
+    END IF;
+  END IF;
+  INSERT INTO profile (user_id, display_name, odds_format, avatar_style, avatar_color, club_id, club_name, clock, username, created_at, updated_at)
   VALUES (me, name_clean, coalesce(p_odds, 'decimal'), coalesce(p_avatar, 'auto'), p_color,
           nullif(p_club_id, 0), CASE WHEN coalesce(p_club_id, 0) = 0 THEN NULL ELSE club_clean END,
-          coalesce(p_clock, '24'), now_s, now_s)
+          coalesce(p_clock, '24'), nullif(handle, ''), now_s, now_s)
   ON CONFLICT (user_id) DO UPDATE SET
     display_name = excluded.display_name,
     odds_format  = excluded.odds_format,
@@ -975,11 +995,16 @@ BEGIN
     club_id      = CASE WHEN p_club_id IS NULL THEN profile.club_id ELSE nullif(p_club_id, 0) END,
     club_name    = CASE WHEN p_club_id IS NULL THEN profile.club_name WHEN p_club_id = 0 THEN NULL ELSE club_clean END,
     clock        = coalesce(p_clock, profile.clock),
+    username     = CASE WHEN handle IS NULL THEN profile.username ELSE nullif(handle, '') END,
     updated_at   = excluded.updated_at;
   RETURN (SELECT json_build_object('display_name', display_name, 'odds_format', odds_format,
                                    'avatar_style', avatar_style, 'avatar_color', avatar_color,
-                                   'club_id', club_id, 'club_name', club_name, 'clock', clock)
+                                   'club_id', club_id, 'club_name', club_name, 'clock', clock,
+                                   'username', username)
           FROM profile WHERE user_id = me);
+EXCEPTION WHEN unique_violation THEN
+  -- Two people choosing the same name in the same instant: the index decides.
+  RAISE EXCEPTION 'username: that one is taken' USING ERRCODE = '23505';
 END;
 $fn$;
 
@@ -1766,7 +1791,7 @@ GRANT EXECUTE ON FUNCTION try_json(text) TO anon;
 GRANT EXECUTE ON FUNCTION report_goals(text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION has_membership() TO anon;
 GRANT EXECUTE ON FUNCTION get_account() TO anon;
-GRANT EXECUTE ON FUNCTION save_profile(text, text, text, text, bigint, text, text) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION save_profile(text, text, text, text, bigint, text, text, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION set_follow(text, bigint, text, boolean) TO anon, authenticated;
 REVOKE ALL ON FUNCTION delete_account_data(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint) TO anon;
