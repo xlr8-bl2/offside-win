@@ -260,7 +260,9 @@ export function scoreSources(rows: HistRow[], modelWeight: number) {
 export interface Policy {
   name: string;
   /** Which probability the policy believes. */
-  source: 'book' | 'model' | 'provider' | 'blend' | 'mix' | 'best';
+  source: 'book' | 'model' | 'provider' | 'blend' | 'mix' | 'best' | 'stack';
+  /** Per-family logistic weights for the stacked source (lab/tune.ts). */
+  stack?: Partial<Record<MarketFamily, number[]>>;
   modelWeight: number;
   minProb: number;
   maxProb: number;
@@ -304,6 +306,7 @@ export function probOf(policy: Policy, o: Option): number | null {
     // the blend for goals, where our rates add to the market's, and the
     // consensus everywhere else, where they do not.
     case 'best': return o.family === 'goals' ? (o.blend ?? o.book) : o.book;
+    case 'stack': return stackProb(policy.stack?.[o.family], o);
     // The blend where there is one, and the book's own view elsewhere, with the
     // provider's opinion averaged in where it has one.
     case 'mix': {
@@ -311,6 +314,20 @@ export function probOf(policy: Policy, o: Option): number | null {
       return o.provider !== null ? 0.8 * base + 0.2 * o.provider : base;
     }
   }
+}
+
+const lg = (p: number) => { const q = Math.min(1 - 1e-6, Math.max(1e-6, p)); return Math.log(q / (1 - q)); };
+
+/** The features of one option for the stacked probability: intercept, the consensus, and how the others differ from it. */
+export function stackFeatures(o: Option): number[] {
+  const b = lg(o.book);
+  return [1, b, o.blend !== null ? lg(o.blend) - b : 0, o.provider !== null ? lg(o.provider) - b : 0];
+}
+
+export function stackProb(w: number[] | undefined, o: Option): number {
+  if (!w) return o.book;
+  const z = stackFeatures(o).reduce((a, x, i) => a + x * (w[i] ?? 0), 0);
+  return 1 / (1 + Math.exp(-z));
 }
 
 export function evOf(p: number, o: Option): number {
