@@ -1,4 +1,4 @@
-import { chanceInWords, refreshSlip } from './slip.ts';
+import { chanceInWords, openSlipLegs, refreshSlip } from './slip.ts';
 import { bsdList, bsdOrNull, num, str, stats as bsdStats, toEpoch } from './bsd.ts';
 import { config } from './config.ts';
 import { analyseFixture } from './context/index.ts';
@@ -315,6 +315,10 @@ export async function runSlate(): Promise<SlateReport> {
   // The confident calls each fixture carries as of this run, for fixtures
   // that have not kicked off. See the withdrawal after the pick upsert.
   const standing = new Map<number, Array<{ market: string; outcome: string; line: number | null }>>();
+  // The calls in the open bet slip. A posted slip does not change, so on its
+  // matches the slate keeps the slip's call (at a fresh price) instead of
+  // choosing again, and never takes it down.
+  const pinned = await openSlipLegs();
   const heroCandidates: HeroCandidate[] = [];
 
   // The grounds on this slate, named once each after the loop.
@@ -383,11 +387,16 @@ export async function runSlate(): Promise<SlateReport> {
         // Champions League and the big five drop to the marquee floor; the call
         // then carries `lean` and the page frames it as a read on a tight game
         // rather than a strong call.
-        return selectConfident(
-          theirCands,
-          floorForRank(leagueRank(analysis.league_id)),
-          calibration,
-        ).map((candidate) => {
+        const pin = pinned.get(analysis.fixture_id);
+        const chosen = pin
+          ? theirCands.filter((c) => c.market === pin.market && String(c.outcome) === pin.outcome
+              && (c.line ?? null) === pin.line).slice(0, 1)
+          : selectConfident(
+            theirCands,
+            floorForRank(leagueRank(analysis.league_id)),
+            calibration,
+          );
+        return chosen.map((candidate) => {
           const drivers = driversFor(candidate, factors);
           return {
             kind: 'CONFIDENT' as const,
@@ -770,9 +779,13 @@ export async function runSlate(): Promise<SlateReport> {
        */
       const started = analysis.kickoff <= Math.floor(Date.now() / 1000);
       if (!started) {
-        standing.set(analysis.fixture_id, confidentVerdicts.map((v) => ({
+        const keep = confidentVerdicts.map((v) => ({
           market: v.candidate.market, outcome: v.candidate.outcome, line: v.candidate.line ?? null,
-        })));
+        }));
+        // A slip's call is never taken down, even if its market has gone quiet.
+        const pin = pinned.get(analysis.fixture_id);
+        if (pin) keep.push(pin as (typeof keep)[number]);
+        standing.set(analysis.fixture_id, keep);
       }
       for (const v of started ? [] : allVerdicts) {
         pickRows.push({
