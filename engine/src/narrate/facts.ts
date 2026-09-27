@@ -633,7 +633,10 @@ function onePlayer(p: BundlePlayer, team: string, side: 'home' | 'away'): PubFac
   const so = p.standout;
   const opp = str(so?.opponent);
   const did = so ? didWhat(num(so.goals) ?? 0, num(so.assists) ?? 0) : null;
-  if (so && opp && did && num(so.kickoff) && (absent || Date.now() / 1000 - so.kickoff! <= 21 * 86400)) {
+  // For an absentee, only one who matters: a squad player's goal in August
+  // is not team news.
+  const worthIt = !absent || imp >= 0.1;
+  if (worthIt && so && opp && did && num(so.kickoff) && (absent || Date.now() / 1000 - so.kickoff! <= 21 * 86400)) {
     const score = str(so.score);
     const res = score ? (so.won === true ? `the ${score} win over ${opp}`
       : so.won === false && score.split('-')[0] !== score.split('-')[1] ? `the ${score} defeat to ${opp}`
@@ -645,9 +648,9 @@ function onePlayer(p: BundlePlayer, team: string, side: 'home' | 'away'): PubFac
   const r = p.recent;
   const scoredIn = num(r?.scoredIn) ?? 0;
   const rg = num(r?.goals) ?? 0;
-  if (scoredIn >= 3) {
+  if (worthIt && scoredIn >= 3) {
     out.push({ text: `${name} ${absent ? 'had' : 'has'} scored in each of the last ${n(scoredIn)} games`, side, weight: lead - 2 });
-  } else if (rg >= 3 && (num(r?.apps) ?? 0) >= 4) {
+  } else if (worthIt && rg >= 3 && (num(r?.apps) ?? 0) >= 4) {
     out.push({ text: `${name} ${absent ? 'had' : 'has'} ${n(rg)} goals in the last ${n(num(r?.apps) ?? 5)} games`, side, weight: lead - 4 });
   }
 

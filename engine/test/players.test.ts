@@ -278,3 +278,8 @@ test('the goalscorer book does not name a rested star either', () => {
   const line = facts.find((f) => f.text.startsWith('the players most fancied'));
   assert.equal(line?.text, 'the players most fancied to score are Robert Lewandowski');
 });
+
+test('a minor absentee is named in the team news, without a highlight reel', () => {
+  const texts = playerFacts({ home: 'England', away: 'Czechia', players: [{ ...saka, name: 'John Stones', importance: 0.02, tags: [] }] }).map((f) => f.text);
+  assert.ok(!texts.some((t) => /John Stones (scored|had scored|had \w+ goals)/.test(t)), texts.join('\n'));
+});
