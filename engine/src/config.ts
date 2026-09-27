@@ -330,6 +330,14 @@ export const config = {
      */
     marqueeFloor: num('CONF_MARQUEE_FLOOR', 0.62),
     /**
+     * A higher floor for some league ranks. Rank 3 (Europa League, Nations
+     * League, the strong second-tier leagues) lost in both tuning periods at
+     * 78%; at 85% it earned in all three, and the rule as a whole went from
+     * 80/82/82% landed at +2.5/+5.2/+7.3% to 81/83/82% at +3.4/+6.0/+7.8%
+     * (lab:tune, 3,077 fixtures).
+     */
+    rankFloors: { 3: num('CONF_RANK3_FLOOR', 0.85) } as Record<number, number>,
+    /**
      * Where a call's probability comes from: `consensus` (consensus.ts: the
      * bookmakers' de-vigged view, with goals priced off market rates blended
      * toward ours) or `provider` (the data provider's prediction, which the
