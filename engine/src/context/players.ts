@@ -256,8 +256,30 @@ export async function buildProfile(
   for (const r of rows) r.kickoff ??= meta.get(r.event_id)?.kickoff ?? null;
   rows = rows.filter((r) => r.kickoff !== null);
   rows.sort((a, b) => (b.kickoff ?? 0) - (a.kickoff ?? 0));
+  // The best game's opponent by name, which our table lacks for a club it
+  // does not hold (a player abroad, a cup tie against a lower division side).
+  const best = bestGame(rows);
+  const bm = best ? meta.get(best.event_id) : undefined;
+  if (best && (!bm || !bm.home || !bm.away)) {
+    const e = asRecord(await bsdOrNull(`/api/v2/events/${best.event_id}/`));
+    if (e) {
+      meta.set(best.event_id, {
+        ...(bm ?? { id: best.event_id, kickoff: best.kickoff ?? 0, tracked: false }),
+        home_team_id: num(e['home_team_id']) ?? bm?.home_team_id ?? 0, away_team_id: num(e['away_team_id']) ?? bm?.away_team_id ?? 0,
+        home_goals: num(e['home_score']) ?? bm?.home_goals ?? null, away_goals: num(e['away_score']) ?? bm?.away_goals ?? null,
+        home: str(e['home_team']) ?? bm?.home ?? null, away: str(e['away_team']) ?? bm?.away ?? null,
+      } as MatchMeta);
+    }
+  }
   const club$ = clubId ? await teamRecord(clubId, since, ctx.kickoff) : { games: 0, goals: 0 };
   return assembleProfile(req, d ?? {}, rows, meta, club$, { ...ctx, national, clubId });
+}
+
+/** The game that shows it: most goal involvements, then the best rating. */
+function bestGame(rows: StatRow[]): StatRow | undefined {
+  const b = [...rows].sort((a, c) =>
+    (c.goals * 2 + c.assists) - (a.goals * 2 + a.assists) || (c.rating ?? 0) - (a.rating ?? 0))[0];
+  return b && (b.goals + b.assists > 0 || (b.rating ?? 0) >= 8) ? b : undefined;
 }
 
 /**
@@ -310,11 +332,9 @@ export function assembleProfile(
     scoredIn: (() => { let k = 0; for (const r of last5) { if (r.goals > 0) k++; else break; } return k; })(),
   } : null;
 
-  // The game that shows it: most goal involvements, then the best rating.
-  const best = [...rows].sort((a, b) =>
-    (b.goals * 2 + b.assists) - (a.goals * 2 + a.assists) || (b.rating ?? 0) - (a.rating ?? 0))[0];
+  const best = bestGame(rows);
   let standout: Standout | null = null;
-  if (best && (best.goals + best.assists > 0 || (best.rating ?? 0) >= 8)) {
+  if (best) {
     const m = meta.get(best.event_id);
     const teamId = best.team_id ?? clubId;
     const isHome = m && teamId ? m.home_team_id === teamId : null;
@@ -369,7 +389,9 @@ export function assembleProfile(
     standout,
     strengths: (asArray(d['strengths']) ?? []).map((x) => String(x)).filter(Boolean).slice(0, 3),
     tags,
-    importance: importanceOf(role, season, club$.goals || (national ? null : ctx.teamGoals)),
+    // A club's share is not a country's: a player who carries Como carries
+    // less of Croatia, where the squad is picked from every club's best.
+    importance: Math.round(importanceOf(role, season, club$.goals || (national ? null : ctx.teamGoals)) * (national ? 0.6 : 1) * 1000) / 1000,
   };
 }
 
@@ -447,11 +469,21 @@ export async function profilesFor(ctx: {
     };
     for (const r of [...out.values()].sort((a, b) => weight(b) - weight(a)).slice(0, 5)) jobs.push(buildProfile(r, common).catch(() => null));
 
-    // The fit danger man: the side's top scorer, when he is not out.
+    // The fit danger men: the side's top scorer when he is not out, and the
+    // forwards on the team sheet. A national side's competition chart has a
+    // goal or two in it, so for them the sheet is the only way to find who
+    // carries the threat; for a club it adds the striker who is not top of
+    // the chart this year.
+    const fit = new Map<number, ProfileRequest>();
     const top = [...(side.scorers ?? [])].sort((a, b) => b.goals - a.goals)[0];
     if (top && top.goals >= 2 && !out.has(top.player_id)) {
-      jobs.push(buildProfile({ id: top.player_id, name: top.name, side: which, team: side.team_name, teamId: side.team_id, position: squad.get(top.player_id)?.position ?? null, status: 'fit', reason: null }, common).catch(() => null));
+      fit.set(top.player_id, { id: top.player_id, name: top.name, side: which, team: side.team_name, teamId: side.team_id, position: squad.get(top.player_id)?.position ?? null, status: 'fit', reason: null });
     }
+    const sheet = ctx.lineups[which]?.players ?? [];
+    for (const pl of sheet.filter((x) => x.starting && /^(F|ATT|FW|ST|CF|LW|RW)$/i.test(x.position ?? '')).sort((a, b) => (b.ai_score ?? 0) - (a.ai_score ?? 0)).slice(0, 2)) {
+      if (!out.has(pl.id) && !fit.has(pl.id)) fit.set(pl.id, { id: pl.id, name: pl.name, side: which, team: side.team_name, teamId: side.team_id, position: pl.position, status: 'fit', reason: null });
+    }
+    for (const r of fit.values()) jobs.push(buildProfile(r, common).catch(() => null));
   }
   return (await Promise.all(jobs)).filter((p): p is PlayerProfile => p !== null);
 }
