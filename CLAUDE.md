@@ -29,6 +29,8 @@ the owner says the site is going live, and confirm the list with them first.
 Not dev tooling, and stays at launch: the `#/trace` page (`viewTrace()`) and
 the `trace` command (`engine/src/trace.ts`, the `trace` option in `pg.yml`).
 They turn a leaked pick's hidden code back into the account that copied it.
+`mail:setup` (`engine/src/mailsetup.ts`) is setup, not dev tooling, and stays too:
+it re-checks Brevo's DNS records and sends a test email.
 
 ## Standing rules
 
