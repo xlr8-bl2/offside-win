@@ -23,6 +23,7 @@
 import { priceAsianHandicap, priceBtts, priceDoubleChance, priceDrawNoBet, priceEuropeanHandicap, priceOverUnder, priceResult, type ScoreMatrix } from '../price.ts';
 import { blendRates, impliedRates, matrixFor, type ImpliedTargets } from '../implied.ts';
 import { settleSelection } from '../settle.ts';
+import { config } from '../config.ts';
 import { parsePrediction, providerMarkets } from '../provider-model.ts';
 import { MARKET_FAMILY, type MarketCode, type MarketFamily, type Outcome } from '../types.ts';
 
@@ -97,7 +98,8 @@ export function toHistRow(r: Record<string, any>): HistRow | null {
   return {
     id: Number(r.id),
     league_id: Number(r.league_id),
-    rank: Number(r.rank ?? 6),
+    // Backfilled snapshots carry no rank; the league's tier is in config.
+    rank: Number(r.rank ?? config.leagueRank[Number(r.league_id)] ?? config.unrankedLeague),
     kickoff: Number(r.kickoff),
     score: [Number(score[0]), Number(score[1])],
     corners: c ? [Number(c[0]), Number(c[1])] : null,
