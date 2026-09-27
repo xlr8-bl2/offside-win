@@ -293,6 +293,11 @@ export interface Policy {
   noQuarters?: boolean;
   /** The biggest handicap line a call may use, either way; -2.5 is a call on a rout. */
   maxHandicap?: number;
+  /**
+   * A second rule for a fixture with nothing this one would take: the strict
+   * rule first, and only then the looser one.
+   */
+  fallback?: Policy;
 }
 
 export interface Pick { row: HistRow; option: Option; p: number; ev: number }
@@ -365,7 +370,10 @@ export function ranked(policy: Policy, row: HistRow, options?: Option[]): Pick[]
       : ev * Math.sqrt(p);
     out.push({ row, option: o, p, ev, score });
   }
-  return out.sort((a, b) => b.score - a.score);
+  const mine = out.sort((a, b) => b.score - a.score);
+  if (!policy.fallback) return mine;
+  const seen = new Set(mine.map((x) => `${x.option.market}|${x.option.line}|${x.option.outcome}`));
+  return [...mine, ...ranked(policy.fallback, row, options).filter((x) => !seen.has(`${x.option.market}|${x.option.line}|${x.option.outcome}`))];
 }
 
 export function choose(policy: Policy, row: HistRow, options?: Option[]): Pick | null {
