@@ -12,7 +12,7 @@
  */
 
 import { kvSetJSON, select } from '../store.ts';
-import { confidentGrid, scoreSources, simulate, toHistRow, walkForward, CURRENT, type HistRow } from './markets.ts';
+import { confidentGrid, productionRules, scoreSources, simulate, toHistRow, walkForward, CURRENT, type HistRow } from './markets.ts';
 
 interface Row {
   id: number;
@@ -144,7 +144,24 @@ export async function runLab(): Promise<void> {
     console.log(`           markets: ${top.map(([k, v]) => `${k} ${v.n}`).join(', ')}`);
   }
 
+  // The rule the slate runs, and its neighbours, on the same split.
+  const sorted = [...rows].sort((a, b) => a.kickoff - b.kickoff);
+  const cut = Math.floor(sorted.length * 0.6);
+  console.log('\nThe production rule and its neighbours (same split)');
+  const production: Record<string, unknown> = {};
+  for (const p of productionRules()) {
+    const train = simulate(p, sorted.slice(0, cut));
+    const test = simulate(p, sorted.slice(cut));
+    production[p.name] = { train, test };
+    console.log(`  ${p.name}`);
+    line('train', train);
+    line('test', test);
+    const top = Object.entries(test.byMarket).sort((x, y) => y[1].n - x[1].n).slice(0, 6);
+    console.log(`           markets: ${top.map(([k, v]) => `${k} ${v.n}`).join(', ')}`);
+  }
+
   await kvSetJSON('lab:markets', {
+    production,
     at: Math.floor(Date.now() / 1000),
     rows: rows.length,
     days,

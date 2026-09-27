@@ -287,6 +287,8 @@ export interface Policy {
    * no cap.
    */
   diversity?: number | null;
+  /** Leave out quarter lines (-1.75, 0.25): a split stake nobody can explain in a sentence. */
+  noQuarters?: boolean;
 }
 
 export interface Pick { row: HistRow; option: Option; p: number; ev: number }
@@ -329,6 +331,7 @@ export function ranked(policy: Policy, row: HistRow, options?: Option[]): Pick[]
   for (const o of opts) {
     if (policy.families && !policy.families.includes(o.family)) continue;
     if (o.odds < policy.minOdds || o.odds > policy.maxOdds) continue;
+    if (policy.noQuarters && o.line !== null && Math.abs((o.line * 4) % 2) === 1) continue;
     // A price far beyond what the consensus thinks is fair is almost always a
     // book that has not updated, not an opportunity anyone could take.
     if (o.odds * o.book > policy.maxGap) continue;
@@ -493,6 +496,29 @@ export function confidentGrid(): Policy[] {
     }
   }
   return out;
+}
+
+/**
+ * The production rule and its near neighbours, scored as named rules rather
+ * than searched for, so the report says how the rule the slate runs does.
+ */
+export function productionRules(): Policy[] {
+  const base: Policy = {
+    name: 'production', source: 'best', modelWeight: 0.5, minProb: 0.8, maxProb: 0.95, minOdds: 1.13, maxOdds: 3.5,
+    minEv: -0.05, maxGap: 1.12, rankBy: 'growth', diversity: 0.3, noQuarters: true,
+  };
+  const v = (name: string, o: Partial<Policy>): Policy => ({ ...base, ...o, name });
+  return [
+    base,
+    v('production, ev >= 0', { minEv: 0 }),
+    v('production, ev >= 0, p >= 0.75', { minEv: 0, minProb: 0.75 }),
+    v('production, ev >= 0, p >= 0.7', { minEv: 0, minProb: 0.7 }),
+    v('production, ranked by probability', { rankBy: 'prob' }),
+    v('production, no cap', { diversity: null }),
+    v('production, quarter lines allowed', { noQuarters: false }),
+    v('value: p >= 0.65, ev >= 0.02, gap 1.06', { minProb: 0.65, minEv: 0.02, maxGap: 1.06, rankBy: 'ev' }),
+    v('value: p >= 0.7, ev >= 0.01, gap 1.08', { minProb: 0.7, minEv: 0.01, maxGap: 1.08, rankBy: 'ev' }),
+  ];
 }
 
 /**

@@ -342,6 +342,14 @@ export const config = {
      * off the board when a book is offering far less than the rest.
      */
     minEv: num('CONF_MIN_EV', -0.05),
+    /**
+     * A best price this far above the consensus's fair odds (odds × fair
+     * probability) is a book that has not moved, not an opportunity anyone
+     * could take, and the call is not made on it.
+     */
+    maxGap: num('CONF_MAX_GAP', 1.12),
+    /** Quarter handicap lines (-1.75, 0.25) are a split stake nobody can explain in a sentence. */
+    quarterLines: process.env.CONF_QUARTER_LINES === 'true',
     /** League rank at or below which a fixture counts as marquee. */
     marqueeRank: num('CONF_MARQUEE_RANK', 2),
     /**
