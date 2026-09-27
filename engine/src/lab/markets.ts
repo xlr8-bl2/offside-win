@@ -291,6 +291,8 @@ export interface Policy {
   diversity?: number | null;
   /** Leave out quarter lines (-1.75, 0.25): a split stake nobody can explain in a sentence. */
   noQuarters?: boolean;
+  /** The biggest handicap line a call may use, either way; -2.5 is a call on a rout. */
+  maxHandicap?: number;
 }
 
 export interface Pick { row: HistRow; option: Option; p: number; ev: number }
@@ -349,6 +351,7 @@ export function ranked(policy: Policy, row: HistRow, options?: Option[]): Pick[]
     if (policy.families && !policy.families.includes(o.family)) continue;
     if (o.odds < policy.minOdds || o.odds > policy.maxOdds) continue;
     if (policy.noQuarters && o.line !== null && Math.abs((o.line * 4) % 2) === 1) continue;
+    if (policy.maxHandicap !== undefined && o.family === 'handicap' && o.line !== null && Math.abs(o.line) > policy.maxHandicap) continue;
     // A price far beyond what the consensus thinks is fair is almost always a
     // book that has not updated, not an opportunity anyone could take.
     if (o.odds * o.book > policy.maxGap) continue;
