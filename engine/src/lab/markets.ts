@@ -35,6 +35,10 @@ export interface Snap {
   book: Record<string, number>;
   best: Record<string, { odds: number; bookmaker?: string }>;
   overround: number;
+  /** How many books quoted the full set, when recorded. */
+  books?: number;
+  /** The sharpest single book's de-vigged view, when recorded. */
+  sharp?: { book: string; fair: Record<string, number> } | null;
 }
 
 export interface HistRow {
@@ -65,9 +69,12 @@ export function fixBookFair(markets: Snap[]): Snap[] {
   const r = markets.find((m) => m.market === '1x2' && m.line === null)?.book;
   if (!r || !(r['HOME']! > 0) || !(r['DRAW']! > 0) || !(r['AWAY']! > 0)) return markets;
   const H = r['HOME']!, D = r['DRAW']!, A = r['AWAY']!;
+  const sr = markets.find((m) => m.market === '1x2' && m.line === null)?.sharp?.fair;
+  const sH = sr?.['HOME'], sD = sr?.['DRAW'], sA = sr?.['AWAY'];
+  const sharpOk = sH !== undefined && sD !== undefined && sA !== undefined;
   return markets.map((m) => {
-    if (m.market === 'double_chance') return { ...m, book: { '1X': H + D, '12': H + A, 'X2': D + A } };
-    if (m.market === 'draw_no_bet') return { ...m, book: { HOME: H / (H + A), AWAY: A / (H + A) } };
+    if (m.market === 'double_chance') return { ...m, book: { '1X': H + D, '12': H + A, 'X2': D + A }, sharp: sharpOk ? { book: 'sharp', fair: { '1X': sH + sD, '12': sH + sA, 'X2': sD + sA } } : null };
+    if (m.market === 'draw_no_bet') return { ...m, book: { HOME: H / (H + A), AWAY: A / (H + A) }, sharp: sharpOk ? { book: 'sharp', fair: { HOME: sH / (sH + sA), AWAY: sA / (sH + sA) } } : null };
     return m;
   });
 }
@@ -118,6 +125,10 @@ export interface Option {
   blend: number | null;
   /** Probability the stake comes back (draw-no-bet draw, whole handicap lines). */
   push: number;
+  /** The sharp book's probability, when it priced the market. */
+  sharp: number | null;
+  /** How many books priced the market, when recorded. */
+  books: number | null;
 }
 
 const GOALS_MARKETS = new Set<MarketCode>(['1x2', 'double_chance', 'draw_no_bet', 'btts', 'over_under_05', 'over_under_15', 'over_under_25', 'over_under_35', 'asian_handicap', 'european_handicap']);
@@ -189,6 +200,8 @@ export function optionsFor(row: HistRow, modelWeight: number): Option[] {
         provider: prov?.get(o as Outcome) ?? null,
         blend: fromMx?.probs.get(o as Outcome) ?? null,
         push: fromMx?.push.get(o as Outcome) ?? 0,
+        sharp: typeof m.sharp?.fair?.[o] === 'number' ? m.sharp.fair[o]! : null,
+        books: typeof m.books === 'number' ? m.books : null,
       });
     }
   }
@@ -221,7 +234,7 @@ const clampP = (p: number) => Math.min(1 - 1e-6, Math.max(1e-6, p));
  * are scored on identical questions.
  */
 export function scoreSources(rows: HistRow[], modelWeight: number) {
-  type Src = 'book' | 'model' | 'provider' | 'blend';
+  type Src = 'book' | 'model' | 'provider' | 'blend' | 'sharp';
   const acc = new Map<string, { n: number; ll: number; br: number }>();
   const add = (fam: string, src: Src, p: number, y: number) => {
     const k = `${fam}|${src}`;
@@ -260,7 +273,7 @@ export function scoreSources(rows: HistRow[], modelWeight: number) {
 export interface Policy {
   name: string;
   /** Which probability the policy believes. */
-  source: 'book' | 'model' | 'provider' | 'blend' | 'mix' | 'best' | 'stack';
+  source: 'book' | 'model' | 'provider' | 'blend' | 'mix' | 'best' | 'stack' | 'sharp' | 'bestsharp';
   /** Per-family logistic weights for the stacked source (lab/tune.ts). */
   stack?: Partial<Record<MarketFamily, number[]>>;
   modelWeight: number;
@@ -293,6 +306,15 @@ export interface Policy {
   noQuarters?: boolean;
   /** The biggest handicap line a call may use, either way; -2.5 is a call on a rout. */
   maxHandicap?: number;
+  /** Only markets at least this many books priced in full. */
+  minBooks?: number;
+  /** Only where the sharp book priced the market too. */
+  requireSharp?: boolean;
+  /**
+   * The value test against the sharp book as well: the best price must be
+   * within this of the sharp book's fair price. Undefined skips it.
+   */
+  minSharpEv?: number;
   /**
    * A second rule for a fixture with nothing this one would take: the strict
    * rule first, and only then the looser one.
@@ -314,6 +336,10 @@ export function probOf(policy: Policy, o: Option): number | null {
     // consensus everywhere else, where they do not.
     case 'best': return o.family === 'goals' ? (o.blend ?? o.book) : o.book;
     case 'stack': return stackProb(policy.stack?.[o.family], o);
+    // The sharp book where it priced the market, the consensus where not.
+    case 'sharp': return o.sharp ?? o.book;
+    // As 'best', with the sharp book standing in for the consensus.
+    case 'bestsharp': return o.family === 'goals' ? (o.blend ?? o.sharp ?? o.book) : (o.sharp ?? o.book);
     // The blend where there is one, and the book's own view elsewhere, with the
     // provider's opinion averaged in where it has one.
     case 'mix': {
@@ -357,6 +383,9 @@ export function ranked(policy: Policy, row: HistRow, options?: Option[]): Pick[]
     if (o.odds < policy.minOdds || o.odds > policy.maxOdds) continue;
     if (policy.noQuarters && o.line !== null && Math.abs((o.line * 4) % 2) === 1) continue;
     if (policy.maxHandicap !== undefined && o.family === 'handicap' && o.line !== null && Math.abs(o.line) > policy.maxHandicap) continue;
+    if (policy.minBooks !== undefined && (o.books ?? 0) < policy.minBooks) continue;
+    if (policy.requireSharp && o.sharp === null) continue;
+    if (policy.minSharpEv !== undefined && o.sharp !== null && evOf(o.sharp, o) < policy.minSharpEv) continue;
     // A price far beyond what the consensus thinks is fair is almost always a
     // book that has not updated, not an opportunity anyone could take.
     if (o.odds * o.book > policy.maxGap) continue;

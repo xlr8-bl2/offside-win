@@ -51,6 +51,9 @@ const BOOK_WEIGHT: Record<string, number> = {
 };
 const DEFAULT_BOOK_WEIGHT = 1.0;
 
+/** The books taken as the sharp reference, sharpest first. */
+const SHARP_ORDER = ['pinnacle', 'betfair', 'smarkets', 'matchbook'];
+
 /**
  * How many books' prices travel per outcome. Every card on the board carries
  * this list, so it is a size decision as much as a completeness one: twelve
@@ -178,6 +181,15 @@ export function buildBookMarkets(quotes: Quote[]): BookMarket[] {
     }
 
     const fairAcc = new Map<Outcome, number>();
+    let books = 0;
+    let sharp: BookMarket['sharp'] = null;
+    for (const slug of SHARP_ORDER) {
+      const m = byBook.get(slug);
+      if (!m || !wanted.every((o) => m.has(o))) continue;
+      const d = devig(wanted.map((o) => m.get(o)!.decimal_odds));
+      sharp = { fair: new Map(wanted.map((o, i) => [o, d.probs[i]!])), book: slug };
+      break;
+    }
     let weightTotal = 0;
     let overroundAcc = 0;
     let overroundWeight = 0;
@@ -185,6 +197,7 @@ export function buildBookMarkets(quotes: Quote[]): BookMarket[] {
 
     for (const [slug, m] of byBook) {
       if (!wanted.every((o) => m.has(o))) continue; // partial set: unusable
+      books++;
       const odds = wanted.map((o) => m.get(o)!.decimal_odds);
       const d = devig(odds);
       if (d.method === 'multiplicative') methodUsed = 'multiplicative';
@@ -242,6 +255,8 @@ export function buildBookMarkets(quotes: Quote[]): BookMarket[] {
       overround: overroundWeight > 0 ? overroundAcc / overroundWeight : 1,
       method: methodUsed,
       movement,
+      books,
+      sharp,
     });
   }
 
@@ -259,6 +274,17 @@ export function buildBookMarkets(quotes: Quote[]): BookMarket[] {
  */
 export function deriveFromResult(markets: BookMarket[]): BookMarket[] {
   const r = markets.find((m) => m.market === '1x2' && m.line === null);
+  // The sharp view of double chance and draw-no-bet, from the sharp result.
+  const sr = r?.sharp;
+  const sH = sr?.fair.get('HOME'), sD = sr?.fair.get('DRAW'), sA = sr?.fair.get('AWAY');
+  if (sr && sH !== undefined && sD !== undefined && sA !== undefined) {
+    for (const m of markets) {
+      if (m.market === 'double_chance') m.sharp = { book: sr.book, fair: new Map<Outcome, number>([['1X', sH + sD], ['12', sH + sA], ['X2', sD + sA]]) };
+      else if (m.market === 'draw_no_bet' && sH + sA > 0) m.sharp = { book: sr.book, fair: new Map<Outcome, number>([['HOME', sH / (sH + sA)], ['AWAY', sA / (sH + sA)]]) };
+    }
+  } else {
+    for (const m of markets) if (m.market === 'double_chance' || m.market === 'draw_no_bet') m.sharp = null;
+  }
   const H = r?.fair.get('HOME');
   const D = r?.fair.get('DRAW');
   const A = r?.fair.get('AWAY');
@@ -284,6 +310,25 @@ export function deriveFromResult(markets: BookMarket[]): BookMarket[] {
     }
   }
   return markets;
+}
+
+const r4 = (v: number) => Number(v.toFixed(4));
+
+/**
+ * The part of a book market the history keeps: the consensus, the best price
+ * and who offers it, the margin, how many books priced it, and the sharp
+ * book's view. The same shape from the slate and from the backfill, so the
+ * lab reads both alike.
+ */
+export function snapshotOf(b: BookMarket | undefined) {
+  if (!b) return { book: {}, best: {}, overround: 1, books: 0, sharp: null };
+  return {
+    book: Object.fromEntries([...b.fair].map(([k, v]) => [k, r4(v)])),
+    best: Object.fromEntries(b.best),
+    overround: r4(b.overround),
+    books: b.books ?? 0,
+    sharp: b.sharp ? { book: b.sharp.book, fair: Object.fromEntries([...b.sharp.fair].map(([k, v]) => [k, r4(v)])) } : null,
+  };
 }
 
 /** Prices from one named book, for the sharp-reference comparison in §7.1. */

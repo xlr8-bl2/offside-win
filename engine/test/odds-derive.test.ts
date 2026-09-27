@@ -26,3 +26,27 @@ test('double chance is priced from the result market, not de-vigged as if it wer
   const dnb = book.find((m) => m.market === 'draw_no_bet')!.fair;
   assert.ok(Math.abs(dnb.get('HOME')! - r.get('HOME')! / (r.get('HOME')! + r.get('AWAY')!)) < 1e-9);
 });
+
+test('the sharp book\'s own view is kept beside the consensus, and the book count', async () => {
+  const { snapshotOf } = await import('../src/odds.ts');
+  const book = buildBookMarkets([
+    q('1x2', 'HOME', 1.5, 'pinnacle'), q('1x2', 'DRAW', 4.4, 'pinnacle'), q('1x2', 'AWAY', 7.2, 'pinnacle'),
+    q('1x2', 'HOME', 1.45, 'bet365'), q('1x2', 'DRAW', 4.2, 'bet365'), q('1x2', 'AWAY', 6.5, 'bet365'),
+    q('double_chance', '1X', 1.1, 'bet365'), q('double_chance', '12', 1.25, 'bet365'), q('double_chance', 'X2', 2.9, 'bet365'),
+  ]);
+  const r = book.find((m) => m.market === '1x2')!;
+  assert.equal(r.books, 2);
+  assert.equal(r.sharp?.book, 'pinnacle');
+  assert.ok(Math.abs([...r.sharp!.fair.values()].reduce((a, b) => a + b, 0) - 1) < 1e-9);
+  // Double chance's sharp view comes from the sharp result, not from Pinnacle's own set.
+  const dc = book.find((m) => m.market === 'double_chance')!;
+  assert.ok(Math.abs(dc.sharp!.fair.get('1X')! - (r.sharp!.fair.get('HOME')! + r.sharp!.fair.get('DRAW')!)) < 1e-9);
+  const snap = snapshotOf(r);
+  assert.equal(snap.books, 2);
+  assert.equal(snap.sharp?.book, 'pinnacle');
+});
+
+test('no sharp book, no sharp view', () => {
+  const book = buildBookMarkets([q('1x2', 'HOME', 1.45, 'bet365'), q('1x2', 'DRAW', 4.2, 'bet365'), q('1x2', 'AWAY', 6.5, 'bet365')]);
+  assert.equal(book[0]!.sharp, null);
+});
