@@ -137,7 +137,10 @@ export async function refreshSlip(now = Math.floor(Date.now() / 1000)): Promise<
      LEFT JOIN league l ON l.id = f.league_id
      WHERE p.kind = 'CONFIDENT' AND p.settled_at IS NULL
        AND p.kickoff > ? AND p.kickoff < ?`,
-    [now + 15 * 60, now + 48 * 3600],
+    // The next day only. It was the next two days, so a slip that locked on
+    // a Friday evening could have its last leg on Sunday, stay open until
+    // then, and stop Saturday's slip being built at all.
+    [now + 15 * 60, now + 24 * 3600],
   );
   const slip = buildSlip(rows.map((r) => ({
     fixture_id: Number(r.fixture_id), kickoff: Number(r.kickoff), home: r.home_team, away: r.away_team,
@@ -178,6 +181,7 @@ export async function settleSlips(now = Math.floor(Date.now() / 1000)): Promise<
   for (const s of open) {
     const legs = JSON.parse(s.legs_json) as Leg[];
     const results: Array<string | null> = [];
+    const states: string[] = [];
     for (const l of legs) {
       // Written out rather than `IS NOT DISTINCT FROM ?`: a null parameter
       // there has no type Postgres can infer.
@@ -186,11 +190,18 @@ export async function settleSlips(now = Math.floor(Date.now() / 1000)): Promise<
            AND market = ? AND outcome = ? AND ${l.line === null ? 'line IS NULL' : 'line = ?'}`,
         l.line === null ? [l.fixture_id, l.market, l.outcome] : [l.fixture_id, l.market, l.outcome, l.line],
       );
-      results.push(!row ? 'VOID' : row.settled_at ? row.result : null);
+      const r = !row ? 'VOID' : row.settled_at ? row.result : null;
+      results.push(r);
+      // Kick-off time and state only: the log is public, and a later leg may
+      // not have kicked off yet.
+      states.push(`${new Date(l.kickoff * 1000).toISOString().slice(5, 16).replace('T', ' ')} ${r ?? (l.kickoff <= now ? 'waiting' : 'to play')}`);
     }
     const lost = results.some((r) => r === 'LOST' || r === 'HALF_LOST');
     const pending = results.some((r) => r === null);
-    if (!lost && pending) continue;
+    if (!lost && pending) {
+      console.log(`  slip ${s.id} still open: ${states.join('; ')}`);
+      continue;
+    }
     const counted = results.filter((r) => r === 'WON' || r === 'HALF_WON');
     const result = lost ? 'LOST' : counted.length ? 'WON' : 'VOID';
     await exec('UPDATE slip SET result = ?, settled_at = ? WHERE id = ?', [result, now, s.id]);
