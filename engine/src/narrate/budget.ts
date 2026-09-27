@@ -108,6 +108,7 @@ export function budgeted(
   return {
     name: chain.length === 1 ? chain[0]!.writer.name : `gemini (${chain.length} models)`,
     async generate(prompt: string): Promise<string> {
+      let lastError = '';
       for (const { model, writer } of chain) {
         const now = Math.floor(Date.now() / 1000);
         if (state.used >= limit) break;
@@ -129,17 +130,16 @@ export function budgeted(
             m.gone = true;
             continue;
           }
-          // Google's "busy" (503) is about that model at that moment. The next
-          // model takes this request; this one is asked again in ten minutes.
-          // It used to end the writing for the whole run.
-          if (/gemini is busy/.test(msg)) {
-            m.pausedUntil = now + BUSY_PAUSE;
-            continue;
-          }
-          throw err;
+          // Anything else -- busy (503), a timeout, a server error -- is about
+          // that model at that moment. The next model takes this request; this
+          // one is asked again in ten minutes. Each of these used to end the
+          // writing for the whole run, one kind at a time.
+          m.pausedUntil = now + BUSY_PAUSE;
+          lastError = msg || String(err);
+          continue;
         }
       }
-      throw new QuotaExhausted(`today's allowance is spent on every model (${state.used}/${limit})`);
+      throw new QuotaExhausted(`no model could take it: every one is spent or waiting (${state.used}/${limit})${lastError ? `; last error: ${lastError.slice(0, 120)}` : ''}`);
     },
   };
 }
