@@ -16,6 +16,7 @@
     "probe:profile": "npm -w engine run probe:profile",
     "probe:reds": "npm -w engine run probe:reds",
     "history": "npm -w engine run history",
+    "history:cards": "npm -w engine run history:cards",
     "ratings": "npm -w engine run ratings",
     "slate": "npm -w engine run slate",
     "slate:loop": "npm -w engine run slate:loop",

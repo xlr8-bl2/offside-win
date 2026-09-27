@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { runBacktest } from './backtest.ts';
 import { clearCache, stats as bsdStats } from './bsd.ts';
 import { config, requireEnv } from './config.ts';
-import { backfillHistory } from './history.ts';
+import { backfillHistory, repairCards } from './history.ts';
 import { probe, probePlayers, probeProfiles, probeReds, probeReport } from './probe.ts';
 import { grant, plans } from './grant.ts';
 import { whopCheck } from './whopcheck.ts';
@@ -122,6 +122,16 @@ const commands: Record<string, () => Promise<unknown>> = {
     requireEnv();
     await ensureSchema();
     return backfillHistory({ full: process.env.FULL_BACKFILL === 'true' });
+  },
+
+  // Card counts the provider's stats left blank because nothing was shown.
+  async 'history:cards'() {
+    requireEnv();
+    await ensureSchema();
+    const days = Number(process.env['GRANT_EMAIL']) || 400;
+    const r = await repairCards(days);
+    console.log(`Cards: ${r.checked} matches without a count in the last ${days} days; ${r.repaired} read from the incidents, ${r.unpublished} still unpublished.`);
+    return r;
   },
 
   async ratings() {
