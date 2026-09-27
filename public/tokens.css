@@ -80,20 +80,6 @@
   --floodlight-hi:  #9e86ff;
   --floodlight-dim: rgba(122, 90, 248, 0.16);
 
-  /* ---------------------------------------------------------------- paper */
-
-  /* The legal documents only. They are set as documents, black on white, so
-     they read as the official record they are rather than as another page
-     of the site. The link colour is the accent darkened until it clears
-     4.5:1 on white. */
-  --paper:      #ffffff;
-  --paper-edge: #d9dbe1;
-  --paper-tint: #f4f5f7;
-  --ink:        #15161a;
-  --ink-2:      #3c404a;
-  --ink-3:      #6a6f7c;
-  --ink-link:   #4a30c9;
-
   /* A second note, for anything imminent rather than live. */
   --sodium:    #f5a524;
 
@@ -175,10 +161,6 @@
    * price, a scoreline or a control.
    */
   --hand: Caveat, 'Bradley Hand', 'Segoe Script', cursive;
-  /* The documents' face: the system's own book serif, nothing to download.
-     Charter on Apple devices, Sitka or Cambria on Windows, Noto Serif on
-     Android. */
-  --serif: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, 'Noto Serif', Georgia, 'Times New Roman', serif;
 
   /* No width axis on the display face; kept because rules still name them. */
   --wide:      100;
