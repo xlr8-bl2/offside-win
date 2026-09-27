@@ -1035,7 +1035,10 @@ export async function runSlate(): Promise<SlateReport> {
   if (writer && writerGaveUp) {
     console.log(
       `Narratives: ${narrateReused} reused, ${narrateWritten}/${narrateAttempts} written before ${writer.name} stopped answering `
-      + `(${writerGaveUp}). The rest are the template grammar's.`,
+      + `(${writerGaveUp}). The rest are the template grammar's.`
+      + (Object.keys(narrateRejections).length
+        ? ` Drafts thrown away: ${Object.entries(narrateRejections).map(([k, v]) => `${k} ${v}`).join(', ')}.`
+        : ''),
     );
   } else if (writer) {
     const fellBack = narrateAttempts - narrateWritten;

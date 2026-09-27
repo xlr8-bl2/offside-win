@@ -36,26 +36,28 @@ test('no request is sent past the allowance, and a refused model is paused', asy
 
 test('the writer moves down the models as each one runs out, as Google counts them', async () => {
   const calls: string[] = [];
-  const mk = (m: string, fail?: 'quota' | 'gone') => ({
+  const mk = (m: string, fail?: 'quota' | 'gone' | 'busy') => ({
     model: m,
     writer: { name: m, generate: async () => {
       calls.push(m);
       if (fail === 'quota') throw new QuotaExhausted('GenerateRequestsPerDayPerProjectPerModel-FreeTier = 20');
       if (fail === 'gone') throw new Error('gemini 404: no longer available');
+      if (fail === 'busy') throw new Error('gemini is busy — the model did not answer after three tries');
       return m;
     } },
   });
   const state = todays(null, '2026-09-26');
-  const w = budgeted([mk('best', 'quota'), mk('retired', 'gone'), mk('next'), mk('last')], state, 100, 2);
-  assert.equal(await w.generate('p'), 'next', 'a refused and a retired model are passed over');
+  const w = budgeted([mk('best', 'quota'), mk('retired', 'gone'), mk('busy', 'busy'), mk('next'), mk('last')], state, 100, 2);
+  assert.equal(await w.generate('p'), 'next', 'a refused, a retired and a busy model are passed over');
+  assert.ok((state.models!['busy']!.pausedUntil ?? 0) > Date.now() / 1000, 'the busy one waits a while');
   assert.equal(await w.generate('p'), 'next');
   // Twenty a day each (two here): the third goes to the one after.
   assert.equal(await w.generate('p'), 'last');
   assert.equal(state.models!['retired']!.gone, true);
-  assert.deepEqual(calls, ['best', 'retired', 'next', 'next', 'last']);
-  assert.ok(!spent(state, 100, ['best', 'retired', 'next', 'last'], 2), 'last has one left');
+  assert.deepEqual(calls, ['best', 'retired', 'busy', 'next', 'next', 'last']);
+  assert.ok(!spent(state, 100, ['best', 'retired', 'busy', 'next', 'last'], 2), 'last has one left');
   await w.generate('p');
-  assert.ok(spent(state, 100, ['best', 'retired', 'next', 'last'], 2), 'every model spent');
+  assert.ok(spent(state, 100, ['best', 'retired', 'busy', 'next', 'last'], 2), 'every model spent or waiting');
   await assert.rejects(w.generate('p'), QuotaExhausted);
 });
 
