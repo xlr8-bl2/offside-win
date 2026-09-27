@@ -1087,6 +1087,8 @@ function slipHTML(data, fixtures = []) {
   const GRADE = { WON: 'won', LOST: 'lost', HALF_WON: 'part', HALF_LOST: 'part', PUSH: 'back', VOID: 'back' };
   const MARK = { won: 'Landed', lost: 'Missed', back: 'Void', part: 'Half' };
   const legState = (l) => {
+    // A call taken down before its match drops out of the slip, as a void leg.
+    if (l.withdrawn) return `<span class="mark back" title="The call was taken down before kick-off">Void</span>`;
     // The slip carries each leg's own state now (slip_legs); the board is the
     // fallback, and it only reaches back a day.
     const f = 'status' in l
