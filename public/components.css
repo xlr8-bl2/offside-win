@@ -504,49 +504,47 @@
  * the same reason: one block of colour on a dark page is an event.
  */
 .promo {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  padding: var(--space-7);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  border: var(--border) solid var(--floodlight);
   border-radius: var(--radius-lg);
-  background: linear-gradient(104deg, #4b2fd0 0%, var(--floodlight) 46%, #8f74ff 100%);
-  color: #fff;
+  background: var(--terrace);
+  overflow: hidden;
 }
-/* The chevron flight the reference runs under its copy. Drawn, not an asset. */
-.promo::after {
-  content: '';
-  position: absolute;
-  inset: 0 0 0 auto;
-  width: 60%;
-  z-index: -1;
-  background-image: repeating-linear-gradient(
-    115deg,
-    rgba(255, 255, 255, 0.09) 0 2px,
-    transparent 2px 26px
-  );
-}
-.promo-aside {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-2xl);
-  color: rgba(255, 255, 255, 0.88);
-}
+.promo-main { padding: var(--space-7); min-width: 0; }
 .promo h2 {
-  margin: 0;
+  margin: 0 0 var(--space-5);
   font-family: var(--display);
   font-size: var(--text-xl);
   font-weight: var(--weight-bold);
   letter-spacing: var(--tracking-xl);
   line-height: var(--leading-snug);
 }
-.promo p {
-  margin: var(--space-3) 0 var(--space-6);
-  max-width: 46ch;
-  font-size: var(--text-sm);
-  line-height: var(--leading-normal);
-  color: rgba(255, 255, 255, 0.82);
+.promo-points { margin: 0 0 var(--space-5); }
+.promo-note { margin: 0; font-size: var(--text-xs); color: var(--chalk-3); line-height: var(--leading-normal); }
+/* The stub, torn off along a dashed line like the member's own ticket. */
+.promo-stub {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-1);
+  min-width: 200px; padding: var(--space-6) var(--space-7);
+  border-left: 2px dashed var(--rule);
+  background: var(--stand);
+  text-align: center;
 }
-.promo .btn-light { border-color: transparent; }
-.promo-price { font-variant-numeric: tabular-nums; }
+.promo-from, .promo-per { font-size: var(--text-xs); color: var(--chalk-3); }
+.promo-price {
+  font-family: var(--display);
+  font-weight: var(--weight-black);
+  font-size: var(--text-3xl);
+  letter-spacing: var(--tracking-num);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--chalk);
+}
+.promo-stub .btn { margin-top: var(--space-4); }
+@media (max-width: 560px) {
+  .promo { grid-template-columns: minmax(0, 1fr); }
+  .promo-stub { border-left: 0; border-top: 2px dashed var(--rule); }
+}
 
 /* ========================================================= the side rail */
 
@@ -2018,7 +2016,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
   gap: var(--space-5);
-  align-items: start;
+  align-items: stretch;
 }
 /* The paid plan is raised rather than shouted at: one accent border and a
    lighter ground. No badge, and no "most popular" on a page with one plan. */
@@ -3623,16 +3621,24 @@ a.pp:hover .pp-name { color: var(--floodlight-hi); }
 /* A wide screen: the pitch on its side, home from the left, and no taller
    than a screen. */
 @media (min-width: 900px) {
-  .sheet-heads { display: flex; justify-content: space-between; align-items: center; gap: var(--space-5); margin-bottom: var(--space-4); order: 1; }
+  /* The names above and the pitch share one width, so each side's name sits
+     over its own half. */
+  .lineup-top { width: 100%; max-width: 960px; align-self: center; }
+  .sheet-heads { display: flex; justify-content: space-between; align-items: center; gap: var(--space-5); margin-bottom: var(--space-4); order: 1; width: 100%; max-width: 960px; align-self: center; }
   .sheet-team.away, .sheet-team.home { order: 0; margin: 0; }
   .sheet-team.away { flex-direction: row-reverse; text-align: right; }
-  .pitch { flex-direction: row; aspect-ratio: 105 / 64; width: 100%; max-width: 720px; align-self: center; padding: var(--space-2) var(--space-3); }
+  .pitch { flex-direction: row; aspect-ratio: 105 / 64; width: 100%; max-width: 960px; align-self: center; padding: var(--space-2) var(--space-3); }
   .pitch-lines.upright { display: none; }
   .pitch-lines.sideways { display: block; }
-  .pitch-side { flex-direction: row-reverse; }
+  .pitch-side { flex-direction: row-reverse; min-width: 0; }
   .pitch-side.home { order: -1; }
-  .pitch-row { flex-direction: column; justify-content: space-evenly; align-items: center; }
-  .pp { width: 76px; }
+  /*
+   * Each line of the formation is a column that takes its share of the
+   * width. At a fixed 76px a player, two 4-2-3-1s were ten columns and 760px
+   * on a 720px pitch, and the right-hand goalkeeper was cut off.
+   */
+  .pitch-row { flex: 1 1 0; min-width: 0; flex-direction: column; justify-content: space-evenly; align-items: center; }
+  .pp { width: 100%; max-width: 84px; }
   .lineup-key { align-self: center; }
 }
 
@@ -3650,7 +3656,9 @@ a.pp:hover .pp-name { color: var(--floodlight-hi); }
 }
 .tl-switch button[aria-selected="true"] { background: var(--terrace); color: var(--chalk); font-weight: 600; }
 .tl-switch button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.tl-pair { display: grid; gap: var(--space-5); align-items: start; }
+/* Side by side, the two lists are always the same height: one team's longer
+   bench left the other's card ending halfway down. */
+.tl-pair { display: grid; gap: var(--space-5); align-items: stretch; }
 @media (max-width: 899px) {
   .tl-pair[data-showing="home"] .tl[data-side="away"],
   .tl-pair[data-showing="away"] .tl[data-side="home"] { display: none; }
@@ -4045,3 +4053,58 @@ html.pay-open { overflow: hidden; }
 .seo-meta { color: var(--chalk-3); font-size: var(--text-sm); }
 .seo-list { padding-left: var(--space-5); }
 .seo-list li { margin-bottom: var(--space-2); }
+
+/* ========================================================= account menu */
+
+.top-right { position: relative; }
+.acct-menu {
+  position: absolute; right: 0; top: calc(100% + var(--space-3));
+  width: min(300px, calc(100vw - 2 * var(--space-4)));
+  padding: var(--space-3);
+  background: var(--stand);
+  border: var(--border) solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--elev-2);
+  z-index: var(--z-overlay);
+}
+.acct-menu[hidden] { display: none; }
+.am-who { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-2) var(--space-3); }
+.am-who div { display: grid; min-width: 0; }
+.am-who b { font-size: var(--text-sm); font-weight: 600; color: var(--chalk); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-who span { font-size: var(--text-xs); color: var(--chalk-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-plan {
+  display: grid; gap: 2px; margin-bottom: var(--space-2);
+  padding: var(--space-3); border-radius: var(--radius-sm);
+  border: var(--border) solid var(--rule); background: var(--terrace);
+  color: inherit; text-decoration: none;
+}
+.am-plan.on { border-color: var(--floodlight); }
+.am-plan b { font-size: var(--text-sm); font-weight: 600; color: var(--chalk); }
+.am-plan span { font-size: var(--text-xs); color: var(--chalk-2); }
+.am-plan:hover { border-color: var(--floodlight-hi); }
+.am-links { display: grid; padding: var(--space-1) 0; border-top: var(--border) solid var(--hairline); }
+.am-links a, .am-out {
+  display: flex; align-items: center; min-height: 40px; padding: 0 var(--space-2);
+  border-radius: var(--radius-sm); font-size: var(--text-sm); color: var(--chalk-2); text-decoration: none;
+}
+.am-links a:hover, .am-out:hover, .am-links a:focus-visible, .am-out:focus-visible { background: var(--terrace); color: var(--chalk); outline: none; }
+.am-links .am-cta { color: var(--floodlight-hi); font-weight: 600; }
+.am-out { width: 100%; border: 0; border-top: var(--border) solid var(--hairline); border-radius: 0; background: transparent; font: inherit; font-size: var(--text-sm); cursor: pointer; }
+
+/* ============================================================= profile */
+
+.prof-facts { margin-top: 0; }
+.prof-club { display: inline-flex; align-items: center; gap: var(--space-2); }
+.prof-view .acct-actions { margin-top: var(--space-6); }
+.prof-edit[hidden], .prof-view[hidden] { display: none; }
+.prof-edit .acct-sub { margin-top: 0; }
+/* The @ sits inside the box, so the handle reads as a handle while typing. */
+.handle-field {
+  display: flex; align-items: center;
+  border: var(--border) solid var(--rule-firm); border-radius: var(--radius); background: var(--pitch);
+}
+.handle-field span { padding-left: var(--space-4); color: var(--chalk-3); font-size: var(--text-md); }
+.acct-form .handle-field input { flex: 1; min-width: 0; border: 0; background: transparent; padding-left: var(--space-1); }
+.handle-field:focus-within { box-shadow: var(--focus-ring); border-color: var(--floodlight); }
+.acct-form .handle-field input:focus-visible { box-shadow: none; }
+.acct-handle { color: var(--floodlight-hi); font-weight: var(--weight-medium); }
