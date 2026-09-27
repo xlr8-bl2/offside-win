@@ -6380,11 +6380,13 @@ function cookieNotice({ force = false } = {}) {
   el.setAttribute('role', 'region');
   el.setAttribute('aria-label', 'Cookie choice');
   el.innerHTML = `
-    <p>Say yes and we count visits anonymously and keep a copy of pages on this
-       device so they open instantly. Say no and we do neither.
-       <a href="#/legal/cookies">What we store</a></p>
-    <button class="btn btn-ghost btn-sm" data-consent="declined">No thanks</button>
-    <button class="btn btn-primary btn-sm" data-consent="accepted">Yes, that's fine</button>`;
+    <p class="cookie-kicker hand" aria-hidden="true">quick one</p>
+    <p class="cookie-text">Can we count visits, anonymously, and keep pages on this device so they
+       open instantly? No adverts, no tracking. <a href="#/legal/cookies">What we store</a></p>
+    <div class="cookie-actions">
+      <button class="btn btn-ghost btn-sm" data-consent="declined">No thanks</button>
+      <button class="btn btn-primary btn-sm" data-consent="accepted">Yes, go on</button>
+    </div>`;
   el.addEventListener('click', (e) => {
     const v = e.target?.dataset?.consent;
     if (v) applyConsent(v);

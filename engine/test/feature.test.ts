@@ -125,3 +125,16 @@ test('a bigger game with no call does not lead over a smaller one we called', ()
   assert.equal(hero.fixture_id, 2);
   assert.equal(chooseHero([fx({ called: false })], NOW), null, 'nothing called: no hero');
 });
+
+test('a big match tonight leads over a bigger name tomorrow', () => {
+  // 27 September 2026, 09:00 UK. Germany v Greece at 19:45 tonight against
+  // Belgium v France at 19:45 tomorrow: France's name used to win it.
+  const now = Date.UTC(2026, 8, 27, 8, 0) / 1000;
+  const tonight = { id: 1, league_id: 64, league: 'UEFA Nations League', kickoff: Date.UTC(2026, 8, 27, 18, 45) / 1000, home: 'Germany', away: 'Greece', called: true };
+  const tomorrow = { id: 2, league_id: 64, league: 'UEFA Nations League', kickoff: Date.UTC(2026, 8, 28, 18, 45) / 1000, home: 'Belgium', away: 'France', called: true };
+  assert.equal(chooseHero([tomorrow, tonight], now)?.fixture_id, 1);
+  // Under way, it keeps the page over tomorrow's too.
+  assert.equal(chooseHero([tomorrow, tonight], tonight.kickoff + 1800)?.fixture_id, 1);
+  // Once tonight's is over, tomorrow's takes it.
+  assert.equal(chooseHero([tomorrow, tonight], tonight.kickoff + 3 * 3600)?.fixture_id, 2);
+});

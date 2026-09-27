@@ -77,6 +77,9 @@ export interface HeroCandidate {
  * second-tier tie, and never on El Clasico, so the bonus meant for the biggest
  * nights of the season was going to games nobody has heard of.
  */
+/** The calendar day in the UK, which is the day the site's readers mean by "today". */
+const ukDay = (epoch: number) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(epoch * 1000));
+
 export function scoreCandidate(f: HeroCandidate, now: number): number {
   const rank = leagueRank(f.league_id);
   let score = (10 - rank) * 100;
@@ -90,16 +93,24 @@ export function scoreCandidate(f: HeroCandidate, now: number): number {
     rank,
   }).weight;
 
-  // Who is playing, whoever they are playing for. See statureOf.
-  score += statureOf(f.home) + statureOf(f.away);
+  // Who is playing, whoever they are playing for (see statureOf). The bigger
+  // name counts in full and the other at half: a fan reads "Germany", and
+  // Serbia v Netherlands summed to more than Germany v Greece.
+  const [hi, lo] = [statureOf(f.home), statureOf(f.away)].sort((a, b) => b - a) as [number, number];
+  score += hi + Math.round(lo / 2);
 
-  // Today beats later this week: a masthead is about tonight. A game two
-  // days out has to be a good deal bigger to lead over one this evening.
+  // Today first. A masthead is about tonight: Germany v Greece and Portugal v
+  // Norway this evening lost the top of the page to Belgium v France the next
+  // day, by one point, because "today" was worth 90 more than "tomorrow" and
+  // France's name was worth more than that. Now a match today (UK time) leads
+  // anything later unless the later one is an occasion on another scale, a
+  // final or a derby. One being played now keeps most of that weight, so the
+  // page does not drop a big game the moment it kicks off.
   const hoursOut = (f.kickoff - now) / 3600;
-  if (hoursOut >= 0 && hoursOut <= 12) score += 150;
-  else if (hoursOut > 12 && hoursOut <= 36) score += 60;
-  else if (hoursOut > 36) score -= 100;
-  else if (hoursOut < 0) score -= 400; // already kicked off
+  if (hoursOut < 0) score += 300;
+  else if (ukDay(f.kickoff) === ukDay(now)) score += 450;
+  else if (hoursOut <= 36) score += 0;
+  else score -= 300;
 
   score += Math.round((f.confidence ?? 0) * 40);
   // A game we have a call on edges one we passed on, all else being equal.
