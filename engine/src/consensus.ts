@@ -12,7 +12,12 @@
  *     whose rates are the market's (fitted back out of the result, goal-line
  *     and both-to-score prices) blended with our model's by `modelWeight`;
  *   - everything else (result, double chance, draw no bet, handicaps,
- *     corners, cards): the de-vigged consensus, which nothing we have beats.
+ *     corners, cards): the sharpest single book's de-vigged price where it
+ *     priced the market (Pinnacle, else an exchange), the consensus where not.
+ *     On 3,077 fixtures the sharp book was a shade more accurate than the
+ *     consensus on results and goals, and measuring value against it rather
+ *     than the consensus is what took the published calls from about 77% to
+ *     about 81% landed (lab:tune).
  *
  * Every call is then an opinion the best available forecast agrees with,
  * rather than one that a price we can check says is wrong.
@@ -69,7 +74,7 @@ export function consensusMarkets(
       if (b.market === 'btts') probs = priceBtts(mx);
       else if (/^over_under_\d\d$/.test(b.market)) probs = priceOverUnder(mx, b.line ?? Number(b.market.slice(-2)) / 10);
     }
-    probs ??= new Map(b.fair);
+    probs ??= new Map(b.sharp?.fair ?? b.fair);
     if (probs.size) markets.push({ market: b.market, line: b.line, probs, confidence: 1 });
   }
   return { markets, rates };
