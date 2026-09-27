@@ -21,7 +21,7 @@
  * telling one reader from another is one header.
  */
 
-import { seoResponse, sitemap } from './seo.ts';
+import { cardImage, seoResponse, sitemap } from './seo.ts';
 import { bearer, jsonHeaders } from './http.ts';
 import { charge, checkout, confirm, payStatus, sweepWhop, renewal, webhook, type PayEnv } from './pay.ts';
 import { deleteAccount } from './account.ts';
@@ -134,6 +134,8 @@ export default {
       // an address with no file behind it: one of the readable pages
       // (seo.ts), the sitemap, or a 404.
       if (path === '/sitemap.xml') return await sitemap(env, url.origin);
+      const card = path.match(/^\/og\/(\d{1,12})\.jpg$/);
+      if (card) return await cardImage(env, Number(card[1]), url.origin);
       try {
         const page = await seoResponse(request, env);
         if (page) return page;
