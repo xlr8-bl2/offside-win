@@ -4108,3 +4108,25 @@ html.pay-open { overflow: hidden; }
 .handle-field:focus-within { box-shadow: var(--focus-ring); border-color: var(--floodlight); }
 .acct-form .handle-field input:focus-visible { box-shadow: none; }
 .acct-handle { color: var(--floodlight-hi); font-weight: var(--weight-medium); }
+
+/* ================================================================ share */
+
+.share-btn { gap: var(--space-2); min-height: 32px; padding-inline: var(--space-3); color: var(--chalk-2); }
+.share-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.share-btn:hover { color: var(--chalk); }
+.verdict-meta .share-btn { order: 99; margin-left: auto; }
+.freecall-meta .share-btn { margin-left: var(--space-2); vertical-align: middle; }
+.slip-share { display: flex; justify-content: flex-end; margin: calc(-1 * var(--space-2)) 0 var(--space-2); }
+
+/* A members' call or slip carries its reader's name, faintly, across it: what
+   a screenshot passed round a group shows. Set per reader by paintMemberMark(). */
+.is-members { position: relative; }
+.is-members::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  border-radius: inherit; background-image: var(--member-mark, none);
+}
+.trace-box {
+  width: 100%; padding: var(--space-4); border-radius: var(--radius);
+  border: var(--border) solid var(--rule-firm); background: var(--pitch); color: var(--chalk);
+  font: inherit; font-size: var(--text-sm); resize: vertical;
+}
