@@ -221,3 +221,12 @@ test('the number check is blind to spelling but not to invention', () => {
   assert.equal(inventedNumber('Arsenal have won five of their last six.', facts), true);
   assert.equal(inventedNumber('It finished 3-2 last time.', facts), true);
 });
+
+test('a return date half the list shares is a placeholder, and is not said', () => {
+  const later = new Date(Date.now() + 23 * DAY * 1000).toISOString().slice(0, 10);
+  const out = (id: number, name: string) => ({ ...saka, id, name, expected_return: later, standout: null, recent: null, importance: 0.05, tags: [] });
+  const texts = playerFacts({ home: 'England', away: 'Czechia', players: [out(1, 'A One'), out(2, 'B Two'), out(3, 'C Three')] }).map((f) => f.text);
+  assert.ok(!texts.some((t) => /not expected back/.test(t)), texts.join('\n'));
+  const one = playerFacts({ home: 'England', away: 'Czechia', players: [out(1, 'A One')] }).map((f) => f.text);
+  assert.ok(one.some((t) => /A One is not expected back until/.test(t)));
+});

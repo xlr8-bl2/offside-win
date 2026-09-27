@@ -12,7 +12,7 @@
  */
 
 import { kvSetJSON, select } from '../store.ts';
-import { scoreSources, simulate, toHistRow, walkForward, CURRENT, type HistRow } from './markets.ts';
+import { confidentGrid, scoreSources, simulate, toHistRow, walkForward, CURRENT, type HistRow } from './markets.ts';
 
 interface Row {
   id: number;
@@ -118,7 +118,7 @@ export async function runLab(): Promise<void> {
   const wf = walkForward(rows, 0.6, Math.max(40, Math.round(rows.length * 0.04)));
   console.log(`\nWalk-forward: tuned on the first ${wf.trainRows} fixtures, scored on the last ${wf.testRows}`);
   const line = (label: string, r: ReturnType<typeof simulate>) =>
-    console.log(`  ${label.padEnd(8)} ${String(r.n).padStart(5)} calls  ${pct(r.hitRate).padStart(6)} landed  odds ${r.avgOdds.toFixed(2)}  return ${pct(r.roi).padStart(7)}  worst run ${r.drawdown.toFixed(1)}  ${Object.entries(r.byFamily).map(([f, v]) => `${f} ${v.n}:${pct(v.roi)}`).join(' ')}`);
+    console.log(`  ${label.padEnd(8)} ${String(r.n).padStart(5)} calls  ${r.perDay.toFixed(1)}/day  ${pct(r.hitRate).padStart(6)} landed  odds ${r.avgOdds.toFixed(2)}  return ${pct(r.roi).padStart(7)}  worst run ${r.drawdown.toFixed(1)}  top market ${pct(r.topShare)} of ${r.markets}  ${Object.entries(r.byFamily).map(([f, v]) => `${f} ${v.n}:${pct(v.roi)}`).join(' ')}`);
   console.log('  today\'s rule');
   line('train', wf.current.train);
   line('test', wf.current.test);
@@ -126,6 +126,22 @@ export async function runLab(): Promise<void> {
     console.log(`  ${b.policy.name}`);
     line('train', b.train);
     line('test', b.test);
+  }
+
+  // The published kind: likely calls, any market, varied. Eligible only if
+  // they stay likely (seven in ten landing in training) and cover the board.
+  const lk = walkForward(rows, 0.6, Math.max(40, Math.round(rows.length * 0.04)), confidentGrid(),
+    (r) => r.hitRate >= 0.7 && r.perDay >= 5);
+  console.log(`\nLikely calls, any market (walk-forward, same split)`);
+  console.log('  today\'s rule');
+  line('train', lk.current.train);
+  line('test', lk.current.test);
+  for (const b of lk.best) {
+    console.log(`  ${b.policy.name}`);
+    line('train', b.train);
+    line('test', b.test);
+    const top = Object.entries(b.test.byMarket).sort((x, y) => y[1].n - x[1].n).slice(0, 6);
+    console.log(`           markets: ${top.map(([k, v]) => `${k} ${v.n}`).join(', ')}`);
   }
 
   await kvSetJSON('lab:markets', {
@@ -139,6 +155,9 @@ export async function runLab(): Promise<void> {
       testRows: wf.testRows,
       current: wf.current,
       best: wf.best.map((b) => ({ policy: b.policy, train: b.train, test: b.test })),
+    },
+    likely: {
+      best: lk.best.map((b) => ({ policy: b.policy, train: b.train, test: b.test })),
     },
   });
 }

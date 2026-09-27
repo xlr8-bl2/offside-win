@@ -491,9 +491,20 @@ export function playerFacts(b: Bundle): PubFact[] {
 
   for (const side of ['home', 'away'] as const) {
     const team = side === 'home' ? b.home : b.away;
-    // The three absentees who matter most, and the chief threat still standing.
-    for (const p of [...bySide(side, false).slice(0, 3), ...bySide(side, true).slice(0, 1)]) {
-      out.push(...onePlayer(p, team, side));
+    // A return date that half the list shares is the feed's placeholder for
+    // "not in the squad", not a date anyone gave. Said once it misleads.
+    const dates = new Map<string, number>();
+    for (const p of bySide(side, false)) {
+      const d = str(p.expected_return);
+      if (d) dates.set(d, (dates.get(d) ?? 0) + 1);
+    }
+    const shared = new Set([...dates].filter(([, k]) => k >= 3).map(([d]) => d));
+    // The three absentees who matter most, and the threats still standing:
+    // the one who matters most, and a second only if the season says so.
+    const fit = bySide(side, true);
+    const threats = fit.slice(0, 1).concat(fit.slice(1, 2).filter((p) => (num(p.season?.goals) ?? 0) >= 3));
+    for (const p of [...bySide(side, false).slice(0, 3), ...threats]) {
+      out.push(...onePlayer(shared.has(str(p.expected_return) ?? '') ? { ...p, expected_return: null } : p, team, side));
     }
   }
   return out;
@@ -550,7 +561,7 @@ function onePlayer(p: BundlePlayer, team: string, side: 'home' | 'away'): PubFac
   }
 
   // 2. What losing the player does, said as football rather than as a figure.
-  if (absent && imp >= 0.12) {
+  if (absent && imp >= (club ? 0.18 : 0.12)) {
     const role = p.role;
     const line = role === 'GK' ? `${team} have to change their keeper`
       : role === 'DEF' ? `${team} lose a regular from the back line`

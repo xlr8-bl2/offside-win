@@ -260,7 +260,7 @@ export function scoreSources(rows: HistRow[], modelWeight: number) {
 export interface Policy {
   name: string;
   /** Which probability the policy believes. */
-  source: 'book' | 'model' | 'provider' | 'blend' | 'mix';
+  source: 'book' | 'model' | 'provider' | 'blend' | 'mix' | 'best';
   modelWeight: number;
   minProb: number;
   maxProb: number;
@@ -273,9 +273,20 @@ export interface Policy {
    * stale or erroneous quote rather than an opportunity.
    */
   maxGap: number;
-  /** How the one call per fixture is chosen among those that qualify. */
-  rankBy: 'ev' | 'prob' | 'evprob';
+  /**
+   * How the one call per fixture is chosen among those that qualify. `growth`
+   * is the expected log of the odds, p·ln(odds): among calls that clear the
+   * probability floor it prefers the one that pays, rather than the shortest
+   * price on the board every time.
+   */
+  rankBy: 'ev' | 'prob' | 'evprob' | 'growth';
   families?: MarketFamily[] | null;
+  /**
+   * The most any one market may take of a day's calls, 0..1. A fixture whose
+   * favourite market is already full takes its next qualifying one. Null for
+   * no cap.
+   */
+  diversity?: number | null;
 }
 
 export interface Pick { row: HistRow; option: Option; p: number; ev: number }
@@ -287,6 +298,10 @@ export function probOf(policy: Policy, o: Option): number | null {
     case 'model': return o.model;
     case 'provider': return o.provider;
     case 'blend': return o.blend ?? o.book;
+    // Whichever source the accuracy table says is sharpest for the family:
+    // the blend for goals, where our rates add to the market's, and the
+    // consensus everywhere else, where they do not.
+    case 'best': return o.family === 'goals' ? (o.blend ?? o.book) : o.book;
     // The blend where there is one, and the book's own view elsewhere, with the
     // provider's opinion averaged in where it has one.
     case 'mix': {
@@ -301,10 +316,16 @@ export function evOf(p: number, o: Option): number {
   return (1 - o.push) * (p * o.odds - 1);
 }
 
-export function choose(policy: Policy, row: HistRow, options?: Option[]): Pick | null {
+/** The market a call counts against for diversity: the market and the side of it. */
+export function bucketOf(o: { market: MarketCode; outcome: Outcome }): string {
+  const side = o.outcome === 'HOME' || o.outcome === '1X' ? 'home' : o.outcome === 'AWAY' || o.outcome === 'X2' ? 'away' : String(o.outcome);
+  return `${o.market} ${side}`;
+}
+
+/** Every option a policy would take on a fixture, best first. */
+export function ranked(policy: Policy, row: HistRow, options?: Option[]): Pick[] {
   const opts = options ?? optionsFor(row, policy.modelWeight);
-  let best: Pick | null = null;
-  let bestScore = -Infinity;
+  const out: Array<Pick & { score: number }> = [];
   for (const o of opts) {
     if (policy.families && !policy.families.includes(o.family)) continue;
     if (o.odds < policy.minOdds || o.odds > policy.maxOdds) continue;
@@ -315,14 +336,40 @@ export function choose(policy: Policy, row: HistRow, options?: Option[]): Pick |
     if (p === null || p < policy.minProb || p > policy.maxProb) continue;
     const ev = evOf(p, o);
     if (ev < policy.minEv) continue;
-    const score = policy.rankBy === 'ev' ? ev : policy.rankBy === 'prob' ? p : ev * Math.sqrt(p);
-    if (score > bestScore) {
-      bestScore = score;
-      best = { row, option: o, p, ev };
-    }
+    const score = policy.rankBy === 'ev' ? ev
+      : policy.rankBy === 'prob' ? p
+      : policy.rankBy === 'growth' ? p * Math.log(o.odds) + ev
+      : ev * Math.sqrt(p);
+    out.push({ row, option: o, p, ev, score });
   }
-  return best;
+  return out.sort((a, b) => b.score - a.score);
 }
+
+export function choose(policy: Policy, row: HistRow, options?: Option[]): Pick | null {
+  return ranked(policy, row, options)[0] ?? null;
+}
+
+/**
+ * One call per fixture across a day, with no market taking more than the
+ * policy's share of the day's calls. Fixtures are served strongest first, so
+ * the cap costs the weakest calls their first choice, not the best ones.
+ */
+export function chooseDay(policy: Policy, rows: HistRow[], cache?: Map<number, Option[]>): Pick[] {
+  const lists = rows.map((r) => ranked(policy, r, cache?.get(r.id))).filter((l) => l.length);
+  if (!policy.diversity) return lists.map((l) => l[0]!);
+  const cap = Math.max(1, Math.ceil(policy.diversity * lists.length));
+  const used = new Map<string, number>();
+  const out: Pick[] = [];
+  for (const l of lists.sort((a, b) => b[0]!.p - a[0]!.p)) {
+    const pick = l.find((c) => (used.get(bucketOf(c.option)) ?? 0) < cap);
+    if (!pick) continue;
+    used.set(bucketOf(pick.option), (used.get(bucketOf(pick.option)) ?? 0) + 1);
+    out.push(pick);
+  }
+  return out;
+}
+
+const dayOf = (t: number) => Math.floor((t + 3600) / 86400);
 
 export interface SimResult {
   policy: string;
@@ -338,32 +385,46 @@ export interface SimResult {
   drawdown: number;
   byFamily: Record<string, { n: number; pnl: number; roi: number }>;
   byMarket: Record<string, { n: number; pnl: number }>;
+  /** How varied the calls are: the biggest market's share, and how many markets were used. */
+  topShare: number;
+  markets: number;
+  /** Calls per day on average, over the days with any. */
+  perDay: number;
 }
 
 export function simulate(policy: Policy, rows: HistRow[], cache?: Map<number, Option[]>): SimResult {
   let n = 0, won = 0, lost = 0, pnl = 0, odds = 0, peak = 0, dd = 0;
   const byFamily: SimResult['byFamily'] = {};
   const byMarket: SimResult['byMarket'] = {};
+  const buckets = new Map<string, number>();
+  const days = new Map<number, HistRow[]>();
   for (const row of [...rows].sort((a, b) => a.kickoff - b.kickoff)) {
-    const opts = cache?.get(row.id) ?? optionsFor(row, policy.modelWeight);
-    const pick = choose(policy, row, opts);
-    if (!pick) continue;
-    const g = grade(row, pick.option);
-    if (!g || g.result === 'VOID') continue;
-    n++;
-    pnl += g.pnl;
-    odds += pick.option.odds;
-    if (g.result === 'WON' || g.result === 'HALF_WON') won++;
-    if (g.result === 'LOST' || g.result === 'HALF_LOST') lost++;
-    peak = Math.max(peak, pnl);
-    dd = Math.max(dd, peak - pnl);
-    const f = (byFamily[pick.option.family] ??= { n: 0, pnl: 0, roi: 0 });
-    f.n++;
-    f.pnl += g.pnl;
-    const mk = `${pick.option.market}${pick.option.line === null ? '' : ` ${pick.option.line}`} ${pick.option.outcome}`;
-    const m = (byMarket[mk] ??= { n: 0, pnl: 0 });
-    m.n++;
-    m.pnl += g.pnl;
+    const d = dayOf(row.kickoff);
+    days.set(d, [...(days.get(d) ?? []), row]);
+  }
+  let activeDays = 0;
+  for (const dayRows of days.values()) {
+    const picks = chooseDay(policy, dayRows, cache).sort((a, b) => a.row.kickoff - b.row.kickoff);
+    if (picks.length) activeDays++;
+    for (const pick of picks) {
+      const g = grade(pick.row, pick.option);
+      if (!g || g.result === 'VOID') continue;
+      n++;
+      pnl += g.pnl;
+      odds += pick.option.odds;
+      if (g.result === 'WON' || g.result === 'HALF_WON') won++;
+      if (g.result === 'LOST' || g.result === 'HALF_LOST') lost++;
+      peak = Math.max(peak, pnl);
+      dd = Math.max(dd, peak - pnl);
+      const f = (byFamily[pick.option.family] ??= { n: 0, pnl: 0, roi: 0 });
+      f.n++;
+      f.pnl += g.pnl;
+      const mk = `${pick.option.market}${pick.option.line === null ? '' : ` ${pick.option.line}`} ${pick.option.outcome}`;
+      const m = (byMarket[mk] ??= { n: 0, pnl: 0 });
+      m.n++;
+      m.pnl += g.pnl;
+      buckets.set(bucketOf(pick.option), (buckets.get(bucketOf(pick.option)) ?? 0) + 1);
+    }
   }
   for (const f of Object.values(byFamily)) f.roi = f.n ? f.pnl / f.n : 0;
   return {
@@ -375,6 +436,9 @@ export function simulate(policy: Policy, rows: HistRow[], cache?: Map<number, Op
     drawdown: dd,
     byFamily,
     byMarket,
+    topShare: n ? Math.max(0, ...buckets.values()) / n : 0,
+    markets: buckets.size,
+    perDay: activeDays ? n / activeDays : 0,
   };
 }
 
@@ -407,13 +471,37 @@ export function policyGrid(): Policy[] {
 }
 
 /**
+ * Rules of the published kind: likely calls, one a fixture, but free to use
+ * any market that clears the bar rather than the shortest price every time,
+ * and with a cap on how much of a day any one market may take.
+ */
+export function confidentGrid(): Policy[] {
+  const out: Policy[] = [];
+  for (const [source, modelWeight] of [['book', 0], ['best', 0.3], ['best', 0.5], ['blend', 0.3], ['mix', 0.3]] as const) {
+    for (const minProb of [0.6, 0.65, 0.7, 0.75, 0.8]) {
+      for (const rankBy of ['prob', 'growth', 'evprob'] as const) {
+        for (const diversity of [null, 0.3]) {
+          for (const minEv of [-1, -0.03]) {
+            out.push({
+              name: `likely ${source}${source === 'book' ? '' : ` w=${modelWeight}`} p>=${minProb} ${rankBy}${diversity ? ` cap ${diversity}` : ''}${minEv > -1 ? ` ev>=${minEv}` : ''}`,
+              source, modelWeight, minProb, maxProb: 0.95, minOdds: 1.13, maxOdds: 3.5, minEv, maxGap: 1.12, rankBy, diversity,
+            });
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Tune on the older part of the history, report on the newer part the tuning
  * never saw. A rule is only eligible if it made enough calls in training to
  * mean something, and it is ranked on a lower confidence bound of its return
  * rather than the return itself, which is what stops a lucky dozen from
  * winning the grid.
  */
-export function walkForward(rows: HistRow[], trainShare = 0.6, minCalls = 40) {
+export function walkForward(rows: HistRow[], trainShare = 0.6, minCalls = 40, grid: Policy[] = policyGrid(), eligible: (r: SimResult) => boolean = () => true) {
   const sorted = [...rows].sort((a, b) => a.kickoff - b.kickoff);
   const cut = Math.floor(sorted.length * trainShare);
   const train = sorted.slice(0, cut);
@@ -427,11 +515,11 @@ export function walkForward(rows: HistRow[], trainShare = 0.6, minCalls = 40) {
     }
     return c;
   };
-  const scored = policyGrid().map((p) => {
+  const scored = grid.map((p) => {
     const r = simulate(p, train, cacheFor(p.modelWeight));
     // Return minus one standard error of it, per call.
     const se = r.n > 1 ? Math.sqrt(Math.max(1e-9, r.avgOdds - 1) / r.n) : 1;
-    return { p, r, lcb: r.n >= minCalls ? r.roi - se : -Infinity };
+    return { p, r, lcb: r.n >= minCalls && eligible(r) ? r.roi - se : -Infinity };
   }).sort((a, b) => b.lcb - a.lcb);
   const top = scored.slice(0, 5);
   return {
