@@ -136,21 +136,19 @@ export type TunedPolicy = Policy;
 
 export function tuneGrid(stack: StackWeights): TunedPolicy[] {
   const out: TunedPolicy[] = [];
-  const sources: Array<[TunedPolicy['source'], number, StackWeights | undefined]> = [
-    ['best', 0.5, undefined],
-    ['book', 0, undefined],
-    ['stack', 0.5, stack],
-  ];
-  for (const [source, modelWeight, st] of sources) {
-    for (const minProb of [0.7, 0.75, 0.8, 0.85]) {
-      for (const minEv of [-0.03, -0.02, -0.01, 0, 0.01, 0.02]) {
-        for (const rankBy of ['prob', 'growth', 'ev'] as const) {
-          for (const maxGap of [1.05, 1.08, 1.12]) {
-            for (const diversity of [0.3, 0.45]) {
+  // The stacked source added nothing on the first pass (the consensus is
+  // already calibrated), so the search is over the rule, not the source.
+  void stack;
+  for (const source of ['best', 'book'] as const) {
+    for (const minProb of [0.7, 0.72, 0.75, 0.78, 0.8, 0.82, 0.85]) {
+      for (const minEv of [-0.02, -0.01, 0, 0.01, 0.02]) {
+        for (const rankBy of ['prob', 'growth'] as const) {
+          for (const maxGap of [1.06, 1.12]) {
+            for (const maxHandicap of [1, 1.5, 99]) {
               out.push({
-                name: `${source} p>=${minProb} ev>=${minEv} ${rankBy} gap ${maxGap} cap ${diversity}`,
-                source, modelWeight, minProb, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5, minEv, maxGap, rankBy,
-                diversity, noQuarters: true, stack: st,
+                name: `${source} p>=${minProb} ev>=${minEv} ${rankBy} gap ${maxGap} hcap<=${maxHandicap}`,
+                source, modelWeight: source === 'book' ? 0 : 0.5, minProb, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5,
+                minEv, maxGap, rankBy, diversity: 0.3, noQuarters: true, maxHandicap,
               });
             }
           }
@@ -199,14 +197,20 @@ export function runTune(rows: HistRow[]): Record<string, unknown> {
     return { p, ra, rb };
   });
   // Earns in both, carries a real board, then lands the most.
-  const ok = scored.filter((s) => s.ra.roi > 0.005 && s.rb.roi > 0.005 && s.ra.perDay >= 8 && s.rb.perDay >= 8 && s.rb.n >= 80);
+  // A clear margin in both periods, not a hair above zero: the first pass
+  // showed rules that scraped a profit in A and B losing it in C.
+  const ok = scored.filter((s) => s.ra.roi > 0.015 && s.rb.roi > 0.015 && s.ra.perDay >= 8 && s.rb.perDay >= 8 && s.rb.n >= 80);
   ok.sort((x, y) => Math.min(y.ra.hitRate, y.rb.hitRate) - Math.min(x.ra.hitRate, x.rb.hitRate));
-  const top = ok.slice(0, 8);
+  // One per probability floor, so the report is the trade-off curve rather
+  // than eight near-copies of one rule.
+  const seenFloor = new Set<number>();
+  const top = ok.filter((s) => (seenFloor.has(s.p.minProb) ? false : (seenFloor.add(s.p.minProb), true))).slice(0, 8);
 
-  console.log(`\n${ok.length} of ${grid.length} rules earned in both A and B with eight or more calls a day. The eight that land most:`);
+  console.log(`\n${ok.length} of ${grid.length} rules earned 1.5% or more in both A and B with eight or more calls a day. The eight that land most:`);
   const refs: Array<[string, Policy]> = [
     ['old rule (provider, 80%+)', CURRENT],
     ['current production', { name: 'production', source: 'best', modelWeight: 0.5, minProb: 0.7, maxProb: 0.95, minOdds: 1.13, maxOdds: 3.5, minEv: 0, maxGap: 1.12, rankBy: 'growth', diversity: 0.3, noQuarters: true }],
+    ['current production, handicaps to 1.5', { name: 'production h1.5', source: 'best', modelWeight: 0.5, minProb: 0.7, maxProb: 0.95, minOdds: 1.13, maxOdds: 3.5, minEv: 0, maxGap: 1.12, rankBy: 'growth', diversity: 0.3, noQuarters: true, maxHandicap: 1.5 }],
   ];
   const report: Record<string, unknown> = { split: { a: a.length, b: b.length, c: c.length }, stack };
   for (const [label, p] of refs) {
