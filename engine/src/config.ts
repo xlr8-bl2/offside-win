@@ -273,19 +273,20 @@ export const config = {
     /**
      * Publish a call at or above this probability.
      *
-     * Chosen by lab:tune on 2,298 fixtures split three ways by date (tuned on
-     * the oldest half, chosen on the next quarter, checked on the newest):
+     * Chosen by lab:tune on 3,077 fixtures split three ways by date (tuned on
+     * the oldest half, chosen on the next quarter, checked once on the newest):
      *
      *   rule                                   landed           a day   return
-     *   provider, 80%+ (the old rule)          83 / 84 / 78%    ~22     -0.8 / -0.4 / -4.4%
-     *   consensus 70%+, fair or better, growth 69 / 77 / 75%    ~18     +2.9 / +5.1 / +3.5%
-     *   consensus 72%+, within 1% of fair,     79 / 79 / 76%    ~28     +3.4 / +1.4 / +3.3%
-     *     likeliest first (this)
+     *   provider, 80%+ (the old rule)          83 / 83 / 80%    ~23     -1.0 / -0.3 / -3.2%
+     *   consensus 72%+, within 1% of fair      77 / 78 / 78%    ~34     -0.5 / +0.4 / +3.0%
+     *   78%+, best price at or above the       80 / 81 / 81%    ~20     +2.2 / +3.3 / +6.3%
+     *     sharp book's fair price (this)
      *
-     * Stricter floors (85%) landed more in the first two periods and lost in
-     * the third, so the extra points were not real.
+     * The sharp-book test (minSharpEv) is what did it: over 1.5 goals, the
+     * market the old board leaned on, lost in both tuning periods when value
+     * was measured against the consensus.
      */
-    floor: num('CONF_FLOOR', 0.72),
+    floor: num('CONF_FLOOR', 0.78),
     /**
      * One call per fixture.
      *
@@ -370,7 +371,7 @@ export const config = {
      * market: the best price must be within this of its fair price. Null
      * skips it.
      */
-    minSharpEv: process.env.CONF_MIN_SHARP_EV ? Number(process.env.CONF_MIN_SHARP_EV) : (null as number | null),
+    minSharpEv: process.env.CONF_MIN_SHARP_EV ? Number(process.env.CONF_MIN_SHARP_EV) : (0 as number | null),
     /** Quarter handicap lines (-1.75, 0.25) are a split stake nobody can explain in a sentence. */
     quarterLines: process.env.CONF_QUARTER_LINES === 'true',
     /** League rank at or below which a fixture counts as marquee. */

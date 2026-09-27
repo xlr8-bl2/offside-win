@@ -177,7 +177,9 @@ function line(label: string, r: SimResult): string {
 }
 
 /** The rule the slate runs (config.confident). */
-const PROD: Policy = { name: 'production', source: 'best', modelWeight: 0.5, minProb: 0.72, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5, minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true };
+const PROD: Policy = { name: 'production', source: 'bestsharp', modelWeight: 0.5, minProb: 0.78, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5, minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true, minSharpEv: 0 };
+/** The rule before the sharp book. */
+const CONSENSUS72: Policy = { name: 'consensus 72', source: 'best', modelWeight: 0.5, minProb: 0.72, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5, minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true };
 /** The rule before this search. */
 const PREV: Policy = { name: 'previous', source: 'best', modelWeight: 0.5, minProb: 0.7, maxProb: 0.95, minOdds: 1.13, maxOdds: 3.5, minEv: 0, maxGap: 1.12, rankBy: 'growth', diversity: 0.3, noQuarters: true };
 const STRICT: Policy = { ...PROD, name: 'strict 80', minProb: 0.8 };
@@ -245,8 +247,9 @@ export function runTune(rows: HistRow[]): Record<string, unknown> {
   const refs: Array<[string, Policy]> = [
     ['old rule (provider, 80%+)', CURRENT],
     ['previous rule (70%+, fair or better, growth)', PREV],
-    ['production (72%+, within 1% of fair, likeliest first)', PROD],
-    ['80%+ only', STRICT],
+    ['consensus 72%+, within 1% of fair', CONSENSUS72],
+    ['production (78%+, at or above the sharp book\'s fair price)', PROD],
+    ['production at 80%+', STRICT],
   ];
   const report: Record<string, unknown> = { split: { a: a.length, b: b.length, c: c.length }, stack };
   for (const [label, p] of refs) {
