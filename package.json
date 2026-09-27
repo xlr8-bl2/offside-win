@@ -22,6 +22,7 @@
     "plans": "npm -w engine run plans --",
     "whop:check": "npm -w engine run whop:check",
     "gemini:check": "npm -w engine run gemini:check",
+    "mail:setup": "npm -w engine run mail:setup",
     "trace": "npm -w engine run trace",
     "backtest": "npm -w engine run backtest",
     "migrate": "npm -w engine run migrate",

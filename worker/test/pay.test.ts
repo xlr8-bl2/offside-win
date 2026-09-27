@@ -494,3 +494,49 @@ test('the confirmation is kept with the buyer own token, the plan and the terms 
   // Written before the processor is asked for anything.
   assert.ok(sent.indexOf(c!) < sent.findIndex((x) => x.url.includes('/checkout/link')));
 });
+
+/* ------------------------------------------------ the confirmation email */
+
+test('a new grant emails the account its confirmation, with what it agreed at checkout', async () => {
+  const at = Math.floor(Date.now() / 1000) - 60;
+  route = (url) => {
+    if (url.includes(`/auth/v1/admin/users/${UID}`)) return new Response(JSON.stringify({ id: UID, email: 'owner@account.com' }), { status: 200 });
+    if (url.includes('/rest/v1/plan')) return new Response(JSON.stringify([{ id: 'matchday', days: 7 }]), { status: 200 });
+    if (url.includes('/rpc/record_entitlement')) return new Response(JSON.stringify({ applied: true }), { status: 200 });
+    if (url.includes('/rest/v1/purchase_consent')) return new Response(JSON.stringify([{ created_at: at, terms_version: '2026-09-27' }]), { status: 200 });
+    if (url.includes('api.brevo.com')) return new Response(JSON.stringify({ messageId: '<x>' }), { status: 201 });
+    return new Response('{}', { status: 200 });
+  };
+  await grantFromMembership({ ...WHOP, BREVO_API_KEY: 'brevo-key' }, mem());
+  const q = find('/rest/v1/purchase_consent')!;
+  assert.match(q.url, new RegExp(`user_id=eq.${UID}`));
+  const mail = find('api.brevo.com/v3/smtp/email')!;
+  assert.equal(mail.headers['api-key'], 'brevo-key');
+  assert.deepEqual(mail.body.to, [{ email: 'owner@account.com' }]);
+  assert.equal(mail.body.sender.email, 'hello@offside.win');
+  assert.equal(mail.body.replyTo.email, 'support@offside.win');
+  assert.match(mail.body.textContent, /lose the 14-day right to cancel/);
+  assert.match(mail.body.textContent, /in force from 27 September 2026/);
+  assert.match(mail.body.subject, /matchday pass/);
+});
+
+test('no Brevo key, a replayed grant, or a refusal from Brevo never stops the membership', async () => {
+  route = (url) => {
+    if (url.includes(`/auth/v1/admin/users/${UID}`)) return new Response(JSON.stringify({ id: UID, email: 'owner@account.com' }), { status: 200 });
+    if (url.includes('/rest/v1/plan')) return new Response(JSON.stringify([{ id: 'matchday', days: 7 }]), { status: 200 });
+    if (url.includes('/rpc/record_entitlement')) return new Response(JSON.stringify({ applied: true }), { status: 200 });
+    if (url.includes('api.brevo.com')) return new Response(JSON.stringify({ code: 'unauthorized' }), { status: 401 });
+    return new Response('[]', { status: 200 });
+  };
+  assert.equal((await grantFromMembership(WHOP, mem())).result, 'granted');
+  assert.equal(find('api.brevo.com'), undefined, 'nothing sent without a key');
+  assert.equal((await grantFromMembership({ ...WHOP, BREVO_API_KEY: 'k' }, mem())).result, 'granted');
+  // A replay: the ledger has it already, so no second email.
+  sent = [];
+  route = (url) => (url.includes('/rpc/record_entitlement')
+    ? new Response(JSON.stringify({ applied: false, reason: 'already recorded' }), { status: 200 })
+    : url.includes('/auth/v1/admin/users/') ? new Response(JSON.stringify({ id: UID, email: 'owner@account.com' }), { status: 200 })
+      : new Response('[]', { status: 200 }));
+  await grantFromMembership({ ...WHOP, BREVO_API_KEY: 'k' }, mem());
+  assert.equal(find('api.brevo.com'), undefined, 'a replay sends nothing');
+});

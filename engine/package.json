@@ -12,6 +12,7 @@
     "plans": "tsx src/run.ts plans",
     "whop:check": "tsx src/run.ts whop:check",
     "gemini:check": "tsx src/run.ts gemini:check",
+    "mail:setup": "tsx src/run.ts mail:setup",
     "trace": "tsx src/run.ts trace",
     "backtest": "tsx src/run.ts backtest",
     "migrate": "tsx src/run.ts migrate",

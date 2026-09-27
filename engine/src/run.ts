@@ -7,6 +7,7 @@ import { probe, probePlayers, probeReport } from './probe.ts';
 import { grant, plans } from './grant.ts';
 import { whopCheck } from './whopcheck.ts';
 import { geminiCheck } from './geminicheck.ts';
+import { mailSetup } from './mailsetup.ts';
 import { trace } from './trace.ts';
 import { fitAllLeagues } from './ratings/fit.ts';
 import { syncTeamShots } from './images/sync.ts';
@@ -158,6 +159,11 @@ const commands: Record<string, () => Promise<unknown>> = {
 
   async 'gemini:check'() {
     return geminiCheck();
+  },
+
+  // Brevo: the key, the domain's DNS records, the sender, and a test email.
+  async 'mail:setup'() {
+    return mailSetup(process.argv[3] ?? (process.env['GRANT_EMAIL'] || undefined));
   },
 
   // The account a leaked call came from, by the code #/trace reads out of it.

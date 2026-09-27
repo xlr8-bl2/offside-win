@@ -12,6 +12,7 @@
  * this file is a mistake against the whole database.
  */
 
+import { membershipMail, sendMail } from './mail.ts';
 import { createCheckoutLink, parseWebhook, type CoinflowConfig } from './coinflow.ts';
 import { verifyWebhook } from './webhook.ts';
 import { WhopError, createWhopCheckout, createWhopPayment, parseWhop, verifyWhop, whopAccountId, whopPeriodEnd } from './whop.ts';
@@ -20,6 +21,8 @@ export interface PayEnv {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_KEY?: string;
+  BREVO_API_KEY?: string;
+  MAIL_FROM?: string;
   /**
    * Which processor is live: 'whop' or 'coinflow'. Whop runs its own checkout
    * and billing, so with it the checkout route hands back the plan's own
@@ -597,7 +600,29 @@ export async function grantFromMembership(env: PayEnv, m: Rec): Promise<GrantOut
     p_manage_url: manage && /^https:\/\/(www\.)?whop\.com\//.test(manage) ? manage : null,
     p_user: uid && UUID_RE.test(uid) ? uid.toLowerCase() : null,
   });
-  return { membership: id, result: out?.applied ? 'granted' : String(out?.reason ?? 'not applied'), user: uid };
+  const granted = Boolean(out?.applied);
+  // Once per grant (the ledger applies each one once, however often Whop
+  // replays it): the confirmation email, with what the buyer agreed to.
+  if (granted) await confirmByEmail(env, email, plan, end, uid && UUID_RE.test(uid) ? uid.toLowerCase() : null);
+  return { membership: id, result: granted ? 'granted' : String(out?.reason ?? 'not applied'), user: uid };
+}
+
+/** The confirmation email. Never throws: the membership is on whatever happens here. */
+async function confirmByEmail(env: PayEnv, email: string, plan: string, until: number, uid: string | null): Promise<void> {
+  try {
+    let consent: { at: number; terms: string } | null = null;
+    if (uid && env.SUPABASE_SERVICE_KEY) {
+      const res = await fetch(new URL(`/rest/v1/purchase_consent?user_id=eq.${uid}&select=created_at,terms_version&order=created_at.desc&limit=1`, env.SUPABASE_URL), {
+        headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, accept: 'application/json' },
+      });
+      const row = res.ok ? (await res.json() as Array<{ created_at: number; terms_version: string }>)[0] : undefined;
+      if (row) consent = { at: Number(row.created_at), terms: String(row.terms_version) };
+    }
+    const sent = await sendMail(env, email, membershipMail({ plan, until, consent }));
+    console.log('mail: membership confirmation', sent ? 'sent' : 'not sent', consent ? 'with consent' : 'without consent');
+  } catch (err) {
+    console.error('mail: confirmation failed', err instanceof Error ? err.message : String(err));
+  }
 }
 
 /** POST /api/pay/confirm: the reader is back from paying; ask Whop about their memberships now. */
