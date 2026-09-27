@@ -81,7 +81,9 @@ function spacer(perMinute: number) {
 export function geminiWriter(opts: GeminiOptions): Writer {
   const model = opts.model ?? DEFAULT_MODEL;
   const pace = spacer(opts.ratePerMinute ?? 8);
-  const timeoutMs = opts.timeoutMs ?? 30_000;
+  // A minute: the 3.x models think before they write, and at thirty seconds
+  // a slow answer was an error that ended a run's writing.
+  const timeoutMs = opts.timeoutMs ?? 60_000;
 
   /** One request. Throws on anything the caller should know about. */
   async function attempt(prompt: string): Promise<{ busy: true; waitMs: number } | { busy: false; text: string }> {
