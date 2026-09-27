@@ -569,7 +569,7 @@ export function confidentGrid(): Policy[] {
 export function productionRules(): Policy[] {
   const base: Policy = {
     name: 'production', source: 'bestsharp', modelWeight: 0.5, minProb: 0.78, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5,
-    minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true, minSharpEv: 0,
+    minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true, minSharpEv: 0, excludeBuckets: ['total_corners under'],
   };
   const v = (name: string, o: Partial<Policy>): Policy => ({ ...base, ...o, name });
   return [

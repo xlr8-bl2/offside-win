@@ -364,6 +364,13 @@ export const config = {
      * could take, and the call is not made on it.
      */
     maxGap: num('CONF_MAX_GAP', 1.12),
+    /**
+     * Markets (market and side, as bucketOf names them) that are not called.
+     * Corners unders lost in both tuning periods under the sharp-book rule,
+     * and leaving them out took the held-out quarter from +6.3% to +7.3%
+     * (lab:tune, 3,077 fixtures). Comma-separated to override.
+     */
+    excludeMarkets: (process.env.CONF_EXCLUDE_MARKETS ?? 'total_corners under').split(',').map((x) => x.trim()).filter(Boolean),
     /** Only markets at least this many books priced in full; 0 for any. */
     minBooks: num('CONF_MIN_BOOKS', 0),
     /**
