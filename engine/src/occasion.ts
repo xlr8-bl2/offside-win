@@ -194,7 +194,8 @@ const STATURE: Array<[string, number]> = [
   ['croatia', 100], ['uruguay', 100], ['mexico', 90], ['colombia', 90], ['united states', 90],
   ['usa', 90], ['morocco', 80], ['japan', 80], ['senegal', 70], ['nigeria', 70], ['denmark', 70],
   ['switzerland', 70], ['türkiye', 70], ['turkey', 70], ['sweden', 60], ['poland', 60],
-  ['scotland', 60], ['wales', 60], ['austria', 60], ['serbia', 50], ['ghana', 50], ['egypt', 50],
+  ['scotland', 60], ['wales', 60], ['austria', 60], ['norway', 60], ['serbia', 50], ['ghana', 50], ['egypt', 50],
+  ['greece', 40], ['ukraine', 40], ['czechia', 40], ['hungary', 30], ['ireland', 30],
 ];
 
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');

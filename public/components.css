@@ -2121,52 +2121,50 @@
 
 .cookie {
   position: fixed;
-  right: var(--space-5);
-  bottom: calc(var(--space-5) + env(safe-area-inset-bottom, 0px));
+  right: var(--space-6);
+  bottom: calc(var(--space-6) + env(safe-area-inset-bottom, 0px));
   z-index: var(--z-overlay);
-  width: min(400px, calc(100vw - var(--space-8)));
-  display: flex;
-  align-items: center;
-  /* It is the first thing on the site anybody sees and it is not the product,
-     so it takes as little of a phone screen as it can while still being a
-     real choice: one sentence, two small buttons, tight padding. It was three
-     lines of text and two full-size buttons, which is a fifth of the viewport
-     spent on a notice about one localStorage key. */
-  gap: var(--space-3) var(--space-4);
-  flex-wrap: wrap;
-  padding: var(--space-4) var(--space-5);
-  background: var(--terrace);
-  border: var(--border) solid var(--rule);
+  width: min(340px, calc(100vw - var(--space-8)));
+  padding: var(--space-5) var(--space-6) var(--space-6);
+  background: var(--stand);
+  border: 1px solid var(--hairline);
+  border-top: 2px solid var(--floodlight);
   border-radius: var(--radius-lg);
   box-shadow: var(--elev-3);
+  /* One entrance, the only motion it has: it rises into place once. */
+  animation: cookie-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
-.cookie p { flex: 1 1 100%; margin: 0; font-size: var(--text-xs); line-height: var(--leading-snug); color: var(--chalk-2); }
-.cookie a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }
+@keyframes cookie-in { from { opacity: 0; transform: translateY(12px); } }
+.cookie-kicker { margin: 0 0 var(--space-1); color: var(--floodlight-hi); font-size: var(--text-xl); }
+.cookie-text { margin: 0; color: var(--chalk-2); font-size: var(--text-sm); line-height: var(--leading-normal); }
+.cookie-text a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
+.cookie-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-5); }
+.cookie-actions .btn { width: 100%; justify-content: center; }
 
 /*
  * On a phone it stops floating.
  *
- * A fixed card at the bottom of a 390px viewport is sitting on top of roughly
- * an eighth of the page, and the page decides what is underneath it. On the
- * pricing page that was the button that takes the money, and the tap went to
- * the notice instead: nothing a reader could see was wrong, and nothing they
- * did worked. Reserving space at the foot of the document does not fix it
- * either, because the thing being covered is in the middle of the page with a
- * footer below it.
- *
- * So on a narrow screen it is an ordinary bar in the flow, directly under the
- * header, where it pushes the page down instead of covering it. Same words,
- * same two buttons, and it cannot be on top of anything because it is not on
- * top of anything.
+ * A fixed card at the bottom of a 390px viewport sat on top of the pricing
+ * page's Buy button, and the tap went to the notice instead: nothing a reader
+ * could see was wrong, and nothing they did worked. So on a narrow screen it
+ * is a band in the flow, directly under the header, full width like the
+ * header itself, where it pushes the page down instead of covering it.
  */
 @media (max-width: 700px) {
   .cookie {
     position: static;
     width: auto;
-    margin: 0 var(--space-4) var(--space-4);
-    border-radius: var(--radius-sm);
+    margin: 0;
+    padding: var(--space-4) var(--space-5) var(--space-5);
+    border: 0;
+    border-bottom: 1px solid var(--hairline);
+    border-radius: 0;
     box-shadow: none;
+    background: linear-gradient(180deg, var(--floodlight-dim), transparent 140%), var(--stand);
+    animation: none;
   }
+  .cookie-kicker { font-size: var(--text-md); }
+  .cookie-actions { margin-top: var(--space-4); }
 }
 
 /* ===================================================== reduced motion */
