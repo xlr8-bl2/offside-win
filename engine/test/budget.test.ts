@@ -14,22 +14,49 @@ test('yesterday\'s count does not carry over', () => {
   assert.deepEqual(todays({ day: '2026-09-26', used: 12, exhausted: false }, '2026-09-26'), { day: '2026-09-26', used: 12, exhausted: false });
 });
 
-test('no request is sent past the allowance, and Google saying no is remembered', async () => {
+test('no request is sent past the allowance, and a refused model is paused', async () => {
   let sent = 0;
+  const ok = { name: 'x', generate: async () => { sent++; return 'ok'; } };
   const state = todays(null, '2026-09-26');
-  const w = budgeted({ name: 'x', generate: async () => { sent++; return 'ok'; } }, state, 2);
-  await w.generate('a'); await w.generate('b');
-  await assert.rejects(w.generate('c'), QuotaExhausted);
+  const w = budgeted([{ model: 'a', writer: ok }], state, 2);
+  await w.generate('p'); await w.generate('p');
+  await assert.rejects(w.generate('p'), QuotaExhausted);
   assert.equal(sent, 2);
-  assert.ok(spent(state, 2));
+  assert.ok(spent(state, 2, ['a']));
 
   const s2 = todays(null, '2026-09-26');
-  const w2 = budgeted({ name: 'x', generate: async () => { throw new QuotaExhausted('daily'); } }, s2, 100);
-  await assert.rejects(w2.generate('a'));
+  const w2 = budgeted([{ model: 'a', writer: { name: 'x', generate: async () => { throw new QuotaExhausted('daily'); } } }], s2, 100);
+  await assert.rejects(w2.generate('p'), QuotaExhausted);
   assert.equal(s2.exhausted, true);
-  assert.ok(spent(s2, 100), 'the next run would ask again straight away');
+  assert.ok(spent(s2, 100, ['a']), 'the next run would ask again straight away');
   // Two hours on, one request is allowed to find out.
-  assert.ok(!spent({ ...s2, pausedUntil: Math.floor(Date.now() / 1000) - 1 }, 100));
+  s2.models!['a']!.pausedUntil = Math.floor(Date.now() / 1000) - 1;
+  assert.ok(!spent(s2, 100, ['a']));
+});
+
+test('the writer moves down the models as each one runs out, as Google counts them', async () => {
+  const calls: string[] = [];
+  const mk = (m: string, fail?: 'quota' | 'gone') => ({
+    model: m,
+    writer: { name: m, generate: async () => {
+      calls.push(m);
+      if (fail === 'quota') throw new QuotaExhausted('GenerateRequestsPerDayPerProjectPerModel-FreeTier = 20');
+      if (fail === 'gone') throw new Error('gemini 404: no longer available');
+      return m;
+    } },
+  });
+  const state = todays(null, '2026-09-26');
+  const w = budgeted([mk('best', 'quota'), mk('retired', 'gone'), mk('next'), mk('last')], state, 100, 2);
+  assert.equal(await w.generate('p'), 'next', 'a refused and a retired model are passed over');
+  assert.equal(await w.generate('p'), 'next');
+  // Twenty a day each (two here): the third goes to the one after.
+  assert.equal(await w.generate('p'), 'last');
+  assert.equal(state.models!['retired']!.gone, true);
+  assert.deepEqual(calls, ['best', 'retired', 'next', 'next', 'last']);
+  assert.ok(!spent(state, 100, ['best', 'retired', 'next', 'last'], 2), 'last has one left');
+  await w.generate('p');
+  assert.ok(spent(state, 100, ['best', 'retired', 'next', 'last'], 2), 'every model spent');
+  await assert.rejects(w.generate('p'), QuotaExhausted);
 });
 
 test('a new key starts the day fresh, even after the old one was spent', async () => {
