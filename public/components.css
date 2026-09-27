@@ -2610,6 +2610,12 @@
 .home-side { display: flex; flex-direction: column; gap: var(--space-5); }
 .home-side .panel + .panel { margin-top: 0; }
 @media (min-width: 1041px) { .home-side { position: sticky; top: var(--space-9); } }
+/* The front page trims its record to the side column's height (balanceRecord
+   in app.js), then the side's last block stretches the last few pixels so
+   both columns end on the same line. */
+.with-side.is-balanced { align-items: stretch; }
+.with-side.is-balanced > .home-side { position: static; }
+.with-side.is-balanced > .home-side > section:last-of-type { flex: 1 0 auto; }
 .side-block { padding: var(--space-5) var(--space-6); }
 
 /* ------------------------------------------------------------- bet slip */

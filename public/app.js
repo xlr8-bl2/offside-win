@@ -1299,6 +1299,56 @@ function tickerHTML(fixtures, recent) {
   </div>`;
 }
 
+/**
+ * The front page's two columns end together.
+ *
+ * The record beside the side column used to be a fixed eight matches, and the
+ * side column's height depends on the day (a slip or none, games on now or
+ * not, the promo gone for members), so one column always ran on past the other
+ * with a blank space above the footer. The record is the column that can give:
+ * it shows as many matches as fit beside the side column, at least three, and
+ * "The full record" has the rest. Watched, because the slip and the live block
+ * redraw in place during a match.
+ */
+function balanceRecord() {
+  const grid = app.querySelector('.with-side');
+  const main = grid?.querySelector(':scope > .stack');
+  const side = grid?.querySelector(':scope > .home-side');
+  const rows = [...(main?.querySelectorAll('.played > .played-row') ?? [])];
+  if (!main || !side || !rows.length) return;
+  const fit = () => {
+    if (!main.isConnected) return;
+    grid.classList.remove('is-balanced');
+    rows.forEach((r) => { r.hidden = false; });
+    // Stacked (a phone): no column to line up with, so a steady eight.
+    if (getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length < 2) {
+      rows.forEach((r, i) => { r.hidden = i >= 8; });
+      return;
+    }
+    // Heights, not positions: the side column is sticky, so where it sits
+    // depends on the scroll. Both columns start at the top of the grid.
+    const room = side.getBoundingClientRect().height;
+    const tall = () => main.getBoundingClientRect().height;
+    let n = rows.length;
+    while (n > 3 && tall() > room + 4) rows[(n -= 1)].hidden = true;
+    // One row short of the side column leaves a gap under the record, so put
+    // that row back and let the side column's last block stretch to meet it.
+    if (n < rows.length && tall() < room - 4) rows[n].hidden = false;
+    grid.classList.add('is-balanced');
+  };
+  fit();
+  if ('ResizeObserver' in window) {
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      if (!main.isConnected) { ro.disconnect(); return; }
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(fit);
+    });
+    ro.observe(side);
+    ro.observe(grid);
+  }
+}
+
 /** The slip, and every settled slip before it. */
 async function viewSlip() {
   placeholder(skeletonHTML());
@@ -1934,7 +1984,7 @@ async function viewHome() {
              </div>
              ${formBarHTML(won, settled.length - won - lost, lost, ['won', 'void', 'lost'],
                `The last ${settled.length} to finish.`)}
-             ${playedHTML(settled.slice(0, 8))}
+             ${playedHTML(settled.slice(0, 16))}
            </div>
          </div>
          ${sideHTML(fixtures, slip)}
@@ -1943,6 +1993,7 @@ async function viewHome() {
 
   paintTally(fixtures, recent);
   tickCountdowns();
+  balanceRecord();
 
   if (!state.heroDetail && state.hero?.fixture_id) {
     const heroId = state.hero.fixture_id;
