@@ -16,6 +16,7 @@ import { cleanProse } from './js/lib/vocabulary.js';
 import { LEGAL, SUPPORT_EMAIL, UPDATED } from './js/lib/legal.js';
 import { mountPayment, openCheckout } from './js/lib/whop.js';
 import { absenceReason } from './js/lib/absence.js';
+import { TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle, ukDay } from './js/lib/titles.js';
 import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, prepareGoogleRedirect, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, siteConfig, viewingAsFree } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
@@ -428,7 +429,7 @@ function pathRoute(pathname = location.pathname) {
   if (m) return `/fixture/${m[1]}`;
   m = pathname.match(/^\/league\/(\d+)/);
   if (m) return `/league/${m[1]}`;
-  return { '/today': '/board', '/results': '/results', '/leagues': '/leagues', '/pricing': '/pricing' }[pathname.replace(/\/+$/, '')] ?? null;
+  return { '/today': '/board', '/results': '/results', '/leagues': '/leagues', '/pricing': '/pricing', '/slip': '/slip' }[pathname.replace(/\/+$/, '')] ?? null;
 }
 const slugOf = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
   .replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
@@ -437,26 +438,33 @@ function hashPath(hash) {
   if (m) return `/match/${m[1]}`;
   m = hash.match(/^#\/league\/(\d+)$/);
   if (m) return `/league/${m[1]}`;
-  return { '#/board': '/today', '#/results': '/results', '#/leagues': '/leagues', '#/pricing': '/pricing', '#/home': '/' }[hash] ?? null;
+  return { '#/board': '/today', '#/results': '/results', '#/leagues': '/leagues', '#/pricing': '/pricing', '#/slip': '/slip', '#/home': '/' }[hash] ?? null;
 }
 /*
- * The tab's title, per page, in the same words the Worker writes for a
- * search engine, so a page reads the same in a result and in the tab.
+ * The tab's title, per page, from the same functions the Worker uses for a
+ * search engine (js/lib/titles.js). Google renders the app, so whatever this
+ * writes is the title it may list: they have to agree, down to the count of
+ * calls on today's board, which is counted over the Worker's window.
  */
-const TITLES = {
-  board: "Today's board", results: 'Our record: every call and how it went', leagues: 'Leagues',
-  pricing: 'Membership', signin: 'Sign in', account: 'Your account', search: 'Find a game',
-  checkout: 'Checkout', slip: 'The bet slip', legal: 'Legal',
-};
 function pageTitle(name) {
   let t = TITLES[name] ?? null;
-  if (name === 'fixture' && state.titleFor) {
-    const { home, away, score } = state.titleFor;
-    t = Array.isArray(score) ? `${home} ${score[0]}–${score[1]} ${away}` : `${home} v ${away}`;
-  } else if (name === 'league' || name === 'player') {
+  if (name === 'fixture' && state.titleFor?.home) {
+    const f = state.titleFor;
+    t = matchTitle({ home: f.home, away: f.away, state: matchState(f).kind, score: f.score, live: f.live_score });
+  } else if (name === 'board') {
+    const now = Date.now() / 1000;
+    const calls = (state.board?.fixtures ?? []).filter((f) => f.kickoff >= now - 12 * 3600 && f.kickoff <= now + 48 * 3600
+      && (f.top_pick || f.locked || f.called)).length;
+    t = state.board ? todayTitle(ukDay(now), calls) : "Today's board";
+  } else if (name === 'slip') {
+    t = slipTitle(state.slipNow);
+  } else if (name === 'league') {
+    const h = app.querySelector('h1')?.textContent.replace(/\s+/g, ' ').trim();
+    t = h ? leagueTitle(h) : null;
+  } else if (name === 'player') {
     t = app.querySelector('h1')?.textContent.replace(/\s+/g, ' ').trim() || null;
   }
-  document.title = !t || name === 'home' ? 'offside.win: the picks for the biggest games' : `${t} | offside.win`;
+  document.title = name === 'home' ? fullTitle(null) : fullTitle(t);
 }
 
 /** Give the app's own links real addresses, keeping the route for the tap. */
@@ -1357,6 +1365,7 @@ async function viewSlip() {
   // The board rides along so each leg can show how its match stands.
   try { [data, board] = await Promise.all([getJSON('/api/slip'), loadBoard().catch(() => null)]); }
   catch (err) { return errorState(err); }
+  state.slipNow = data?.current ?? null;
   const tone = (r) => (r === 'WON' ? 'won' : r === 'LOST' ? 'lost' : 'back');
   const recent = data?.recent ?? [];
   app.innerHTML = `
@@ -3516,7 +3525,7 @@ function readsFor(f, verdicts) {
 async function viewFixture(id, params = new URLSearchParams()) {
   placeholder(skeletonHTML());
   let f;
-  try { f = await getJSON(`/api/fixture/${id}`); state.titleFor = f?.home && f?.away ? { home: f.home, away: f.away, score: f.score } : null; } catch {
+  try { f = await getJSON(`/api/fixture/${id}`); state.titleFor = f?.home && f?.away ? f : null; } catch {
     /*
      * A fixture we cannot show. The provider's message was printed raw --
      * "fixture not found or not yet analysed" -- under a Back button and

@@ -1,6 +1,6 @@
 {
-  "name": "offside.win",
-  "short_name": "offside",
+  "name": "Offside.win",
+  "short_name": "Offside",
   "description": "Football calls with the reason behind each one, and every result published.",
   "start_url": "/#/home",
   "display": "standalone",

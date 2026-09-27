@@ -33,7 +33,7 @@ export async function render(which) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${page.title}: offside.win</title>
+<title>${page.title} | Offside.win</title>
 <meta name="description" content="${page.title} for offside.win, which publishes football match analysis and a call on the biggest games.">
 <link rel="canonical" href="https://offside.win/${which}">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">

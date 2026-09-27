@@ -25,6 +25,7 @@
 
 import { describe as describeCall } from '../../public/js/lib/markets.js';
 import { findBannedInProse } from '../../engine/src/vocabulary.ts';
+import { SITE_NAME, TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle } from '../../public/js/lib/titles.js';
 
 export interface SeoEnv {
   SUPABASE_URL: string;
@@ -162,7 +163,7 @@ export interface Page {
   noindex?: boolean;
 }
 
-const SITE = 'offside.win';
+const SITE = SITE_NAME;
 const MOVES = 'Calls are looked at again every fifteen minutes until kick-off, so one can change or come down, and each closes when the match starts. The bet slip stays exactly as posted.';
 
 function crumbs(items: Array<[string, string]>, site: string): { html: string; ld: unknown } {
@@ -201,7 +202,7 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
   let description: string;
   let callHTML: string;
   if (state === 'ft' && score) {
-    title = `${vs}: result, scorers and our call`;
+    title = matchTitle({ home, away, state, score });
     description = settledCall
       ? `${vs} in the ${league}. Our call, ${callName(settledCall, home, away)}, ${RESULT_WORD[settledCall.result] ?? 'was settled'}. Scorers, the stats and how it went.`
       : `${vs} in the ${league}: the result, the scorers and the stats.${hasCall ? '' : ' We did not have a call on this one.'}`;
@@ -209,13 +210,13 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
       ? `<p>Our call was <b>${esc(callName(settledCall, home, away))}</b>, at odds of ${esc(Number(settledCall.odds).toFixed(2))}${settledCall.bookmaker ? ` with ${esc(settledCall.bookmaker)}` : ''}. It ${esc(RESULT_WORD[settledCall.result] ?? 'was settled')}. Every settled call is on <a href="/results">the record</a>, the misses included.</p>`
       : `<p>We did not have a call on this match.</p>`;
   } else if (state === 'live') {
-    title = `${home} v ${away} live${live ? `: ${live[0]}–${live[1]}` : ''}`;
+    title = matchTitle({ home, away, state, live });
     description = `${home} v ${away} is under way in the ${league}${live ? `, ${live[0]}–${live[1]}${f.live_minute ? ` after ${f.live_minute} minutes` : ''}` : ''}. ${hasCall ? 'Our call closed at kick-off and goes up with how it went at full time.' : 'Team news, form and the head-to-head.'}`;
     callHTML = hasCall
       ? `<p>We have a call on this match. It closed at kick-off: calls are not sold once a match is on, and this one is shown here at full time with whether it landed.</p>`
       : `<p>We passed on this match before kick-off.</p>`;
   } else {
-    title = `${home} v ${away} prediction, preview and team news`;
+    title = matchTitle({ home, away, state });
     if (openCall) {
       const name = callName(openCall, home, away);
       description = `${home} v ${away}, ${when.day} ${when.time} UK. Today's free call: ${name}. The reasoning, team news, form and head-to-head.`;
@@ -332,7 +333,7 @@ export async function todayPage(env: SeoEnv, site: string): Promise<Page> {
   const free = fixtures.find((f) => f.free_call && f.top_pick);
   const c = crumbs([[SITE, '/'], ["Today's board", '/today']], site);
   return {
-    title: `Football predictions today, ${day}: ${calls} ${calls === 1 ? 'call' : 'calls'}`,
+    title: todayTitle(day, calls),
     description: clip(`${calls} calls across ${fixtures.length} matches in ${comps} competitions.${free ? ` Today's free call: ${free.home} v ${free.away}.` : ''} Team news, form and the reason behind every call.`),
     canonical: `${site}/today`,
     body: `
@@ -370,7 +371,7 @@ export async function leaguePage(env: SeoEnv, id: number, site: string): Promise
   const c = crumbs([[SITE, '/'], ['Leagues', '/leagues'], [name, leaguePath(id, name)]], site);
   const leader = rows.find((r) => Number(r.position) === 1 && !r.group);
   return {
-    title: `${name} predictions, fixtures, results and table`,
+    title: leagueTitle(name),
     description: clip(`${name}: ${ahead.length} matches coming up${ahead[0] ? `, next ${ahead[0].home} v ${ahead[0].away}` : ''}. Our call on each, the latest results${leader ? `, and the table, led by ${leader.team}` : ' and the table'}.`),
     canonical: `${site}${leaguePath(id, name)}`,
     body: `
@@ -397,7 +398,7 @@ export async function resultsPage(env: SeoEnv, site: string): Promise<Page> {
   const money = `£${Math.abs(pnl).toFixed(2)} ${pnl < 0 ? 'down' : 'up'}`;
   const c = crumbs([[SITE, '/'], ['Results', '/results']], site);
   return {
-    title: 'Our record: every call and how it went',
+    title: TITLES.results,
     description: `Of the last ${graded.length} calls, ${won} landed. £10 on every one would have left you ${money}. Every settled call, the misses included.`,
     canonical: `${site}/results`,
     body: `
@@ -417,10 +418,47 @@ export async function resultsPage(env: SeoEnv, site: string): Promise<Page> {
   };
 }
 
+/**
+ * The bet slip. While it is open its legs are for members, so the page says
+ * how many there are, the total odds and when the first one kicks off, and
+ * names the legs of settled slips, which are public.
+ */
+export async function slipPage(env: SeoEnv, site: string): Promise<Page> {
+  const d = await read<Rec>(env, 'get_slip', {});
+  const cur: Rec | null = d?.current ?? null;
+  const recent: Rec[] = Array.isArray(d?.recent) ? d!.recent : [];
+  const rec: Rec = d?.record ?? {};
+  const n = Number(cur?.legs_count ?? 0);
+  const odds = Number(cur?.odds);
+  const first = cur?.first_kickoff ? ukTime(Number(cur.first_kickoff)) : null;
+  const so = Number(rec.n) ? ` Slips so far: ${word(Number(rec.won))} of ${word(Number(rec.n))} landed.` : '';
+  const c = crumbs([[SITE, '/'], ["Today's bet slip", '/slip']], site);
+  const now = cur && n && Number.isFinite(odds)
+    ? `The slip on now has ${word(n)} legs at total odds of ${odds.toFixed(2)}${first ? `, the first kicking off ${first.day} at ${first.time} UK` : ''}. It is fixed as posted: the legs do not change once it is up.`
+    : 'There is no slip open right now. A new one goes up when there are enough strong calls in the next day.';
+  return {
+    title: slipTitle(cur),
+    description: clip(`${now} Our most likely calls combined into one slip, and every slip graded afterwards, won or lost.${so}`),
+    canonical: `${site}/slip`,
+    body: `
+  <article class="wrap section narrow seo">
+    ${c.html}
+    <h1 class="display">The bet slip</h1>
+    <p>${esc(now)} Which matches and calls are on it is for <a href="/pricing">members</a> until it settles.${esc(so)}</p>
+    ${recent.length ? `<h2>Settled slips</h2><ul class="seo-list">${recent.slice(0, 10).map((r) => {
+      const legs: Rec[] = Array.isArray(r.legs) ? r.legs : [];
+      return `<li>${esc(ukTime(Number(r.first_kickoff)).day)}, ${esc(word(legs.length))} legs at ${esc(Number(r.odds).toFixed(2))}: ${esc(r.result === 'WON' ? 'landed' : r.result === 'LOST' ? 'missed' : 'void')}. ${legs.map((l) => `<a href="${esc(matchPath({ id: l.fixture_id, home: l.home, away: l.away }))}">${esc(`${l.home} v ${l.away}`)}</a>`).join(', ')}</li>`;
+    }).join('')}</ul>` : ''}
+    <p><a href="/today">Today's board</a> <span aria-hidden="true">/</span> <a href="/results">The record</a></p>
+  </article>`,
+    jsonLd: [c.ld],
+  };
+}
+
 function staticPage(path: string, site: string): Page | null {
   if (path === '/pricing') {
     return {
-      title: 'Membership: every call, from £3.49 for the weekend',
+      title: TITLES.pricing,
       description: 'One call a day is free. Members get every call the moment it goes up, the legs of the bet slip and the reason behind each call. Cancel in one tap.',
       canonical: `${site}/pricing`,
       body: `<article class="wrap section narrow seo"><h1 class="display">One call a day is free. Members get all of them.</h1>
@@ -431,7 +469,7 @@ function staticPage(path: string, site: string): Page | null {
   }
   if (path === '/leagues') {
     return {
-      title: 'Leagues and competitions we cover',
+      title: TITLES.leagues,
       description: 'Eighty-eight competitions, from the Premier League and the Champions League down. Fixtures, results, tables and our call on every match.',
       canonical: `${site}/leagues`,
       body: `<article class="wrap section narrow seo"><h1 class="display">Leagues</h1>
@@ -446,7 +484,7 @@ function staticPage(path: string, site: string): Page | null {
 
 /** The page the app lives in, with its head and first screen written for this address. */
 export function render(shell: string, page: Page): string {
-  const t = `${page.title} | ${SITE}`;
+  const t = fullTitle(page.title);
   const ld = page.jsonLd.map((x) => `<script type="application/ld+json">${JSON.stringify(x).replace(/</g, '\\u003c')}</script>`).join('\n');
   let html = shell
     .replace(/<title>[\s\S]*?<\/title>/, `<title>${esc(t)}</title>`)
@@ -456,7 +494,8 @@ export function render(shell: string, page: Page): string {
     .replace(/<meta property="og:description" content="[^"]*">/, `<meta property="og:description" content="${esc(page.description)}">`)
     .replace(/<meta name="twitter:title" content="[^"]*">/, `<meta name="twitter:title" content="${esc(page.title)}">`)
     .replace(/<meta name="twitter:description" content="[^"]*">/, `<meta name="twitter:description" content="${esc(page.description)}">`)
-    .replace('</head>', `<meta property="og:url" content="${esc(page.canonical)}">\n${page.noindex ? '<meta name="robots" content="noindex">\n' : ''}${ld}\n</head>`);
+    .replace(/<meta name="robots" content="[^"]*">/, page.noindex ? '<meta name="robots" content="noindex">' : '$&')
+    .replace('</head>', `<meta property="og:url" content="${esc(page.canonical)}">\n${ld}\n</head>`);
   html = html.replace(/<main id="app">[\s\S]*?<\/main>/, `<main id="app">${page.body}</main>`);
   return html;
 }
@@ -491,6 +530,8 @@ export async function seoResponse(request: Request, env: SeoEnv): Promise<Respon
     page = await todayPage(env, site);
   } else if (path === '/results') {
     page = await resultsPage(env, site);
+  } else if (path === '/slip') {
+    page = await slipPage(env, site);
   } else {
     page = staticPage(path, site);
   }
@@ -527,6 +568,7 @@ export async function sitemap(env: SeoEnv, origin: string): Promise<Response> {
     [`${site}/`, today, 'hourly'],
     [`${site}/today`, today, 'hourly'],
     [`${site}/results`, today, 'daily'],
+    [`${site}/slip`, today, 'daily'],
     [`${site}/leagues`, today, 'weekly'],
     [`${site}/pricing`, today, 'monthly'],
   ];
