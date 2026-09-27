@@ -347,6 +347,10 @@ export interface Candidate {
   kelly: number;
   confidence: number;
   family: MarketFamily;
+  /** How many books priced the full market. */
+  books?: number;
+  /** The sharp book's fair probability for this outcome, when it priced the market. */
+  sharp_prob?: number | null;
 }
 
 export interface Verdict {

@@ -363,6 +363,14 @@ export const config = {
      * could take, and the call is not made on it.
      */
     maxGap: num('CONF_MAX_GAP', 1.12),
+    /** Only markets at least this many books priced in full; 0 for any. */
+    minBooks: num('CONF_MIN_BOOKS', 0),
+    /**
+     * The value test against the sharp book as well, where it priced the
+     * market: the best price must be within this of its fair price. Null
+     * skips it.
+     */
+    minSharpEv: process.env.CONF_MIN_SHARP_EV ? Number(process.env.CONF_MIN_SHARP_EV) : (null as number | null),
     /** Quarter handicap lines (-1.75, 0.25) are a split stake nobody can explain in a sentence. */
     quarterLines: process.env.CONF_QUARTER_LINES === 'true',
     /** League rank at or below which a fixture counts as marquee. */
