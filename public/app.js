@@ -1087,7 +1087,12 @@ function slipHTML(data, fixtures = []) {
   const GRADE = { WON: 'won', LOST: 'lost', HALF_WON: 'part', HALF_LOST: 'part', PUSH: 'back', VOID: 'back' };
   const MARK = { won: 'Landed', lost: 'Missed', back: 'Void', part: 'Half' };
   const legState = (l) => {
-    const f = byId.get(Number(l.fixture_id));
+    // The slip carries each leg's own state now (slip_legs); the board is the
+    // fallback, and it only reaches back a day.
+    const f = 'status' in l
+      ? { id: l.fixture_id, kickoff: l.kickoff, status: l.status, score: l.score, live_score: l.live_score, live_minute: l.live_minute,
+          called: l.result ? { market: l.market, outcome: l.outcome, result: l.result } : null }
+      : byId.get(Number(l.fixture_id));
     if (!f) return '';
     const st = matchState(f);
     const score = Array.isArray(f.score) && f.score.length === 2 ? f.score : null;

@@ -157,6 +157,8 @@ export interface SettleReport {
   considered: number;
   settled: number;
   unresolved: number;
+  /** Calls voided because their match was postponed, cancelled, abandoned or never reported. */
+  voided?: number;
   pnl: number;
   /** Older picks given a post-mortem after the fact. */
   backfilled: number;
@@ -347,6 +349,9 @@ export async function backfillPostMortems(limit = 400): Promise<number> {
   return done;
 }
 
+/** How long after kick-off a match with no final result is given up on. */
+const STALE_AFTER = 72 * 3600;
+
 export async function runSettle(): Promise<SettleReport> {
   const now = Math.floor(Date.now() / 1000);
   // Give a match time to finish and the provider time to publish final stats.
@@ -355,6 +360,7 @@ export async function runSettle(): Promise<SettleReport> {
   const pending = await select<{
     id: number;
     fixture_id: number;
+    kickoff: number;
     market: MarketCode;
     outcome: Outcome;
     line: number | null;
@@ -363,7 +369,7 @@ export async function runSettle(): Promise<SettleReport> {
     closing_odds: number | null;
     evidence_json: string | null;
   }>(
-    `SELECT id, fixture_id, market, outcome, line, odds, opening_odds, closing_odds, evidence_json
+    `SELECT id, fixture_id, kickoff, market, outcome, line, odds, opening_odds, closing_odds, evidence_json
      FROM pick WHERE settled_at IS NULL AND kickoff < ? ORDER BY kickoff ASC LIMIT 500`,
     [cutoff],
   );
@@ -383,6 +389,14 @@ export async function runSettle(): Promise<SettleReport> {
   // One lookup per fixture, not per pick.
   const fixtureIds = [...new Set(pending.map((p) => p.fixture_id))];
   const scores = new Map<number, FinalScore>();
+  /*
+   * Matches that will never give a result: postponed, cancelled, abandoned.
+   * A call on one is void, the way a bookmaker settles it. Before this they
+   * sat "unresolved" for ever, and so did any bet slip with one in it -- and
+   * an unsettled slip stops the next one being built.
+   */
+  const voided = new Set<number>();
+  const unresolvedLog: string[] = [];
 
   for (const id of fixtureIds) {
     const local = await select<{
@@ -406,8 +420,14 @@ export async function runSettle(): Promise<SettleReport> {
       const hg = num(ev?.['home_score']);
       const ag = num(ev?.['away_score']);
       const status = String(ev?.['status'] ?? '').toLowerCase();
+      if (/postpon|cancel|abandon|suspend|interrupt|walkover|awarded/.test(status)) {
+        voided.add(id);
+        continue;
+      }
       if (hg === undefined || ag === undefined || !/finish|ft|ended|after/.test(status)) {
         report.unresolved++;
+        // Ids and the provider's status only: safe in a public log.
+        unresolvedLog.push(`${id}:${status || 'no status'}`);
         continue;
       }
       row = {
@@ -469,6 +489,13 @@ export async function runSettle(): Promise<SettleReport> {
   };
   for (const p of pending) {
     const s = scores.get(p.fixture_id);
+    // Three days after kick-off with no final result is a match that is not
+    // coming back: void, rather than hold a slip open for ever.
+    if (!s && (voided.has(p.fixture_id) || p.kickoff < now - STALE_AFTER)) {
+      updates.push({ id: p.id, result: 'VOID', pnl: 0, clv: null, postmortem: null });
+      report.voided = (report.voided ?? 0) + 1;
+      continue;
+    }
     if (!s) {
       report.unresolved++;
       continue;
@@ -535,8 +562,11 @@ export async function runSettle(): Promise<SettleReport> {
 
   console.log(
     `Settled ${report.settled} picks (${report.pnl >= 0 ? '+' : ''}${report.pnl.toFixed(2)} units), ` +
-      `${report.unresolved} still unresolved.`,
+      `${report.unresolved} still unresolved.`
+      + (report.voided ? ` Voided ${report.voided} on matches that were postponed, cancelled, abandoned or never reported.` : ''),
   );
+  if (unresolvedLog.length) console.log(`  waiting on a final result: ${unresolvedLog.join(', ')}`);
+  if (report.slips) console.log(`  settled ${report.slips} bet slip${report.slips === 1 ? '' : 's'}`);
   return report;
 }
 

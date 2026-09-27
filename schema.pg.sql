@@ -1689,6 +1689,32 @@ $fn$;
 -- An open slip's legs need a membership; its size, total odds and chance do
 -- not, because those are the offer. A settled slip is public in full, like a
 -- settled call.
+-- Each leg of a slip, as its match stands now: status, score (or the running
+-- score) and the record's grade for that call. The slip page used to borrow
+-- these from the board, which reaches back a day, so a slip whose first leg
+-- was two days ago showed its played matches with nothing against them.
+-- Runs as the caller: inside get_slip that is the owner, and called directly
+-- by the public key it can read neither table and returns nothing.
+CREATE OR REPLACE FUNCTION slip_legs(p_legs text)
+RETURNS json LANGUAGE sql STABLE SET search_path = public AS $fn$
+  SELECT coalesce(json_agg(
+           l.leg || jsonb_build_object(
+             'status', f.status,
+             'score', CASE WHEN f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
+                           THEN jsonb_build_array(f.home_goals, f.away_goals) END,
+             'live_score', CASE WHEN f.home_goals IS NULL AND f.live_home IS NOT NULL AND f.live_away IS NOT NULL
+                                THEN jsonb_build_array(f.live_home, f.live_away) END,
+             'live_minute', f.live_minute,
+             'result', (SELECT pk.result FROM pick pk
+                        WHERE pk.fixture_id = f.id AND pk.kind = 'CONFIDENT' AND pk.settled_at IS NOT NULL
+                          AND pk.market = l.leg->>'market' AND pk.outcome = l.leg->>'outcome'
+                          AND pk.line IS NOT DISTINCT FROM (l.leg->>'line')::double precision
+                        LIMIT 1))
+           ORDER BY l.ord), '[]'::json)
+  FROM jsonb_array_elements(coalesce(try_json(p_legs)::jsonb, '[]'::jsonb)) WITH ORDINALITY AS l(leg, ord)
+  LEFT JOIN fixture f ON f.id = (l.leg->>'fixture_id')::bigint;
+$fn$;
+
 CREATE OR REPLACE FUNCTION get_slip()
 RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   WITH m AS MATERIALIZED (SELECT has_membership() AS ok)
@@ -1699,12 +1725,12 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
                'id', s.id, 'odds', s.odds, 'chance', s.chance,
                'first_kickoff', s.first_kickoff,
                'legs_count', json_array_length(s.legs_json::json),
-               'legs', CASE WHEN (SELECT ok FROM m) THEN s.legs_json::json ELSE NULL END)
+               'legs', CASE WHEN (SELECT ok FROM m) THEN slip_legs(s.legs_json) ELSE NULL END)
       FROM slip s WHERE s.settled_at IS NULL
       ORDER BY s.created_at DESC LIMIT 1),
     'recent', coalesce((
       SELECT json_agg(r ORDER BY r.first_kickoff DESC) FROM (
-        SELECT s.id, s.odds, s.chance, s.result, s.first_kickoff, s.legs_json::json AS legs
+        SELECT s.id, s.odds, s.chance, s.result, s.first_kickoff, slip_legs(s.legs_json) AS legs
         FROM slip s WHERE s.settled_at IS NOT NULL
         ORDER BY s.first_kickoff DESC LIMIT 10) r), '[]'::json),
     'record', (
@@ -1747,6 +1773,7 @@ GRANT EXECUTE ON FUNCTION get_model() TO anon;
 GRANT EXECUTE ON FUNCTION get_hero() TO anon;
 GRANT EXECUTE ON FUNCTION get_health() TO anon;
 GRANT EXECUTE ON FUNCTION get_slip() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION slip_legs(text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_plans() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION free_fixture_id() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_league(bigint) TO anon, authenticated;
