@@ -11,8 +11,8 @@
  * need ratings as they stood on the day), so these rows carry the market and
  * the provider only; the lab scores the model on the rows that have it.
  *
- * Spends at most `LAB_BUDGET` provider requests (default 1500), because the
- * free plan's day is shared with the slate.
+ * Spends at most `LAB_BUDGET` provider requests (default 20000; the plan has
+ * no daily cap, so this only bounds a runaway), eight matches at a time.
  */
 
 import { bsdOrNull, stats as bsdStats } from '../bsd.ts';
@@ -20,7 +20,7 @@ import { buildBookMarkets, fetchQuotes } from '../odds.ts';
 import { exec, select } from '../store.ts';
 
 export async function backfillSnapshots(): Promise<void> {
-  const budget = Number(process.env['LAB_BUDGET'] ?? 1500);
+  const budget = Number(process.env['LAB_BUDGET'] ?? 20000);
   const days = Number(process.env['LAB_DAYS'] ?? 35);
   const now = Math.floor(Date.now() / 1000);
   const rows = await select<{
@@ -42,11 +42,11 @@ export async function backfillSnapshots(): Promise<void> {
   const start = bsdStats.requests;
   let kept = 0;
   let empty = 0;
-  for (const m of rows) {
-    if (bsdStats.requests - start >= budget) break;
+  const one = async (m: (typeof rows)[number]): Promise<void> => {
+    if (bsdStats.requests - start >= budget) return;
     const quotes = await fetchQuotes(m.id, '2015-01-01T00:00:00Z');
     // A handful of quotes from one book is not a market.
-    if (quotes.length < 12) { empty++; continue; }
+    if (quotes.length < 12) { empty++; return; }
     const book = buildBookMarkets(quotes);
     const markets = book.map((b) => ({
       market: b.market,
@@ -56,7 +56,7 @@ export async function backfillSnapshots(): Promise<void> {
       best: Object.fromEntries(b.best),
       overround: Number(b.overround.toFixed(4)),
     }));
-    if (!markets.some((x) => x.market === '1x2')) { empty++; continue; }
+    if (!markets.some((x) => x.market === '1x2')) { empty++; return; }
     const prediction = await bsdOrNull<Record<string, unknown>>(`/api/v2/events/${m.id}/prediction/`);
     const corners = m.home_corners !== null && m.away_corners !== null ? [m.home_corners, m.away_corners] : null;
     const reds = m.home_reds !== null && m.away_reds !== null ? m.home_reds + m.away_reds : null;
@@ -68,6 +68,12 @@ export async function backfillSnapshots(): Promise<void> {
         now],
     );
     kept++;
-  }
+  };
+  // Eight at a time: the provider answers in parallel and a serial walk of a
+  // month of football took ten minutes for a fifth of it.
+  let next = 0;
+  await Promise.all(Array.from({ length: 8 }, async () => {
+    while (next < rows.length && bsdStats.requests - start < budget) await one(rows[next++]!);
+  }));
   console.log(`lab:backfill: archived ${kept}, ${empty} had no usable market; ${bsdStats.requests - start} requests spent`);
 }
