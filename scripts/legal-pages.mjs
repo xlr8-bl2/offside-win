@@ -24,19 +24,20 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PAGES = { privacy: 'privacy.html', terms: 'terms.html' };
 
 export async function render(which) {
-  const { LEGAL, UPDATED } = await import(pathToFileURL(join(ROOT, 'public/js/lib/legal.js')).href);
+  const { LEGAL, legalHTML } = await import(pathToFileURL(join(ROOT, 'public/js/lib/legal.js')).href);
   const page = LEGAL[which];
   // Links into the app become links to the app from here.
-  const body = page.body.replace(/href="#\//g, 'href="/#/');
+  const body = legalHTML(which).replace(/href="#\//g, 'href="/#/');
   return `<!doctype html>
 <html lang="en-GB">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${page.title} | Offside.win</title>
-<meta name="description" content="${page.title} for offside.win, which publishes football match analysis and a call on the biggest games.">
+<meta name="description" content="${page.title} for Offside.win, which publishes football match analysis and a call on the biggest games.">
 <link rel="canonical" href="https://offside.win/${which}">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/base.css">
 <link rel="stylesheet" href="/components.css">
@@ -47,10 +48,8 @@ export async function render(which) {
   <a class="brand" href="/" aria-label="offside.win, home"><span class="wordmark" aria-hidden="true">off<i class="wm-line"></i>side<span class="wm-tld">.win</span></span></a>
 </div></header>
 <main><div class="wrap section">
-  <div class="section-head"><div><h1 class="display">${page.title}</h1>
-    <p>Last updated ${UPDATED}.</p></div></div>
-  <div class="prose">${body}</div>
-  <p class="prose"><a href="/">Back to offside.win</a></p>
+${body}
+  <p class="legal-back"><a href="/">Back to Offside.win</a></p>
 </div></main>
 </body>
 </html>

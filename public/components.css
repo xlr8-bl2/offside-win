@@ -4136,3 +4136,184 @@ html.pay-open { overflow: hidden; }
   border: var(--border) solid var(--rule-firm); background: var(--pitch); color: var(--chalk);
   font: inherit; font-size: var(--text-sm); resize: vertical;
 }
+
+/* ============================================================ legal pages
+
+   The privacy policy and the terms, set as long reads rather than as a wall
+   of small print: a kicker in the hand, the title, a standfirst, the plain
+   summary in a box of its own, then numbered sections with the contents
+   beside them. The section numbers are the one flourish, set big in the
+   scoreboard figures, because they are real references ("section 9"), not
+   ornament. */
+
+.legal { max-width: 1040px; }
+.legal-head { max-width: 760px; margin-bottom: var(--space-9); }
+.legal-kicker {
+  margin: 0 0 var(--space-2);
+  color: var(--floodlight-hi);
+  font-size: var(--text-xl);
+}
+.legal-head h1 { margin: 0 0 var(--space-6); }
+.legal-standfirst {
+  margin: 0 0 var(--space-6);
+  max-width: 40em;
+  color: var(--chalk);
+  font-size: var(--text-lg);
+  line-height: var(--leading-read);
+  text-wrap: pretty;
+}
+.legal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) 0;
+  margin: 0;
+  color: var(--chalk-3);
+  font-size: var(--text-sm);
+}
+.legal-meta span + span {
+  margin-left: var(--space-4);
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--hairline);
+}
+
+.legal-short {
+  max-width: 760px;
+  margin: 0 0 var(--space-11);
+  padding: var(--space-7) var(--space-8);
+  background: var(--stand);
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--floodlight);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+}
+.legal-short h2 {
+  margin: 0 0 var(--space-4);
+  font-family: var(--display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-xl);
+}
+.legal-short ul { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-4); }
+.legal-short li {
+  position: relative;
+  padding-left: var(--space-7);
+  color: var(--chalk);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+}
+.legal-short li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0.62em;
+  width: 10px;
+  height: 2px;
+  background: var(--floodlight-hi);
+}
+.legal-short-note { margin: var(--space-6) 0 0; color: var(--chalk-3); font-size: var(--text-sm); }
+
+.legal-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-8); }
+@media (min-width: 901px) {
+  .legal-body { grid-template-columns: 230px minmax(0, 1fr); gap: var(--space-11); align-items: start; }
+  .legal-toc {
+    position: sticky;
+    top: calc(var(--header-h) + var(--space-7));
+    max-height: calc(100vh - var(--header-h) - var(--space-10));
+    overflow-y: auto;
+  }
+  .legal-toc summary { pointer-events: none; }
+  .legal-toc summary::marker, .legal-toc summary::-webkit-details-marker { content: ''; display: none; }
+}
+
+.legal-toc summary {
+  cursor: pointer;
+  margin-bottom: var(--space-4);
+  color: var(--chalk);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+@media (max-width: 900px) {
+  .legal-toc {
+    padding: var(--space-4) var(--space-5);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius);
+  }
+  .legal-toc:not([open]) summary { margin-bottom: 0; }
+}
+.legal-toc ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.legal-toc a {
+  display: grid;
+  grid-template-columns: 1.9em minmax(0, 1fr);
+  gap: var(--space-2);
+  padding: 5px 0;
+  color: var(--chalk-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  text-decoration: none;
+}
+.legal-toc a span {
+  color: var(--chalk-3);
+  font-family: var(--display-figures);
+  font-variant-numeric: tabular-nums;
+}
+.legal-toc a:hover, .legal-toc a:focus-visible { color: var(--chalk); }
+.legal-toc a:hover span { color: var(--floodlight-hi); }
+
+.legal-text { max-width: var(--maxw-read); }
+.legal-sec {
+  padding-top: var(--space-8);
+  margin-top: var(--space-8);
+  border-top: 1px solid var(--hairline);
+  scroll-margin-top: calc(var(--header-h) + var(--space-5));
+}
+.legal-sec:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.legal .legal-sec h2 {
+  display: grid;
+  grid-template-columns: 2.4rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-5);
+  font-size: var(--text-2xl);
+  line-height: var(--leading-tight);
+}
+.legal-no {
+  color: var(--floodlight-hi);
+  font-family: var(--display-figures);
+  font-size: 1.15em;
+  font-variant-numeric: tabular-nums;
+}
+@media (min-width: 1100px) {
+  /* The number hangs in the margin, so the headings and the text share an edge. */
+  .legal .legal-sec h2 { grid-template-columns: 3.2rem minmax(0, 1fr); margin-left: -3.2rem; }
+}
+.legal .legal-text p, .legal .legal-text li {
+  font-size: var(--text-read);
+  line-height: var(--leading-read);
+  text-wrap: pretty;
+}
+.legal .legal-text p { margin: 0 0 var(--space-5); }
+.legal .legal-text b { color: var(--chalk); font-weight: 600; }
+.legal-plain .legal-text { margin-top: 0; }
+.legal-back { margin-top: var(--space-11); }
+
+/* The two boxes before a payment. Plain, readable, and not pre-ticked: the
+   second is a legal acknowledgement and only counts if it is a real choice. */
+.co-agree { display: grid; gap: var(--space-4); margin: 0 0 var(--space-6); padding: 0; border: 0; }
+.co-check {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+  color: var(--chalk-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  cursor: pointer;
+}
+.co-check input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--floodlight); }
+.co-check a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }
+.paid-confirm { max-width: var(--maxw-read); margin: 0 0 var(--space-6); color: var(--chalk-3); font-size: var(--text-sm); line-height: var(--leading-normal); }
+.paid-confirm a { color: var(--chalk-2); text-decoration: underline; text-underline-offset: 2px; }
+@media (max-width: 600px) {
+  .legal-meta { flex-direction: column; gap: var(--space-1); }
+  .legal-meta span + span { margin-left: 0; padding-left: 0; border-left: 0; }
+  .legal-short { padding: var(--space-6) var(--space-5); }
+}

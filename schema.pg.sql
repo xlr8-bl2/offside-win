@@ -452,6 +452,23 @@ CREATE TABLE IF NOT EXISTS entitlement_grant (
   created_at bigint NOT NULL
 );
 
+-- What each buyer confirmed at checkout: 18 or over and the terms (with the
+-- version), and the express request to start at once with the acknowledgement
+-- that it ends the 14-day right to cancel (Consumer Contracts Regulations 2013,
+-- reg. 37). Written through record_consent with the buyer's own token before
+-- any payment is started; read by nobody but the service role. Kept six years after the
+-- membership ends, the window in which a claim about it can be brought.
+CREATE TABLE IF NOT EXISTS purchase_consent (
+  id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id       uuid NOT NULL,
+  plan_id       text NOT NULL,
+  terms_version text NOT NULL,
+  adult         boolean NOT NULL,
+  waived        boolean NOT NULL,
+  created_at    bigint NOT NULL
+);
+CREATE INDEX IF NOT EXISTS purchase_consent_user ON purchase_consent (user_id, created_at);
+
 -- The entitlement, and the only one of these four a browser ever reads. It
 -- carries the card's brand and last four so the account page can say "Visa
 -- ending 4242" without going anywhere near the credential table.
@@ -1606,6 +1623,11 @@ ALTER TABLE entitlement ENABLE ROW LEVEL SECURITY;
 -- Who has paid is nobody's business but theirs; read through get_account.
 REVOKE ALL ON entitlement FROM anon, authenticated;
 
+ALTER TABLE purchase_consent ENABLE ROW LEVEL SECURITY;
+-- Service role only, like the grant ledger: nobody reads another's consent,
+-- and nobody may write one for themselves without paying through the Worker.
+REVOKE ALL ON purchase_consent FROM anon, authenticated;
+
 ALTER TABLE entitlement_grant ENABLE ROW LEVEL SECURITY;
 -- A ledger for the service role only, which Supabase's default privileges
 -- already give it, exactly as for entitlement.
@@ -1792,6 +1814,25 @@ GRANT EXECUTE ON FUNCTION report_goals(text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION has_membership() TO anon;
 GRANT EXECUTE ON FUNCTION get_account() TO anon;
 GRANT EXECUTE ON FUNCTION save_profile(text, text, text, text, bigint, text, text, text) TO anon, authenticated;
+
+-- The checkout's two boxes, recorded as the signed-in buyer and only for them:
+-- auth.uid() names the account, so nobody can write a confirmation for
+-- someone else, and the table itself stays closed to every public role.
+CREATE OR REPLACE FUNCTION record_consent(p_plan text, p_terms text)
+RETURNS void LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE
+  me uuid := auth.uid();
+BEGIN
+  IF me IS NULL THEN RAISE EXCEPTION 'sign in first' USING ERRCODE = '28000'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM plan WHERE id = p_plan) THEN RAISE EXCEPTION 'no such plan' USING ERRCODE = '22023'; END IF;
+  IF p_terms IS NULL OR p_terms !~ '^[\w.-]{1,40}$' THEN RAISE EXCEPTION 'no terms version' USING ERRCODE = '22023'; END IF;
+  INSERT INTO purchase_consent (user_id, plan_id, terms_version, adult, waived, created_at)
+  VALUES (me, p_plan, p_terms, true, true, floor(extract(epoch FROM now()))::bigint);
+END
+$fn$;
+GRANT EXECUTE ON FUNCTION record_consent(text, text) TO anon, authenticated;
+
+
 GRANT EXECUTE ON FUNCTION set_follow(text, bigint, text, boolean) TO anon, authenticated;
 REVOKE ALL ON FUNCTION delete_account_data(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint) TO anon;

@@ -13,7 +13,7 @@
 import { describe as market, didItLand, recap } from './js/lib/markets.js';
 import { COUNTRY_NAMES, bookName, cash, country, localPrice, purse } from './js/lib/books.js';
 import { cleanProse } from './js/lib/vocabulary.js';
-import { LEGAL, SUPPORT_EMAIL, UPDATED } from './js/lib/legal.js';
+import { LEGAL, SUPPORT_EMAIL, TERMS_VERSION, UPDATED as TERMS_DATE, legalHTML } from './js/lib/legal.js';
 import { mountPayment, openCheckout } from './js/lib/whop.js';
 import { absenceReason } from './js/lib/absence.js';
 import { TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle, ukDay } from './js/lib/titles.js';
@@ -4902,8 +4902,8 @@ async function startCheckout(plan = 'monthly') {
  * The fallback for our checkout page: used while the API key cannot take a
  * payment itself, or if the card fields will not load.
  */
-async function openEmbeddedCheckout(plan) {
-  const out = await postJSON('/api/pay/checkout', { plan });
+async function openEmbeddedCheckout(plan, consent) {
+  const out = await postJSON('/api/pay/checkout', { plan, consent });
   if (out.checkout) {
     try {
       await openCheckout({
@@ -5095,8 +5095,9 @@ async function viewPricing() {
         and prices come in, so a call can change, or come down if we stop backing it. At kick-off it closes:
         calls are not sold once a match is on, and each one is graded at full time. The bet slip is the
         exception: once it is posted it stays exactly as it is, and it is graded on the legs it went up with.</p>
-      <p><b>Changed your mind?</b> Fourteen days, full refund, whatever you have read.
-        <a href="#/legal/refunds">How refunds work</a>. Cancel a renewing plan from your Whop account in one tap;
+      <p><b>It starts when you pay.</b> At checkout you ask for access straight away, which ends the 14-day
+        right to cancel for a change of mind. If anything of ours fails, you get it put right or your money back.
+        <a href="#/legal/refunds">How refunds work</a>. Cancel a renewing plan in one tap;
         you keep access to the end of what you paid for.</p>
       <p>It is not tipping and it is not advice to place a bet. We publish what we think will happen and why,
         and the record of how that has gone, including when it has gone badly.
@@ -5256,7 +5257,7 @@ async function viewCheckout(params) {
           fifteen minutes, and close when the match starts.</p>
         <p class="co-who">It goes on the account you are signed in with:
           <b>${esc(user.email ?? '')}</b></p>
-        <p class="co-small">Changed your mind? Fourteen days, full refund, whatever you have read.
+        <p class="co-small">If something of ours fails, you get it put right or your money back.
           <a href="#/legal/refunds">How refunds work</a>.</p>
       </section>
 
@@ -5268,6 +5269,14 @@ async function viewCheckout(params) {
         <h2 class="co-pay-title" id="co-pay-title">Pay by card, Apple Pay or Google Pay</h2>
         ${m ? `<p class="co-upgrade">Your ${esc((PLAN_NAME[m.plan_id] ?? 'membership').toLowerCase())} runs to
           ${esc(longDate(m.expires_at))}. The ${esc(name.toLowerCase())} starts as soon as you pay.</p>` : ''}
+        <fieldset class="co-agree">
+          <legend class="visually-hidden">Before you pay</legend>
+          <label class="co-check"><input type="checkbox" id="co-adult">
+            <span>I am 18 or over and I agree to the <a href="#/legal/terms" target="_blank">terms of use</a>.</span></label>
+          <label class="co-check"><input type="checkbox" id="co-waive">
+            <span>Start my ${esc(name.toLowerCase())} straight away. I understand that once it starts I lose my
+              14-day right to cancel.</span></label>
+        </fieldset>
         <div class="co-fields">
           <div id="co-email"></div>
           <div id="co-payment"><p class="pay-wait">Loading the secure card form…</p></div>
@@ -5287,14 +5296,35 @@ async function viewCheckout(params) {
   const say = (text) => { errorLine.textContent = text; errorLine.hidden = !text; };
   let complete = false;
   let working = null;
-  const idle = () => { working?.(); working = null; button.disabled = !complete; };
+  let embedded = false;
+  /*
+   * Both boxes, every time. The second is the express request and the
+   * acknowledgement the Consumer Contracts Regulations 2013 (reg. 37) ask for
+   * before digital content may start inside the 14 days; without it a buyer
+   * keeps the right to cancel. The Worker refuses a payment without them, so
+   * this is the courtesy and that is the rule.
+   */
+  const boxes = [app.querySelector('#co-adult'), app.querySelector('#co-waive')];
+  const agreed = () => boxes.every((b) => b.checked);
+  const consent = () => ({ adult: boxes[0].checked, waive: boxes[1].checked, terms: TERMS_VERSION });
+  const ready = () => agreed() && (embedded || complete);
+  const idle = () => { working?.(); working = null; button.disabled = !ready(); };
+  for (const b of boxes) b.onchange = () => { if (!working) button.disabled = !ready(); };
 
-  // Whop's own checkout, when ours cannot take this payment.
+  // Whop's own checkout, when ours cannot take this payment: the same two
+  // boxes first, then a button that opens it.
   const fallback = async (why) => {
     if (why) say(why);
-    working?.();
-    working = busy(button, 'Opening the checkout…');
-    try { await openEmbeddedCheckout(planId); } catch (err) { say(err.message); }
+    embedded = true;
+    app.querySelector('.co-fields')?.remove();
+    button.textContent = 'Continue to payment';
+    button.onclick = async () => {
+      if (working || !agreed()) return;
+      say('');
+      working = busy(button, 'Opening the checkout…');
+      try { await openEmbeddedCheckout(planId, consent()); } catch (err) { say(err.message); }
+      idle();
+    };
     idle();
   };
 
@@ -5308,7 +5338,7 @@ async function viewCheckout(params) {
       email: user.email,
       returnUrl: `${location.origin}/#/account?paid=1`,
       into: { email: '#co-email', payment: '#co-payment', branding: '#co-branding' },
-      onComplete: (ok) => { complete = ok; if (!working) button.disabled = !ok; },
+      onComplete: (ok) => { complete = ok; if (!working) button.disabled = !ready(); },
     });
     const wait = app.querySelector('#co-payment .pay-wait');
     if (wait) wait.remove();
@@ -5320,12 +5350,13 @@ async function viewCheckout(params) {
   const paid = () => { location.hash = '#/account?paid=1'; };
   button.onclick = async () => {
     if (working || !complete) return;
+    if (!agreed()) { say('Tick both boxes above first. Nothing has been charged.'); return; }
     say('');
     working = busy(button, 'Paying…');
     try {
       const token = await state.payHandle.token();
       if (!token) throw new Error('The card details did not come through. Nothing has been charged. Try again.');
-      const out = await postJSON('/api/pay/charge', { plan: planId, confirmation_token: token });
+      const out = await postJSON('/api/pay/charge', { plan: planId, confirmation_token: token, consent: consent() });
       if (out.status === 'paid') { paid(); return; }
       if (out.client_secret) {
         // The bank wants a word first (3D Secure): Whop runs that step.
@@ -5772,7 +5803,11 @@ async function viewAccount() {
     </div>
     ${justPaid ? `<p class="paid-note${active ? ' done' : ''}" role="status">${active
       ? 'Payment received. You are in: every call is open.'
-      : 'Payment received. Switching your membership on, which usually takes a few seconds.'}</p>` : ''}
+      : 'Payment received. Switching your membership on, which usually takes a few seconds.'}</p>
+    <p class="paid-confirm">As you asked at checkout, your membership started straight away, and you
+      accepted that this ends the 14-day right to cancel for a change of mind. If anything of ours
+      fails, you still get it put right or your money back. The <a href="#/legal/terms">terms of use</a>
+      (in force from ${esc(TERMS_DATE)}) apply.</p>` : ''}
     <div class="tabs" role="tablist">
       ${ACCOUNT_TABS.map(([k, label]) => `<button class="tab${k === open ? ' on' : ''}" data-tab="${k}" role="tab" aria-selected="${k === open}">${esc(label)}</button>`).join('')}
     </div>
@@ -6243,12 +6278,22 @@ function viewLegal(which) {
   })() : '';
   app.innerHTML = `
   <div class="wrap section">
-    <div class="section-head"><div><h1 class="display">${esc(page.title)}</h1>
-      <p>Last updated ${esc(UPDATED)}.</p></div></div>
-    <div class="prose">${page.body}</div>
+    ${legalHTML(which)}
     ${choice}
   </div>`;
   for (const b of app.querySelectorAll('[data-consent-set]')) b.onclick = () => applyConsent(b.dataset.consentSet);
+  // Twenty-odd sections is a long list to scroll past on a phone before the
+  // first word: there it starts closed.
+  const toc = app.querySelector('.legal-toc');
+  if (toc && matchMedia('(max-width: 900px)').matches) toc.open = false;
+  // Contents links scroll rather than change the address, which the router
+  // would read as a page of its own.
+  for (const a of app.querySelectorAll('[data-jump]')) {
+    a.onclick = (e) => {
+      e.preventDefault();
+      document.getElementById(a.dataset.jump)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    };
+  }
 }
 
 // -------------------------------------------------------- cookie consent
