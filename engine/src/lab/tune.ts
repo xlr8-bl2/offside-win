@@ -177,7 +177,7 @@ function line(label: string, r: SimResult): string {
 }
 
 /** The rule the slate runs (config.confident). */
-const PROD: Policy = { name: 'production', source: 'bestsharp', modelWeight: 0.5, minProb: 0.78, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5, minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true, minSharpEv: 0, excludeBuckets: ['total_corners under'], rankFloor: { 3: 0.85 } };
+const PROD: Policy = { name: 'production', source: 'bestsharp', modelWeight: 0.5, minProb: 0.78, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5, minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true, minSharpEv: 0, excludeBuckets: ['total_corners under'], rankFloor: { 1: 0.7, 2: 0.7, 3: 0.85 } };
 /** The rule before the sharp book. */
 const CONSENSUS72: Policy = { name: 'consensus 72', source: 'best', modelWeight: 0.5, minProb: 0.72, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5, minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true };
 /** The rule before this search. */
@@ -266,9 +266,8 @@ export function runTune(rows: HistRow[]): Record<string, unknown> {
     ['consensus 72%+, within 1% of fair', CONSENSUS72],
     ['production (78%+, at or above the sharp book\'s fair price)', PROD],
     ['production at 80%+', STRICT],
-    ['production with the marquee floor (62% for ranks 1-2)', { ...PROD, name: 'marquee', rankFloor: { ...PROD.rankFloor, 1: 0.62, 2: 0.62 } }],
-    ['production with a 70% marquee floor', { ...PROD, name: 'marquee 70', rankFloor: { ...PROD.rankFloor, 1: 0.7, 2: 0.7 } }],
-    ['production, rank 3 at 78% (as before)', { ...PROD, name: 'rank3 78', rankFloor: {} }],
+    ['production with a 62% marquee floor (before)', { ...PROD, name: 'marquee 62', rankFloor: { ...PROD.rankFloor, 1: 0.62, 2: 0.62 } }],
+    ['production without a marquee exception', { ...PROD, name: 'no marquee', rankFloor: { 3: 0.85 } }],
   ];
   const report: Record<string, unknown> = { split: { a: a.length, b: b.length, c: c.length }, stack };
   for (const [label, p] of refs) {

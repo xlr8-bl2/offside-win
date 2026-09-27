@@ -328,7 +328,10 @@ export const config = {
      * than a strong call, which is the true statement and the only one worth
      * making.
      */
-    marqueeFloor: num('CONF_MARQUEE_FLOOR', 0.62),
+    // 0.62 cost about three points of landing on the rule as a whole; 0.70
+    // kept every big game answered and scored better than no exception at all:
+    // 81/82/83% landed, +3.7/+6.0/+8.5% (lab:tune, 3,077 fixtures).
+    marqueeFloor: num('CONF_MARQUEE_FLOOR', 0.7),
     /**
      * A higher floor for some league ranks. Rank 3 (Europa League, Nations
      * League, the strong second-tier leagues) lost in both tuning periods at
