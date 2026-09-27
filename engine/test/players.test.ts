@@ -230,3 +230,51 @@ test('a return date half the list shares is a placeholder, and is not said', () 
   const one = playerFacts({ home: 'England', away: 'Czechia', players: [out(1, 'A One')] }).map((f) => f.text);
   assert.ok(one.some((t) => /A One is not expected back until/.test(t)));
 });
+
+/* ------------------------------------------------------ the danger man */
+
+const NOW = Date.UTC(2026, 8, 27) / 1000;
+const star = (over: Record<string, unknown> = {}) => ({
+  ...saka, id: 30, name: 'Lamine Yamal', team: 'Barcelona', side: 'home' as const, status: 'fit' as const,
+  reason: null, expected_return: null, importance: 0.45, tags: ['top_scorer'],
+  recent: { apps: 5, goals: 1, assists: 2, scoredIn: 0 }, standout: { ...saka.standout, kickoff: NOW - 40 * DAY, opponent: 'Girona' },
+  ...over,
+});
+
+test('a fit star with nothing new to say about them is not the danger man', () => {
+  const texts = playerFacts({ home: 'Barcelona', away: 'Getafe', players: [star()], now: NOW }).map((f) => f.text);
+  assert.deepEqual(texts, []);
+});
+
+test('a scoring run or a big game in the last three weeks is a hook', () => {
+  const run = playerFacts({ home: 'Barcelona', away: 'Getafe', players: [star({ recent: { apps: 5, goals: 4, assists: 0, scoredIn: 3 } })], now: NOW });
+  assert.ok(run.some((f) => f.text === 'Lamine Yamal has scored in each of the last three games'));
+  assert.ok(run.every((f) => f.weight <= 68), 'the threat never leads the preview');
+  const big = playerFacts({ home: 'Barcelona', away: 'Getafe', players: [star({ standout: { ...saka.standout, kickoff: NOW - 5 * DAY, opponent: 'Sevilla' } })], now: NOW });
+  assert.ok(big.length > 0);
+});
+
+test('a star named in the last few days is rested unless the run goes on', () => {
+  const hot = star({ standout: { ...saka.standout, kickoff: NOW - 5 * DAY, opponent: 'Sevilla' } });
+  assert.deepEqual(playerFacts({ home: 'Barcelona', away: 'Getafe', players: [hot], now: NOW, recentThreats: ['lamineyamal'] }), []);
+  const streak = star({ recent: { apps: 5, goals: 5, assists: 0, scoredIn: 4 } });
+  assert.ok(playerFacts({ home: 'Barcelona', away: 'Getafe', players: [streak], now: NOW, recentThreats: ['lamineyamal'] }).length > 0);
+});
+
+test('one threat per fixture, and the less obvious name wins a tie', () => {
+  const a = star({ recent: { apps: 5, goals: 3, assists: 0, scoredIn: 3 } });
+  const b = star({ id: 31, name: 'Ferran Torres', importance: 0.2, recent: { apps: 5, goals: 3, assists: 0, scoredIn: 3 } });
+  const facts = playerFacts({ home: 'Barcelona', away: 'Getafe', players: [a, b], now: NOW });
+  const named = new Set(facts.map((f) => f.threat));
+  assert.equal(named.size, 1);
+  assert.ok(named.has('ferrantorres'));
+});
+
+test('the goalscorer book does not name a rested star either', () => {
+  const facts = pubFacts({
+    home: 'Barcelona', away: 'Getafe', recentThreats: ['lamineyamal'],
+    goalscorers: [{ player: 'Lamine Yamal', price: 0.4 }, { player: 'Robert Lewandowski', price: 0.35 }],
+  });
+  const line = facts.find((f) => f.text.startsWith('the players most fancied'));
+  assert.equal(line?.text, 'the players most fancied to score are Robert Lewandowski');
+});

@@ -264,6 +264,11 @@ export const config = {
    * "is the price wrong", this one asks "what is likely", and mixing the two
    * thresholds would mean a change to one silently moved the other.
    */
+  /** consensus.ts: how far the goals markets move from the market's rates toward our model's. */
+  consensus: {
+    modelWeight: num('CONSENSUS_MODEL_WEIGHT', 0.5),
+  },
+
   confident: {
     /** Publish a call at or above this probability. */
     floor: num('CONF_FLOOR', 0.8),
@@ -309,6 +314,34 @@ export const config = {
      * making.
      */
     marqueeFloor: num('CONF_MARQUEE_FLOOR', 0.62),
+    /**
+     * Where a call's probability comes from: `consensus` (consensus.ts: the
+     * bookmakers' de-vigged view, with goals priced off market rates blended
+     * toward ours) or `provider` (the data provider's prediction, which the
+     * market lab scored least accurate on goals). See lab/markets.ts.
+     */
+    source: (process.env.CONF_SOURCE ?? 'consensus') as 'consensus' | 'provider',
+    /**
+     * Among the calls on a fixture that clear the floor, which one. `prob`
+     * takes the likeliest, which is nearly always the shortest price on the
+     * card (over 1.5 goals, a double chance) and made the board one market
+     * deep. `growth` weighs what it pays as well: p·ln(odds) plus the expected
+     * return at the best price, so a 78% call at 1.30 beats an 86% call at
+     * 1.13.
+     */
+    rankBy: (process.env.CONF_RANK_BY ?? 'growth') as 'prob' | 'growth',
+    /**
+     * The most any one market (and side of it) may take of a day's calls, as
+     * a share of the day's fixtures. A fixture whose first choice is full
+     * takes its next call that clears the floor, or none. 0 turns it off.
+     */
+    diversity: num('CONF_DIVERSITY', 0.3),
+    /**
+     * Never a call whose best price returns less than this per pound on its
+     * own probability; -1 turns it off. Keeps a likely call at a poor price
+     * off the board when a book is offering far less than the rest.
+     */
+    minEv: num('CONF_MIN_EV', -0.05),
     /** League rank at or below which a fixture counts as marquee. */
     marqueeRank: num('CONF_MARQUEE_RANK', 2),
     /**

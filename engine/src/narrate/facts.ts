@@ -33,6 +33,8 @@ export interface PubFact {
   side: 'home' | 'away' | 'match';
   /** How much it is worth leading on. Higher first. */
   weight: number;
+  /** The fit player a threat line is about (a name key), so the slate can rest them next time. */
+  threat?: string;
 }
 
 interface LedgerEntry {
@@ -59,6 +61,13 @@ interface Bundle {
   managers?: { home?: string | null; away?: string | null } | null;
   /** Profiles of the absentees and the danger men (players.ts, forBundle). */
   players?: BundlePlayer[] | null;
+  /**
+   * Fit players named as the threat in another write-up in the last few days.
+   * They are rested unless something new has happened (see `hookOf`).
+   */
+  recentThreats?: string[] | null;
+  /** Now, for how recent a standout game is. Defaults to the clock. */
+  now?: number;
 }
 
 /** What `forBundle` stores. Everything optional: older bundles have none of it. */
@@ -410,8 +419,11 @@ function lineupFacts(b: Bundle): PubFact[] {
  * knows without looking up. The number behind it is ours to keep.
  */
 function scorerFacts(b: Bundle): PubFact[] {
+  // The goalscorer book always fancies the same stars, so a name there is
+  // rested exactly as a threat line is: not named again within days.
+  const recent = new Set(b.recentThreats ?? []);
   const list0 = (b.goalscorers ?? [])
-    .filter((g) => str(g.player) && num(g.price) !== null)
+    .filter((g) => str(g.player) && num(g.price) !== null && !recent.has(threatKey(g.player!)))
     .sort((a, c) => (c.price ?? 0) - (a.price ?? 0));
   if (!list0.length) return [];
   // Attribute a scorer to a side through the team sheets where possible.
@@ -421,14 +433,12 @@ function scorerFacts(b: Bundle): PubFact[] {
     }
     return null;
   };
-  const out: PubFact[] = [];
   const top = list0.slice(0, 2).map((g) => g.player!);
   const who = top.map((name) => {
     const side = sideOf(name);
     return side ? `${name} for ${side === 'home' ? b.home : b.away}` : name;
   });
-  out.push({ text: `the players most fancied to score are ${list(who)}`, side: 'match', weight: 76 });
-  return out;
+  return [{ text: `the players most fancied to score are ${list(who)}`, side: 'match', weight: 58, threat: top.map(threatKey).join('|') }];
 }
 
 function managerNameFacts(b: Bundle): PubFact[] {
@@ -499,15 +509,63 @@ export function playerFacts(b: Bundle): PubFact[] {
       if (d) dates.set(d, (dates.get(d) ?? 0) + 1);
     }
     const shared = new Set([...dates].filter(([, k]) => k >= 3).map(([d]) => d));
-    // The three absentees who matter most, and the threats still standing:
-    // the one who matters most, and a second only if the season says so.
-    const fit = bySide(side, true);
-    const threats = fit.slice(0, 1).concat(fit.slice(1, 2).filter((p) => (num(p.season?.goals) ?? 0) >= 3));
-    for (const p of [...bySide(side, false).slice(0, 3), ...threats]) {
+    // The three absentees who matter most. Absence is news every time.
+    for (const p of bySide(side, false).slice(0, 3)) {
       out.push(...onePlayer(shared.has(str(p.expected_return) ?? '') ? { ...p, expected_return: null } : p, team, side));
     }
   }
+
+  // At most one fit threat for the whole fixture, and only with a hook.
+  const threat = pickThreat(players.filter((p) => p.status === 'fit'), b);
+  if (threat) {
+    const side = threat.side as 'home' | 'away';
+    const team = side === 'home' ? b.home : b.away;
+    // Below the team news and the form: the threat colours the argument, it
+    // does not lead it.
+    for (const f of onePlayer(threat, team, side)) out.push({ ...f, weight: Math.min(f.weight, 68), threat: threatKey(threat.name ?? '') });
+  }
   return out;
+}
+
+/**
+ * Why a fit player is worth a line in this preview, or null when nothing is.
+ *
+ * The obvious star is not news. Naming the same winger as the danger man in
+ * every game a side plays is the thing a reader notices by the third week, and
+ * it says nothing about this match. So a fit player earns a line only with a
+ * hook: a scoring run (goals in three straight, or three in the last five), or
+ * a standout game in the last three weeks. A player named as the threat in
+ * another write-up in the last few days is rested unless the run is still
+ * going, in which case the run is the news.
+ */
+/** Accent- and case-blind, as availability.ts matches names. */
+export const threatKey = (name: string): string => String(name ?? '').toLowerCase().normalize('NFD').replace(/[^a-z]/g, '');
+
+export function hookOf(p: BundlePlayer, now: number, recent: Set<string>): number {
+  const scoredIn = num(p.recent?.scoredIn) ?? 0;
+  const rg = num(p.recent?.goals) ?? 0;
+  const so = p.standout;
+  const fresh = so && num(so.kickoff) && now - so.kickoff! <= 21 * 86400
+    && ((num(so.goals) ?? 0) >= 2 || (num(so.goals) ?? 0) + (num(so.assists) ?? 0) >= 3) ? 1 : 0;
+  const run = scoredIn >= 3 ? 2 + scoredIn : rg >= 3 ? 2 : 0;
+  if (!run && !fresh) return 0;
+  if (recent.has(threatKey(p.name ?? '')) && scoredIn < 3) return 0;
+  return run + fresh;
+}
+
+function pickThreat(fit: BundlePlayer[], b: Bundle): BundlePlayer | null {
+  const now = b.now ?? Math.floor(Date.now() / 1000);
+  const recent = new Set(b.recentThreats ?? []);
+  let best: BundlePlayer | null = null;
+  let bestScore = 0;
+  for (const p of fit) {
+    const h = hookOf(p, now, recent);
+    // Ties go to the less obvious name: the lower importance is the one a
+    // reader has heard about less.
+    const score = h ? h + 0.1 * (1 - Math.min(1, num(p.importance) ?? 0)) : 0;
+    if (score > bestScore) { best = p; bestScore = score; }
+  }
+  return best;
 }
 
 function onePlayer(p: BundlePlayer, team: string, side: 'home' | 'away'): PubFact[] {
@@ -575,7 +633,7 @@ function onePlayer(p: BundlePlayer, team: string, side: 'home' | 'away'): PubFac
   const so = p.standout;
   const opp = str(so?.opponent);
   const did = so ? didWhat(num(so.goals) ?? 0, num(so.assists) ?? 0) : null;
-  if (so && opp && did && num(so.kickoff)) {
+  if (so && opp && did && num(so.kickoff) && (absent || Date.now() / 1000 - so.kickoff! <= 21 * 86400)) {
     const score = str(so.score);
     const res = score ? (so.won === true ? `the ${score} win over ${opp}`
       : so.won === false && score.split('-')[0] !== score.split('-')[1] ? `the ${score} defeat to ${opp}`
@@ -605,7 +663,7 @@ function onePlayer(p: BundlePlayer, team: string, side: 'home' | 'away'): PubFac
 
   // 6. What kind of player, when the feed knows.
   const strengths = (p.strengths ?? []).map((x) => String(x).toLowerCase().trim()).filter((x) => /^[a-z ]{3,30}$/.test(x));
-  if (strengths.length && imp >= 0.1) {
+  if (absent && strengths.length && imp >= 0.1) {
     out.push({ text: `${name} is known for ${list(strengths.slice(0, 2))}`, side, weight: 38 });
   }
 
