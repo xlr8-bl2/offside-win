@@ -117,18 +117,37 @@ export function chanceInWords(chance: number): string {
 
 interface SlipRow { id: number; first_kickoff: number; legs_json: string }
 
+/** The calls in the open slip, by fixture: the slate keeps these as posted. */
+export async function openSlipLegs(): Promise<Map<number, { market: string; outcome: string; line: number | null }>> {
+  const [current] = await select<SlipRow>(
+    'SELECT id, first_kickoff, legs_json FROM slip WHERE settled_at IS NULL ORDER BY created_at DESC LIMIT 1',
+  );
+  const out = new Map<number, { market: string; outcome: string; line: number | null }>();
+  if (!current) return out;
+  try {
+    for (const l of JSON.parse(current.legs_json) as Leg[]) {
+      out.set(Number(l.fixture_id), { market: l.market, outcome: String(l.outcome), line: l.line === null ? null : Number(l.line) });
+    }
+  } catch { /* an unreadable slip pins nothing */ }
+  return out;
+}
+
 /**
- * Rebuild the open slip from the calls on the board, unless it has started.
+ * Post a slip when there is none open.
  *
- * Before its first kick-off the slip follows the board: a call withdrawn or a
- * better one published changes it, exactly as the calls themselves change.
- * Once a leg has kicked off it is frozen, because from then on it is a record.
+ * A posted slip is fixed. It used to follow the board until its first
+ * kick-off and then lose legs whenever a call on it was taken down, which is
+ * no use to anyone: a slip is for placing as one bet, and a bet, once placed,
+ * does not change. So it is built once, from the strongest calls of the next
+ * day, stands as posted, and is graded on exactly those legs; the next one is
+ * built when it has settled. The slate keeps the calls in it on the board as
+ * well (see openSlipLegs), so the slip and the match pages always agree.
  */
 export async function refreshSlip(now = Math.floor(Date.now() / 1000)): Promise<Slip | null> {
   const [current] = await select<SlipRow>(
     'SELECT id, first_kickoff, legs_json FROM slip WHERE settled_at IS NULL ORDER BY created_at DESC LIMIT 1',
   );
-  if (current && current.first_kickoff <= now) return null;
+  if (current) return null;
 
   const rows = await select<Leg & { home_team: string; away_team: string }>(
     `SELECT p.fixture_id, p.kickoff, f.home_team, f.away_team, l.name AS league,
@@ -148,20 +167,10 @@ export async function refreshSlip(now = Math.floor(Date.now() / 1000)): Promise<
     odds: Number(r.odds), bookmaker: r.bookmaker ?? null, model_prob: Number(r.model_prob),
   })));
 
-  if (!slip) {
-    // Nothing reaches the band today. An unstarted slip built from calls that
-    // have since gone is withdrawn rather than left advertising them.
-    if (current) await exec('DELETE FROM slip WHERE id = ?', [current.id]);
-    return null;
-  }
-  const legs = JSON.stringify(slip.legs);
-  if (current) {
-    await exec('UPDATE slip SET legs_json = ?, odds = ?, chance = ?, first_kickoff = ?, created_at = ? WHERE id = ?',
-      [legs, slip.odds, slip.chance, slip.first_kickoff, now, current.id]);
-  } else {
-    await exec('INSERT INTO slip (created_at, first_kickoff, legs_json, odds, chance) VALUES (?, ?, ?, ?, ?)',
-      [now, slip.first_kickoff, legs, slip.odds, slip.chance]);
-  }
+  // Nothing reaches the band yet: no slip today, rather than a weak one.
+  if (!slip) return null;
+  await exec('INSERT INTO slip (created_at, first_kickoff, legs_json, odds, chance) VALUES (?, ?, ?, ?, ?)',
+    [now, slip.first_kickoff, JSON.stringify(slip.legs), slip.odds, slip.chance]);
   return slip;
 }
 

@@ -805,7 +805,8 @@ function freeCallHTML(hero, detail, free = null) {
  */
 const CALLS_NOTE = `<p class="calls-note"><b>Calls move until kick-off.</b> We look at every match again every
   fifteen minutes as team news and prices come in, so a call can change, or come down if we stop backing
-  it. At kick-off it closes: nothing is sold once a match is on, and it is graded at full time.</p>`;
+  it. At kick-off it closes: nothing is sold once a match is on, and it is graded at full time. The bet
+  slip is the exception: once it is posted, it stays exactly as it is.</p>`;
 
 const LOCK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>';
 function heroCallHTML(hero, row) {
@@ -1069,15 +1070,18 @@ function slipHTML(data, fixtures = []) {
   }
   const legs = Array.isArray(cur.legs) ? cur.legs : null;
   /*
-   * The slip follows the board until its first leg kicks off, then it is a
+   * A posted slip is fixed (engine/src/slip.ts): the legs it went up with are
+   * the legs it is graded on. The countdown is to its first kick-off, and
+   * the words say it will not change, which is the point of a slip. Was: it
+   * followed the board until its first leg kicked off, then it is a
    * record. Saying when that is, and counting down to it, is the difference
    * between "a slip" and "the slip, and you have forty minutes".
    */
   const first = Number(cur.first_kickoff) || 0;
   const lock = !first ? ''
     : first <= Date.now() / 1000
-      ? `<p class="slip-lock live"><i></i>Locked. The first leg is under way.</p>`
-      : `<p class="slip-lock">Locks in <b data-countdown="${first}" data-done="a moment">—</b></p>`;
+      ? `<p class="slip-lock live"><i></i>Under way. These legs stand as posted.</p>`
+      : `<p class="slip-lock">Fixed as posted. First kick-off in <b data-countdown="${first}" data-done="a moment">—</b></p>`;
   /*
    * Each leg, as it stands. The board rows carry the running score and, once
    * a match is over, the record's grade, so a member watching the slip sees
@@ -4901,7 +4905,8 @@ async function viewPricing() {
         whatever email you give the card form.</p>
       <p><b>Calls move until kick-off.</b> Every match is looked at again every fifteen minutes as team news
         and prices come in, so a call can change, or come down if we stop backing it. At kick-off it closes:
-        calls are not sold once a match is on, and each one is graded at full time.</p>
+        calls are not sold once a match is on, and each one is graded at full time. The bet slip is the
+        exception: once it is posted it stays exactly as it is, and it is graded on the legs it went up with.</p>
       <p><b>Changed your mind?</b> Fourteen days, full refund, whatever you have read.
         <a href="#/legal/refunds">How refunds work</a>. Cancel a renewing plan from your Whop account in one tap;
         you keep access to the end of what you paid for.</p>
