@@ -74,9 +74,16 @@ export async function loadHistory(): Promise<HistRow[]> {
   const seen = new Set(out.map((r) => r.id));
   let from = 0;
   for (;;) {
-    const page = await select<{ fixture_id: number; league_id: number; kickoff: number; home_goals: number; away_goals: number; snapshot: string }>(
-      `SELECT fixture_id, league_id, kickoff, home_goals, away_goals, snapshot
-         FROM market_snapshot WHERE kickoff > $1 ORDER BY kickoff LIMIT 1000`,
+    // Corners and cards from the match table, which history:cards repaired,
+    // rather than the counts frozen into the snapshot when it was taken.
+    const page = await select<{
+      fixture_id: number; league_id: number; kickoff: number; home_goals: number; away_goals: number; snapshot: string;
+      hc: number | null; ac: number | null; hr: number | null; ar: number | null;
+    }>(
+      `SELECT s.fixture_id, s.league_id, s.kickoff, s.home_goals, s.away_goals, s.snapshot,
+              m.home_corners AS hc, m.away_corners AS ac, m.home_reds AS hr, m.away_reds AS ar
+         FROM market_snapshot s LEFT JOIN match m ON m.id = s.fixture_id
+        WHERE s.kickoff > $1 ORDER BY s.kickoff LIMIT 1000`,
       [from],
     );
     if (!page.length) break;
@@ -84,6 +91,8 @@ export async function loadHistory(): Promise<HistRow[]> {
       from = Math.max(from, Number(r.kickoff));
       let s: Record<string, any>;
       try { s = JSON.parse(r.snapshot); } catch { continue; }
+      if (r.hr !== null && r.ar !== null) s['reds'] = Number(r.hr) + Number(r.ar);
+      if (r.hc !== null && r.ac !== null) s['corners'] = [Number(r.hc), Number(r.ac)];
       if (seen.has(Number(r.fixture_id))) {
         const live = byId.get(Number(r.fixture_id));
         const snap = toHistRow({ ...s, id: r.fixture_id, league_id: r.league_id, kickoff: r.kickoff, score: [r.home_goals, r.away_goals] });
