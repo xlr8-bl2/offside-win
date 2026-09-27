@@ -137,18 +137,19 @@ export type TunedPolicy = Policy;
 export function tuneGrid(stack: StackWeights): TunedPolicy[] {
   const out: TunedPolicy[] = [];
   // The stacked source added nothing on the first pass (the consensus is
-  // already calibrated), so the search is over the rule, not the source.
+  // already calibrated), so the search is over the rule, the reference price
+  // and how well traded the market is.
   void stack;
-  for (const source of ['best', 'book'] as const) {
+  for (const source of ['best', 'book', 'bestsharp'] as const) {
     for (const minProb of [0.7, 0.72, 0.75, 0.78, 0.8, 0.82, 0.85]) {
-      for (const minEv of [-0.02, -0.01, 0, 0.01, 0.02]) {
+      for (const minEv of [-0.02, -0.01, 0, 0.01]) {
         for (const rankBy of ['prob', 'growth'] as const) {
-          for (const maxGap of [1.06, 1.12]) {
-            for (const maxHandicap of [1, 1.5, 99]) {
+          for (const minBooks of [0, 6, 12]) {
+            for (const minSharpEv of [undefined, -0.01, 0]) {
               out.push({
-                name: `${source} p>=${minProb} ev>=${minEv} ${rankBy} gap ${maxGap} hcap<=${maxHandicap}`,
+                name: `${source} p>=${minProb} ev>=${minEv} ${rankBy}${minBooks ? ` books>=${minBooks}` : ''}${minSharpEv !== undefined ? ` sharp-ev>=${minSharpEv}` : ''}`,
                 source, modelWeight: source === 'book' ? 0 : 0.5, minProb, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5,
-                minEv, maxGap, rankBy, diversity: 0.3, noQuarters: true, maxHandicap,
+                minEv, maxGap: 1.12, rankBy, diversity: 0.3, noQuarters: true, minBooks: minBooks || undefined, minSharpEv,
               });
             }
           }
@@ -190,6 +191,24 @@ export function runTune(rows: HistRow[]): Record<string, unknown> {
     const w = stack[fam]!;
     console.log(`  ${fam.padEnd(9)} consensus ${logLoss(d, (o) => o.book).toFixed(4)}  blend ${logLoss(d, (o) => o.blend ?? o.book).toFixed(4)}  stacked ${logLoss(d, (o) => stackProb(w, o)).toFixed(4)}  (n ${d.length}; weights ${w.map((x) => x.toFixed(2)).join(' ')})`);
   }
+  // The sharp book against the consensus, on the options both priced.
+  const both = [...labelled(a, cache), ...dataB].filter((x) => x.o.sharp !== null);
+  const all = labelled(sorted, cache);
+  console.log(`\nSharp book against the consensus (A and B, where both priced it; sharp view on ${pct(all.filter((x) => x.o.sharp !== null).length / Math.max(1, all.length))} of all options):`);
+  for (const fam of ['result', 'goals', 'handicap', 'corners'] as MarketFamily[]) {
+    const d = both.filter((x) => x.o.family === fam);
+    if (d.length < 100) continue;
+    console.log(`  ${fam.padEnd(9)} consensus ${logLoss(d, (o) => o.book).toFixed(4)}  sharp ${logLoss(d, (o) => o.sharp!).toFixed(4)}  blend ${logLoss(d, (o) => o.blend ?? o.book).toFixed(4)}  (n ${d.length})`);
+  }
+  const booksKnown = all.filter((x) => x.o.books !== null);
+  if (booksKnown.length > 500) {
+    console.log('\nConsensus log loss by how many books priced the market:');
+    for (const [lo, hi] of [[1, 5], [6, 11], [12, 19], [20, 999]] as const) {
+      const d = booksKnown.filter((x) => x.o.books! >= lo && x.o.books! <= hi);
+      if (d.length >= 100) console.log(`  ${String(lo).padStart(2)}-${hi === 999 ? '+' : hi} books  ${logLoss(d, (o) => o.book).toFixed(4)}  (n ${d.length})`);
+    }
+  }
+
   console.log('\nHow often the consensus is right, by what it says (A):');
   for (const r of calibration(labelled(a, cache), (o) => o.book)) {
     console.log(`  ${r.band.padEnd(8)} n ${String(r.n).padStart(5)}  says ${pct(r.said)}  landed ${pct(r.landed)}`);

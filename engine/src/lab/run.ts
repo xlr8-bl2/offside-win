@@ -66,7 +66,11 @@ export async function loadHistory(): Promise<HistRow[]> {
     if (page.length < 400) break;
   }
   // And everything the board has since let go of (market_snapshot, filled by
-  // pruneBoard), which is what lets the history outgrow the board's week.
+  // pruneBoard), which is what lets the history outgrow the board's week. A
+  // match in both keeps the board's row (it has our model's view) and takes
+  // from the snapshot what the board did not keep: the sharp book's view, the
+  // book count, and markets our model does not price.
+  const byId = new Map(out.map((r) => [r.id, r]));
   const seen = new Set(out.map((r) => r.id));
   let from = 0;
   for (;;) {
@@ -78,15 +82,34 @@ export async function loadHistory(): Promise<HistRow[]> {
     if (!page.length) break;
     for (const r of page) {
       from = Math.max(from, Number(r.kickoff));
-      if (seen.has(Number(r.fixture_id))) continue;
       let s: Record<string, any>;
       try { s = JSON.parse(r.snapshot); } catch { continue; }
+      if (seen.has(Number(r.fixture_id))) {
+        const live = byId.get(Number(r.fixture_id));
+        const snap = toHistRow({ ...s, id: r.fixture_id, league_id: r.league_id, kickoff: r.kickoff, score: [r.home_goals, r.away_goals] });
+        if (live && snap) mergeMarkets(live, snap);
+        continue;
+      }
       const h = toHistRow({ ...s, id: r.fixture_id, league_id: r.league_id, kickoff: r.kickoff, score: [r.home_goals, r.away_goals] });
       if (h) out.push(h);
     }
     if (page.length < 1000) break;
   }
   return out.sort((a, b) => a.kickoff - b.kickoff);
+}
+
+/** Fill in what the board's snapshot of a match lacks from the backfilled one. */
+function mergeMarkets(live: HistRow, snap: HistRow): void {
+  const key = (m: { market: string; line: number | null }) => `${m.market}|${m.line ?? null}`;
+  const from = new Map(snap.markets.map((m) => [key(m), m]));
+  for (const m of live.markets) {
+    const o = from.get(key(m));
+    if (!o) continue;
+    if (m.sharp === undefined) m.sharp = o.sharp;
+    if (m.books === undefined) m.books = o.books;
+    from.delete(key(m));
+  }
+  live.markets.push(...from.values());
 }
 
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;

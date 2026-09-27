@@ -304,6 +304,14 @@ export interface BookMarket {
   method: 'shin' | 'multiplicative';
   /** §7.1 movement, per outcome, where the book reported it. */
   movement: Map<Outcome, { opening: number; current: number; dir: 'SHORTENING' | 'DRIFTING' | null }>;
+  /** How many books quoted the full set: a thin market's consensus is one opinion. */
+  books?: number;
+  /**
+   * The sharpest single book's de-vigged view (Pinnacle, else an exchange),
+   * when it quoted the full set. Kept beside the consensus so the lab can say
+   * which one to measure value against.
+   */
+  sharp?: { fair: Map<Outcome, number>; book: string } | null;
 }
 
 /** Our own price for the same market. */

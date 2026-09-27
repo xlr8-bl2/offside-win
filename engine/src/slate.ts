@@ -19,6 +19,7 @@ import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
 import { bucketOf, buildCandidates, DayMix, driversFor, floorForRank, isLean, marketLabel, rankConfident, select, setAsideFor, type CalibrationMap } from './select.ts';
 import { consensusMarkets } from './consensus.ts';
+import { snapshotOf } from './odds.ts';
 import { dbStats, exec as dbExec, insertMany, kvGetJSON, kvSetJSON, pickConflictTarget, select as dbSelect } from './store.ts';
 import type { CalibrationRow } from './select.ts';
 import { MARKET_FAMILY, type Candidate, type Factor, type MarketFamily } from './types.ts';
@@ -793,17 +794,7 @@ export async function runSlate(): Promise<SlateReport> {
           line: m.line,
           confidence: Number(m.confidence.toFixed(3)),
           model: Object.fromEntries([...m.probs].map(([k, v]) => [k, Number(v.toFixed(4))])),
-          book: Object.fromEntries(
-            [...(analysis.book.find((b) => b.market === m.market && b.line === m.line)?.fair ?? new Map())]
-              .map(([k, v]) => [k, Number((v as number).toFixed(4))]),
-          ),
-          best: Object.fromEntries(
-            [...(analysis.book.find((b) => b.market === m.market && b.line === m.line)?.best ?? new Map())]
-              .map(([k, v]) => [k, v]),
-          ),
-          overround: Number(
-            (analysis.book.find((b) => b.market === m.market && b.line === m.line)?.overround ?? 1).toFixed(4),
-          ),
+          ...snapshotOf(analysis.book.find((b) => b.market === m.market && b.line === m.line)),
         })),
         candidates: [...cands]
           .sort((a, b) => b.shrunk_edge - a.shrunk_edge)
@@ -1205,7 +1196,10 @@ export async function archiveSnapshots(before: number): Promise<void> {
        CROSS JOIN LATERAL (SELECT try_json(f.report_json)::jsonb AS j) r
       WHERE f.kickoff < $1 AND f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
         AND jsonb_typeof(b.j->'markets') = 'array'
-     ON CONFLICT (fixture_id) DO NOTHING`,
+     -- A backfilled row (the market only) gives way to the board's own,
+     -- which carries our model's view too.
+     ON CONFLICT (fixture_id) DO UPDATE SET snapshot = EXCLUDED.snapshot, archived_at = EXCLUDED.archived_at
+      WHERE market_snapshot.snapshot LIKE '%"source":"backfill"%'`,
     [before],
   );
 }
