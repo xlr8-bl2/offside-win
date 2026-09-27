@@ -58,12 +58,20 @@ const cand = (market: string, outcome: string, p: number, odds: number): Candida
   odds, bookmaker: 'x', prices: [], kelly: 0, confidence: 1, family: 'goals',
 } as unknown as Candidate);
 
-test('growth prefers a likely call that pays over the shortest price on the card', () => {
+test('calls are ranked likeliest first (lab:tune); growth is kept as an option', () => {
   const short = cand('over_under_15', 'over', 0.88, 1.14);
   const pays = cand('btts', 'no', 0.8, 1.3);
   assert.ok(confidentScore(pays, 'growth') > confidentScore(short, 'growth'));
   assert.ok(confidentScore(short, 'prob') > confidentScore(pays, 'prob'));
-  assert.equal(rankConfident([short, pays], 0.75)[0], pays);
+  assert.equal(rankConfident([pays, short], 0.75)[0], short);
+});
+
+test('a price more than 1% below fair is not a call, however likely', () => {
+  const near = cand('over_under_15', 'over', 0.88, 1.13); // 0.88 × 1.13 = 0.994: within 1% of fair
+  const bad = cand('btts', 'no', 0.8, 1.2); // 0.96: 4% under fair
+  const out = rankConfident([near, bad], 0.72);
+  assert.ok(out.includes(near));
+  assert.ok(!out.includes(bad));
 });
 
 test('the day mix caps one market and keeps a standing call', () => {
