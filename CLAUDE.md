@@ -22,8 +22,9 @@ the owner says the site is going live, and confirm the list with them first.
   the npm scripts, and the `gemini:check` option and `GEMINI_*` variables in
   `pg.yml`; the slate's own `GEMINI_*` settings stay).
 - Preview and probe workflows: `narrate-preview.yml`, `poster-preview.yml`,
-  `probe.yml`, `supabase-check.yml` (and `engine/src/probe.ts` if nothing
-  else imports it).
+  `probe.yml`, `supabase-check.yml`, and the `probe*` commands (`run.ts`
+  entries, npm scripts, the `probe:players` / `probe:profile` options in
+  `pg.yml`), then `engine/src/probe.ts` once nothing imports it.
 - Stray local preview helpers are not in the repo; nothing to do there.
 
 Not dev tooling, and stays at launch: the `#/trace` page (`viewTrace()`) and

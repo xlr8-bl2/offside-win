@@ -57,6 +57,30 @@ interface Bundle {
   goalscorers?: Array<{ player?: string; price?: number }> | null;
   /** Managers by name, when the feed has them. */
   managers?: { home?: string | null; away?: string | null } | null;
+  /** Profiles of the absentees and the danger men (players.ts, forBundle). */
+  players?: BundlePlayer[] | null;
+}
+
+/** What `forBundle` stores. Everything optional: older bundles have none of it. */
+export interface BundlePlayer {
+  id?: number;
+  name?: string;
+  side?: 'home' | 'away';
+  team?: string;
+  club?: string | null;
+  role?: string;
+  status?: 'out' | 'doubtful' | 'fit';
+  reason?: string | null;
+  expected_return?: string | null;
+  season?: {
+    apps?: number; starts?: number; goals?: number; assists?: number; clean_sheets?: number;
+    team_games?: number; tracked_apps?: number; tracked_starts?: number;
+  } | null;
+  recent?: { apps?: number; goals?: number; assists?: number; scoredIn?: number } | null;
+  standout?: { opponent?: string | null; kickoff?: number; goals?: number; assists?: number; score?: string | null; won?: boolean | null } | null;
+  strengths?: string[];
+  tags?: string[];
+  importance?: number;
 }
 
 const WORD = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
@@ -178,7 +202,7 @@ function absenceFacts(ev: Record<string, unknown>, team: string, side: 'home' | 
 
   // A named player out is worth more than a headcount, so it leads.
   const named = players
-    .map((p) => ({ name: str(p['player']), reason: str(p['reason']), share: num(p['goal_share']) ?? 0 }))
+    .map((p) => ({ name: str(p['player']), reason: str(p['reason']), share: num(p['importance']) ?? num(p['goal_share']) ?? 0 }))
     .filter((p) => p.name)
     .sort((a, b) => b.share - a.share);
 
@@ -213,7 +237,7 @@ function absenceFacts(ev: Record<string, unknown>, team: string, side: 'home' | 
   }
 
   const share = num(ev['combined_goal_share']) ?? 0;
-  if (share >= 0.2) {
+  if (share >= 0.25) {
     out.push({ text: `${team} are without a big chunk of their goals`, side, weight: 80 });
   }
 
@@ -228,11 +252,13 @@ function managerFacts(id: string, ev: Record<string, unknown>, team: string, sid
   const who = name && name !== 'the manager' ? name : 'the new manager';
   if (games === null) return [];
 
-  if (id.includes('.bounce') && games <= 6) {
-    return [{ text: `${who} has had ${n(games)} games in charge at ${team}`, side, weight: 80 }];
+  // A count of games in charge is only news while it is tiny; after that the
+  // point is simply that the manager is new, and it is not a lead.
+  if (id.includes('.bounce') && games <= 3) {
+    return [{ text: games <= 1 ? `${who} has only just taken over at ${team}` : `${who} took over at ${team} only ${n(games)} games ago`, side, weight: 62 }];
   }
-  if (id.includes('.settling') && games <= 14) {
-    return [{ text: `${who} is still settling in at ${team}`, side, weight: 50 }];
+  if ((id.includes('.bounce') || id.includes('.settling')) && games <= 14) {
+    return [{ text: `${who} is still settling in at ${team}`, side, weight: 45 }];
   }
   return [];
 }
@@ -414,6 +440,167 @@ function managerNameFacts(b: Bundle): PubFact[] {
   return out;
 }
 
+
+/* ---------------------------------------------------------------- players */
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+  'September', 'October', 'November', 'December'];
+
+/** "14 September": a date as a supporter says it. */
+function day(epoch: number): string {
+  const d = new Date(epoch * 1000);
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+}
+
+function goalsWord(g: number): string {
+  return g === 1 ? 'one goal' : `${n(g)} goals`;
+}
+
+function assistsWord(a: number): string {
+  return a === 1 ? 'one assist' : `${n(a)} assists`;
+}
+
+/** "scored twice", "scored and set up another", "set up two". */
+function didWhat(goals: number, assists: number): string | null {
+  const g = goals === 1 ? 'scored' : goals === 2 ? 'scored twice' : goals === 3 ? 'scored a hat-trick' : goals > 3 ? `scored ${n(goals)}` : '';
+  const a = assists === 0 ? '' : goals > 0
+    ? (assists === 1 ? 'set up another' : `set up ${n(assists)} more`)
+    : (assists === 1 ? 'set up a goal' : `set up ${n(assists)}`);
+  if (!g && !a) return null;
+  return g && a ? `${g} and ${a}` : g || a;
+}
+
+/**
+ * Who the players are, not just who is missing.
+ *
+ * The analysis used to know two things about an absentee: the name, and the
+ * reason. So "Saka is out" arrived with nothing about why that matters. These
+ * lines say it the way a pundit would: what the player has done this season,
+ * where that stands at the club, a game that shows it, how the player is
+ * going, when they are back. Every number is a count, a scoreline or a date.
+ *
+ * The fit danger men get the same treatment, so the preview can say who
+ * carries the threat as well as who is missing.
+ */
+export function playerFacts(b: Bundle): PubFact[] {
+  const out: PubFact[] = [];
+  const players = (b.players ?? []).filter((p) => str(p.name) && (p.side === 'home' || p.side === 'away'));
+  const bySide = (side: 'home' | 'away', fit: boolean) => players
+    .filter((p) => p.side === side && (p.status === 'fit') === fit)
+    .sort((x, y) => (y.importance ?? 0) - (x.importance ?? 0));
+
+  for (const side of ['home', 'away'] as const) {
+    const team = side === 'home' ? b.home : b.away;
+    // The three absentees who matter most, and the chief threat still standing.
+    for (const p of [...bySide(side, false).slice(0, 3), ...bySide(side, true).slice(0, 1)]) {
+      out.push(...onePlayer(p, team, side));
+    }
+  }
+  return out;
+}
+
+function onePlayer(p: BundlePlayer, team: string, side: 'home' | 'away'): PubFact[] {
+  const out: PubFact[] = [];
+  const name = str(p.name)!;
+  const absent = p.status !== 'fit';
+  const tags = new Set(p.tags ?? []);
+  const imp = num(p.importance) ?? 0;
+  const s = p.season ?? null;
+  const g = num(s?.goals) ?? 0;
+  const a = num(s?.assists) ?? 0;
+  const apps = num(s?.apps) ?? 0;
+  const club = str(p.club);
+  // "for Arsenal" when the numbers were earned somewhere other than this side.
+  const at = club ? ` for ${club}` : '';
+  // How much a line about this player is worth leading on: an absentee who
+  // matters outranks almost anything; one who does not is background.
+  const lead = absent ? 70 + Math.round(Math.min(imp, 0.5) * 56) : 64 + Math.round(Math.min(imp, 0.5) * 24);
+
+  // 1. What the player has done this season, and where that stands.
+  if (s && apps >= 3) {
+    const games = num(s.team_games) ?? 0;
+    const started = num(s.tracked_starts) ?? 0;
+    if (p.role === 'GK') {
+      const cs = num(s.clean_sheets) ?? 0;
+      if (tags.has('first_choice_keeper')) {
+        out.push({
+          text: cs >= 2
+            ? `${name} has been first choice in goal${club ? ` at ${club}` : ` for ${team}`}, with ${n(cs)} clean sheets this season`
+            : `${name} has been first choice in goal${club ? ` at ${club}` : ` for ${team}`} this season`,
+          side, weight: lead,
+        });
+      }
+    } else if (g + a > 0 && (p.role !== 'DEF' || g + a >= 2)) {
+      const what = g && a ? `${goalsWord(g)} and ${assistsWord(a)}` : g ? goalsWord(g) : assistsWord(a);
+      // The rank comes from the side's own chart, so it is said as the chart
+      // says it, not as "more than anyone", which the season total may not be.
+      const rank = !club && tags.has('top_scorer') ? ` and is ${team}'s top scorer`
+        : !club && tags.has('top_creator') ? ` and has set up more than anyone at ${team}`
+        : '';
+      out.push({ text: `${name} has ${what}${at} this season${rank}`, side, weight: lead + (rank ? 4 : 0) });
+    }
+    if (p.role !== 'GK' && games >= 5 && (tags.has('ever_present') || tags.has('defensive_rock'))) {
+      out.push({
+        text: started >= games
+          ? `${name} has started every one of ${club ?? team}'s ${n(games)} games this season`
+          : `${name} has started ${n(started)} of ${club ?? team}'s ${n(games)} games this season`,
+        side, weight: lead - 6,
+      });
+    }
+  }
+
+  // 2. What losing the player does, said as football rather than as a figure.
+  if (absent && imp >= 0.12) {
+    const role = p.role;
+    const line = role === 'GK' ? `${team} have to change their keeper`
+      : role === 'DEF' ? `${team} lose a regular from the back line`
+      : tags.has('top_creator') || tags.has('chance_creator') ? `${team} lose the player who makes their chances`
+      : role === 'ATT' || tags.has('top_scorer') ? `a big part of ${team}'s goals goes missing with ${name}`
+      : `${team} lose one of their most important players in ${name}`;
+    out.push({ text: line, side, weight: lead + 2 });
+  }
+
+  // 3. One game that shows it.
+  const so = p.standout;
+  const opp = str(so?.opponent);
+  const did = so ? didWhat(num(so.goals) ?? 0, num(so.assists) ?? 0) : null;
+  if (so && opp && did && num(so.kickoff)) {
+    const score = str(so.score);
+    const res = score ? (so.won === true ? `the ${score} win over ${opp}`
+      : so.won === false && score.split('-')[0] !== score.split('-')[1] ? `the ${score} defeat to ${opp}`
+      : `the ${score} draw with ${opp}`) : `the game against ${opp}`;
+    out.push({ text: `${name} ${did} in ${res} on ${day(so.kickoff!)}`, side, weight: lead - 10 });
+  }
+
+  // 4. How the player is going.
+  const r = p.recent;
+  const scoredIn = num(r?.scoredIn) ?? 0;
+  const rg = num(r?.goals) ?? 0;
+  if (scoredIn >= 3) {
+    out.push({ text: `${name} ${absent ? 'had' : 'has'} scored in each of the last ${n(scoredIn)} games`, side, weight: lead - 2 });
+  } else if (rg >= 3 && (num(r?.apps) ?? 0) >= 4) {
+    out.push({ text: `${name} ${absent ? 'had' : 'has'} ${n(rg)} goals in the last ${n(num(r?.apps) ?? 5)} games`, side, weight: lead - 4 });
+  }
+
+  // 5. When the player is back, and whether it is really an absence at all.
+  if (p.status === 'doubtful') {
+    out.push({ text: `${name} is a doubt for ${team}`, side, weight: Math.max(lead, 72) });
+  }
+  const back = str(p.expected_return);
+  const t = back ? Date.parse(back) : NaN;
+  if (absent && Number.isFinite(t) && t > Date.now() + 86400_000 && t < Date.now() + 200 * 86400_000) {
+    out.push({ text: `${name} is not expected back until ${day(Math.floor(t / 1000))}`, side, weight: lead - 14 });
+  }
+
+  // 6. What kind of player, when the feed knows.
+  const strengths = (p.strengths ?? []).map((x) => String(x).toLowerCase().trim()).filter((x) => /^[a-z ]{3,30}$/.test(x));
+  if (strengths.length && imp >= 0.1) {
+    out.push({ text: `${name} is known for ${list(strengths.slice(0, 2))}`, side, weight: 38 });
+  }
+
+  return out;
+}
+
 /* ------------------------------------------------------------------ entry */
 
 /**
@@ -452,6 +639,7 @@ export function pubFacts(bundle: Bundle): PubFact[] {
   out.push(...tableFacts(bundle));
   out.push(...lineupFacts(bundle));
   out.push(...scorerFacts(bundle));
+  out.push(...playerFacts(bundle));
   out.push(...managerNameFacts(bundle));
 
   if (bundle.lineups?.status === 'confirmed') {

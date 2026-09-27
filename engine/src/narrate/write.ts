@@ -162,15 +162,47 @@ export function validate(text: string, req: WriteRequest): Rejection[] {
   if (violations.length) out.push('banned-term');
 
   // Every digit and every number-word has to be traceable to a fact.
-  const said = new Set(allowed.join(' ').toLowerCase().match(/[a-z0-9-]+/g) ?? []);
-  const numbers = text.toLowerCase().match(/\b\d+(?:-\d+)?\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/g) ?? [];
-  for (const tok of numbers) {
-    if (said.has(tok) || HARMLESS.test(tok)) continue;
-    out.push('invented-number');
-    break;
-  }
+  if (inventedNumber(text, allowed)) out.push('invented-number');
 
   return out;
+}
+
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve'];
+
+/** Scorelines written with any dash are one scoreline: "3–1", "3—1" and "3-1". */
+function unifyDashes(s: string): string {
+  return s.replace(/(\d)\s*[–—-]\s*(\d)/g, '$1-$2');
+}
+
+/**
+ * Whether the text uses a number no fact carries.
+ *
+ * A number is the same number however it is spelt: the facts say "won four of
+ * their last six" and a draft that says "won 4 of their last 6" has invented
+ * nothing. Rejecting it threw away good drafts and fell back to the template
+ * voice, which was the commonest rejection in the run logs. A scoreline is one
+ * token ("3-1"), so "3-1" in the text needs "3-1" in the facts, not a 3 and a
+ * 1 from two different sentences.
+ */
+export function inventedNumber(text: string, allowed: string[], extra: RegExp = /(?!)/): boolean {
+  const said = new Set<string>();
+  for (const tok of unifyDashes(allowed.join(' ')).toLowerCase().match(/[a-z0-9.-]+/g) ?? []) {
+    said.add(tok);
+    // "3-1" also vouches for nothing else; a lone number vouches for its word.
+    const i = NUMBER_WORDS.indexOf(tok);
+    if (i >= 0) said.add(String(i));
+    if (/^\d+$/.test(tok) && Number(tok) < NUMBER_WORDS.length) said.add(NUMBER_WORDS[Number(tok)]!);
+    // A trailing full stop is punctuation, not a decimal.
+    if (tok.endsWith('.')) said.add(tok.replace(/\.+$/, ''));
+  }
+  const numbers = unifyDashes(text).toLowerCase()
+    .match(/\b\d+(?:[.-]\d+)?\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/g) ?? [];
+  for (const tok of numbers) {
+    if (said.has(tok) || HARMLESS.test(tok) || extra.test(tok)) continue;
+    return true;
+  }
+  return false;
 }
 
 const WHY_MIN = 30;
@@ -190,13 +222,7 @@ export function validateWhy(text: string, req: WriteRequest): Rejection[] {
   const odds = oddsPhrase(req.odds);
   const allowed = [...req.facts.map((f) => f.text), req.call, odds ?? ''];
   if (findBannedInProse(text, allowed).length) out.push('banned-term');
-  const said = new Set(allowed.join(' ').toLowerCase().match(/[a-z0-9.-]+/g) ?? []);
-  const numbers = text.toLowerCase().match(/\b\d+(?:[.-]\d+)?\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/g) ?? [];
-  for (const tok of numbers) {
-    if (said.has(tok) || HARMLESS.test(tok)) continue;
-    out.push('invented-number');
-    break;
-  }
+  if (inventedNumber(text, allowed)) out.push('invented-number');
   // A bare price is the thing the owner asked to stop.
   if (odds && !text.includes(odds.replace(/^at /, ''))) out.push('banned-term');
   return out;

@@ -3,6 +3,7 @@ import { config } from '../config.ts';
 import { buildBookMarkets, fetchQuotes } from '../odds.ts';
 import { loadLeagueModel, loadRefereeRate } from '../ratings/fit.ts';
 import { kvGetJSON, kvSetJSON, select } from '../store.ts';
+import { profilesFor } from './players.ts';
 import type { MatchRow } from '../types.ts';
 import type {
   FixtureContext, LineupInfo, LineupPlayer, ManagerInfo, ManagerTenure,
@@ -453,6 +454,16 @@ export async function gatherFixture(
   ]);
 
   const leagueRow = await select<{ name: string }>('SELECT name FROM league WHERE id = ?', [leagueId]);
+  const lineups = parseLineups(lineupsRaw);
+
+  // Who the missing players are and who carries the threat. Not for a match
+  // long since played, where nothing is left to say about who is fit.
+  const players = opts.light || kickoff < Date.now() / 1000 - 3 * 3600
+    ? null
+    : await profilesFor({ leagueId, kickoff, lineups, home, away }).catch((err) => {
+      console.warn(`  players: ${fixtureId} profiles failed (${err instanceof Error ? err.message : String(err)})`);
+      return null;
+    });
 
   return {
     fixture_id: fixtureId,
@@ -463,7 +474,8 @@ export async function gatherFixture(
     home,
     away,
     event,
-    lineups: parseLineups(lineupsRaw),
+    lineups,
+    players,
     referee,
     standings,
     seasonRounds: standings ? estimateRounds(standings) : null,

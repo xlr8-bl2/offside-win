@@ -11,6 +11,7 @@ import { fillCrestColors } from './images/crest.ts';
 import { fillVenues } from './context/venue.ts';
 import { refreshSchedule } from './schedule.ts';
 import { pubFacts } from './narrate/facts.ts';
+import { forBundle } from './context/players.ts';
 import { geminiWriter } from './narrate/gemini.ts';
 import { budgeted, keyId, spent, todays, type BudgetState } from './narrate/budget.ts';
 import { write, type Writer } from './narrate/write.ts';
@@ -151,8 +152,25 @@ export function leagueRank(leagueId: number): number {
  * call, and re-reading a preview because a full-back is fit is not worth a
  * request.
  */
-export function narrativeKey(fixtureId: number, c: Candidate): string {
-  return `narr:${fixtureId}:${c.market}:${c.outcome}:${c.line ?? ''}`;
+export function narrativeKey(fixtureId: number, c: Candidate, news = ''): string {
+  return `narr:${fixtureId}:${c.market}:${c.outcome}:${c.line ?? ''}${news ? `:${fnv(news)}` : ''}`;
+}
+
+/**
+ * The team news a paragraph was written against: who is out, and whether the
+ * sheets are confirmed. A paragraph that says a striker is fit is wrong the
+ * moment he is ruled out, so a change here is worth a rewrite; nothing else
+ * about the fixture moves often enough to be.
+ */
+export function teamNews(lineups: { status?: string; unavailable?: Array<{ id: number }> } | null | undefined): string {
+  const out = (lineups?.unavailable ?? []).map((u) => u.id).sort((a, b) => a - b);
+  return `p1|${lineups?.status === 'confirmed' ? 'c' : 'p'}|${out.join(',')}`;
+}
+
+function fnv(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(36);
 }
 
 /** Long enough to outlive a fixture's build-up, short enough to expire. */
@@ -350,6 +368,7 @@ export async function runSlate(): Promise<SlateReport> {
       }
 
       const { analysis, factors, confidence } = analyseFixture(ctx);
+      const players = ctx.players ? ctx.players.map(forBundle) : null;
       const cands = buildCandidates(analysis.model, analysis.book, calibration);
       const selection = select(cands, analysis.book, factors, confidence);
 
@@ -443,7 +462,7 @@ export async function runSlate(): Promise<SlateReport> {
       if (writer && !writerGaveUp) {
         for (const v of confidentVerdicts) {
           // Written once per call, not once per run.
-          const key = narrativeKey(analysis.fixture_id, v.candidate);
+          const key = narrativeKey(analysis.fixture_id, v.candidate, teamNews(ctx.lineups));
           // Stored as { text, why } now; older entries are a bare string and
           // are rewritten, since they have no members' paragraph.
           const cached = await kvGetJSON<string | { text: string; why: string | null }>(key);
@@ -486,6 +505,7 @@ export async function runSlate(): Promise<SlateReport> {
               goalscorers: ((analysis.external as { polymarket?: { goalscorers?: unknown } } | null)
                 ?.polymarket?.goalscorers ?? null) as Array<{ player?: string; price?: number }> | null,
               managers: { home: ctx.home.manager?.name ?? null, away: ctx.away.manager?.name ?? null },
+              players: players ?? null,
             }),
             odds: v.candidate.odds,
           }, writer);
@@ -671,6 +691,10 @@ export async function runSlate(): Promise<SlateReport> {
         // analysis into a link by looking it up here, so a name the writer
         // uses that is not in this list simply stays text.
         people: peopleOf(ctx),
+        // Who the absentees and the danger men are: season numbers, standing
+        // at the club, a game that shows it, current form. The writer's player
+        // lines come from here; kept so the page can show them too.
+        players: players ?? null,
         // The players worth a link: the competition's top scorers. A name in
         // the analysis links only if it is one of these, and the link opens
         // the competition's chart at that name.

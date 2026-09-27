@@ -470,3 +470,52 @@ export async function probeReport(): Promise<void> {
     break;
   }
 }
+
+/**
+ * `probe:profile [fixture ids]`: build the player profiles and the pub facts
+ * for a few upcoming fixtures, and print what the writer would be handed.
+ * With no ids, the biggest fixtures in the next two days that have team news.
+ * Prints football data only (names, counts, scorelines), nothing private.
+ */
+export async function probeProfiles(ids: number[] = []): Promise<void> {
+  const { gatherFixture } = await import('./context/gather.ts');
+  const { forBundle } = await import('./context/players.ts');
+  const { pubFacts } = await import('./narrate/facts.ts');
+  const { findBannedInProse } = await import('./vocabulary.ts');
+  let events: Array<Record<string, unknown>>;
+  if (ids.length) {
+    events = (await Promise.all(ids.map((id) => bsdOrNull<Record<string, unknown>>(`/api/v2/events/${id}/`)))).filter((e): e is Record<string, unknown> => !!e);
+  } else {
+    const from = new Date().toISOString().slice(0, 10);
+    const to = new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10);
+    const all = await bsdList<Record<string, unknown>>('/api/v2/events/', { date_from: from, date_to: to }, { limit: 200, max: 400 });
+    const rank = (e: Record<string, unknown>) => config.leagueRank[Number(e['league_id'])] ?? config.unrankedLeague;
+    events = all.filter((e) => !/finish|ended|progress|live/i.test(String(e['status'] ?? ''))).sort((a, b) => rank(a) - rank(b)).slice(0, 6);
+  }
+  for (const e of events) {
+    const t0 = Date.now();
+    const ctx = await gatherFixture(e);
+    if (!ctx) { console.log(`\n${e['home_team']} v ${e['away_team']}: no fitted ratings, skipped`); continue; }
+    const players = (ctx.players ?? []).map(forBundle);
+    console.log(`\n${ctx.home.team_name} v ${ctx.away.team_name} (${ctx.league_name}, event ${ctx.fixture_id}): ${players.length} profiles in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    for (const p of players) {
+      const s = p.season;
+      console.log(`  ${p.side.padEnd(4)} ${p.status.padEnd(8)} ${p.name} [${p.role}${p.club ? `, club ${p.club}` : ''}] `
+        + (s ? `apps ${s.apps} starts ${s.starts} g ${s.goals} a ${s.assists} cs ${s.clean_sheets} team games ${s.team_games} tracked ${s.tracked_apps}/${s.tracked_starts}` : 'no season')
+        + ` importance ${p.importance} tags ${p.tags.join(',') || '-'}`
+        + (p.standout ? ` best: ${p.standout.goals}g ${p.standout.assists}a v ${p.standout.opponent} ${p.standout.score ?? ''}` : '')
+        + (p.recent ? ` last ${p.recent.apps}: ${p.recent.goals}g, scored in ${p.recent.scoredIn} straight` : ''));
+    }
+    const facts = pubFacts({
+      home: ctx.home.team_name, away: ctx.away.team_name, players,
+      lineups: { status: ctx.lineups.status, home: ctx.lineups.home, away: ctx.lineups.away },
+      standings: ctx.standings ? { home: ctx.home.standing, away: ctx.away.standing, size: ctx.standings.length } : null,
+      managers: { home: ctx.home.manager?.name ?? null, away: ctx.away.manager?.name ?? null },
+    });
+    console.log('  facts the writer would get:');
+    for (const f of facts.slice(0, 18)) {
+      const bad = findBannedInProse(f.text);
+      console.log(`    ${String(f.weight).padStart(3)} ${f.text}${bad.length ? `   <-- BANNED ${bad.map((b) => b.term).join(',')}` : ''}`);
+    }
+  }
+}
