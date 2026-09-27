@@ -38,6 +38,8 @@ export interface BudgetState {
    * out costs when the day really is spent.
    */
   pausedUntil?: number;
+  /** Per model, because that is how Google counts the free tier. */
+  models?: Record<string, ModelState>;
 }
 
 export function pacificDay(ms = Date.now()): string {
@@ -50,7 +52,8 @@ export function todays(saved: BudgetState | null, day = pacificDay(), key?: stri
   const base = { day, ...(k ? { key: k } : {}) };
   return saved && saved.day === day && (!key || saved.key === key)
     ? { ...base, used: Number(saved.used) || 0, exhausted: Boolean(saved.exhausted),
-        ...(Number(saved.pausedUntil) ? { pausedUntil: Number(saved.pausedUntil) } : {}) }
+        ...(Number(saved.pausedUntil) ? { pausedUntil: Number(saved.pausedUntil) } : {}),
+        ...(saved.models ? { models: saved.models } : {}) }
     : { ...base, used: 0, exhausted: false };
 }
 
@@ -60,34 +63,73 @@ export async function keyId(apiKey: string): Promise<string> {
   return [...new Uint8Array(buf)].slice(0, 6).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** How long a quota refusal pauses the writer. */
+/** How long a quota refusal pauses a model. */
 export const PAUSE = 2 * 3600;
 
-export function spent(state: BudgetState, limit: number): boolean {
-  // A refusal saved before pauses existed has no pausedUntil, and does not stop anything.
-  return state.used >= limit || (state.pausedUntil ?? 0) > Math.floor(Date.now() / 1000);
+export interface ModelState {
+  used: number;
+  pausedUntil?: number;
+  /** Retired for this key (a 404): not asked again today. */
+  gone?: boolean;
+}
+
+function modelOpen(state: BudgetState, model: string, perModel: number, now: number): boolean {
+  const m = state.models?.[model];
+  return !m || (!m.gone && m.used < perModel && (m.pausedUntil ?? 0) <= now);
 }
 
 /**
- * The writer, counting against the day. A request past the allowance is not
- * sent at all; Google's own "that is the day" is remembered, so the next run
- * does not ask again.
+ * Is there anything left to ask today? With a list of models, the answer is
+ * whether any of them still has allowance; without one, the old single pause.
  */
-export function budgeted(writer: Writer, state: BudgetState, limit: number): Writer {
+export function spent(state: BudgetState, limit: number, models: string[] = [], perModel = Infinity): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  if (state.used >= limit) return true;
+  if (models.length) return !models.some((m) => modelOpen(state, m, perModel, now));
+  // A refusal saved before pauses existed has no pausedUntil, and does not stop anything.
+  return (state.pausedUntil ?? 0) > now;
+}
+
+/**
+ * The writers, in order of preference, counting against the day.
+ *
+ * Google's free tier is counted per model: twenty requests a day each
+ * (GenerateRequestsPerDayPerProjectPerModel-FreeTier = 20, in its own words),
+ * and a key can call several Flash models. So the writer works down the list:
+ * the best model until its twenty are gone or Google refuses, then the next.
+ * A request past the allowance is never sent, a refused model is paused for
+ * two hours, and a retired one (404) is dropped for the day.
+ */
+export function budgeted(
+  chain: Array<{ model: string; writer: Writer }>, state: BudgetState, limit: number, perModel = Infinity,
+): Writer {
   return {
-    name: writer.name,
+    name: chain.length === 1 ? chain[0]!.writer.name : `gemini (${chain.length} models)`,
     async generate(prompt: string): Promise<string> {
-      if (spent(state, limit)) throw new QuotaExhausted(`today's allowance of ${limit} is spent`);
-      state.used++;
-      try {
-        return await writer.generate(prompt);
-      } catch (err) {
-        if (err instanceof QuotaExhausted) {
-          state.exhausted = true;
-          state.pausedUntil = Math.floor(Date.now() / 1000) + PAUSE;
+      for (const { model, writer } of chain) {
+        const now = Math.floor(Date.now() / 1000);
+        if (state.used >= limit) break;
+        if (!modelOpen(state, model, perModel, now)) continue;
+        state.models ??= {};
+        const m = (state.models[model] ??= { used: 0 });
+        state.used++;
+        m.used++;
+        try {
+          return await writer.generate(prompt);
+        } catch (err) {
+          if (err instanceof QuotaExhausted) {
+            state.exhausted = true;
+            m.pausedUntil = now + PAUSE;
+            continue;
+          }
+          if (/gemini 404/.test(err instanceof Error ? err.message : '')) {
+            m.gone = true;
+            continue;
+          }
+          throw err;
         }
-        throw err;
       }
+      throw new QuotaExhausted(`today's allowance is spent on every model (${state.used}/${limit})`);
     },
   };
 }

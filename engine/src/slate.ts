@@ -181,15 +181,31 @@ function plainCall(c: Candidate, home: string, away: string): string {
  * working one. A slate that refused to run without an optional key would be a
  * site that stops publishing because a free quota lapsed.
  */
-function buildWriter(): Writer | null {
+/*
+ * The models, best first. Google's free tier gives each model its own twenty
+ * requests a day, so the writer works down this list (see budgeted). All are
+ * current Flash models the key could call on 26 September 2026 (gemini:check
+ * lists them); a retired one answers 404 and is skipped for the day.
+ * GEMINI_MODELS replaces the list; GEMINI_MODEL puts one model first.
+ */
+const MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash',
+  'gemini-3-flash-preview', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+
+function buildWriters(): Array<{ model: string; writer: Writer }> | null {
   const apiKey = process.env['GEMINI_API_KEY'];
   if (!apiKey) return null;
-  return geminiWriter({
-    apiKey,
-    model: process.env['GEMINI_MODEL'] || undefined,
-    // Gentle enough for the free tier's per-minute limit on any flash model.
-    ratePerMinute: Number(process.env['GEMINI_RPM'] || 8),
-  });
+  const listed = (process.env['GEMINI_MODELS'] || '').split(',').map((m) => m.trim()).filter(Boolean);
+  const first = process.env['GEMINI_MODEL']?.trim();
+  const models = [...new Set([...(first ? [first] : []), ...(listed.length ? listed : MODELS)])];
+  return models.map((model) => ({
+    model,
+    writer: geminiWriter({
+      apiKey,
+      model,
+      // Gentle enough for the free tier's per-minute limit on any flash model.
+      ratePerMinute: Number(process.env['GEMINI_RPM'] || 8),
+    }),
+  }));
 }
 
 export async function runSlate(): Promise<SlateReport> {
@@ -201,10 +217,14 @@ export async function runSlate(): Promise<SlateReport> {
   const geminiKey = process.env['GEMINI_API_KEY'];
   const budget: BudgetState = todays(await kvGetJSON<BudgetState>('gemini:budget'), undefined,
     geminiKey ? await keyId(geminiKey) : undefined);
-  const rawWriter = buildWriter();
-  const writer = rawWriter && !spent(budget, perDay) ? budgeted(rawWriter, budget, perDay) : null;
+  // Twenty a day per model on the free tier, in Google's own words.
+  const perModel = Number(process.env['GEMINI_PER_MODEL'] || 20);
+  const chain = buildWriters();
+  const models = chain?.map((c) => c.model) ?? [];
+  const rawWriter = chain ? { name: `gemini (${models.join(', ')})` } : null;
+  const writer = chain && !spent(budget, perDay, models, perModel) ? budgeted(chain, budget, perDay, perModel) : null;
   if (rawWriter && !writer) {
-    console.log(`Narratives: today's ${rawWriter.name} allowance is spent (${budget.used}/${perDay}`
+    console.log(`Narratives: today's Gemini allowance is spent on every model (${budget.used}/${perDay}`
       + `${budget.pausedUntil ? `, paused after Google refused until ${new Date(budget.pausedUntil * 1000).toISOString().slice(11, 16)} UTC` : ''}). The grammar writes until then.`);
   }
 
@@ -426,7 +446,7 @@ export async function runSlate(): Promise<SlateReport> {
           }
 
           if (narrateAttempts >= perRun) break;
-          if (spent(budget, perDay)) {
+          if (spent(budget, perDay, models, perModel)) {
             writerGaveUp = budget.pausedUntil ? 'Google refused for quota; trying again in two hours' : `today's allowance of ${perDay} is spent`;
             break;
           }
@@ -474,7 +494,7 @@ export async function runSlate(): Promise<SlateReport> {
             for (const r of result.rejections) narrateRejections[r] = (narrateRejections[r] ?? 0) + 1;
             // A rejected draft is the writer working. A thrown request is the
             // writer not being reachable, and only the second kind repeats.
-            if (result.error && spent(budget, perDay)) {
+            if (result.error && spent(budget, perDay, models, perModel)) {
               writerGaveUp = result.error;
               break;
             }
@@ -1007,7 +1027,11 @@ export async function runSlate(): Promise<SlateReport> {
   await kvSetJSON('narrate:ledger', ledger.snapshot());
   await kvSetJSON('slate:last_run', { at: now, ...report });
 
-  if (writer) console.log(`Narratives: ${budget.used} of today's ${perDay} Gemini requests used.`);
+  if (writer) {
+    const per = Object.entries(budget.models ?? {})
+      .map(([m, st]) => `${m} ${st.used}${st.gone ? ' (retired)' : st.pausedUntil && st.pausedUntil > Date.now() / 1000 ? ' (refused, paused)' : ''}`);
+    console.log(`Narratives: ${budget.used} of today's ${perDay} Gemini requests used${per.length ? `: ${per.join(', ')}` : ''}.`);
+  }
   if (writer && writerGaveUp) {
     console.log(
       `Narratives: ${narrateReused} reused, ${narrateWritten}/${narrateAttempts} written before ${writer.name} stopped answering `
