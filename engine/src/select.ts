@@ -378,6 +378,7 @@ export function confidentEligible(c: Candidate, floor = config.confident.floor, 
     (config.confident.minEv <= -1 || c.model_prob * c.odds - 1 >= config.confident.minEv) &&
     c.odds * c.book_prob <= config.confident.maxGap &&
     (c.books ?? 0) >= config.confident.minBooks &&
+    !config.confident.excludeMarkets.includes(bucketOf(c)) &&
     (config.confident.minSharpEv === null || c.sharp_prob == null || c.sharp_prob * c.odds - 1 >= config.confident.minSharpEv) &&
     (config.confident.quarterLines || c.line === null || Math.abs((c.line * 4) % 2) !== 1)
   );
