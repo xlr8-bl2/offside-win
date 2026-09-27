@@ -118,6 +118,42 @@ export async function identify(env: PayEnv, jwt: string | null): Promise<{ id: s
  * `plan` table on this side, so a client asking to pay a penny is quoted nine
  * pounds like everybody else.
  */
+/*
+ * What the buyer confirmed at checkout: 18 or over and the terms, and the
+ * express request for the membership to start at once with the acknowledgement
+ * that doing so ends the 14-day right to cancel (Consumer Contracts
+ * Regulations 2013, reg. 37). Without both no payment starts, and each one is
+ * kept so it can be shown later what was agreed, when, and to which version.
+ */
+export interface Consent { adult: true; waive: true; terms: string }
+
+export function readConsent(body: unknown): Consent | null {
+  const c = (body as { consent?: Record<string, unknown> } | null)?.consent;
+  if (!c || c['adult'] !== true || c['waive'] !== true) return null;
+  const terms = typeof c['terms'] === 'string' && /^[\w.-]{1,40}$/.test(c['terms']) ? c['terms'] : '';
+  return terms ? { adult: true, waive: true, terms } : null;
+}
+
+export const NO_CONSENT = 'Tick both boxes above the payment first. Nothing has been charged.';
+
+/**
+ * Keep the confirmation, with the buyer's own token: record_consent writes it
+ * for auth.uid() and nobody else, so no service key is needed here. A failure
+ * is logged, never shown: the buyer did confirm.
+ */
+export async function recordConsent(env: PayEnv, jwt: string, planId: string, c: Consent): Promise<void> {
+  try {
+    const res = await fetch(new URL('/rest/v1/rpc/record_consent', env.SUPABASE_URL), {
+      method: 'POST',
+      headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${jwt}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ p_plan: planId, p_terms: c.terms }),
+    });
+    if (!res.ok) console.error('consent: not recorded', res.status);
+  } catch (err) {
+    console.error('consent: not recorded', err instanceof Error ? err.message : String(err));
+  }
+}
+
 export async function checkout(request: Request, env: PayEnv, jwt: string | null): Promise<Response> {
   // There is a real window where the code is deployed and the merchant account
   // is not. Saying so plainly beats a 500 that reads like the site is broken.
@@ -129,10 +165,13 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
   if (!user) return json({ error: 'Sign in first.' }, 401);
 
   let planId = 'monthly';
+  let consent: Consent | null = null;
   try {
     const body = await request.json() as { plan?: unknown };
     if (typeof body?.plan === 'string' && body.plan) planId = body.plan;
-  } catch { /* an empty body means the default plan */ }
+    consent = readConsent(body);
+  } catch { /* an empty body means the default plan, and no consent */ }
+  if (!consent) return json({ error: NO_CONSENT }, 400);
 
   const rows = await fetch(
     new URL(`/rest/v1/plan?id=eq.${encodeURIComponent(planId)}&active=eq.1&select=id,name,amount_minor,currency,days,checkout_url`, env.SUPABASE_URL),
@@ -141,6 +180,7 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
   const plans = rows.ok ? await rows.json() as any[] : [];
   const plan = plans[0];
   if (!plan) return json({ error: 'That plan is not available.' }, 404);
+  await recordConsent(env, jwt!, String(plan.id), consent);
 
   if (provider(env) === 'whop') {
     const site = env.SITE_URL ?? new URL(request.url).origin;
@@ -634,8 +674,10 @@ export async function charge(request: Request, env: PayEnv, jwt: string | null):
   const user = await identify(env, jwt);
   if (!user) return json({ error: 'Sign in first.' }, 401);
 
-  let body: { plan?: unknown; confirmation_token?: unknown } = {};
+  let body: { plan?: unknown; confirmation_token?: unknown; consent?: unknown } = {};
   try { body = await request.json() as typeof body; } catch { /* checked below */ }
+  const consent = readConsent(body);
+  if (!consent) return json({ error: NO_CONSENT }, 400);
   const planId = typeof body.plan === 'string' && /^[a-z0-9_-]{1,40}$/.test(body.plan) ? body.plan : '';
   const token = typeof body.confirmation_token === 'string' && /^ctok_[A-Za-z0-9_]{4,200}$/.test(body.confirmation_token) ? body.confirmation_token : '';
   if (!planId || !token) return json({ error: 'The card details did not come through. Nothing has been charged. Try again.' }, 400);
@@ -646,6 +688,7 @@ export async function charge(request: Request, env: PayEnv, jwt: string | null):
   );
   const plan = (rows.ok ? await rows.json() as any[] : [])[0];
   if (!plan) return json({ error: 'That plan is not available.' }, 404);
+  await recordConsent(env, jwt!, String(plan.id), consent);
 
   const site = env.SITE_URL ?? new URL(request.url).origin;
   try {

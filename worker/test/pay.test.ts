@@ -51,17 +51,20 @@ const post = (path: string, body: unknown) =>
 
 const find = (needle: string) => sent.find((c) => c.url.includes(needle));
 
+/** Both checkout boxes ticked, as the page sends them. */
+const OK = { adult: true, waive: true, terms: '2026-09-27' };
+
 /* ------------------------------------------------------------- the checkout */
 
 test('checkout refuses anyone who is not signed in', async () => {
-  const res = await checkout(post('/api/pay/checkout', {}), ENV, null);
+  const res = await checkout(post('/api/pay/checkout', { consent: OK, }), ENV, null);
   assert.equal(res.status, 401);
   assert.equal(sent.length, 0, 'it must not reach the processor at all');
 });
 
 test('the price comes from the database, never from the caller', async () => {
   // The attack this stops: "I would like to pay one penny for a year."
-  const res = await checkout(post('/api/pay/checkout', { plan: 'monthly', amount_minor: 1, days: 3650 }), ENV, 'jwt');
+  const res = await checkout(post('/api/pay/checkout', { consent: OK,  plan: 'monthly', amount_minor: 1, days: 3650 }), ENV, 'jwt');
   assert.equal(res.status, 200);
 
   const order = find('/checkout/link')!;
@@ -72,7 +75,7 @@ test('the price comes from the database, never from the caller', async () => {
 });
 
 test('checkout identifies the reader with the issuer rather than trusting the token', async () => {
-  await checkout(post('/api/pay/checkout', {}), ENV, 'jwt');
+  await checkout(post('/api/pay/checkout', { consent: OK, }), ENV, 'jwt');
   const who = find('/auth/v1/user');
   assert.ok(who, 'the token was never checked with Supabase');
   assert.equal((who!.headers as any).authorization, 'Bearer jwt');
@@ -85,7 +88,7 @@ test('an unknown plan is refused rather than guessed at', async () => {
   route = (url) => url.includes('/auth/v1/user')
     ? new Response(JSON.stringify({ id: 'user-1' }), { status: 200 })
     : new Response('[]', { status: 200 });
-  const res = await checkout(post('/api/pay/checkout', { plan: 'lifetime' }), ENV, 'jwt');
+  const res = await checkout(post('/api/pay/checkout', { consent: OK,  plan: 'lifetime' }), ENV, 'jwt');
   assert.equal(res.status, 404);
 });
 
@@ -93,13 +96,13 @@ test('a forged token buys nothing', async () => {
   route = (url) => url.includes('/auth/v1/user')
     ? new Response('{"msg":"invalid"}', { status: 401 })
     : new Response('{}', { status: 200 });
-  const res = await checkout(post('/api/pay/checkout', {}), ENV, 'forged.jwt');
+  const res = await checkout(post('/api/pay/checkout', { consent: OK, }), ENV, 'forged.jwt');
   assert.equal(res.status, 401);
   assert.equal(find('/checkout/link'), undefined);
 });
 
 test('the service key is never sent to the processor or used for a checkout', async () => {
-  await checkout(post('/api/pay/checkout', {}), ENV, 'jwt');
+  await checkout(post('/api/pay/checkout', { consent: OK, }), ENV, 'jwt');
   const leaked = sent.filter((c) => JSON.stringify(c.headers).includes(ENV.SUPABASE_SERVICE_KEY));
   assert.deepEqual(leaked, [], 'the service key reached a request that did not need it');
 });
@@ -234,7 +237,7 @@ test('checkout says so plainly when there is no processor configured yet', async
   // The real state of the site between deploying this and opening a merchant
   // account. A 500 here would read as "the site is broken" rather than "not
   // yet", and someone would go looking for a bug that is not there.
-  const res = await checkout(post('/api/pay/checkout', {}), { ...ENV, COINFLOW_API_KEY: '' }, 'jwt');
+  const res = await checkout(post('/api/pay/checkout', { consent: OK, }), { ...ENV, COINFLOW_API_KEY: '' }, 'jwt');
   assert.equal(res.status, 503);
   assert.match((await res.json() as any).error, /not open yet/);
   assert.equal(sent.length, 0, 'it must not even check who is asking');
@@ -248,7 +251,7 @@ test('with Whop live, checkout hands back the plan\'s own link with the email on
     if (url.includes('/rest/v1/plan')) return new Response(JSON.stringify([{ id: 'season', amount_minor: 4900, currency: 'GBP', days: 365, checkout_url: 'https://whop.com/checkout/plan_s' }]), { status: 200 });
     return new Response('{}', { status: 200 });
   };
-  const res = await checkout(post('/api/pay/checkout', { plan: 'season' }), { ...ENV, PAY_PROVIDER: 'whop', WHOP_WEBHOOK_SECRET: 'whsec_x' }, 'jwt');
+  const res = await checkout(post('/api/pay/checkout', { consent: OK,  plan: 'season' }), { ...ENV, PAY_PROVIDER: 'whop', WHOP_WEBHOOK_SECRET: 'whsec_x' }, 'jwt');
   assert.equal(res.status, 200);
   const { link } = await res.json() as { link: string };
   assert.equal(link, 'https://whop.com/checkout/plan_s?email=a%40b.c');
@@ -319,7 +322,7 @@ test('with an API key, checkout makes a Whop checkout priced from our plan row',
     if (url.includes('/checkout_configurations')) return new Response(JSON.stringify({ id: 'ch_1', purchase_url: '/checkout/ch_1/' }), { status: 200 });
     return new Response('{}', { status: 200 });
   };
-  const res = await checkout(post('/api/pay/checkout', { plan: 'monthly' }), { ...ENV, PAY_PROVIDER: 'whop', WHOP_WEBHOOK_SECRET: 'x', WHOP_API_KEY: 'k', WHOP_COMPANY_ID: 'biz_1', SITE_URL: 'https://offside.win' }, 'jwt');
+  const res = await checkout(post('/api/pay/checkout', { consent: OK,  plan: 'monthly' }), { ...ENV, PAY_PROVIDER: 'whop', WHOP_WEBHOOK_SECRET: 'x', WHOP_API_KEY: 'k', WHOP_COMPANY_ID: 'biz_1', SITE_URL: 'https://offside.win' }, 'jwt');
   const out = await res.json() as any;
   assert.equal(out.checkout, 'ch_1');
   assert.equal(out.link, 'https://whop.com/checkout/ch_1/');
@@ -417,7 +420,7 @@ test('charge prices from our plan row and passes only the token from the page', 
     if (url.includes('/rpc/record_entitlement')) return new Response(JSON.stringify({ applied: true }), { status: 200 });
     return new Response('{}', { status: 200 });
   };
-  const res = await charge(post('/api/pay/charge', { plan: 'monthly', confirmation_token: 'ctok_abc123', amount: 1 }), WHOP, 'jwt');
+  const res = await charge(post('/api/pay/charge', { consent: OK,  plan: 'monthly', confirmation_token: 'ctok_abc123', amount: 1 }), WHOP, 'jwt');
   const out = await res.json() as any;
   assert.equal(res.status, 200);
   assert.equal(out.status, 'paid');
@@ -438,10 +441,10 @@ test('charge refuses a malformed token, and falls back when the key may not char
     if (url.endsWith('/api/v1/payments')) return new Response(JSON.stringify({ error: { type: 'forbidden', message: 'Missing permission payment:charge' } }), { status: 403 });
     return new Response('{}', { status: 200 });
   };
-  const bad = await charge(post('/api/pay/charge', { plan: 'matchday', confirmation_token: 'not-a-token' }), WHOP, 'jwt');
+  const bad = await charge(post('/api/pay/charge', { consent: OK,  plan: 'matchday', confirmation_token: 'not-a-token' }), WHOP, 'jwt');
   assert.equal(bad.status, 400);
   assert.ok(!find('/api/v1/payments'), 'nothing sent to Whop for a malformed token');
-  const res = await charge(post('/api/pay/charge', { plan: 'matchday', confirmation_token: 'ctok_x1234' }), WHOP, 'jwt');
+  const res = await charge(post('/api/pay/charge', { consent: OK,  plan: 'matchday', confirmation_token: 'ctok_x1234' }), WHOP, 'jwt');
   const out = await res.json() as any;
   assert.equal(res.status, 409);
   assert.equal(out.fallback, true);
@@ -464,4 +467,30 @@ test('a Whop membership running out is left to its date; a refund ends it now', 
   res = await send({ type: 'payment.refunded', data: { id: 'pay_3', user: { email: 'fan@example.com' } } });
   assert.equal(res.status, 200);
   assert.ok(find('/rpc/revoke_entitlement'), 'a refund must end access');
+});
+
+/* ------------------------------------------------- the checkout confirmation */
+
+test('no payment starts without both checkout boxes, and nothing is sent to the processor', async () => {
+  for (const consent of [undefined, { adult: true }, { waive: true, terms: 'x' }, { adult: true, waive: true }, { adult: 'yes', waive: true, terms: 'v' }]) {
+    sent = [];
+    const res = await checkout(post('/api/pay/checkout', { plan: 'monthly', consent }), ENV, 'jwt');
+    assert.equal(res.status, 400);
+    assert.match((await res.json() as any).error, /Tick both boxes/);
+    assert.equal(find('/checkout/link'), undefined);
+    assert.equal(find('record_consent'), undefined);
+  }
+  const res = await charge(post('/api/pay/charge', { plan: 'monthly', confirmation_token: 'ctok_abc123' }), { ...ENV, PAY_PROVIDER: 'whop', WHOP_API_KEY: 'k', WHOP_COMPANY_ID: 'biz_1' }, 'jwt');
+  assert.equal(res.status, 400);
+});
+
+test('the confirmation is kept with the buyer own token, the plan and the terms version', async () => {
+  await checkout(post('/api/pay/checkout', { plan: 'monthly', consent: OK }), ENV, 'jwt');
+  const c = find('/rpc/record_consent');
+  assert.ok(c, 'consent written');
+  assert.equal(c!.method, 'POST');
+  assert.equal(c!.headers.authorization, 'Bearer jwt');
+  assert.deepEqual(c!.body, { p_plan: 'monthly', p_terms: '2026-09-27' });
+  // Written before the processor is asked for anything.
+  assert.ok(sent.indexOf(c!) < sent.findIndex((x) => x.url.includes('/checkout/link')));
 });
