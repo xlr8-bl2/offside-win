@@ -1709,7 +1709,13 @@ RETURNS json LANGUAGE sql STABLE SET search_path = public AS $fn$
                         WHERE pk.fixture_id = f.id AND pk.kind = 'CONFIDENT' AND pk.settled_at IS NOT NULL
                           AND pk.market = l.leg->>'market' AND pk.outcome = l.leg->>'outcome'
                           AND pk.line IS NOT DISTINCT FROM (l.leg->>'line')::double precision
-                        LIMIT 1))
+                        LIMIT 1),
+             -- The call was taken down before its match: the slip settles this
+             -- leg as void (settleSlips), so the page must not grade it.
+             'withdrawn', NOT EXISTS (SELECT 1 FROM pick pk
+                        WHERE pk.fixture_id = (l.leg->>'fixture_id')::bigint AND pk.kind = 'CONFIDENT'
+                          AND pk.market = l.leg->>'market' AND pk.outcome = l.leg->>'outcome'
+                          AND pk.line IS NOT DISTINCT FROM (l.leg->>'line')::double precision))
            ORDER BY l.ord), '[]'::json)
   FROM jsonb_array_elements(coalesce(try_json(p_legs)::jsonb, '[]'::jsonb)) WITH ORDINALITY AS l(leg, ord)
   LEFT JOIN fixture f ON f.id = (l.leg->>'fixture_id')::bigint;
