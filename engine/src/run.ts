@@ -8,6 +8,7 @@ import { grant, plans } from './grant.ts';
 import { whopCheck } from './whopcheck.ts';
 import { geminiCheck } from './geminicheck.ts';
 import { mailSetup } from './mailsetup.ts';
+import { syncCards } from './cards/sync.ts';
 import { trace } from './trace.ts';
 import { fitAllLeagues } from './ratings/fit.ts';
 import { syncTeamShots } from './images/sync.ts';
@@ -159,6 +160,12 @@ const commands: Record<string, () => Promise<unknown>> = {
 
   async 'gemini:check'() {
     return geminiCheck();
+  },
+
+  // The share card of every match on the board, redrawn when it changes.
+  async cards() {
+    requireEnv({ provider: false });
+    await syncCards();
   },
 
   // Brevo: the key, the domain's DNS records, the sender, and a test email.

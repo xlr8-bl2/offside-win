@@ -26,11 +26,13 @@
 import { describe as describeCall } from '../../public/js/lib/markets.js';
 import { findBannedInProse } from '../../engine/src/vocabulary.ts';
 import { SITE_NAME, TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle } from '../../public/js/lib/titles.js';
+import { cardPath, cardState } from '../../public/js/lib/cards.js';
 
 export interface SeoEnv {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   SITE_URL?: string;
+  IMAGE_BUCKET?: string;
   ASSETS: { fetch(input: Request | string): Promise<Response> };
 }
 
@@ -161,6 +163,8 @@ export interface Page {
   status?: number;
   /** A match gone from the database, or an address that will never exist. */
   noindex?: boolean;
+  /** The link preview's picture, when the page has its own (a match's card). */
+  image?: { url: string; alt: string };
 }
 
 const SITE = SITE_NAME;
@@ -283,7 +287,11 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
     organizer: { '@type': 'Organization', name: league || SITE },
   };
 
-  return { title, description: clip(description), canonical, body, jsonLd: [event, c.ld] };
+  // Its own share card (engine/src/cards), drawn by the cards workflow. The
+  // query changes at full time so a platform that cached the preview card
+  // fetches the result card; the Worker ignores it and serves the latest.
+  const image = { url: `${site}/og/${Number(f.id)}.jpg?s=${cardState(f)}`, alt: `${home} v ${away}${score ? `, ${score[0]}–${score[1]}` : ''}` };
+  return { title, description: clip(description), canonical, body, jsonLd: [event, c.ld], image };
 }
 
 function rowStatus(f: Rec): string {
@@ -494,6 +502,9 @@ export function render(shell: string, page: Page): string {
     .replace(/<meta property="og:description" content="[^"]*">/, `<meta property="og:description" content="${esc(page.description)}">`)
     .replace(/<meta name="twitter:title" content="[^"]*">/, `<meta name="twitter:title" content="${esc(page.title)}">`)
     .replace(/<meta name="twitter:description" content="[^"]*">/, `<meta name="twitter:description" content="${esc(page.description)}">`)
+    .replace(/<meta property="og:image" content="[^"]*">/, (m) => (page.image ? `<meta property="og:image" content="${esc(page.image.url)}">` : m))
+    .replace(/<meta property="og:image:alt" content="[^"]*">/, (m) => (page.image ? `<meta property="og:image:alt" content="${esc(page.image.alt)}">` : m))
+    .replace(/<meta name="twitter:image" content="[^"]*">/, (m) => (page.image ? `<meta name="twitter:image" content="${esc(page.image.url)}">` : m))
     .replace(/<meta name="robots" content="[^"]*">/, page.noindex ? '<meta name="robots" content="noindex">' : '$&')
     .replace('</head>', `<meta property="og:url" content="${esc(page.canonical)}">\n${ld}\n</head>`);
   html = html.replace(/<main id="app">[\s\S]*?<\/main>/, `<main id="app">${page.body}</main>`);
@@ -585,4 +596,30 @@ export async function sitemap(env: SeoEnv, origin: string): Promise<Response> {
 ${urls.map(([loc, lastmod, freq]) => `  <url><loc>${esc(loc)}</loc><lastmod>${lastmod}</lastmod><changefreq>${freq}</changefreq></url>`).join('\n')}
 </urlset>`;
   return new Response(xml, { headers: { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'public, max-age=900' } });
+}
+
+/* ------------------------------------------------------------ share cards */
+
+/**
+ * offside.win/og/<id>.jpg: a match's share card, from the public images
+ * bucket where the cards workflow puts it. A match with no card yet (just
+ * added, or the workflow has not run) gets the site's own picture rather than
+ * a broken image, and is not cached for long so the real card replaces it.
+ */
+export async function cardImage(env: SeoEnv, id: number, origin: string): Promise<Response> {
+  const bucket = env.IMAGE_BUCKET ?? 'shots';
+  try {
+    const res = await fetch(new URL(`/storage/v1/object/public/${bucket}/${cardPath(id)}`, env.SUPABASE_URL), {
+      cf: { cacheTtl: 300, cacheEverything: true },
+    } as RequestInit);
+    if (res.ok && (res.headers.get('content-type') ?? '').startsWith('image/')) {
+      return new Response(res.body, {
+        headers: { 'content-type': 'image/jpeg', 'cache-control': 'public, max-age=600', 'x-card': 'match' },
+      });
+    }
+  } catch { /* the fallback below */ }
+  const fallback = await env.ASSETS.fetch(new Request(`${origin}/og.png`));
+  return new Response(fallback.body, {
+    headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=300', 'x-card': 'fallback' },
+  });
 }

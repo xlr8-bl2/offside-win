@@ -147,3 +147,32 @@ test('a withdrawn page swaps the robots line for noindex rather than adding a se
   const ok = render(SHELL, { title: 'x', description: 'd', canonical: 'https://offside.win/x', body: '', jsonLd: [] });
   assert.match(ok, /<meta name="robots" content="index, follow">/);
 });
+
+test('a match page names its own share card as the link preview, changing address at full time', async () => {
+  const shell = SHELL.replace('</head>', '<meta property="og:image" content="https://offside.win/og.png"><meta property="og:image:alt" content="x"><meta name="twitter:image" content="https://offside.win/og.png"></head>');
+  const pre = (await matchPage(env({ get_fixture: FIX }) as any, 212602, 'https://offside.win'))!;
+  const html = render(shell, pre);
+  assert.match(html, /<meta property="og:image" content="https:\/\/offside.win\/og\/212602.jpg\?s=pre">/);
+  assert.match(html, /<meta name="twitter:image" content="https:\/\/offside.win\/og\/212602.jpg\?s=pre">/);
+  assert.match(html, /og:image:alt" content="Iceland v Estonia"/);
+  const ft = (await matchPage(env({ get_fixture: { ...FIX, status: 'finished', score: [0, 1] } }) as any, 212602, 'https://offside.win'))!;
+  assert.equal(ft.image!.url, 'https://offside.win/og/212602.jpg?s=ft-0-1');
+  // A page without its own picture keeps the site's.
+  const other = render(shell, { title: 'x', description: 'd', canonical: 'https://offside.win/today', body: '', jsonLd: [] });
+  assert.match(other, /og:image" content="https:\/\/offside.win\/og.png"/);
+});
+
+test('a card that is not drawn yet falls back to the site picture instead of a broken image', async () => {
+  const { cardImage } = await import('../src/seo.ts');
+  const e = { ...env({}), ASSETS: { fetch: async () => new Response('png', { headers: { 'content-type': 'image/png' } }) } };
+  globalThis.fetch = (async () => new Response('{"error":"not found"}', { status: 400, headers: { 'content-type': 'application/json' } })) as any;
+  const miss = await cardImage(e as any, 5, 'https://offside.win');
+  assert.equal(miss.headers.get('x-card'), 'fallback');
+  globalThis.fetch = (async (u: any) => {
+    assert.match(String(u), /\/storage\/v1\/object\/public\/shots\/og\/5\.jpg$/);
+    return new Response('jpg', { headers: { 'content-type': 'image/jpeg' } });
+  }) as any;
+  const hit = await cardImage(e as any, 5, 'https://offside.win');
+  assert.equal(hit.headers.get('x-card'), 'match');
+  assert.equal(hit.headers.get('content-type'), 'image/jpeg');
+});

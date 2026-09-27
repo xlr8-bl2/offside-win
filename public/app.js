@@ -6533,6 +6533,13 @@ async function route({ soft = false } = {}) {
     smartQuotes(app);
     crawlable(app);
     pageTitle(name);
+    // A match page's address becomes the match's real one, so a link copied
+    // from the address bar unfurls into that match's share card rather than
+    // the front page's. Only a plain match route is rewritten; one carrying
+    // options after a "?" keeps its hash.
+    if (name === 'fixture' && state.titleFor?.id && /^#\/fixture\/\d+$/.test(location.hash)) {
+      try { history.replaceState(history.state, '', matchUrl(state.titleFor.id, state.titleFor.home, state.titleFor.away)); } catch { /* keep the hash */ }
+    }
     // After the content is in, so the position is measured against the real
     // page rather than a skeleton. A view that asked for an element in view
     // (a highlighted scorer) gets it, centred.
@@ -6859,6 +6866,14 @@ document.getElementById('burger').onclick = (e) => {
 };
 
 window.addEventListener('hashchange', route);
+// Back and forward between a match's real address (/match/…) and a hash
+// route change the path as well as the hash, and a browser fires no
+// hashchange for that, only popstate. Route on it too, once per URL.
+let routedFor = null;
+window.addEventListener('popstate', () => {
+  setTimeout(() => { if (routedFor !== location.href) route(); }, 0);
+});
+window.addEventListener('hashchange', () => { routedFor = location.href; });
 
 renderRegion();
 

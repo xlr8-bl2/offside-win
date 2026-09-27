@@ -68,7 +68,7 @@ export async function ensureBucket(): Promise<void> {
 }
 
 /** Upload, overwriting whatever was at that path. Returns the public URL. */
-export async function put(path: string, body: Uint8Array, contentType: string): Promise<string> {
+export async function put(path: string, body: Uint8Array, contentType: string, cacheControl = 'public, max-age=604800'): Promise<string> {
   const { url, key } = must();
   const res = await fetch(`${url}/storage/v1/object/${config.storage.bucket}/${path}`, {
     method: 'POST',
@@ -76,7 +76,7 @@ export async function put(path: string, body: Uint8Array, contentType: string): 
       authorization: `Bearer ${key}`,
       apikey: key,
       'content-type': contentType,
-      'cache-control': 'public, max-age=604800',
+      'cache-control': cacheControl,
       'x-upsert': 'true',
     },
     body,
