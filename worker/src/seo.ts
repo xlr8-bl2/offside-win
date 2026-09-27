@@ -163,7 +163,7 @@ export interface Page {
 }
 
 const SITE = 'offside.win';
-const MOVES = 'Calls are looked at again every fifteen minutes until kick-off, so one can change or come down, and each closes when the match starts.';
+const MOVES = 'Calls are looked at again every fifteen minutes until kick-off, so one can change or come down, and each closes when the match starts. The bet slip stays exactly as posted.';
 
 function crumbs(items: Array<[string, string]>, site: string): { html: string; ld: unknown } {
   return {
