@@ -25,6 +25,7 @@
     "mail:setup": "npm -w engine run mail:setup",
     "cards": "npm -w engine run cards",
     "lab": "npm -w engine run lab",
+    "lab:odds": "npm -w engine run lab:odds",
     "trace": "npm -w engine run trace",
     "backtest": "npm -w engine run backtest",
     "migrate": "npm -w engine run migrate",

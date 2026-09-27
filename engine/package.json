@@ -15,6 +15,7 @@
     "mail:setup": "tsx src/run.ts mail:setup",
     "cards": "tsx src/run.ts cards",
     "lab": "tsx src/run.ts lab",
+    "lab:odds": "tsx src/run.ts lab:odds",
     "trace": "tsx src/run.ts trace",
     "backtest": "tsx src/run.ts backtest",
     "migrate": "tsx src/run.ts migrate",
