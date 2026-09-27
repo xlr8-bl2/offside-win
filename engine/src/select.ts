@@ -343,7 +343,7 @@ export function setAsideFor(candidate: Candidate, factors: Factor[], drivers: Fa
 export function floorForRank(rank: number): number {
   return rank <= config.confident.marqueeRank
     ? config.confident.marqueeFloor
-    : config.confident.floor;
+    : config.confident.rankFloors[rank] ?? config.confident.floor;
 }
 
 /** Whether a published call cleared the normal bar or only the marquee one. */
