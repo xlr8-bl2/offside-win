@@ -273,14 +273,19 @@ export const config = {
     /**
      * Publish a call at or above this probability.
      *
-     * It was 0.8 on the provider's numbers: 82% landed at an average of 1.16
-     * and lost 2.7% a call on the fixtures the lab held back. On the consensus
-     * with the best price at or above fair (minEv 0 below) and the market mix,
-     * 0.7 landed 75% at 1.33 and returned +3.3% on the older fixtures and +4.3%
-     * on the newer ones it never saw, across seventeen markets instead of ten
-     * (npm run lab, 2,298 fixtures, September 2026).
+     * Chosen by lab:tune on 2,298 fixtures split three ways by date (tuned on
+     * the oldest half, chosen on the next quarter, checked on the newest):
+     *
+     *   rule                                   landed           a day   return
+     *   provider, 80%+ (the old rule)          83 / 84 / 78%    ~22     -0.8 / -0.4 / -4.4%
+     *   consensus 70%+, fair or better, growth 69 / 77 / 75%    ~18     +2.9 / +5.1 / +3.5%
+     *   consensus 72%+, within 1% of fair,     79 / 79 / 76%    ~28     +3.4 / +1.4 / +3.3%
+     *     likeliest first (this)
+     *
+     * Stricter floors (85%) landed more in the first two periods and lost in
+     * the third, so the extra points were not real.
      */
-    floor: num('CONF_FLOOR', 0.7),
+    floor: num('CONF_FLOOR', 0.72),
     /**
      * One call per fixture.
      *
@@ -298,7 +303,7 @@ export const config = {
      * goals is ~97% and prices near 1.02: true, worthless, and the fastest way
      * to look like every other tips site.
      */
-    ceiling: num('CONF_CEILING', 0.95),
+    ceiling: num('CONF_CEILING', 0.97),
     /**
      * And never publish one at a price this short whatever its probability. The
      * live board offered Ajax 1X at 1.04 — a 94% call returning fourpence in
@@ -338,7 +343,7 @@ export const config = {
      * return at the best price, so a 78% call at 1.30 beats an 86% call at
      * 1.13.
      */
-    rankBy: (process.env.CONF_RANK_BY ?? 'growth') as 'prob' | 'growth',
+    rankBy: (process.env.CONF_RANK_BY ?? 'prob') as 'prob' | 'growth',
     /**
      * The most any one market (and side of it) may take of a day's calls, as
      * a share of the day's fixtures. A fixture whose first choice is full
@@ -347,11 +352,11 @@ export const config = {
     diversity: num('CONF_DIVERSITY', 0.3),
     /**
      * Never a call whose best price returns less than this per pound on its
-     * own probability; -1 turns it off. At 0 the best price has to be at or
-     * above the consensus's fair price: the one condition that separated the
-     * rules that earned in the lab from the ones that did not.
+     * own probability; -1 turns it off. Near zero the best price has to be
+     * at or about the consensus's fair price: the one condition that separated
+     * the rules that earned in the lab from the ones that did not.
      */
-    minEv: num('CONF_MIN_EV', 0),
+    minEv: num('CONF_MIN_EV', -0.01),
     /**
      * A best price this far above the consensus's fair odds (odds × fair
      * probability) is a book that has not moved, not an opportunity anyone

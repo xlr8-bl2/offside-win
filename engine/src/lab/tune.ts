@@ -165,8 +165,11 @@ function line(label: string, r: SimResult): string {
   return `  ${label.padEnd(3)} ${String(r.n).padStart(4)} calls ${r.perDay.toFixed(1).padStart(5)}/day  ${pct(r.hitRate).padStart(6)} landed  odds ${r.avgOdds.toFixed(2)}  return ${pct(r.roi).padStart(6)}  top ${pct(r.topShare)} of ${r.markets}`;
 }
 
-const PROD: Policy = { name: 'production', source: 'best', modelWeight: 0.5, minProb: 0.7, maxProb: 0.95, minOdds: 1.13, maxOdds: 3.5, minEv: 0, maxGap: 1.12, rankBy: 'growth', diversity: 0.3, noQuarters: true };
-const STRICT: Policy = { ...PROD, name: 'strict 80', minProb: 0.8, maxProb: 0.97, minEv: -0.01, rankBy: 'prob' };
+/** The rule the slate runs (config.confident). */
+const PROD: Policy = { name: 'production', source: 'best', modelWeight: 0.5, minProb: 0.72, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5, minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true };
+/** The rule before this search. */
+const PREV: Policy = { name: 'previous', source: 'best', modelWeight: 0.5, minProb: 0.7, maxProb: 0.95, minOdds: 1.13, maxOdds: 3.5, minEv: 0, maxGap: 1.12, rankBy: 'growth', diversity: 0.3, noQuarters: true };
+const STRICT: Policy = { ...PROD, name: 'strict 80', minProb: 0.8 };
 
 export function runTune(rows: HistRow[]): Record<string, unknown> {
   const sorted = [...rows].sort((a, b) => a.kickoff - b.kickoff);
@@ -212,12 +215,9 @@ export function runTune(rows: HistRow[]): Record<string, unknown> {
   console.log(`\n${ok.length} of ${grid.length} rules earned 1.5% or more in both A and B with eight or more calls a day. The eight that land most:`);
   const refs: Array<[string, Policy]> = [
     ['old rule (provider, 80%+)', CURRENT],
-    ['current production', { name: 'production', source: 'best', modelWeight: 0.5, minProb: 0.7, maxProb: 0.95, minOdds: 1.13, maxOdds: 3.5, minEv: 0, maxGap: 1.12, rankBy: 'growth', diversity: 0.3, noQuarters: true }],
-    ['80%+, most likely first, within 1% of fair', STRICT],
-    ['tiered: that, else current production', { ...STRICT, name: 'tiered 80/70', fallback: PROD }],
-    ['tiered: that, else 75%+ at fair or better', { ...STRICT, name: 'tiered 80/75', fallback: { ...PROD, minProb: 0.75 } }],
-    ['tiered: that, else 72%+ within 1% of fair', { ...STRICT, name: 'tiered 80/72', fallback: { ...PROD, minProb: 0.72, minEv: -0.01, rankBy: 'prob' } }],
-    ['current production, handicaps to 1.5', { name: 'production h1.5', source: 'best', modelWeight: 0.5, minProb: 0.7, maxProb: 0.95, minOdds: 1.13, maxOdds: 3.5, minEv: 0, maxGap: 1.12, rankBy: 'growth', diversity: 0.3, noQuarters: true, maxHandicap: 1.5 }],
+    ['previous rule (70%+, fair or better, growth)', PREV],
+    ['production (72%+, within 1% of fair, likeliest first)', PROD],
+    ['80%+ only', STRICT],
   ];
   const report: Record<string, unknown> = { split: { a: a.length, b: b.length, c: c.length }, stack };
   for (const [label, p] of refs) {

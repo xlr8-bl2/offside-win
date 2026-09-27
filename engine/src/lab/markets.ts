@@ -532,17 +532,15 @@ export function confidentGrid(): Policy[] {
  */
 export function productionRules(): Policy[] {
   const base: Policy = {
-    name: 'production', source: 'best', modelWeight: 0.5, minProb: 0.7, maxProb: 0.95, minOdds: 1.13, maxOdds: 3.5,
-    minEv: 0, maxGap: 1.12, rankBy: 'growth', diversity: 0.3, noQuarters: true,
+    name: 'production', source: 'best', modelWeight: 0.5, minProb: 0.72, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5,
+    minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true,
   };
   const v = (name: string, o: Partial<Policy>): Policy => ({ ...base, ...o, name });
   return [
     base,
     v('production, p >= 0.8', { minProb: 0.8 }),
     v('production, p >= 0.75', { minProb: 0.75 }),
-    v('production, p >= 0.65', { minProb: 0.65 }),
-    v('production, ev >= -0.05', { minEv: -0.05 }),
-    v('production, ranked by probability', { rankBy: 'prob' }),
+    v('production, p >= 0.7, ev >= 0, growth (previous)', { minProb: 0.7, minEv: 0, rankBy: 'growth', maxProb: 0.95 }),
     v('production, no cap', { diversity: null }),
     v('production, quarter lines allowed', { noQuarters: false }),
     v('value: p >= 0.65, ev >= 0.02, gap 1.06', { minProb: 0.65, minEv: 0.02, maxGap: 1.06, rankBy: 'ev' }),
