@@ -3213,7 +3213,11 @@ function reportHTML(f, { title = 'Match report', inPlay = false } = {}) {
         <span class="rg-who">${who}</span>
         <span class="rg-mid"><em>${/own/i.test(e.kind ?? '') ? EV_ICON.own : EV_ICON.goal}${esc(minuteOf(e))}</em>${e.score ? `<b>${esc(e.score[0])}–${esc(e.score[1])}</b>` : ''}</span>
       </li>`;
-    }).join('')}</ol>` : `<p class="rep-none">${inPlay ? 'No goals yet.' : 'No goals.'}</p>`;
+    }).join('')}</ol>`
+    // In play, the goal can reach the score a minute before it reaches the
+    // timeline. "No goals yet" under a 1-0 is worse than saying nothing.
+    : inPlay && Array.isArray(f.live_score) && f.live_score[0] + f.live_score[1] > 0 ? ''
+    : `<p class="rep-none">${inPlay ? 'No goals yet.' : 'No goals.'}</p>`;
   const cardsFor = (side) => events.filter((e) => e.t === 'card' && (e.side === 'away' ? 'away' : 'home') === side)
     .map((e) => `<span class="rep-card">${EV_ICON[e.card] ?? EV_ICON.yellow}${esc(surname(e.player ?? ''))} ${esc(minuteOf(e))}</span>`).join('');
   const hc = cardsFor('home'), ac = cardsFor('away');
