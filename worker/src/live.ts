@@ -88,6 +88,7 @@ export function compactMatch(raw: unknown): LiveMatch | null {
   const id = numOr(r?.['id']);
   if (!r || id === null) return null;
   const pens = rec(r['penalty_shootout']);
+  const status = liveStatus(r['status'], r['period']);
   return {
     id,
     league_id: numOr(r['league_id']),
@@ -97,10 +98,12 @@ export function compactMatch(raw: unknown): LiveMatch | null {
     home_id: numOr(r['home_team_id']),
     away_id: numOr(r['away_team_id']),
     kickoff: epoch(r['event_date']),
-    status: liveStatus(r['status'], r['period']),
+    status,
     minute: numOr(r['current_minute']),
     score: pair(r['home_score'], r['away_score']),
-    ht: pair(r['home_score_ht'], r['away_score_ht']),
+    // The provider fills the half-time score in as the first half goes on,
+    // so it is only a half-time score once the first half is over.
+    ht: status === '1st_half' || status === 'notstarted' ? null : pair(r['home_score_ht'], r['away_score_ht']),
     pens: pens ? pair(pens['home'] ?? pens['home_score'], pens['away'] ?? pens['away_score']) : null,
   };
 }
@@ -193,14 +196,29 @@ const off = () => new Response(JSON.stringify({ enabled: false, at: Math.floor(D
   headers: HEADERS(60),
 });
 
+/**
+ * The rows of a list response. The provider's lists are not uniform about the
+ * key (`results`, `events`, `changes`, ...), and the live one's is not written
+ * down, so the named key is tried first and then the usual ones.
+ */
 function listOf(raw: unknown, key: string): unknown[] {
+  if (Array.isArray(raw)) return raw;
   const r = rec(raw);
-  return Array.isArray(r?.[key]) ? r[key] as unknown[] : Array.isArray(raw) ? raw as unknown[] : [];
+  for (const k of [key, 'results', 'events', 'matches', 'data']) {
+    if (Array.isArray(r?.[k])) return r[k] as unknown[];
+  }
+  return [];
 }
 
 const matchesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('list', 25, ctx, async () => {
   const raw = await provider(env, '/api/v2/events/live/', { limit: 500 });
-  return listOf(raw, 'results').map(compactMatch).filter((m): m is LiveMatch => m !== null);
+  const matches = listOf(raw, 'results').map(compactMatch).filter((m): m is LiveMatch => m !== null);
+  const count = numOr(rec(raw)?.['count']);
+  // The provider says matches are on and none were read: the list's key has
+  // changed. Its field names (never values) go out with the body so that is
+  // visible from a phone, rather than a board that silently stops moving.
+  const unread = count && !matches.length ? Object.keys(rec(raw) ?? {}) : undefined;
+  return { matches, unread };
 });
 
 const changesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('changes', 60, ctx, async () => {
@@ -228,11 +246,11 @@ const changesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('changes', 60, ctx, 
  */
 export async function liveList(env: LiveEnv, ctx?: Ctx): Promise<Response> {
   if (!env.BSD_API_KEY) return off();
-  const [matches, changes] = await Promise.all([
+  const [{ matches, unread }, changes] = await Promise.all([
     matchesNow(env, ctx),
     changesNow(env, ctx).catch(() => [] as FixtureChange[]),
   ]);
-  return json({ enabled: true, at: Math.floor(Date.now() / 1000), matches, changes }, 25);
+  return json({ enabled: true, at: Math.floor(Date.now() / 1000), matches, changes, ...(unread ? { unread } : {}) }, 25);
 }
 
 /** GET /api/live/:id: one match in play, with its timeline and numbers. */
@@ -250,7 +268,11 @@ export async function liveMatch(env: LiveEnv, id: number, ctx?: Ctx): Promise<Re
       enabled: true,
       at: Math.floor(Date.now() / 1000),
       match: m,
-      report: { events: inc.events, ht: inc.ht ?? m?.ht ?? null, stats: parseTeamStats(stats) },
+      report: {
+        events: inc.events,
+        ht: m?.status === '1st_half' ? null : inc.ht ?? m?.ht ?? null,
+        stats: parseTeamStats(stats),
+      },
     };
   }), 25);
 }
