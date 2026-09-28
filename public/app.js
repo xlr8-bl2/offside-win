@@ -154,7 +154,20 @@ async function fetchText(path, headers) {
   return text;
 }
 
-async function getJSON(path, { fresh = false } = {}) {
+/*
+ * One request per address at a time. A prefetch that is still on its way when
+ * the reader taps is joined, not repeated, so the tap is served the moment the
+ * prefetch lands.
+ */
+const inflight = new Map();
+function fetchOnce(key, path, headers) {
+  if (inflight.has(key)) return inflight.get(key);
+  const p = fetchText(path, headers).finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
+
+async function getJSON(path, { fresh = false, quiet = false } = {}) {
   const headers = await authHeaders();
   if (!CACHEABLE.test(path)) return withLive(JSON.parse(await fetchText(path, headers)));
 
@@ -163,16 +176,90 @@ async function getJSON(path, { fresh = false } = {}) {
   const age = hit ? Date.now() - hit.at : Infinity;
   if (hit && age < FRESH_MS) return withLive(JSON.parse(hit.text));
   if (hit && age < KEEP_MS) {
-    // Serve the old copy now; fetch the new one behind it.
-    fetchText(path, headers).then((text) => {
+    // Serve the old copy now; fetch the new one behind it. A prefetch for
+    // another page never redraws this one.
+    fetchOnce(key, path, headers).then((text) => {
       cacheWrite(key, text);
-      if (text !== hit.text) softRefresh();
+      if (text !== hit.text && !quiet) softRefresh();
     }).catch(() => { /* the old copy stays up */ });
     return withLive(JSON.parse(hit.text));
   }
-  const text = await fetchText(path, headers);
+  const text = await fetchOnce(key, path, headers);
   cacheWrite(key, text);
   return withLive(JSON.parse(text));
+}
+
+/*
+ * Reading ahead.
+ *
+ * A page change used to start its reads when the new page began to draw, so
+ * every tap waited on the network. Now the reads start earlier: the main
+ * pages' data is fetched as soon as the browser is idle after the first page,
+ * a page's data is fetched the moment a finger lands on (or a pointer rests
+ * on) a link to it, and the matches in view on a list are read ahead too. By
+ * the time the tap completes, the page is usually already in memory and
+ * draws at once. Nothing here is shown; it only fills the cache that getJSON
+ * reads.
+ */
+function apiReadsFor(hash) {
+  const raw = String(hash || '').replace(/^[^#]*#?\/?/, '');
+  const cut = raw.indexOf('?');
+  const parts = (cut === -1 ? raw : raw.slice(0, cut)).split('/').filter(Boolean);
+  const q = new URLSearchParams(cut === -1 ? '' : raw.slice(cut + 1));
+  const hours = [24, 48, 72, 120, 240].includes(Number(q.get('hours'))) ? Number(q.get('hours')) : 72;
+  const id = parts[1] && /^\d+$/.test(parts[1]) ? parts[1] : null;
+  switch (parts[0] || 'home') {
+    case 'home': return ['/api/board?hours=72', '/api/hero', '/api/picks?limit=40&settled=true', '/api/slip'];
+    case 'board': return [`/api/board?hours=${hours}`];
+    case 'leagues': return ['/api/board?hours=72'];
+    case 'league': return id ? [`/api/league/${id}`] : [];
+    case 'fixture': return id ? [`/api/fixture/${id}`] : [];
+    case 'results': return ['/api/picks?limit=120&settled=true', '/api/picks?limit=20&settled=false'];
+    case 'slip': return ['/api/slip'];
+    case 'pricing': return ['/api/plans', '/api/hero'];
+    default: return [];
+  }
+}
+const warmed = new Map();
+function warm(hash) {
+  if (navigator.connection?.saveData) return;
+  for (const path of apiReadsFor(hash)) {
+    // Once a minute per address is plenty: getJSON keeps it fresh after that.
+    if (Date.now() - (warmed.get(path) ?? 0) < 60_000) continue;
+    warmed.set(path, Date.now());
+    getJSON(path, { quiet: true }).catch(() => { warmed.delete(path); });
+  }
+}
+const linkHash = (a) => a.dataset?.hash ?? a.getAttribute('href');
+document.addEventListener('pointerdown', (e) => {
+  const a = e.target.closest?.('a[href^="#/"], a[data-hash]');
+  if (a) warm(linkHash(a));
+}, { passive: true, capture: true });
+let hoverTimer = null;
+document.addEventListener('pointerover', (e) => {
+  if (e.pointerType !== 'mouse') return;
+  const a = e.target.closest?.('a[href^="#/"], a[data-hash]');
+  clearTimeout(hoverTimer);
+  if (a) hoverTimer = setTimeout(() => warm(linkHash(a)), 70);
+}, { passive: true });
+document.addEventListener('focusin', (e) => {
+  const a = e.target.closest?.('a[href^="#/"], a[data-hash]');
+  if (a) warm(linkHash(a));
+});
+const whenIdle = (fn) => (window.requestIdleCallback ? requestIdleCallback(fn, { timeout: 2500 }) : setTimeout(fn, 600));
+let warmedMain = false;
+/** After a page has drawn: the main pages, then the matches in view. */
+function readAhead() {
+  whenIdle(() => {
+    if (!warmedMain) {
+      warmedMain = true;
+      for (const h of ['#/home', '#/board', '#/results', '#/slip', '#/leagues']) warm(h);
+    }
+    const inView = [...app.querySelectorAll('a[href^="#/fixture/"], a[data-hash^="#/fixture/"], a[href^="#/league/"], a[data-hash^="#/league/"]')]
+      .filter((a) => { const r = a.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight * 1.5; })
+      .slice(0, 8);
+    for (const a of inView) warm(linkHash(a));
+  });
 }
 
 /*
@@ -7155,6 +7242,7 @@ async function route({ soft = false } = {}) {
     playFlashes();
     if (state.board) paintFooter(state.board);
     enhanceSelects(app);
+    readAhead();
     if (state.liveFixture) markLiveEvents(Number(state.liveFixture.id), document.getElementById('live-centre'));
     smartQuotes(app);
     crawlable(app);

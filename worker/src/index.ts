@@ -29,6 +29,7 @@ import { bearer, jsonHeaders } from './http.ts';
 import { charge, checkout, confirm, payStatus, sweepWhop, renewal, webhook, type PayEnv } from './pay.ts';
 import { deleteAccount } from './account.ts';
 import { fixtureChanges, liveList, liveMatch, type LiveEnv } from './live.ts';
+import { EDGE_PATHS, edgeCached } from './edge.ts';
 
 interface Env extends PayEnv, LiveEnv {
   SUPABASE_URL: string;
@@ -111,7 +112,7 @@ async function passthrough(
   return new Response(res.body, { headers: jsonHeaders(jwt !== null) });
 }
 
-export default {
+const worker = {
   // Every ten minutes: ask Whop for paid memberships and switch on any the
   // webhook did not. See sweepWhop in pay.ts.
   async scheduled(_event: unknown, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<void> {
@@ -150,6 +151,14 @@ export default {
     }
 
     const jwt = bearer(request);
+
+    // A signed-out read of something every visitor sees the same: from the
+    // edge's copy (edge.ts). The inner call carries a marker so it goes to the
+    // database rather than round again.
+    if (request.method === 'GET' && !jwt && EDGE_PATHS.test(path) && !request.headers.has('x-edge-fill')) {
+      const fill = new Request(request.url, { method: 'GET', headers: { 'x-edge-fill': '1' } });
+      return edgeCached(request, ctx, () => worker.fetch(fill, env, ctx));
+    }
 
     try {
       if (path === '/api/config') return config(env);
@@ -326,3 +335,5 @@ async function hit(request: Request, env: Env): Promise<Response> {
   } catch { /* a lost count is not worth an error */ }
   return done;
 }
+
+export default worker;
