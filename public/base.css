@@ -123,9 +123,10 @@ html {
   /* The board is long and the fixture page has anchors in it. */
   scroll-padding-top: calc(var(--header-h) + var(--space-5));
 }
-@media (prefers-reduced-motion: no-preference) {
-  html { scroll-behavior: smooth; }
-}
+/* No smooth scrolling on the page as a whole. It turned every page change
+   into a slide: a tap on a footer link scrolled the whole way back up while
+   the next page drew, which read as the site jumping to the footer and back.
+   An in-page jump that should glide asks for it itself. */
 
 body {
   margin: 0;
@@ -620,7 +621,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   }
   .nav a:hover { background: var(--terrace); }
   .nav a.on { color: var(--chalk); background: var(--terrace); }
-  .nav a.on::after { transform: scaleY(1); }
+  .nav a.on::after { display: none; }
   .nav a.nav-only-menu {
     display: flex;
     margin-top: var(--space-4);
@@ -636,8 +637,19 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 }
 @keyframes menu-in { from { opacity: 0; transform: translateY(-6px); } }
 @media (prefers-reduced-motion: reduce) { .nav.open { animation: none; } }
+/*
+ * Membership one tap away on a phone. The offer used to leave the bar under
+ * 560px, so on the device most readers use the only way to it was two taps
+ * deep in the menu. Now it stays, as one word, and "Sign in" (a word nobody
+ * needs twice) moves into the menu instead, until they are signed in.
+ */
+#upgrade-link .ul-short { display: none; }
+.nav a.nav-signin { display: none; }
 @media (max-width: 560px) {
-  .top-right .btn-primary { display: none; }
+  #upgrade-link .ul-long { display: none; }
+  #upgrade-link .ul-short { display: inline; }
+  .top-right #account-link.btn { display: none; }
+  .nav a.nav-signin:not([hidden]) { display: flex; }
 }
 /*
  * The bar on a phone: the name, the live count, search, the account and the
@@ -1086,3 +1098,11 @@ table, .tbl, .odds, .price, .row-goals, .slip-odds, .mc-count, [data-countdown] 
 @supports (text-box: trim-both cap alphabetic) {
   .wordmark { text-box: trim-both cap alphabetic; }
 }
+
+/* The page area is always at least a screen tall, so the footer never rides
+   up under a page that is still loading and then gets shoved back down. */
+main#app { min-height: calc(100dvh - var(--header-h) - env(safe-area-inset-top, 0px)); }
+@media (prefers-reduced-motion: no-preference) {
+  main#app.page-in { animation: page-in 160ms var(--ease-out); }
+}
+@keyframes page-in { from { opacity: 0.4; } }

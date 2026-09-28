@@ -436,6 +436,20 @@ VALUES ('matchday', 'Matchday pass', 7, 349, 'GBP', 1, 0, floor(extract(epoch FR
        ('season',   'Season ticket', 365, 4900, 'GBP', 1, 2, floor(extract(epoch FROM now()))::bigint)
 ON CONFLICT (id) DO NOTHING;
 
+-- Three months in place of a year. A year up front was a large first payment
+-- for a site a reader has only just met, and a switch into it would have been
+-- a long wait before the new price began. Three months at seven pounds a
+-- month is the saving without the commitment. The season ticket is retired,
+-- not deleted: past receipts still name it.
+INSERT INTO plan (id, name, days, amount_minor, currency, active, sort, updated_at)
+VALUES ('quarter', '3 months', 90, 2100, 'GBP', 1, 2, floor(extract(epoch FROM now()))::bigint)
+ON CONFLICT (id) DO NOTHING;
+-- Written as an insert because migrate runs only statements that shape the
+-- schema or seed it; it is a no-op once the row is off.
+INSERT INTO plan (id, name, days, amount_minor, currency, active, sort, updated_at)
+VALUES ('season', 'Season ticket', 365, 4900, 'GBP', 0, 3, floor(extract(epoch FROM now()))::bigint)
+ON CONFLICT (id) DO UPDATE SET active = 0, updated_at = excluded.updated_at WHERE plan.active = 1;
+
 -- An entitlement by email, for a processor that runs its own accounts.
 --
 -- Whop takes the payment on its own site under whatever email the buyer uses

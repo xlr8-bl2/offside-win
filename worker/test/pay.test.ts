@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { charge, checkout, confirm, grantFromMembership, sweepWhop, renewal, webhook } from '../src/pay.ts';
+import { charge, checkout, confirm, grantFromMembership, sweepWhop, renewal, switchTerms, webhook } from '../src/pay.ts';
 import { parseWebhook } from '../src/coinflow.ts';
 
 /**
@@ -539,4 +539,63 @@ test('no Brevo key, a replayed grant, or a refusal from Brevo never stops the me
       : new Response('[]', { status: 200 }));
   await grantFromMembership({ ...WHOP, BREVO_API_KEY: 'k' }, mem());
   assert.equal(find('api.brevo.com'), undefined, 'a replay sends nothing');
+});
+
+/* ------------------------------------------------------ switching plans */
+
+test('switch terms: the days already paid for come free before the new plan charges', () => {
+  const now = 1_800_000_000;
+  const monthlyLeft = { plan_id: 'monthly', expires_at: now + 12 * 86400 - 3600 };
+  const t = switchTerms(monthlyLeft, { id: 'quarter', renews: true }, now);
+  assert.deepEqual(t, { ok: true, terms: { from: 'monthly', until: monthlyLeft.expires_at, trialDays: 12 } });
+  // No membership, or one that has run out: an ordinary purchase.
+  assert.deepEqual(switchTerms(null, { id: 'quarter', renews: true }, now), { ok: true, terms: null });
+  assert.deepEqual(switchTerms({ plan_id: 'monthly', expires_at: now - 1 }, { id: 'quarter', renews: true }, now), { ok: true, terms: null });
+  // The same plan again, or a one-off week on top of a membership: refused.
+  assert.equal(switchTerms(monthlyLeft, { id: 'monthly', renews: true }, now).ok, false);
+  assert.equal(switchTerms(monthlyLeft, { id: 'matchday', renews: false }, now).ok, false);
+  // A pass with a few hours left still gets a day, never zero.
+  assert.equal((switchTerms({ plan_id: 'matchday', expires_at: now + 600 }, { id: 'monthly', renews: true }, now) as any).terms.trialDays, 1);
+});
+
+const SWITCHER = (cancelStatus: number) => (url: string) => {
+  if (url.includes('/auth/v1/user')) return new Response(JSON.stringify({ id: UID, email: 'a@b.c' }), { status: 200 });
+  if (url.includes('/rest/v1/plan')) return new Response(JSON.stringify([{ id: 'quarter', name: '3 months', amount_minor: 2100, currency: 'GBP', days: 90, checkout_url: null }]), { status: 200 });
+  if (url.includes('/rpc/get_account')) return new Response(JSON.stringify({ membership: { plan_id: 'monthly', via: 'whop', expires_at: Math.floor(Date.now() / 1000) + 10 * 86400 } }), { status: 200 });
+  if (url.includes('/api/v1/memberships?')) return new Response(JSON.stringify({ data: [mem({ id: 'mem_old', metadata: { user_id: UID, plan: 'monthly' } })], page_info: {} }), { status: 200 });
+  if (url.includes('/memberships/mem_old/cancel')) return new Response('{}', { status: cancelStatus });
+  if (url.includes('/checkout_configurations')) return new Response(JSON.stringify({ id: 'ch_2', purchase_url: '/checkout/ch_2/' }), { status: 200 });
+  return new Response('{}', { status: 200 });
+};
+
+test('a member moving to three months: the old plan stops renewing first, then nothing is charged until their paid days run out', async () => {
+  route = SWITCHER(200);
+  const res = await checkout(post('/api/pay/checkout', { consent: OK, plan: 'quarter' }), WHOP, 'jwt');
+  assert.equal(res.status, 200);
+  const out = await res.json() as any;
+  assert.equal(out.switch.from, 'monthly');
+  assert.equal(out.switch.trialDays, 10);
+  const cancelAt = sent.findIndex((c) => c.url.includes('/memberships/mem_old/cancel'));
+  const newAt = sent.findIndex((c) => c.url.includes('/checkout_configurations'));
+  assert.ok(cancelAt >= 0 && cancelAt < newAt, 'the old plan is stopped before the new one is offered');
+  assert.equal(sent[cancelAt].body.cancellation_mode, 'at_period_end', 'it keeps the days already paid for');
+  const plan = sent[newAt].body.plan;
+  assert.equal(plan.trial_period_days, 10);
+  assert.equal(plan.renewal_price, 21);
+  assert.equal(plan.initial_price, 0, 'nothing on top today');
+});
+
+test('if the old plan cannot be stopped, no switch is offered and nothing is charged', async () => {
+  route = SWITCHER(403);
+  const res = await checkout(post('/api/pay/checkout', { consent: OK, plan: 'quarter' }), WHOP, 'jwt');
+  assert.equal(res.status, 503);
+  assert.ok(!find('/checkout_configurations'), 'no checkout was made');
+});
+
+test('a member cannot be charged the full price on the card form while switching', async () => {
+  route = SWITCHER(200);
+  const res = await charge(post('/api/pay/charge', { consent: OK, plan: 'quarter', confirmation_token: 'ctok_abcdef' }), WHOP, 'jwt');
+  assert.equal(res.status, 409);
+  assert.equal((await res.json() as any).fallback, true);
+  assert.ok(!find('/payments'), 'no card charge was attempted');
 });
