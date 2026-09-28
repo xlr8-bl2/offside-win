@@ -74,7 +74,11 @@ jobs:
       # Each is optional on purpose. Payments are unconfigured until an account
       # exists, and a missing key must leave the read path deploying normally
       # rather than failing the whole workflow -- the site is not a shop yet.
-      - name: Push the payment secrets
+      # BSD_API_KEY is the live layer's (worker/src/live.ts): scores in play
+      # are fetched by the Worker, thirty seconds old at most, and the key never
+      # leaves it. Without it /api/live says `enabled: false` and the site falls
+      # back to the slate's own scores.
+      - name: Push the Worker secrets
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -85,9 +89,10 @@ jobs:
           WHOP_WEBHOOK_SECRET: ${{ secrets.WHOP_WEBHOOK_SECRET }}
           WHOP_API_KEY: ${{ secrets.WHOP_API_KEY }}
           BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          BSD_API_KEY: ${{ secrets.BSD_API_KEY }}
         run: |
           set -uo pipefail
-          for name in SUPABASE_SERVICE_KEY COINFLOW_API_KEY COINFLOW_WEBHOOK_SECRET WHOP_WEBHOOK_SECRET WHOP_API_KEY BREVO_API_KEY; do
+          for name in SUPABASE_SERVICE_KEY COINFLOW_API_KEY COINFLOW_WEBHOOK_SECRET WHOP_WEBHOOK_SECRET WHOP_API_KEY BREVO_API_KEY BSD_API_KEY; do
             value="${!name:-}"
             if [ -z "$value" ]; then
               echo "$name is not set - skipping (payments stay switched off)"
