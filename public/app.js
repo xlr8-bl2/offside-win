@@ -13,9 +13,11 @@
 import { describe as market, didItLand, recap } from './js/lib/markets.js';
 import { COUNTRY_NAMES, bookName, cash, country, localPrice, purse } from './js/lib/books.js';
 import { cleanProse } from './js/lib/vocabulary.js';
-import { LEGAL, SUPPORT_EMAIL, UPDATED } from './js/lib/legal.js';
+import { LEGAL, SUPPORT_EMAIL, TERMS_VERSION, UPDATED as TERMS_DATE, legalHTML } from './js/lib/legal.js';
 import { mountPayment, openCheckout } from './js/lib/whop.js';
 import { absenceReason } from './js/lib/absence.js';
+import { anchorClock, clockText, diffEvents, eachFixture, eventKey, fixtureIdOf, ingest, inPlayWindow, overlay, signature } from './js/lib/live.js';
+import { TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle, ukDay } from './js/lib/titles.js';
 import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, prepareGoogleRedirect, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, siteConfig, viewingAsFree } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
@@ -153,23 +155,266 @@ async function fetchText(path, headers) {
 
 async function getJSON(path, { fresh = false } = {}) {
   const headers = await authHeaders();
-  if (!CACHEABLE.test(path)) return JSON.parse(await fetchText(path, headers));
+  if (!CACHEABLE.test(path)) return withLive(JSON.parse(await fetchText(path, headers)));
 
   const key = cacheKey(headers.authorization ? 'auth' : 'anon', path);
   const hit = fresh ? null : cacheRead(key);
   const age = hit ? Date.now() - hit.at : Infinity;
-  if (hit && age < FRESH_MS) return JSON.parse(hit.text);
+  if (hit && age < FRESH_MS) return withLive(JSON.parse(hit.text));
   if (hit && age < KEEP_MS) {
     // Serve the old copy now; fetch the new one behind it.
     fetchText(path, headers).then((text) => {
       cacheWrite(key, text);
       if (text !== hit.text) softRefresh();
     }).catch(() => { /* the old copy stays up */ });
-    return JSON.parse(hit.text);
+    return withLive(JSON.parse(hit.text));
   }
   const text = await fetchText(path, headers);
   cacheWrite(key, text);
-  return JSON.parse(text);
+  return withLive(JSON.parse(text));
+}
+
+/*
+ * Live: scores, minutes, postponements and moved kick-offs, thirty seconds
+ * old at most.
+ *
+ * Everything above is what the slate wrote, which is up to fifteen minutes
+ * behind a match in play. /api/live is the Worker asking the provider
+ * directly (worker/src/live.ts), and every read above passes through
+ * withLive() on its way to a view, so the board, the front page, the results
+ * and the match page all show the same minute without any of them knowing
+ * where it came from. The rules are in js/lib/live.js.
+ *
+ * It only polls while the page on screen has a match being played or about
+ * to be; otherwise it looks every five minutes, for fixture changes. A goal,
+ * a whistle or a postponement redraws the page where it stands; a minute
+ * ticking over is patched in place.
+ */
+const LIVE_EVERY = 30_000;
+const QUIET_EVERY = 5 * 60_000;
+const live = {
+  enabled: true,
+  byId: new Map(),
+  changes: new Map(),
+  fetchedAt: 0,
+  /** Fixture ids on the page now, and whether any is in play. */
+  seen: new Set(),
+  watching: false,
+  /** The match page's fixture, whose timeline and numbers are polled too. */
+  focus: null,
+  detail: new Map(),
+  busy: false,
+  /** Each match's clock, ticking between polls (js/lib/live.js, anchorClock). */
+  clock: new Map(),
+  /** Events waiting to be played on the page once it has redrawn. */
+  flash: [],
+  /** Timeline events already on screen, per match, so a new one can be marked. */
+  evSeen: new Map(),
+};
+
+function withLive(data) {
+  const now = Date.now() / 1000;
+  eachFixture(data, (f) => {
+    overlay(f, live);
+    live.seen.add(fixtureIdOf(f));
+    if (inPlayWindow(f, now)) live.watching = true;
+  });
+  return data;
+}
+
+/**
+ * The clock beside a match in play: minutes and seconds, ticking every second
+ * (tickClocks) from the provider's last minute, so a live page never sits
+ * still between polls. Without the live feed it is the slate's minute, as
+ * before.
+ */
+function minuteHTML(f) {
+  const id = fixtureIdOf(f);
+  const a = live.clock.get(id);
+  if (!a && f?.live_minute == null) return '';
+  return `<span class="minute${a ? ' ticking' : ''}" data-lm="${esc(id)}">${esc(a ? clockText(a) : `${f.live_minute}'`)}</span>`;
+}
+
+function tickClocks() {
+  if (document.hidden) return;
+  const now = Date.now();
+  for (const el of document.querySelectorAll('[data-lm]')) {
+    const a = live.clock.get(Number(el.dataset.lm));
+    if (!a) continue;
+    const t = clockText(a, now);
+    if (el.textContent !== t) el.textContent = t;
+    if (!el.classList.contains('ticking')) el.classList.add('ticking');
+  }
+}
+
+/*
+ * Something happened: play it where it is on the page. The score that changed
+ * pops, the row or the match header flashes, a whistle pulses the badge. Run
+ * once the page has redrawn with the new score, and then forgotten, so a
+ * later redraw does not play it again.
+ */
+function restartClass(el, cls) {
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+  const done = (ev) => { if (ev.target === el) { el.classList.remove(cls); el.removeEventListener('animationend', done); } };
+  el.addEventListener('animationend', done);
+}
+
+function playFlashes() {
+  if (!live.flash.length) return;
+  const now = Date.now();
+  const due = live.flash.filter((e) => now - e.at < 15000);
+  live.flash = [];
+  for (const e of due) {
+    // Links are rewritten to real addresses after drawing (crawlable), and
+    // keep the route in data-hash; either form finds the match.
+    const h = `#/fixture/${e.id}`;
+    const sel = `a.row[href="${h}"], a.row[data-hash="${h}"], a.side-item[href="${h}"], a.side-item[data-hash="${h}"], [data-fx="${e.id}"]`;
+    for (const el of document.querySelectorAll(sel)) {
+      restartClass(el, e.kind === 'goal' ? 'flash-goal' : e.kind === 'disallowed' ? 'flash-var' : 'flash-whistle');
+      if (e.kind === 'goal') {
+        const nums = el.querySelectorAll('.row-goals, .gf');
+        const num = nums.length === 2 ? nums[e.side === 'away' ? 1 : 0] : el.querySelector('[data-score]');
+        if (num) restartClass(num, 'goal-pop');
+      } else {
+        const badge = el.querySelector('.live-badge');
+        if (badge) restartClass(badge, 'badge-pop');
+      }
+    }
+  }
+}
+
+/*
+ * The alert for a moment worth interrupting for: a goal, a goal ruled out, a
+ * red card, half and full time. Only for matches a reader has a reason to
+ * care about (one we have a call on, their club, the match they have open),
+ * one at a time, five seconds each, and a tap goes to the match. Announced
+ * politely to screen readers.
+ */
+const toasts = [];
+let toastOn = false;
+function announceable(id) {
+  if (Number(state.liveFixture?.id) === id) return true;
+  const f = (state.board?.fixtures ?? []).find((x) => Number(x.id) === id);
+  const club = myClubId();
+  return Boolean(f && (hasCall(f) || (club && (Number(f.home_id) === club || Number(f.away_id) === club))));
+}
+function toast(e) {
+  if (document.hidden || !announceable(e.id)) return;
+  const f = (state.board?.fixtures ?? []).find((x) => Number(x.id) === e.id) ?? state.liveFixture;
+  const home = f?.home ?? e.m?.home ?? 'Home';
+  const away = f?.away ?? e.m?.away ?? 'Away';
+  const sc = Array.isArray(e.score) ? e.score : null;
+  const line = sc
+    ? `${e.kind === 'goal' && e.side === 'home' ? `<b>${esc(home)}</b>` : esc(home)} ${sc[0]}–${sc[1]} ${e.kind === 'goal' && e.side === 'away' ? `<b>${esc(away)}</b>` : esc(away)}`
+    : `${esc(home)} v ${esc(away)}`;
+  const kind = { goal: 'Goal', disallowed: 'Goal ruled out', halftime: 'Half time', fulltime: 'Full time', red: 'Red card' }[e.kind];
+  if (!kind) return;
+  const icon = e.kind === 'goal' ? EV_ICON.goal : e.kind === 'red' ? EV_ICON.red : '<i class="toast-whistle" aria-hidden="true"></i>';
+  const minute = e.kind === 'goal' || e.kind === 'red' ? (live.clock.get(e.id) ? clockText(live.clock.get(e.id)).split(':')[0] : e.minute) : null;
+  toasts.push({
+    id: e.id,
+    html: `${icon}<span class="toast-kind">${kind}${minute ? ` <em>${esc(minute)}'</em>` : ''}</span>
+      <span class="toast-line">${e.kind === 'red' && e.player ? `${esc(e.player)}, ${esc(e.side === 'away' ? away : home)}` : line}</span>`,
+    kind: e.kind,
+  });
+  while (toasts.length > 3) toasts.shift();
+  if (!toastOn) nextToast();
+}
+function nextToast() {
+  const t = toasts.shift();
+  if (!t) { toastOn = false; return; }
+  toastOn = true;
+  let rack = document.getElementById('toast-rack');
+  if (!rack) {
+    rack = document.createElement('div');
+    rack.id = 'toast-rack';
+    rack.className = 'toast-rack';
+    rack.setAttribute('aria-live', 'polite');
+    document.body.appendChild(rack);
+  }
+  const a = document.createElement('a');
+  a.className = `live-toast is-${t.kind}`;
+  a.href = `#/fixture/${t.id}`;
+  a.innerHTML = t.html;
+  rack.replaceChildren(a);
+  setTimeout(() => {
+    a.classList.add('out');
+    setTimeout(() => { a.remove(); nextToast(); }, 260);
+  }, 5000);
+}
+
+/*
+ * The open match's timeline: a goal, card or change that was not on screen
+ * last time slides in and glows, and a red card gets the alert.
+ */
+function markLiveEvents(id, box) {
+  const events = live.detail.get(id)?.body?.report?.events;
+  // Nothing loaded yet: no first view to compare against.
+  if (!events) return;
+  const keys = new Set(events.map(eventKey));
+  const seen = live.evSeen.get(id);
+  live.evSeen.set(id, keys);
+  // The first view of this match's timeline: everything on it is old news.
+  if (!seen) return;
+  for (const e of events) {
+    if (e.t === 'card' && (e.card === 'red' || e.card === 'second_yellow') && !seen.has(eventKey(e))) {
+      toast({ id, kind: 'red', player: e.player, side: e.side, minute: e.minute });
+    }
+  }
+  if (box) for (const el of box.querySelectorAll('[data-ev]')) if (!seen.has(el.dataset.ev)) restartClass(el, 'ev-new');
+}
+
+async function liveTick({ force = false } = {}) {
+  if (!live.enabled || document.hidden || live.busy) return;
+  const now = Date.now();
+  const listDue = force || now - live.fetchedAt >= (live.watching ? LIVE_EVERY : QUIET_EVERY) - 1000;
+  const focus = live.focus;
+  const had = focus ? live.detail.get(focus) : null;
+  // The open match's timeline is read with the scores, so a goal and its
+  // scorer arrive together.
+  const detailDue = focus && (!had || listDue || now - had.at >= LIVE_EVERY - 1000);
+  if (!listDue && !detailDue) return;
+  live.busy = true;
+  let redraw = false;
+  try {
+    if (listDue) {
+      const before = new Map([...live.seen].map((id) => [id, signature(id, live)]));
+      const body = await fetch('/api/live').then((r) => (r.ok ? r.json() : null));
+      live.fetchedAt = Date.now();
+      if (body && body.enabled === false) { live.enabled = false; return; }
+      if (body) {
+        const prevById = live.byId;
+        Object.assign(live, ingest(body, live.byId));
+        const now = Date.now();
+        for (const [id, m] of live.byId) {
+          const a = anchorClock(live.clock.get(id) ?? null, m.minute, m.status, now);
+          if (a) live.clock.set(id, a); else live.clock.delete(id);
+        }
+        for (const e of diffEvents(prevById, live.byId)) {
+          if (!live.seen.has(e.id)) continue;
+          live.flash.push({ ...e, at: now });
+          toast(e);
+        }
+        for (const [id, sig] of before) if (signature(id, live) !== sig) redraw = true;
+        // Views that keep a read between routes get the new state too.
+        for (const o of [state.board, state.hero, state.heroDetail]) if (o) withLive(o);
+      }
+    }
+    if (detailDue && live.focus === focus) {
+      const res = await fetch(`/api/live/${encodeURIComponent(focus)}`);
+      const text = res.ok ? await res.text() : null;
+      if (text && text !== had?.text) {
+        live.detail.set(focus, { at: Date.now(), text, body: JSON.parse(text) });
+        if (!patchLiveCentre(focus)) { markLiveEvents(focus, null); redraw = true; }
+      } else if (had) had.at = Date.now();
+    }
+  } catch { /* the last good frame stays up */ } finally {
+    live.busy = false;
+  }
+  if (redraw) softRefresh();
+  else { tickClocks(); playFlashes(); }
 }
 
 /*
@@ -222,7 +467,11 @@ const isSoon = (epoch) => {
  * because the feed lags — the clock is trusted over the flag, but only far
  * enough to stop claiming the match is upcoming.
  */
-const LIVE_STATES = new Set(['1st_half', '2nd_half', 'extra_time', 'penalties', 'live']);
+const LIVE_STATES = new Set(['1st_half', '2nd_half', 'extra_time', 'penalties', 'live', 'inprogress']);
+const OFF_LABEL = { postponed: 'Postponed', cancelled: 'Cancelled', canceled: 'Cancelled', abandoned: 'Abandoned', suspended: 'Suspended' };
+// Of those, the ones a bookmaker settles as void. A suspended match may yet
+// be finished.
+const VOIDED = new Set(['postponed', 'cancelled', 'canceled', 'abandoned']);
 
 function matchState(f) {
   const status = String(f?.status ?? '').toLowerCase();
@@ -233,9 +482,9 @@ function matchState(f) {
     return { kind: 'live', label: 'Half time', short: 'HT' };
   }
   if (LIVE_STATES.has(status)) return { kind: 'live', label: 'Live', short: 'LIVE' };
-  if (status === 'postponed' || status === 'cancelled' || status === 'canceled') {
-    return { kind: 'off', label: 'Postponed', short: 'OFF' };
-  }
+  // Called off, or stopped. Said in full: "OFF" beside a kick-off time does
+  // not tell a reader whether the game is on another day or not at all.
+  if (OFF_LABEL[status]) return { kind: 'off', label: OFF_LABEL[status], short: OFF_LABEL[status] };
   const since = f?.kickoff ? Date.now() / 1000 - f.kickoff : -1;
   /*
    * The feed says not started and the clock disagrees.
@@ -428,7 +677,7 @@ function pathRoute(pathname = location.pathname) {
   if (m) return `/fixture/${m[1]}`;
   m = pathname.match(/^\/league\/(\d+)/);
   if (m) return `/league/${m[1]}`;
-  return { '/today': '/board', '/results': '/results', '/leagues': '/leagues', '/pricing': '/pricing' }[pathname.replace(/\/+$/, '')] ?? null;
+  return { '/today': '/board', '/results': '/results', '/leagues': '/leagues', '/pricing': '/pricing', '/slip': '/slip' }[pathname.replace(/\/+$/, '')] ?? null;
 }
 const slugOf = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
   .replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
@@ -437,26 +686,33 @@ function hashPath(hash) {
   if (m) return `/match/${m[1]}`;
   m = hash.match(/^#\/league\/(\d+)$/);
   if (m) return `/league/${m[1]}`;
-  return { '#/board': '/today', '#/results': '/results', '#/leagues': '/leagues', '#/pricing': '/pricing', '#/home': '/' }[hash] ?? null;
+  return { '#/board': '/today', '#/results': '/results', '#/leagues': '/leagues', '#/pricing': '/pricing', '#/slip': '/slip', '#/home': '/' }[hash] ?? null;
 }
 /*
- * The tab's title, per page, in the same words the Worker writes for a
- * search engine, so a page reads the same in a result and in the tab.
+ * The tab's title, per page, from the same functions the Worker uses for a
+ * search engine (js/lib/titles.js). Google renders the app, so whatever this
+ * writes is the title it may list: they have to agree, down to the count of
+ * calls on today's board, which is counted over the Worker's window.
  */
-const TITLES = {
-  board: "Today's board", results: 'Our record: every call and how it went', leagues: 'Leagues',
-  pricing: 'Membership', signin: 'Sign in', account: 'Your account', search: 'Find a game',
-  checkout: 'Checkout', slip: 'The bet slip', legal: 'Legal',
-};
 function pageTitle(name) {
   let t = TITLES[name] ?? null;
-  if (name === 'fixture' && state.titleFor) {
-    const { home, away, score } = state.titleFor;
-    t = Array.isArray(score) ? `${home} ${score[0]}–${score[1]} ${away}` : `${home} v ${away}`;
-  } else if (name === 'league' || name === 'player') {
+  if (name === 'fixture' && state.titleFor?.home) {
+    const f = state.titleFor;
+    t = matchTitle({ home: f.home, away: f.away, state: matchState(f).kind, score: f.score, live: f.live_score });
+  } else if (name === 'board') {
+    const now = Date.now() / 1000;
+    const calls = (state.board?.fixtures ?? []).filter((f) => f.kickoff >= now - 12 * 3600 && f.kickoff <= now + 48 * 3600
+      && (f.top_pick || f.locked || f.called)).length;
+    t = state.board ? todayTitle(ukDay(now), calls) : "Today's board";
+  } else if (name === 'slip') {
+    t = slipTitle(state.slipNow);
+  } else if (name === 'league') {
+    const h = app.querySelector('h1')?.textContent.replace(/\s+/g, ' ').trim();
+    t = h ? leagueTitle(h) : null;
+  } else if (name === 'player') {
     t = app.querySelector('h1')?.textContent.replace(/\s+/g, ' ').trim() || null;
   }
-  document.title = !t || name === 'home' ? 'offside.win: the picks for the biggest games' : `${t} | offside.win`;
+  document.title = name === 'home' ? fullTitle(null) : fullTitle(t);
 }
 
 /** Give the app's own links real addresses, keeping the route for the tap. */
@@ -1357,6 +1613,7 @@ async function viewSlip() {
   // The board rides along so each leg can show how its match stands.
   try { [data, board] = await Promise.all([getJSON('/api/slip'), loadBoard().catch(() => null)]); }
   catch (err) { return errorState(err); }
+  state.slipNow = data?.current ?? null;
   const tone = (r) => (r === 'WON' ? 'won' : r === 'LOST' ? 'lost' : 'back');
   const recent = data?.recent ?? [];
   app.innerHTML = `
@@ -1404,8 +1661,8 @@ function liveNowHTML(fixtures) {
           <span class="side-thumb">${crest(f.home, 'sm', f.home_id)}${crest(f.away, 'sm', f.away_id)}</span>
           <span class="side-body">
             <span class="side-sel">${esc(f.home)} v ${esc(f.away)}</span>
-            <span class="side-meta"><span class="side-league">${esc(f.league ?? '')}</span><b>${sc ? `${sc[0]}–${sc[1]}` : 'under way'}</b>${
-              f.live_minute != null ? `<span class="minute">${esc(f.live_minute)}'</span>` : ''}${trackHTML(liveTrack(f.top_pick, f))}</span>
+            <span class="side-meta"><span class="side-league">${esc(f.league ?? '')}</span><b data-score>${sc ? `${sc[0]}–${sc[1]}` : 'under way'}</b>${
+              minuteHTML(f)}${trackHTML(liveTrack(f.top_pick, f))}</span>
           </span>
         </a>`;
       }).join('')}
@@ -1653,7 +1910,11 @@ function rowHTML(f) {
      aria-label="${esc(f.home)} versus ${esc(f.away)}">
     <div class="row-when">
       ${state.kind === 'upcoming'
-        ? `<span class="row-time">${esc(time)}</span><span class="row-day">${esc(day)}</span>`
+        // A kick-off the provider has moved since the slate wrote the row: the
+        // new time, and a word saying it is new, so a reader who remembered
+        // three o'clock is not left wondering which is right.
+        ? `<span class="row-time">${esc(time)}</span><span class="row-day">${esc(day)}</span>${
+            f.moved_from ? `<span class="row-moved" title="Was ${esc(kickoffLabel(f.moved_from))}">New time</span>` : ''}`
         // On a match in progress the bare time reads as the clock -- "LIVE
         // 12:00" looks like the twelfth minute of the second half. It is the
         // kick-off, so it says so, in the shorthand every football page uses.
@@ -1662,7 +1923,7 @@ function rowHTML(f) {
         // afternoon's.
         : `<span class="row-time">${liveBadge(state)}</span><span class="row-day">${
             state.kind === 'live' && f.live_minute != null
-              ? `<span class="minute">${esc(f.live_minute)}'</span>`
+              ? minuteHTML(f)
               : `${day === 'Today' ? '' : `${esc(day)} · `}ko ${esc(time)}`}</span>`}
     </div>
 
@@ -1704,6 +1965,11 @@ function rowHTML(f) {
                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>
                      Members</span>`
                 : `<span class="row-pass">No pick</span>`)
+        // Called off: a bet on a match that is not played is void, which is
+        // how the record will settle it too. Said now rather than leaving a
+        // price up as though it could still be taken.
+        : state.kind === 'off' && VOIDED.has(String(f.status).toLowerCase()) && (pick || f.locked)
+          ? `<span class="mark back">Void</span>${pick ? `<span class="odds-book">called at ${oddsOf(p ? p.odds : pick.odds)}</span>` : ''}`
         : pick && p && track ? `
         ${trackHTML(track)}<span class="odds-book">at ${oddsOf(p.odds)}</span>`
         : pick && p ? `
@@ -3062,7 +3328,7 @@ function highlightsCard(hl) {
     </a>`;
 }
 
-function reportHTML(f) {
+function reportHTML(f, { title = 'Match report', inPlay = false } = {}) {
   const r = f?.report;
   if (!r) return '';
   const events = (r.events ?? []).filter((e) => e && (e.t === 'goal' || e.t === 'card' || e.t === 'sub'));
@@ -3093,13 +3359,17 @@ function reportHTML(f) {
       const kind = /own/i.test(e.kind ?? '') ? ' <small>own goal</small>' : /pen/i.test(e.kind ?? '') ? ' <small>pen</small>' : '';
       const who = `<b>${playerLink(e.player_id, e.player ?? 'Goal', f.league_id)}</b>${kind}${
         e.assist ? `<small class="rep-assist">${EV_ICON.assist}${(f._link ?? ((h) => h))(esc(e.assist))}</small>` : ''}`;
-      return `<li class="rep-goal ${e.side === 'away' ? 'away' : 'home'}">
+      return `<li class="rep-goal ${e.side === 'away' ? 'away' : 'home'}" data-ev="${esc(eventKey(e))}">
         <span class="rg-who">${who}</span>
         <span class="rg-mid"><em>${/own/i.test(e.kind ?? '') ? EV_ICON.own : EV_ICON.goal}${esc(minuteOf(e))}</em>${e.score ? `<b>${esc(e.score[0])}–${esc(e.score[1])}</b>` : ''}</span>
       </li>`;
-    }).join('')}</ol>` : '<p class="rep-none">No goals.</p>';
+    }).join('')}</ol>`
+    // In play, the goal can reach the score a minute before it reaches the
+    // timeline. "No goals yet" under a 1-0 is worse than saying nothing.
+    : inPlay && Array.isArray(f.live_score) && f.live_score[0] + f.live_score[1] > 0 ? ''
+    : `<p class="rep-none">${inPlay ? 'No goals yet.' : 'No goals.'}</p>`;
   const cardsFor = (side) => events.filter((e) => e.t === 'card' && (e.side === 'away' ? 'away' : 'home') === side)
-    .map((e) => `<span class="rep-card">${EV_ICON[e.card] ?? EV_ICON.yellow}${esc(surname(e.player ?? ''))} ${esc(minuteOf(e))}</span>`).join('');
+    .map((e) => `<span class="rep-card" data-ev="${esc(eventKey(e))}">${EV_ICON[e.card] ?? EV_ICON.yellow}${esc(surname(e.player ?? ''))} ${esc(minuteOf(e))}</span>`).join('');
   const hc = cardsFor('home'), ac = cardsFor('away');
   const cardsHTML = hc || ac ? `
     <div class="rep-cards">
@@ -3111,7 +3381,7 @@ function reportHTML(f) {
       <summary>Every event <span>${events.length}</span></summary>
       <div class="rep-heads"><span>${esc(f.home)}</span><span>${esc(f.away)}</span></div>
       <div class="timeline">
-        ${events.map((e) => `<div class="ev ${e.side === 'away' ? 'away' : 'home'} is-${e.t}">
+        ${events.map((e) => `<div class="ev ${e.side === 'away' ? 'away' : 'home'} is-${e.t}" data-ev="${esc(eventKey(e))}">
             <span class="ev-min">${esc(minuteOf(e))}</span><span class="ev-body">${line(e)}</span></div>`).join('')}
       </div>
     </details>` : '';
@@ -3136,7 +3406,7 @@ function reportHTML(f) {
 
   return `
   <div class="panel report">
-    <p class="panel-head">Match report${r.ht ? ` <span>Half time ${esc(r.ht[0])}–${esc(r.ht[1])}</span>` : ''}</p>
+    <p class="panel-head">${esc(title)}${r.ht ? ` <span>Half time ${esc(r.ht[0])}–${esc(r.ht[1])}</span>` : ''}</p>
     ${hl ? highlightsCard(hl) : ''}
     ${events.length ? goalsHTML : ''}
     ${cardsHTML}
@@ -3513,10 +3783,180 @@ function readsFor(f, verdicts) {
   return { reads, rest: others.filter((r) => !shown.has(r.id)) };
 }
 
+/*
+ * The match page while the match is on: goals, cards, substitutions and the
+ * team numbers so far, from /api/live/:id, redrawn in place every thirty
+ * seconds (liveTick) with the timeline left open if it was open. After the
+ * whistle the same timeline stands in for the report until the slate has
+ * written the full one, which can take a quarter of an hour.
+ */
+function liveCentreHTML(f, st) {
+  const body = live.detail.get(Number(f.id))?.body;
+  const rep = body?.report && ((body.report.events ?? []).length || body.report.stats) ? body.report : null;
+  if (st.kind === 'live') {
+    return `<div id="live-centre" data-fixture="${esc(f.id)}">${
+      rep ? reportHTML({ ...f, report: rep }, { title: 'So far', inPlay: true }) : ''}</div>`;
+  }
+  if (st.kind === 'ft' && !f.report && rep) return reportHTML({ ...f, report: rep });
+  return reportHTML(f);
+}
+
+function patchLiveCentre(id) {
+  const box = document.getElementById('live-centre');
+  const f = state.liveFixture;
+  if (!box || !f || Number(box.dataset.fixture) !== id || Number(f.id) !== id) return false;
+  const rep = live.detail.get(id)?.body?.report;
+  if (!rep) return true;
+  const open = box.querySelector('details.rep-all')?.open;
+  box.innerHTML = reportHTML({ ...f, report: rep }, { title: 'So far', inPlay: true });
+  if (open) box.querySelector('details.rep-all')?.setAttribute('open', '');
+  smartQuotes(box);
+  markLiveEvents(id, box);
+  return true;
+}
+
+/*
+ * Who's who: what a supporter knows about a match that is not about the
+ * price. Each manager against this opponent over a whole career, the league's
+ * team of the season from these two sides, the money paid for a player, their
+ * goals for their country, and the referee. Written by the slate for the next
+ * two days' games (engine/src/context/extras.ts). Counts said as a supporter
+ * says them; no rates, and a panel with nothing in it is not drawn.
+ */
+const SMALL = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+const say = (v) => (Number.isInteger(v) && v >= 0 && v < SMALL.length ? SMALL[v] : String(v));
+const feeSaid = (eur) => (eur >= 1e6 ? `€${Math.round(eur / 1e6)}m` : `€${Math.round(eur / 1e3)}k`);
+const MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function windowSaid(at) {
+  const d = new Date(at * 1000);
+  const m = d.getUTCMonth();
+  const when = m >= 5 && m <= 8 ? 'the summer' : m <= 1 ? 'January' : MONTH[m];
+  return d.getUTCFullYear() === new Date().getUTCFullYear() ? `in ${when}` : `in ${when}${when === 'the summer' ? ' of' : ''} ${d.getUTCFullYear()}`;
+}
+const XI_ROLE = { G: 'goalkeeper', D: 'defender', M: 'midfielder', F: 'forward' };
+
+function whosWhoHTML(f) {
+  const x = f?.extras;
+  if (!x) return '';
+  const rows = [];
+  for (const side of ['home', 'away']) {
+    const m = x.managers?.[side];
+    const v = m?.vs;
+    if (!m?.name || !v) continue;
+    const opp = side === 'home' ? f.away : f.home;
+    const n = v.w + v.d + v.l;
+    const last = v.last
+      ? ` Last time: ${v.last.result === 'W' ? 'won' : v.last.result === 'L' ? 'lost' : 'drew'} ${esc(v.last.score.replace('-', '–'))} in ${MONTH[new Date(v.last.kickoff * 1000).getUTCMonth()]} ${new Date(v.last.kickoff * 1000).getUTCFullYear()}.`
+      : '';
+    const games = say(n);
+    rows.push({ label: esc(m.name), note: `Manages ${esc(side === 'home' ? f.home : f.away)}. ${games[0].toUpperCase()}${games.slice(1)} ${n === 1 ? 'game' : 'games'} against ${esc(opp)} in every job so far: won ${v.w}, drawn ${v.d}, lost ${v.l}.${last}` });
+  }
+  // How each side does against teams above and below them in the table.
+  for (const side of ['home', 'away']) {
+    const sp = x.split?.[side];
+    const bits = [['above', sp?.above], ['below', sp?.below]]
+      .filter(([, r]) => r && r.w + r.d + r.l >= 2)
+      .map(([k, r]) => `Against sides ${k} them in the table, their last ${say(r.w + r.d + r.l)}: won ${r.w}, drawn ${r.d}, lost ${r.l}.`);
+    if (bits.length) rows.push({ label: esc(side === 'home' ? f.home : f.away), note: bits.join(' ') });
+  }
+  // One row per player, whatever there is to say about them.
+  const people = new Map();
+  const teamOf = (teamId) => (teamId === x.teams?.away ? f.away : f.home);
+  for (const b of x.best_xi ?? []) {
+    const goals = b.goals ? `${say(b.goals)} goal${b.goals === 1 ? '' : 's'}` : null;
+    const assists = b.assists ? `${say(b.assists)} assist${b.assists === 1 ? '' : 's'}` : null;
+    const did = [goals, assists].filter(Boolean).join(' and ');
+    people.set(String(b.id), { name: b.name, notes: [`In the league's team of the season so far, as a ${XI_ROLE[b.position] ?? 'player'}${did ? `: ${did} in ${say(b.matches)} games` : ''}.`], team: teamOf(b.team_id) });
+  }
+  const profiled = new Map((f.players ?? []).map((p) => [String(p.id), p]));
+  for (const [id, e] of Object.entries(x.players ?? {})) {
+    const p = profiled.get(id);
+    const row = people.get(id) ?? { name: p?.name, notes: [], team: p?.side === 'away' ? f.away : f.home };
+    if (!row.name) continue;
+    // A transfer is a club's business: never shown against a national side.
+    const nationalSide = e.country === row.team || !!p?.club;
+    if (e.signed?.fee >= 5e6 && !nationalSide) row.notes.push(`Cost ${esc(row.team)} ${feeSaid(e.signed.fee)} from ${esc(e.signed.from)} ${windowSaid(e.signed.at)}.`);
+    if (e.goals >= 3 && e.country) row.notes.push(`${say(e.goals)[0].toUpperCase()}${say(e.goals).slice(1)} goals${e.caps ? ` in ${say(e.caps)} games` : ''} for ${esc(e.country)}.`);
+    if (row.notes.length) people.set(id, row);
+  }
+  // Club and country: a player's form is not one team's. In a country's match
+  // the club season comes first; in a club's, the break just gone. And a
+  // finals tournament in the last few months, and a heavy fortnight.
+  const count = (v, one, many) => `${say(v)} ${v === 1 ? one : many}`;
+  const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+  for (const p of f.players ?? []) {
+    if (!p?.id || !p.name) continue;
+    const c = p.country;
+    const notes = [];
+    const team = p.side === 'away' ? f.away : f.home;
+    if (p.club && p.season?.apps >= 2) {
+      notes.push(cap(`${count(p.season.goals ?? 0, 'goal', 'goals')} in ${count(p.season.apps, 'game', 'games')} for ${esc(p.club)} this season.`));
+    }
+    if (c?.team && p.club && c.apps >= 1) {
+      notes.push(cap(`${count(c.goals ?? 0, 'goal', 'goals')} in the last ${count(c.apps, 'game', 'games')} for ${esc(c.team)}.`));
+    }
+    if (c?.team && !p.club && c.lately?.apps) {
+      const l = c.lately;
+      notes.push(l.goals
+        ? cap(`${count(l.goals, 'goal', 'goals')} for ${esc(c.team)} in the international break.`)
+        : `Played ${l.apps === 1 ? 'once' : l.apps === 2 ? 'twice' : `${say(l.apps)} times`} for ${esc(c.team)} in the break.`);
+    }
+    const t = c?.tournament;
+    if (t?.name && t.apps >= 2 && Date.now() / 1000 - t.ended <= 120 * 86400) {
+      const name = t.name.replace(/^(FIFA|UEFA|CONMEBOL|CAF|AFC|CONCACAF|OFC)\s+/i, '').replace(/\s*20\d\d(\/\d\d)?$/, '');
+      notes.push(`Played ${say(t.apps)} games at the ${esc(name)}${t.goals ? `, with ${count(t.goals, 'goal', 'goals')}` : ''}.`);
+    }
+    if (p.status === 'fit' && p.load?.country > 0 && p.load.games >= 3) {
+      notes.push(cap(`${say(p.load.games)} games in the last fortnight for club and country.`));
+    }
+    if (!notes.length) continue;
+    const row = people.get(String(p.id)) ?? { name: p.name, notes: [], team };
+    row.notes.push(...notes);
+    people.set(String(p.id), row);
+  }
+  for (const [id, r] of people) rows.push({ label: playerLink(Number(id), r.name, f.league_id), note: r.notes.join(' ') });
+  const ref = x.referee;
+  if (ref?.name) {
+    const cards = ref.matches >= 5
+      ? ` ${ref.yellows} yellow card${ref.yellows === 1 ? '' : 's'} in ${say(ref.matches)} games${ref.usual ? `, where ${ref.usual} would be usual in this league` : ''}, and ${ref.reds ? `${say(ref.reds)} red${ref.reds === 1 ? '' : 's'}` : 'nobody sent off'}.`
+      : '';
+    rows.push({ label: 'The referee', note: `${esc(ref.name)}.${cards}` });
+  }
+  if (!rows.length) return '';
+  return `
+    <div class="panel whos-who">
+      <p class="panel-head">Who's who</p>
+      <div class="reads">${rows.map((r) => `<div class="read"><b>${r.label}</b><p>${r.note}</p></div>`).join('')}</div>
+    </div>`;
+}
+
+/*
+ * A fixture that has changed since it was written: a kick-off moved, or a
+ * match called off. Said at the top of the match page, in plain words, and
+ * what it means for a bet on it.
+ */
+function changeNoteHTML(f, st) {
+  if (st.kind === 'off') {
+    const say = {
+      postponed: 'Postponed. A bet on a match that is not played is void.',
+      cancelled: 'Cancelled. A bet on a match that is not played is void.',
+      canceled: 'Cancelled. A bet on a match that is not played is void.',
+      abandoned: 'Abandoned. Bookmakers usually void bets on a match that was not finished.',
+      suspended: 'Play is suspended. The score stands where it stopped until it restarts.',
+    }[String(f.status).toLowerCase()];
+    return say ? `<p class="fx-change off">${esc(say)}</p>` : '';
+  }
+  if (st.kind === 'upcoming' && f.moved_from) {
+    const was = kickoffLabel(f.moved_from).replace(/^(Today|Tomorrow)/, (w) => w.toLowerCase());
+    return `<p class="fx-change">Kick-off moved from ${esc(was)}.</p>`;
+  }
+  return '';
+}
+
 async function viewFixture(id, params = new URLSearchParams()) {
   placeholder(skeletonHTML());
   let f;
-  try { f = await getJSON(`/api/fixture/${id}`); state.titleFor = f?.home && f?.away ? { home: f.home, away: f.away, score: f.score } : null; } catch {
+  try { f = await getJSON(`/api/fixture/${id}`); state.titleFor = f?.home && f?.away ? f : null; } catch {
     /*
      * A fixture we cannot show. The provider's message was printed raw --
      * "fixture not found or not yet analysed" -- under a Back button and
@@ -3618,6 +4058,12 @@ async function viewFixture(id, params = new URLSearchParams()) {
    */
   const st = matchState(f);
   const played = st.kind === 'ft';
+  // Being played, or just over with no report written yet: the timeline and
+  // the numbers are asked for every thirty seconds (liveTick).
+  if (st.kind === 'live' || (played && !f.report && Date.now() / 1000 - f.kickoff < 4 * 3600)) {
+    live.focus = Number(f.id);
+    state.liveFixture = f;
+  }
   const sc = Array.isArray(f.score) && f.score.length === 2
     && f.score[0] !== null && f.score[1] !== null ? f.score : null;
   const hg = sc ? Number(sc[0]) : null;
@@ -3662,7 +4108,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
   const overview = `
     <div class="grid-2">
       <div>
-        ${reportHTML(f)}
+        ${liveCentreHTML(f, st)}
         <div class="panel">
           <p class="panel-head">${callHead}</p>
           ${verdicts.length
@@ -3702,6 +4148,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
           </div>
         </div>` : ''}
         ${formPanel(f.form, f.home, f.away)}
+        ${whosWhoHTML(f)}
         ${f.venue_id ? `<div class="panel venue" data-shot="yes">
           <p class="panel-head">${esc(f.venue?.name || 'The ground')}</p>
           ${f.venue?.city || f.venue?.capacity ? `<p class="venue-meta">${esc([f.venue.city ? `In ${f.venue.city}` : '', f.venue.capacity ? `holds ${Number(f.venue.capacity).toLocaleString('en-GB')}` : ''].filter(Boolean).join(', ').replace(/^h/, 'H'))}.</p>` : ''}
@@ -3743,14 +4190,15 @@ async function viewFixture(id, params = new URLSearchParams()) {
     : '';
 
   app.innerHTML = `
-  <section class="hero fx-top${wash}" data-shot="${f.venue_id ? 'yes' : 'none'}">
+  <section class="hero fx-top${wash}" data-shot="${f.venue_id ? 'yes' : 'none'}" data-fx="${esc(f.id)}">
     <div class="hero-media">${venueShot(f.venue_id, '', true)}</div>
     ${wash ? '<div class="fx-wash" aria-hidden="true"></div>' : ''}
     <div class="wrap hero-inner">
       ${backHTML('Back to the board')}
       <div class="hero-copy">
         <span class="timechip${isSoon(f.kickoff) ? ' soon' : ''}">${esc(kickoffLabel(f.kickoff))}</span>
-        ${st.kind === 'upcoming' ? '' : liveBadge(st)}${st.kind === 'live' && f.live_minute != null ? `<span class="minute">${esc(f.live_minute)}'</span>` : ''}
+        ${st.kind === 'upcoming' ? '' : liveBadge(st)}${st.kind === 'live' ? minuteHTML(f) : ''}
+        ${changeNoteHTML(f, st)}
         <h1 class="visually-hidden">${esc(shown ? `${f.home} ${shown[0]}–${shown[1]} ${f.away}` : `${f.home} v ${f.away}`)}</h1>
         <div class="fx-stack${shown ? ' scored' : ''}" aria-hidden="true">
           <span class="fx-line">
@@ -3824,7 +4272,9 @@ async function viewFixture(id, params = new URLSearchParams()) {
    * page's height does not change. The router clears the timer on the way
    * out, and a backgrounded tab does not ask.
    */
-  if (st.kind === 'live') {
+  // Without the live feed (no provider key on the Worker), the slate's own
+  // score is re-read once a minute instead.
+  if (st.kind === 'live' && !live.enabled) {
     const refresh = () => {
       if (document.hidden) return;
       getJSON(`/api/fixture/${id}`, { fresh: true })
@@ -4893,8 +5343,8 @@ async function startCheckout(plan = 'monthly') {
  * The fallback for our checkout page: used while the API key cannot take a
  * payment itself, or if the card fields will not load.
  */
-async function openEmbeddedCheckout(plan) {
-  const out = await postJSON('/api/pay/checkout', { plan });
+async function openEmbeddedCheckout(plan, consent) {
+  const out = await postJSON('/api/pay/checkout', { plan, consent });
   if (out.checkout) {
     try {
       await openCheckout({
@@ -5086,8 +5536,9 @@ async function viewPricing() {
         and prices come in, so a call can change, or come down if we stop backing it. At kick-off it closes:
         calls are not sold once a match is on, and each one is graded at full time. The bet slip is the
         exception: once it is posted it stays exactly as it is, and it is graded on the legs it went up with.</p>
-      <p><b>Changed your mind?</b> Fourteen days, full refund, whatever you have read.
-        <a href="#/legal/refunds">How refunds work</a>. Cancel a renewing plan from your Whop account in one tap;
+      <p><b>It starts when you pay.</b> At checkout you ask for access straight away, which ends the 14-day
+        right to cancel for a change of mind. If anything of ours fails, you get it put right or your money back.
+        <a href="#/legal/refunds">How refunds work</a>. Cancel a renewing plan in one tap;
         you keep access to the end of what you paid for.</p>
       <p>It is not tipping and it is not advice to place a bet. We publish what we think will happen and why,
         and the record of how that has gone, including when it has gone badly.
@@ -5247,7 +5698,7 @@ async function viewCheckout(params) {
           fifteen minutes, and close when the match starts.</p>
         <p class="co-who">It goes on the account you are signed in with:
           <b>${esc(user.email ?? '')}</b></p>
-        <p class="co-small">Changed your mind? Fourteen days, full refund, whatever you have read.
+        <p class="co-small">If something of ours fails, you get it put right or your money back.
           <a href="#/legal/refunds">How refunds work</a>.</p>
       </section>
 
@@ -5259,6 +5710,14 @@ async function viewCheckout(params) {
         <h2 class="co-pay-title" id="co-pay-title">Pay by card, Apple Pay or Google Pay</h2>
         ${m ? `<p class="co-upgrade">Your ${esc((PLAN_NAME[m.plan_id] ?? 'membership').toLowerCase())} runs to
           ${esc(longDate(m.expires_at))}. The ${esc(name.toLowerCase())} starts as soon as you pay.</p>` : ''}
+        <fieldset class="co-agree">
+          <legend class="visually-hidden">Before you pay</legend>
+          <label class="co-check"><input type="checkbox" id="co-adult">
+            <span>I am 18 or over and I agree to the <a href="#/legal/terms" target="_blank">terms of use</a>.</span></label>
+          <label class="co-check"><input type="checkbox" id="co-waive">
+            <span>Start my ${esc(name.toLowerCase())} straight away. I understand that once it starts I lose my
+              14-day right to cancel.</span></label>
+        </fieldset>
         <div class="co-fields">
           <div id="co-email"></div>
           <div id="co-payment"><p class="pay-wait">Loading the secure card form…</p></div>
@@ -5278,14 +5737,35 @@ async function viewCheckout(params) {
   const say = (text) => { errorLine.textContent = text; errorLine.hidden = !text; };
   let complete = false;
   let working = null;
-  const idle = () => { working?.(); working = null; button.disabled = !complete; };
+  let embedded = false;
+  /*
+   * Both boxes, every time. The second is the express request and the
+   * acknowledgement the Consumer Contracts Regulations 2013 (reg. 37) ask for
+   * before digital content may start inside the 14 days; without it a buyer
+   * keeps the right to cancel. The Worker refuses a payment without them, so
+   * this is the courtesy and that is the rule.
+   */
+  const boxes = [app.querySelector('#co-adult'), app.querySelector('#co-waive')];
+  const agreed = () => boxes.every((b) => b.checked);
+  const consent = () => ({ adult: boxes[0].checked, waive: boxes[1].checked, terms: TERMS_VERSION });
+  const ready = () => agreed() && (embedded || complete);
+  const idle = () => { working?.(); working = null; button.disabled = !ready(); };
+  for (const b of boxes) b.onchange = () => { if (!working) button.disabled = !ready(); };
 
-  // Whop's own checkout, when ours cannot take this payment.
+  // Whop's own checkout, when ours cannot take this payment: the same two
+  // boxes first, then a button that opens it.
   const fallback = async (why) => {
     if (why) say(why);
-    working?.();
-    working = busy(button, 'Opening the checkout…');
-    try { await openEmbeddedCheckout(planId); } catch (err) { say(err.message); }
+    embedded = true;
+    app.querySelector('.co-fields')?.remove();
+    button.textContent = 'Continue to payment';
+    button.onclick = async () => {
+      if (working || !agreed()) return;
+      say('');
+      working = busy(button, 'Opening the checkout…');
+      try { await openEmbeddedCheckout(planId, consent()); } catch (err) { say(err.message); }
+      idle();
+    };
     idle();
   };
 
@@ -5299,7 +5779,7 @@ async function viewCheckout(params) {
       email: user.email,
       returnUrl: `${location.origin}/#/account?paid=1`,
       into: { email: '#co-email', payment: '#co-payment', branding: '#co-branding' },
-      onComplete: (ok) => { complete = ok; if (!working) button.disabled = !ok; },
+      onComplete: (ok) => { complete = ok; if (!working) button.disabled = !ready(); },
     });
     const wait = app.querySelector('#co-payment .pay-wait');
     if (wait) wait.remove();
@@ -5311,12 +5791,13 @@ async function viewCheckout(params) {
   const paid = () => { location.hash = '#/account?paid=1'; };
   button.onclick = async () => {
     if (working || !complete) return;
+    if (!agreed()) { say('Tick both boxes above first. Nothing has been charged.'); return; }
     say('');
     working = busy(button, 'Paying…');
     try {
       const token = await state.payHandle.token();
       if (!token) throw new Error('The card details did not come through. Nothing has been charged. Try again.');
-      const out = await postJSON('/api/pay/charge', { plan: planId, confirmation_token: token });
+      const out = await postJSON('/api/pay/charge', { plan: planId, confirmation_token: token, consent: consent() });
       if (out.status === 'paid') { paid(); return; }
       if (out.client_secret) {
         // The bank wants a word first (3D Secure): Whop runs that step.
@@ -5763,7 +6244,11 @@ async function viewAccount() {
     </div>
     ${justPaid ? `<p class="paid-note${active ? ' done' : ''}" role="status">${active
       ? 'Payment received. You are in: every call is open.'
-      : 'Payment received. Switching your membership on, which usually takes a few seconds.'}</p>` : ''}
+      : 'Payment received. Switching your membership on, which usually takes a few seconds.'}</p>
+    <p class="paid-confirm">As you asked at checkout, your membership started straight away, and you
+      accepted that this ends the 14-day right to cancel for a change of mind. If anything of ours
+      fails, you still get it put right or your money back. The <a href="#/legal/terms">terms of use</a>
+      (in force from ${esc(TERMS_DATE)}) apply.</p>` : ''}
     <div class="tabs" role="tablist">
       ${ACCOUNT_TABS.map(([k, label]) => `<button class="tab${k === open ? ' on' : ''}" data-tab="${k}" role="tab" aria-selected="${k === open}">${esc(label)}</button>`).join('')}
     </div>
@@ -6234,12 +6719,18 @@ function viewLegal(which) {
   })() : '';
   app.innerHTML = `
   <div class="wrap section">
-    <div class="section-head"><div><h1 class="display">${esc(page.title)}</h1>
-      <p>Last updated ${esc(UPDATED)}.</p></div></div>
-    <div class="prose">${page.body}</div>
+    ${legalHTML(which)}
     ${choice}
   </div>`;
   for (const b of app.querySelectorAll('[data-consent-set]')) b.onclick = () => applyConsent(b.dataset.consentSet);
+  // Contents links scroll rather than change the address, which the router
+  // would read as a page of its own.
+  for (const a of app.querySelectorAll('[data-jump]')) {
+    a.onclick = (e) => {
+      e.preventDefault();
+      document.getElementById(a.dataset.jump)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    };
+  }
 }
 
 // -------------------------------------------------------- cookie consent
@@ -6326,11 +6817,13 @@ function cookieNotice({ force = false } = {}) {
   el.setAttribute('role', 'region');
   el.setAttribute('aria-label', 'Cookie choice');
   el.innerHTML = `
-    <p>Say yes and we count visits anonymously and keep a copy of pages on this
-       device so they open instantly. Say no and we do neither.
-       <a href="#/legal/cookies">What we store</a></p>
-    <button class="btn btn-ghost btn-sm" data-consent="declined">No thanks</button>
-    <button class="btn btn-primary btn-sm" data-consent="accepted">Yes, that's fine</button>`;
+    <p class="cookie-kicker hand" aria-hidden="true">quick one</p>
+    <p class="cookie-text">Can we count visits, anonymously, and keep pages on this device so they
+       open instantly? No adverts, no tracking. <a href="#/legal/cookies">What we store</a></p>
+    <div class="cookie-actions">
+      <button class="btn btn-ghost btn-sm" data-consent="declined">No thanks</button>
+      <button class="btn btn-primary btn-sm" data-consent="accepted">Yes, go on</button>
+    </div>`;
   el.addEventListener('click', (e) => {
     const v = e.target?.dataset?.consent;
     if (v) applyConsent(v);
@@ -6460,6 +6953,11 @@ async function route({ soft = false } = {}) {
   }
   const backTo = !soft && !navByLink ? scrollMemory.get(here) : undefined;
   navByLink = false;
+  // What is on the page is about to be read again, so what it is watching is too.
+  live.seen.clear();
+  live.watching = false;
+  live.focus = null;
+  state.liveFixture = null;
   clearInterval(state.tick);
   clearInterval(state.poll);
   if (state.onVisible) { removeEventListener('visibilitychange', state.onVisible); state.onVisible = null; }
@@ -6478,9 +6976,19 @@ async function route({ soft = false } = {}) {
   } finally {
     if (!soft) countView();
     state.soft = false;
+    liveTick();
+    playFlashes();
+    if (state.liveFixture) markLiveEvents(Number(state.liveFixture.id), document.getElementById('live-centre'));
     smartQuotes(app);
     crawlable(app);
     pageTitle(name);
+    // A match page's address becomes the match's real one, so a link copied
+    // from the address bar unfurls into that match's share card rather than
+    // the front page's. Only a plain match route is rewritten; one carrying
+    // options after a "?" keeps its hash.
+    if (name === 'fixture' && state.titleFor?.id && /^#\/fixture\/\d+$/.test(location.hash)) {
+      try { history.replaceState(history.state, '', matchUrl(state.titleFor.id, state.titleFor.home, state.titleFor.away)); } catch { /* keep the hash */ }
+    }
     // After the content is in, so the position is measured against the real
     // page rather than a skeleton. A view that asked for an element in view
     // (a highlighted scorer) gets it, centred.
@@ -6807,8 +7315,23 @@ document.getElementById('burger').onclick = (e) => {
 };
 
 window.addEventListener('hashchange', route);
+// Back and forward between a match's real address (/match/…) and a hash
+// route change the path as well as the hash, and a browser fires no
+// hashchange for that, only popstate. Route on it too, once per URL.
+let routedFor = null;
+window.addEventListener('popstate', () => {
+  setTimeout(() => { if (routedFor !== location.href) route(); }, 0);
+});
+window.addEventListener('hashchange', () => { routedFor = location.href; });
 
 renderRegion();
+
+// The live poll (liveTick): a look every five seconds at whether one is due,
+// which is every thirty while a match on the page is being played. Coming
+// back to a backgrounded tab looks at once.
+setInterval(liveTick, 5000);
+setInterval(tickClocks, 1000);
+addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); });
 
 /**
  * Boot.

@@ -13,13 +13,13 @@ on:
       command:
         description: 'Engine command to run against Postgres'
         type: choice
-        options: [migrate, history, ratings, slate, settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players', grant, plans, 'whop:check', 'gemini:check', trace]
+        options: [migrate, history, 'history:cards', ratings, slate, settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players', 'probe:profile', 'probe:reds', 'probe:extras', grant, plans, 'whop:check', 'gemini:check', trace, 'mail:setup', lab, 'lab:tune', 'lab:odds', 'lab:backfill']
         default: migrate
       arg:
         # Free text for the commands that take one. `grant` reads an email and
         # an optional second word: "you@example.com", "you@example.com 30",
         # "you@example.com off".
-        description: 'Argument for the command (grant: "email [days|off]"; plans: "id <checkout url | price in pence>"; trace: the code from #/trace)'
+        description: 'Argument for the command (grant: "email [days|off]"; plans: "id <checkout url | price in pence>"; trace: the code from #/trace; mail:setup: an email to send a test to)'
         type: string
         default: ''
       leagues:
@@ -77,6 +77,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           WHOP_API_KEY: ${{ secrets.WHOP_API_KEY }}
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           WHOP_COMPANY_ID: biz_u3qYuQLDjOpDZH
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           # Actions expressions have no split(), and using one stops the whole

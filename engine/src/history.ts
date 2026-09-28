@@ -152,6 +152,13 @@ function normalisePossession(v: number | null): number | null {
 /**
  * Cards from the incidents feed, used when the stats payload has no card
  * counters. Incidents are a per-event list, so this counts rather than reads.
+ *
+ * A card arrives as `{ type: 'card', is_home, card_type: 'yellow' |
+ * 'yellowRed' | 'red' }` (probe:report). The provider leaves the card counters
+ * out of the stats entirely when a match had no cards, so a published list
+ * with no card in it is a count of zero, not an unknown: storing it as unknown
+ * kept only the matches that had cards, and the card history read as if four
+ * matches in ten had a red.
  */
 export function extractCardsFromIncidents(
   payload: unknown,
@@ -165,16 +172,16 @@ export function extractCardsFromIncidents(
   let ay = 0;
   let hr = 0;
   let ar = 0;
-  let sawCard = false;
+  let sawAnything = false;
 
   for (const raw of list) {
     const inc = asRecord(raw);
     if (!inc) continue;
+    sawAnything = true;
     const type = String(inc['incident_type'] ?? inc['type'] ?? inc['kind'] ?? '').toLowerCase();
-    const detail = String(inc['incident_class'] ?? inc['detail'] ?? inc['card'] ?? inc['class'] ?? '').toLowerCase();
+    const detail = String(inc['card_type'] ?? inc['incident_class'] ?? inc['detail'] ?? inc['card'] ?? inc['class'] ?? '').toLowerCase();
     const blob = `${type} ${detail}`;
     if (!blob.includes('card')) continue;
-    sawCard = true;
 
     const teamId = num(inc['team_id'] ?? inc['teamId']);
     const isHomeFlag = inc['is_home'] ?? inc['isHome'] ?? inc['home'];
@@ -182,18 +189,52 @@ export function extractCardsFromIncidents(
       teamId !== undefined ? teamId === homeTeamId : isHomeFlag === true || isHomeFlag === 'home';
 
     // A second yellow is a dismissal; count it as red, as the market settles it.
-    const isRed = blob.includes('red') || blob.includes('second');
+    const isRed = detail.includes('red') || detail.includes('second');
     if (isRed) {
       if (isHome) hr++;
       else ar++;
-    } else if (blob.includes('yellow')) {
+    } else if (detail.includes('yellow') || detail === '') {
       if (isHome) hy++;
       else ay++;
     }
   }
 
-  if (!sawCard) return null;
+  // An empty list is an unpublished one; a list with a kick-off, goals or
+  // substitutions and no card in it is a match without a card.
+  if (!sawAnything) return null;
   return { home_yellows: hy, away_yellows: ay, home_reds: hr, away_reds: ar };
+}
+
+/**
+ * Card counts for finished matches stored as unknown: the ones the provider's
+ * stats left blank because nothing was shown. Read from the incidents, which
+ * say so. `days` bounds how far back.
+ */
+export async function repairCards(days: number, limit = 20000): Promise<{ checked: number; repaired: number; unpublished: number }> {
+  const now = Math.floor(Date.now() / 1000);
+  const rows = await select<{ id: number; home_team_id: number }>(
+    `SELECT id, home_team_id FROM match
+      WHERE home_goals IS NOT NULL AND home_reds IS NULL AND kickoff BETWEEN ? AND ?
+      ORDER BY kickoff DESC LIMIT ?`,
+    [now - days * 86400, now - 3 * 3600, limit],
+  );
+  let repaired = 0;
+  let unpublished = 0;
+  let next = 0;
+  await Promise.all(Array.from({ length: config.bsd.concurrency }, async () => {
+    while (next < rows.length) {
+      const m = rows[next++]!;
+      const inc = await bsdOrNull(`/api/v2/events/${m.id}/incidents/`);
+      const cards = inc ? extractCardsFromIncidents(inc, m.home_team_id) : null;
+      if (!cards) { unpublished++; continue; }
+      await exec(
+        'UPDATE match SET home_yellows = ?, away_yellows = ?, home_reds = ?, away_reds = ? WHERE id = ?',
+        [cards.home_yellows, cards.away_yellows, cards.home_reds, cards.away_reds, m.id],
+      );
+      repaired++;
+    }
+  }));
+  return { checked: rows.length, repaired, unpublished };
 }
 
 // ------------------------------------------------------------- discovery
