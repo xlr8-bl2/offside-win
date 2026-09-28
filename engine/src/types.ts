@@ -357,6 +357,8 @@ export interface Candidate {
   books?: number;
   /** The sharp book's fair probability for this outcome, when it priced the market. */
   sharp_prob?: number | null;
+  /** The market's probability for this outcome when it opened (odds.ts, `open`). */
+  open_prob?: number | null;
 }
 
 export interface Verdict {

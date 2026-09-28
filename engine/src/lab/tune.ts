@@ -177,7 +177,7 @@ function line(label: string, r: SimResult): string {
 }
 
 /** The rule the slate runs (config.confident). */
-const PROD: Policy = { name: 'production', source: 'bestsharp', modelWeight: 0.5, minProb: 0.78, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5, minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true, minSharpEv: 0, excludeBuckets: ['total_corners under'], rankFloor: { 1: 0.7, 2: 0.7, 3: 0.85 } };
+const PROD: Policy = { name: 'production', source: 'bestsharp', modelWeight: 0.5, minProb: 0.78, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5, minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true, minSharpEv: 0, excludeBuckets: ['total_corners under'], rankFloor: { 1: 0.7, 2: 0.7, 3: 0.85 }, maxDrift: 0.01 };
 /** The rule before the sharp book. */
 const CONSENSUS72: Policy = { name: 'consensus 72', source: 'best', modelWeight: 0.5, minProb: 0.72, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5, minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true };
 /** The rule before this search. */
@@ -295,7 +295,8 @@ export function runTune(rows: HistRow[]): Record<string, unknown> {
       }
     }
     const moves: Policy[] = [];
-    for (const maxDrift of [0.005, 0.01, 0.02, 0.03, 0.05]) moves.push({ ...PROD, name: `production, drift <= ${maxDrift}`, maxDrift });
+    moves.push({ ...PROD, name: 'production without the drift limit', maxDrift: undefined });
+    for (const maxDrift of [0.005, 0.02, 0.03, 0.05]) moves.push({ ...PROD, name: `production, drift <= ${maxDrift}`, maxDrift });
     for (const minSteam of [0, 0.005, 0.01]) moves.push({ ...PROD, name: `production, backed >= ${minSteam}`, minSteam });
     const rows: unknown[] = [];
     for (const p of moves) {
