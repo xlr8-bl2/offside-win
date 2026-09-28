@@ -2473,9 +2473,9 @@ async function viewBoard(params = new URLSearchParams()) {
     state.when = WHEN.some((x) => x.id === w) ? w : 'upcoming';
   }
 
-  app.innerHTML = `<div class="wrap section dense">
+  placeholder(`<div class="wrap section dense">
     <div class="rows">${'<div class="skeleton skeleton-row"></div>'.repeat(8)}</div>
-  </div>`;
+  </div>`);
   let board;
   try { board = await loadBoard(); } catch (err) {
     return errorState(err);
@@ -4932,9 +4932,9 @@ function recapCardHTML(x) {
  * the rest follow under their own heading rather than being mixed in.
  */
 async function viewLeagues() {
-  app.innerHTML = `<div class="wrap section dense">
+  placeholder(`<div class="wrap section dense">
     <div class="rows">${'<div class="skeleton skeleton-row"></div>'.repeat(8)}</div>
-  </div>`;
+  </div>`);
   const board = state.board ?? (await loadBoard());
   const fixtures = board.fixtures ?? [];
 
@@ -7051,8 +7051,31 @@ document.addEventListener('click', (e) => {
  * where the page already has content and swapping it for a skeleton for one
  * frame is exactly the flash this is meant to remove.
  */
+/*
+ * And only when the wait is long enough to notice. It used to go up at once
+ * on every page change, so even a page that was ready in a tenth of a second
+ * went old page, then a short grey skeleton with the footer pulled up under
+ * it, then the real page pushing everything back down: a flicker and a jump
+ * on every tap. Now the old page stays until the new one is ready, and the
+ * skeleton is only shown if that takes more than a quarter of a second. Any
+ * write the view makes first cancels it.
+ */
+let placeholderTimer = null;
 function placeholder(html) {
-  if (!state.soft) app.innerHTML = html;
+  if (state.soft) return;
+  clearTimeout(placeholderTimer);
+  placeholderTimer = setTimeout(() => {
+    placeholderTimer = null;
+    app.innerHTML = html;
+    jumpTo(0);
+  }, 400);
+}
+new MutationObserver(() => { if (placeholderTimer) { clearTimeout(placeholderTimer); placeholderTimer = null; } })
+  .observe(app, { childList: true });
+
+/** Straight there. Never animated: a page change is not a scroll. */
+function jumpTo(y) {
+  window.scrollTo({ top: y, left: 0, behavior: 'instant' });
 }
 
 async function route({ soft = false } = {}) {
@@ -7089,7 +7112,6 @@ async function route({ soft = false } = {}) {
   if (!soft) {
     document.getElementById('nav').classList.remove('open');
     document.getElementById('burger').setAttribute('aria-expanded', 'false');
-    window.scrollTo(0, 0);
   }
   try {
     await render(name, parts, params);
@@ -7119,7 +7141,16 @@ async function route({ soft = false } = {}) {
     const target = state.scrollTarget;
     state.scrollTarget = null;
     if (target && !soft && backTo === undefined) target.scrollIntoView({ block: 'center' });
-    else window.scrollTo(0, soft ? keepY : (backTo ?? 0));
+    else jumpTo(soft ? keepY : (backTo ?? 0));
+    clearTimeout(placeholderTimer);
+    placeholderTimer = null;
+    // The new page arrives in one piece, with a short fade so the swap reads
+    // as a change of page and not as the old one breaking.
+    if (!soft) {
+      app.classList.remove('page-in');
+      void app.offsetWidth;
+      app.classList.add('page-in');
+    }
   }
 }
 
