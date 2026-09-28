@@ -58,7 +58,7 @@ function open(select, button) {
   const panel = document.createElement('div');
   panel.className = `dd-panel${sheet ? ' is-sheet' : ''}`;
   panel.innerHTML = `
-    ${sheet ? `<div class="dd-head"><b>${esc(title)}</b>
+    ${sheet ? `<div class="dd-grip" aria-hidden="true"></div><div class="dd-head"><b>${esc(title)}</b>
       <button type="button" class="dd-x" aria-label="Close"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>` : ''}
     ${searchable ? `<div class="dd-find"><input type="search" autocomplete="off" spellcheck="false"
       placeholder="Type to find" aria-label="Find in ${esc(title.toLowerCase())}" aria-controls="${id}"></div>` : ''}
@@ -132,6 +132,7 @@ function open(select, button) {
   list.addEventListener('click', (e) => { const li = e.target.closest('.dd-opt'); if (li) choose(li); });
   list.addEventListener('pointermove', (e) => { const li = e.target.closest('.dd-opt'); if (li && !li.classList.contains('is-active')) setActive(li, false); });
   panel.querySelector('.dd-x')?.addEventListener('click', () => close({ focus: true }));
+  if (sheet) dragToClose(panel, list, scrim);
   scrim?.addEventListener('click', () => close({ focus: true }));
 
   find?.addEventListener('input', () => {
@@ -166,6 +167,78 @@ function open(select, button) {
       if (hit) setActive(hit);
     }
   });
+}
+
+/**
+ * A sheet goes the way it came: pulled down by its handle or its heading, or
+ * by the list once the list is at its top, it follows the finger, and let go
+ * a third of the way down (or flicked) it closes. Short of that it settles
+ * back. The same gesture every phone's own sheets answer to.
+ */
+function dragToClose(panel, list, scrim) {
+  let from = null;
+  let dy = 0;
+  let lastY = 0;
+  let lastT = 0;
+  let speed = 0;
+  const begin = (y) => {
+    from = y; dy = 0; speed = 0; lastY = y; lastT = performance.now();
+    panel.style.transition = 'none';
+    scrim.style.transition = 'none';
+  };
+  const move = (y) => {
+    if (from === null) return;
+    dy = Math.max(0, y - from);
+    const t = performance.now();
+    speed = (y - lastY) / Math.max(1, t - lastT);
+    lastY = y; lastT = t;
+    panel.style.transform = `translateY(${dy}px)`;
+    scrim.style.opacity = String(Math.max(0, 1 - dy / panel.offsetHeight));
+  };
+  const end = () => {
+    if (from === null) return;
+    from = null;
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    panel.style.transition = reduce ? 'none' : 'transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1)';
+    scrim.style.transition = reduce ? 'none' : 'opacity 200ms linear';
+    if (dy > panel.offsetHeight * 0.3 || (dy > 24 && speed > 0.5)) {
+      panel.style.transform = 'translateY(100%)';
+      scrim.style.opacity = '0';
+      setTimeout(() => { if (openOne?.panel === panel) close({ focus: true }); }, reduce ? 0 : 190);
+    } else {
+      panel.style.transform = '';
+      scrim.style.opacity = '';
+    }
+  };
+
+  // The handle and the heading: a pointer, any kind.
+  for (const el of panel.querySelectorAll('.dd-grip, .dd-head')) {
+    el.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('.dd-x') || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      el.setPointerCapture(e.pointerId);
+      begin(e.clientY);
+    });
+    el.addEventListener('pointermove', (e) => move(e.clientY));
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+  }
+
+  // The list: only a pull downwards from its very top, so scrolling it still
+  // scrolls it.
+  let touchY = null;
+  list.addEventListener('touchstart', (e) => { touchY = list.scrollTop <= 0 ? e.touches[0].clientY : null; }, { passive: true });
+  list.addEventListener('touchmove', (e) => {
+    if (touchY === null) return;
+    const y = e.touches[0].clientY;
+    if (from === null) {
+      if (y - touchY < 6) { if (y < touchY) touchY = null; return; }
+      begin(touchY);
+    }
+    e.preventDefault();
+    move(y);
+  }, { passive: false });
+  list.addEventListener('touchend', () => { touchY = null; end(); });
+  list.addEventListener('touchcancel', () => { touchY = null; end(); });
 }
 
 /** The button's face: the chosen option's words. */
