@@ -637,8 +637,19 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 }
 @keyframes menu-in { from { opacity: 0; transform: translateY(-6px); } }
 @media (prefers-reduced-motion: reduce) { .nav.open { animation: none; } }
+/*
+ * Membership one tap away on a phone. The offer used to leave the bar under
+ * 560px, so on the device most readers use the only way to it was two taps
+ * deep in the menu. Now it stays, as one word, and "Sign in" (a word nobody
+ * needs twice) moves into the menu instead, until they are signed in.
+ */
+#upgrade-link .ul-short { display: none; }
+.nav a.nav-signin { display: none; }
 @media (max-width: 560px) {
-  .top-right .btn-primary { display: none; }
+  #upgrade-link .ul-long { display: none; }
+  #upgrade-link .ul-short { display: inline; }
+  .top-right #account-link.btn { display: none; }
+  .nav a.nav-signin:not([hidden]) { display: flex; }
 }
 /*
  * The bar on a phone: the name, the live count, search, the account and the

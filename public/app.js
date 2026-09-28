@@ -5494,6 +5494,7 @@ async function openEmbeddedCheckout(plan, consent) {
 const PLAN_LINE = {
   matchday: 'Matchday pass: seven days, one payment',
   monthly: 'Monthly membership: renews each month',
+  quarter: '3-month membership: renews every three months',
   season: 'Season ticket: renews each year',
 };
 
@@ -5561,7 +5562,7 @@ async function viewPricing() {
   const free = freeId ? await getJSON(`/api/fixture/${encodeURIComponent(freeId)}`).catch(() => null) : null;
   const money = (minor, cur) => new Intl.NumberFormat('en-GB', { style: 'currency', currency: cur || 'GBP', minimumFractionDigits: minor % 100 ? 2 : 0 }).format(minor / 100);
   const byId = Object.fromEntries((plans ?? []).map((p) => [p.id, p]));
-  const order = ['matchday', 'monthly', 'season'].filter((id) => byId[id]);
+  const order = ['matchday', 'monthly', 'quarter'].filter((id) => byId[id]);
 
   /*
    * What each plan is, in the reader's words.
@@ -5573,19 +5574,27 @@ async function viewPricing() {
   const COPY = {
     matchday: { blurb: 'A weekend of every call. One payment, seven days, and it stops.', renews: false, tag: null },
     monthly:  { blurb: 'All the calls, all month. Renews each month until you cancel.', renews: true, tag: 'Most take this' },
-    season:   { blurb: 'The whole season for less than half the monthly price.', renews: true, tag: 'Best value' },
+    quarter:  { blurb: 'Three months of every call, cheaper by the month. Renews every three months until you cancel.', renews: true, tag: 'Best value' },
   };
-  const perMonth = (p) => p.days >= 300 ? money(Math.round(p.amount_minor / 12), p.currency) + ' a month' : null;
+  const perMonth = (p) => p.days >= 80 ? money(Math.round(p.amount_minor / Math.round(p.days / 30)), p.currency) + ' a month' : null;
+  const per = (p) => (p.days === 7 ? 'for the week' : p.days >= 300 ? 'a year' : p.days >= 80 ? 'for three months' : 'a month');
 
   // What each plan's button does for this reader: buy it, or, for a member,
   // nothing (it is theirs), an upgrade, or a switch that has to wait for the
   // renewing plan to be cancelled so nobody pays for two.
+  /*
+   * A member moving plans keeps every day already paid for: the new plan
+   * starts now and its first payment is on the date the old one was paid
+   * to. So the button says so, and the card says when the new price begins.
+   */
   const buttonFor = (id, p) => {
-    const buy = p.days === 7 ? 'Get the weekend' : p.days >= 300 ? 'Get the season' : 'Join for the month';
+    const buy = p.days === 7 ? 'Get the weekend' : p.days >= 80 ? 'Get three months' : 'Join for the month';
     if (!mine) return { label: buy };
     if (mine.plan_id === id) return { label: 'Your plan', mine: true };
-    if (renewsItself(mine)) return { label: 'Switch to this', quiet: true };
-    return { label: mine.plan_id === 'matchday' ? `Upgrade to ${p.days >= 300 ? 'the season' : 'monthly'}` : buy };
+    if (id === 'matchday') return { label: 'Covered by yours', covered: true };
+    const up = p.days > (PLAN_DAYS[mine.plan_id] ?? 0);
+    return { label: up ? 'Upgrade' : 'Switch', quiet: !up,
+      note: `Nothing to pay today. ${money(p.amount_minor, p.currency)} from ${shortDate(mine.expires_at)}, when what you have paid for runs out.` };
   };
 
   app.innerHTML = `
@@ -5619,12 +5628,15 @@ async function viewPricing() {
           ${b.mine ? `<span class="plan-tagline is-mine">Yours to ${esc(shortDate(mine.expires_at))}</span>` : !mine && c.tag ? `<span class="plan-tagline">${esc(c.tag)}</span>` : ''}
           <h2>${esc(p.name)}</h2>
           <p class="plan-price"><b>${esc(money(p.amount_minor, p.currency))}</b>
-            <span>${p.days === 7 ? 'for the week' : p.days >= 300 ? 'a year' : 'a month'}</span></p>
+            <span>${esc(per(p))}</span></p>
           ${perMonth(p) ? `<p class="plan-per">${esc(perMonth(p))}</p>` : ''}
           <p class="plan-blurb">${esc(c.blurb)}</p>
+          ${b.note ? `<p class="plan-switch">${esc(b.note)}</p>` : ''}
           ${b.mine
             ? `<a class="btn btn-ghost btn-lg" href="#/account?tab=membership">Your plan</a>`
-            : `<button class="btn ${b.quiet ? 'btn-ghost' : lead ? 'btn-accent' : 'btn-primary'} btn-lg" data-buy="${esc(id)}">${esc(b.label)}</button>`}
+            : b.covered
+              ? `<button class="btn btn-ghost btn-lg" type="button" disabled>${esc(b.label)}</button>`
+              : `<button class="btn ${b.quiet ? 'btn-ghost' : lead || !mine ? 'btn-accent' : 'btn-primary'} btn-lg" data-buy="${esc(id)}">${esc(b.label)}</button>`}
         </section>`;
       }).join('')}
     </div>
@@ -5658,6 +5670,10 @@ async function viewPricing() {
         and prices come in, so a call can change, or come down if we stop backing it. At kick-off it closes:
         calls are not sold once a match is on, and each one is graded at full time. The bet slip is the
         exception: once it is posted it stays exactly as it is, and it is graded on the legs it went up with.</p>
+      <p><b>Moving plans is fair.</b> Go from a matchday pass to a month, or from a month to three,
+        whenever you like. Every day you have already paid for is kept: the new plan starts straight
+        away, nothing is charged until your paid time runs out, and the plan you leave stops renewing.
+        You never pay twice for the same day.</p>
       <p><b>It starts when you pay.</b> At checkout you ask for access straight away, which ends the 14-day
         right to cancel for a change of mind. If anything of ours fails, you get it put right or your money back.
         <a href="#/legal/refunds">How refunds work</a>. Cancel a renewing plan in one tap;
@@ -5709,6 +5725,11 @@ const PLAN_TERMS = {
     runs: 'A month from when you pay.',
     after: 'Then the same again each month until you cancel. Cancel in one tap and keep it to the end of the month you paid for.',
   },
+  quarter: {
+    per: 'every three months',
+    runs: 'Three months from when you pay.',
+    after: 'Then the same again every three months until you cancel. Cancel in one tap and keep it to the end of the three months you paid for.',
+  },
   season: {
     per: 'a year',
     runs: 'A year from when you pay.',
@@ -5724,17 +5745,7 @@ const PLAN_TERMS = {
 function checkoutBlock(m, planId) {
   if (!m) return null;
   const have = PLAN_NAME[m.plan_id] ?? 'membership';
-  const want = PLAN_NAME[planId] ?? 'plan';
   const until = longDate(m.expires_at);
-  const manage = whopManageUrl(m);
-  if (m.plan_id === planId && m.plan_id === 'matchday') {
-    return {
-      title: 'Your matchday pass is still running',
-      body: `It runs to ${until}. Buy the next one once it has finished, or go monthly now and carry on without a gap.`,
-      actions: `<a class="btn btn-accent" href="#/checkout?plan=monthly">Go monthly</a>
-        <a class="btn btn-ghost" href="#/board">Today's calls</a>`,
-    };
-  }
   if (m.plan_id === planId) {
     return {
       title: 'This one is already yours',
@@ -5743,11 +5754,11 @@ function checkoutBlock(m, planId) {
         <a class="btn btn-ghost" href="#/account?tab=membership">Your membership</a>`,
     };
   }
-  if (renewsItself(m)) {
+  if (planId === 'matchday') {
     return {
-      title: `You are on the ${have.toLowerCase()}`,
-      body: `It renews by itself, so paying here as well would charge you for both. To switch, cancel it first${manage ? ' on Whop' : ''}: you keep it to ${until}. Then come back for the ${want.toLowerCase()}.`,
-      actions: `${manage ? `<a class="btn btn-primary" href="${esc(manage)}" target="_blank" rel="noopener noreferrer">Cancel on Whop</a>` : `<a class="btn btn-primary" href="#/account?tab=membership">Your membership</a>`}
+      title: 'Your membership already covers this week',
+      body: `Your ${have.toLowerCase()} runs to ${until}. A matchday pass on top would buy nothing.`,
+      actions: `<a class="btn btn-accent" href="#/board">Today's calls</a>
         <a class="btn btn-ghost" href="#/pricing">Back to the plans</a>`,
     };
   }
@@ -5801,6 +5812,8 @@ async function viewCheckout(params) {
   const price = money(plan.amount_minor, plan.currency);
   const name = PLAN_NAME[planId] ?? plan.name;
   const renews = planId !== 'matchday';
+  // A member moving plans: nothing today, the new price from their paid-to date.
+  const moving = m && !block ? m : null;
 
   app.innerHTML = `
   <div class="wrap section checkout" data-plan="${esc(planId)}">
@@ -5808,8 +5821,14 @@ async function viewCheckout(params) {
     <div class="co-grid">
       <section class="co-summary" aria-labelledby="co-name">
         <h1 class="display" id="co-name">${esc(name)}</h1>
+        ${moving ? `
+        <p class="co-price"><b>${esc(money(0, plan.currency))}</b> <span>today</span></p>
+        <p class="co-terms"><b>Then ${esc(price)} ${esc(terms.per)}, from ${esc(longDate(moving.expires_at))}.</b>
+          Your ${esc((PLAN_NAME[moving.plan_id] ?? 'membership').toLowerCase())} is paid up to that date, so the ${esc(name.toLowerCase())}
+          starts now and its first payment waits until then. The ${esc((PLAN_NAME[moving.plan_id] ?? 'membership').toLowerCase())} stops renewing.
+          You keep every day you have paid for and pay for none twice.</p>` : `
         <p class="co-price"><b>${esc(price)}</b> <span>${esc(terms.per)}</span></p>
-        <p class="co-terms"><b>${esc(terms.runs)}</b> ${esc(terms.after)}</p>
+        <p class="co-terms"><b>${esc(terms.runs)}</b> ${esc(terms.after)}</p>`}
         <ul class="ticks co-ticks">
           <li><b>Every open call</b> the moment it goes up</li>
           <li><b>The bet slip's legs</b>, before the first one kicks off</li>
@@ -5829,9 +5848,10 @@ async function viewCheckout(params) {
         <h2 class="co-pay-title" id="co-pay-title">${esc(block.title)}</h2>
         <p class="co-block">${esc(block.body)}</p>
         <div class="member-actions">${block.actions}</div>` : `
-        <h2 class="co-pay-title" id="co-pay-title">Pay by card, Apple Pay or Google Pay</h2>
-        ${m ? `<p class="co-upgrade">Your ${esc((PLAN_NAME[m.plan_id] ?? 'membership').toLowerCase())} runs to
-          ${esc(longDate(m.expires_at))}. The ${esc(name.toLowerCase())} starts as soon as you pay.</p>` : ''}
+        <h2 class="co-pay-title" id="co-pay-title">${moving ? `Switch to the ${esc(name.toLowerCase())}` : 'Pay by card, Apple Pay or Google Pay'}</h2>
+        ${moving ? `<p class="co-upgrade">Nothing is charged today. Whop keeps your card for the first payment on
+          ${esc(longDate(moving.expires_at))}. If you stop before the end, your ${esc((PLAN_NAME[moving.plan_id] ?? 'membership').toLowerCase())}
+          simply runs to that date.</p>` : ''}
         <fieldset class="co-agree">
           <legend class="visually-hidden">Before you pay</legend>
           <label class="co-check"><input type="checkbox" id="co-adult">
@@ -5847,7 +5867,7 @@ async function viewCheckout(params) {
         </div>
         <button class="btn btn-accent btn-lg co-button" id="co-pay" type="button" disabled>Pay ${esc(price)}</button>
         <p class="co-error" role="alert" hidden></p>
-        <p class="co-note">${renews ? `By paying you agree to ${esc(price)} ${esc(terms.per)} until you cancel. ` : ''}Card details go
+        <p class="co-note">${renews ? `By ${moving ? 'switching' : 'paying'} you agree to ${esc(price)} ${esc(terms.per)}${moving ? ` from ${esc(shortDate(moving.expires_at))}` : ''} until you cancel. ` : ''}Card details go
           straight to Whop, who take the payment. They never reach offside.win.</p>`}
       </section>
     </div>
@@ -5891,6 +5911,11 @@ async function viewCheckout(params) {
     idle();
   };
 
+  if (moving) {
+    await fallback();
+    button.textContent = 'Switch, nothing to pay today';
+    return;
+  }
   if (!cfg?.whopAccount) { await fallback(); return; }
   try {
     state.payHandle = await mountPayment({
@@ -6088,7 +6113,8 @@ async function viewSignin() {
   };
 }
 
-const PLAN_NAME = { matchday: 'Matchday pass', monthly: 'Monthly membership', season: 'Season ticket' };
+const PLAN_NAME = { matchday: 'Matchday pass', monthly: 'Monthly membership', quarter: '3-month membership', season: 'Season ticket' };
+const PLAN_DAYS = { matchday: 7, monthly: 30, quarter: 90, season: 365 };
 
 /*
  * The account.
@@ -6295,6 +6321,11 @@ async function viewAccount() {
           : `<a class="btn btn-accent" href="#/pricing">See the plans</a>`}
       </div>
     </section>
+    ${active && m.plan_id !== 'quarter' && m.card_brand !== 'complimentary' ? `
+    <a class="acct-upgrade" href="#/checkout?plan=${m.plan_id === 'matchday' ? 'monthly' : 'quarter'}">
+      <b>${m.plan_id === 'matchday' ? 'Carry on by the month' : 'Go to three months and pay less a month'}</b>
+      <span>Nothing to pay today: the new plan's first payment is on ${esc(when(m.expires_at))}, when what you have paid for runs out.</span>
+    </a>` : active ? `<p class="acct-line"><a href="#/pricing">Change plan</a></p>` : ''}
     ${account.receipts?.length ? `
       <h2 class="acct-sub">Payments</h2>
       <table class="tbl"><tbody>
@@ -7422,8 +7453,12 @@ async function headerAuth() {
   }
   if (upgrade) {
     upgrade.hidden = member;
-    upgrade.textContent = user ? 'Upgrade' : 'Get the calls';
+    // The long words on a laptop, one word on a phone, where it sits in the
+    // bar in place of "Sign in" (which moves into the menu).
+    upgrade.innerHTML = user ? '<span>Upgrade</span>' : '<span class="ul-long">Get the calls</span><span class="ul-short">Join</span>';
   }
+  const navSignin = document.getElementById('nav-signin');
+  if (navSignin) navSignin.hidden = Boolean(user);
 }
 
 /**

@@ -15,7 +15,7 @@
 import { membershipMail, sendMail } from './mail.ts';
 import { createCheckoutLink, parseWebhook, type CoinflowConfig } from './coinflow.ts';
 import { verifyWebhook } from './webhook.ts';
-import { WhopError, createWhopCheckout, createWhopPayment, parseWhop, verifyWhop, whopAccountId, whopPeriodEnd } from './whop.ts';
+import { WhopError, cancelWhopAtPeriodEnd, createWhopCheckout, createWhopPayment, parseWhop, verifyWhop, whopAccountId, whopPeriodEnd } from './whop.ts';
 
 export interface PayEnv {
   SUPABASE_URL: string;
@@ -157,6 +157,83 @@ export async function recordConsent(env: PayEnv, jwt: string, planId: string, c:
   }
 }
 
+/* ------------------------------------------------------ switching plans */
+
+/**
+ * Moving from one plan to another, fairly.
+ *
+ * Every plan opens the same calls; they differ only in how long they run and
+ * what a day costs. So a reader who moves (a matchday pass to a month, a
+ * month to three) keeps every day they have already paid for, and pays
+ * nothing more until those days run out: the new plan starts now with its
+ * first charge on the date the old one was paid to. No day is paid twice and
+ * none is lost, whichever way they move.
+ *
+ * The old plan, if it renews by itself, is set to stop at the end of its
+ * paid time before anything else happens, so the reader can never end up
+ * with two plans that both take money. If that cannot be done (the key
+ * lacks the permission, Whop is down) the switch is refused and nothing is
+ * charged.
+ */
+export interface PlanSwitch { from: string; until: number; trialDays: number }
+
+/** Pure: what a switch from `current` to `next` means now, or why not. */
+export function switchTerms(
+  current: { plan_id: string; expires_at: number } | null,
+  next: { id: string; renews: boolean },
+  now = Math.floor(Date.now() / 1000),
+): { ok: true; terms: PlanSwitch | null } | { ok: false; error: string } {
+  if (!current || !(Number(current.expires_at) > now)) return { ok: true, terms: null };
+  if (current.plan_id === next.id) return { ok: false, error: 'That plan is already yours. There is nothing to pay.' };
+  // A one-off week on top of a running membership buys nothing.
+  if (!next.renews) return { ok: false, error: 'Your membership already covers this week. Nothing has been charged.' };
+  const days = Math.min(180, Math.max(1, Math.ceil((Number(current.expires_at) - now) / 86400)));
+  return { ok: true, terms: { from: current.plan_id, until: Number(current.expires_at), trialDays: days } };
+}
+
+/** The reader's live membership, read with their own token. */
+async function liveMembershipOf(env: PayEnv, jwt: string): Promise<{ plan_id: string; expires_at: number; via: string | null } | null> {
+  const res = await fetch(new URL('/rest/v1/rpc/get_account', env.SUPABASE_URL), {
+    method: 'POST',
+    headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${jwt}`, 'content-type': 'application/json' },
+    body: '{}',
+  });
+  if (!res.ok) return null;
+  const m = (await res.json() as { membership?: { plan_id?: string; expires_at?: number; via?: string } | null })?.membership;
+  if (!m?.plan_id || !(Number(m.expires_at) > Date.now() / 1000)) return null;
+  return { plan_id: m.plan_id, expires_at: Number(m.expires_at), via: m.via ?? null };
+}
+
+/**
+ * Stop every renewing Whop membership of this reader at the end of its paid
+ * time. True when there is none left that would take money again.
+ */
+async function stopRenewals(env: PayEnv, user: { id: string; email: string | null }): Promise<boolean> {
+  if (!env.WHOP_API_KEY) return false;
+  let list: Rec[];
+  try { list = await listWhopMemberships(env, 400, 5); } catch { return false; }
+  const mine = list.filter((m) => {
+    const meta = asRec(m['metadata']) ?? {};
+    const email = asStr(asRec(m['user'])?.['email'])?.toLowerCase() ?? asStr(m['email'])?.toLowerCase() ?? null;
+    return asStr(meta['user_id'])?.toLowerCase() === user.id.toLowerCase() || (!!user.email && email === user.email.toLowerCase());
+  });
+  for (const m of mine) {
+    const status = String(m['status'] ?? '').toLowerCase();
+    if (!/active|trialing|past_due/.test(status)) continue;
+    if (m['cancel_at_period_end'] === true) continue;
+    const id = asStr(m['id']);
+    if (!id) continue;
+    const code = await cancelWhopAtPeriodEnd(env.WHOP_API_KEY, id);
+    if (code >= 400 && code !== 404) {
+      console.error('switch: could not stop renewal', code);
+      return false;
+    }
+  }
+  return true;
+}
+
+export const SWITCH_CLOSED = 'Switching plans is not open yet. Nothing has been charged and your plan is as it was.';
+
 export async function checkout(request: Request, env: PayEnv, jwt: string | null): Promise<Response> {
   // There is a real window where the code is deployed and the merchant account
   // is not. Saying so plainly beats a 500 that reads like the site is broken.
@@ -187,6 +264,12 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
 
   if (provider(env) === 'whop') {
     const site = env.SITE_URL ?? new URL(request.url).origin;
+    const renews = String(plan.id) !== 'matchday';
+    const verdict = switchTerms(await liveMembershipOf(env, jwt!), { id: String(plan.id), renews });
+    if (!verdict.ok) return json({ error: verdict.error }, 409);
+    const sw = verdict.terms;
+    // Stop the old plan first. Only then is the new one offered.
+    if (sw && !(await stopRenewals(env, user))) return json({ error: SWITCH_CLOSED }, 503);
     // The card form on our own page: a checkout configuration made here, with
     // the price from our plan row and the account id as metadata, which the
     // page hands to Whop's Checkout element.
@@ -202,19 +285,22 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
             currency: String(plan.currency),
             days: Number(plan.days),
             // A matchday pass is a week and stops; the others renew until cancelled.
-            renews: String(plan.id) !== 'matchday',
+            renews,
           },
           user: { id: user.id, email: user.email },
           returnUrl: `${site}/#/account?paid=1`,
+          trialDays: sw?.trialDays,
         });
-        return json({ checkout: made.id, link: made.link, returnUrl: `${site}/#/account?paid=1` });
+        return json({ checkout: made.id, link: made.link, returnUrl: `${site}/#/account?paid=1`, switch: sw });
       } catch (err) {
         console.error('whop checkout:', err instanceof Error ? err.message : String(err));
         if (!plan.checkout_url) return json({ error: 'The payment page could not be opened. Nothing has been charged. Try again in a minute.' }, 502);
       }
     }
     // No API key yet: the plan's own Whop checkout link, with the email on it
-    // so the webhook can find the account.
+    // so the webhook can find the account. It charges the full price at once,
+    // so it is never used for a switch.
+    if (sw) return json({ error: SWITCH_CLOSED }, 503);
     if (typeof plan.checkout_url !== 'string' || !plan.checkout_url) {
       return json({ error: 'That plan has no checkout yet.' }, 503);
     }
@@ -713,6 +799,15 @@ export async function charge(request: Request, env: PayEnv, jwt: string | null):
   );
   const plan = (rows.ok ? await rows.json() as any[] : [])[0];
   if (!plan) return json({ error: 'That plan is not available.' }, 404);
+  // A reader with a membership running is switching, and a switch charges
+  // nothing today: that goes through Whop's own checkout, never a card charge
+  // here at the full price.
+  const current = await liveMembershipOf(env, jwt!);
+  if (current) {
+    const verdict = switchTerms(current, { id: String(plan.id), renews: String(plan.id) !== 'matchday' });
+    if (!verdict.ok) return json({ error: verdict.error }, 409);
+    return json({ error: 'Switching opens Whop\'s checkout. Nothing has been charged.', fallback: true }, 409);
+  }
   await recordConsent(env, jwt!, String(plan.id), consent);
 
   const site = env.SITE_URL ?? new URL(request.url).origin;
