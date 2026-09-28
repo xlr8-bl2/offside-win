@@ -337,50 +337,38 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 
 .brand { display: inline-flex; align-items: center; flex: none; }
 /*
- * The wordmark: the offside line drawn through the name.
+ * The wordmark: "offside", a violet ball for the full stop, "win" quieter.
  *
- * Three marks preceded it. Three diagonal strokes said nothing. A raised
- * linesman's flag read as an icon rather than a name. A hand-drawn ring
- * standing in for the "o" was the telestrator, which is the product's voice
- * but not its subject, and a circle among condensed capitals read as a
- * stray "O".
- *
- * The subject is the call, and the purest picture of a call in football is
- * the line: the one the broadcaster draws across the pitch to show whether a
- * forward was level. Here it is drawn through the word itself, between "off"
- * and "side", in the one colour on the site that belongs to us, running a
- * little past the capitals top and bottom the way the broadcast line runs
- * off the players. The mark (see .mark and public/icon.svg) is the same
- * idea as a symbol: a ball, the line through it, and the sliver of the ball
- * past the line in violet.
- *
- * Set in the display face at its heaviest, tracked a touch open because Big
- * Shoulders at 800 closes up at small sizes. ".win" drops to the quiet
- * colour: it is the address, not the name.
+ * It used to draw the broadcaster's offside line through the word in the
+ * condensed display face ("off|side"), which read as a cursor or a typo,
+ * and sat oddly beside a symbol that drew the same line again. The name is
+ * now set plainly in the UI face at its heaviest, tracked tight so it holds
+ * together as one word, and the one bit of character is the ball. The icon
+ * (public/icon.svg) is the same idea: an "o" and the ball.
  */
 .wordmark {
   display: inline-flex;
   align-items: baseline;
-  font-family: var(--display);
-  font-weight: var(--weight-black);
+  font-family: var(--body);
+  font-weight: var(--weight-bold);
   font-size: var(--text-xl);
   line-height: 1;
-  letter-spacing: 0.012em;
+  letter-spacing: -0.05em;
   color: var(--chalk);
   white-space: nowrap;
 }
-.wm-line {
-  align-self: stretch;
-  width: max(2px, 0.075em);
-  margin: -0.14em 0.07em -0.1em 0.075em;
-  border-radius: 1px;
+/* The full stop is the ball: round, violet, sitting on the line. */
+.wm-ball {
+  display: inline-block;
+  width: 0.24em;
+  height: 0.24em;
+  margin: 0 0.05em 0 0.07em;
+  border-radius: 50%;
   background: var(--floodlight-hi);
 }
-.wm-tld { color: var(--chalk-3); letter-spacing: 0.005em; }
-.brand:hover .wm-line { background: var(--floodlight); }
+.wm-tld { color: var(--chalk-3); }
+.brand:hover .wm-ball { background: var(--floodlight); }
 
-/* The mark, where there is room for a symbol: the footer, the icons. */
-.brand-symbol { width: auto; height: 36px; aspect-ratio: 578 / 462; flex: none; color: var(--chalk); }
 
 /*
  * A pill rail, with the current route as a filled pill.
@@ -689,7 +677,16 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 
 /* ---------------------------------------------------------------- footer */
 
-.foot { border-top: var(--border) solid var(--hairline); background: var(--stand); }
+/*
+ * The footer fades from the raised surface into the page colour, so it ends
+ * on the same colour as whatever a phone shows past the bottom of the page.
+ * It was a flat grey slab, and scrolling right to the end on a phone showed
+ * a band of darker page colour under it: the footer looked cut off.
+ */
+.foot {
+  border-top: var(--border) solid var(--hairline);
+  background: linear-gradient(to bottom, var(--stand), var(--pitch) 70%);
+}
 
 .foot-top {
   max-width: var(--maxw);
@@ -721,7 +718,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 }
 .foot-cols {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: 1fr 1.25fr 1.4fr 1fr 1fr;
   gap: var(--space-7);
   padding-bottom: var(--space-8);
   border-bottom: var(--border) solid var(--hairline);
@@ -766,10 +763,35 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .socials a:hover { color: var(--chalk); border-color: var(--rule-firm); }
 .socials svg { width: 15px; height: 15px; }
 
-.foot-brand { display: inline-flex; align-items: center; gap: var(--space-4); color: var(--chalk-2); }
+/* A competition with games coming, and how many. */
+.foot-col .foot-comp, .foot-col .foot-fx {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.foot-comp span, .foot-fx span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.foot-comp small { flex: none; font-size: var(--text-2xs); color: var(--chalk-3); font-variant-numeric: tabular-nums; }
+/* The next kick-offs: the time above the match, so a long name has the row. */
+.foot-col .foot-fx { flex-direction: column; align-items: flex-start; gap: 1px; }
+.foot-fx small { font-size: var(--text-2xs); color: var(--floodlight-hi); font-variant-numeric: tabular-nums; }
+.foot-fx span { max-width: 100%; }
+.foot-col .foot-all { margin-top: var(--space-2); color: var(--chalk); font-weight: var(--weight-medium); }
+.foot-quiet { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--chalk-3); }
+.foot-col #foot-live { display: flex; align-items: center; gap: var(--space-3); color: var(--chalk); }
+.foot-follow-note { margin: var(--space-4) 0 0; font-size: var(--text-xs); color: var(--chalk-3); max-width: 24ch; }
+
+.foot-base {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-8);
+}
+.foot-brand { display: inline-flex; align-items: center; }
 .foot-brand .wordmark { font-size: var(--text-2xl); }
-.foot-about { max-width: 60ch; margin: var(--space-4) 0 0; font-size: var(--text-sm); color: var(--chalk-3); }
-.foot-stats { display: flex; gap: var(--space-9); flex-wrap: wrap; }
+.foot-about { max-width: 56ch; margin: var(--space-4) 0 0; font-size: var(--text-sm); color: var(--chalk-3); }
+.foot-stats { display: grid; grid-template-columns: repeat(4, auto); gap: var(--space-4) var(--space-8); }
 .foot-stats div b {
   display: block;
   font-family: var(--display);
@@ -794,6 +816,16 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 }
 .region-pick b { color: var(--chalk-2); font-weight: var(--weight-medium); }
 
+.foot-legal {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4) var(--space-8);
+  flex-wrap: wrap;
+  padding-top: var(--space-6);
+  border-top: var(--border) solid var(--hairline);
+}
+.foot-copy { margin: 0; font-size: var(--text-xs); color: var(--chalk-3); }
 .foot-note {
   margin: 0;
   max-width: 76ch;
@@ -804,9 +836,16 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .foot-note a { color: var(--chalk-2); text-decoration: underline; text-underline-offset: 2px; }
 .foot-note a:hover { color: var(--chalk); }
 
+@media (max-width: 1080px) {
+  .foot-cols { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .foot-base { grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .foot-stats { grid-template-columns: repeat(4, auto); justify-content: start; }
+}
 @media (max-width: 760px) {
-  .foot-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-6); }
-  .foot-stats { gap: var(--space-7); }
+  .foot-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-7) var(--space-6); }
+  /* The live lists get the full width on a phone: names are long. */
+  .foot-col-next { grid-column: 1 / -1; }
+  .foot-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5) var(--space-6); }
 }
 
 /* ------------------------------------------------------------ utilities */

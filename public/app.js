@@ -4871,7 +4871,7 @@ async function viewLeagues() {
   app.innerHTML = `
   <div class="wrap section dense">
     <div class="page-head">
-      <h1 class="display xl">Leagues</h1>
+      <h1 class="display xl">Competitions</h1>
       <p class="page-sub">${all.length} ${all.length === 1 ? 'competition' : 'competitions'} on the board right now,
         out of 88 we cover. ${totalCalls
           ? `${totalCalls} ${totalCalls === 1 ? 'call' : 'calls'} between them.`
@@ -6978,6 +6978,7 @@ async function route({ soft = false } = {}) {
     state.soft = false;
     liveTick();
     playFlashes();
+    if (state.board) paintFooter(state.board);
     if (state.liveFixture) markLiveEvents(Number(state.liveFixture.id), document.getElementById('live-centre'));
     smartQuotes(app);
     crawlable(app);
@@ -7290,14 +7291,108 @@ function renderRegion() {
     : `<p>Prices shown from books that take customers in most countries.</p>`;
 }
 
+/*
+ * The footer, drawn from the board rather than typed in.
+ *
+ * It used to carry fixed links to the Premier League, La Liga, Serie A and
+ * the Bundesliga, a "88 leagues" that were really competitions, and "Tonight's
+ * are on the board" at five in the morning. During an international break the
+ * big leagues are two weeks from their next game and those links led to empty
+ * pages. Now every link goes somewhere with something on it: the competitions
+ * with games in the next three days, the next kick-offs we have a call on,
+ * and a live line only while matches are being played.
+ */
+const FOOT_COMPS = 7;
+const FOOT_NEXT = 5;
+function paintFooter(board) {
+  const fixtures = board?.fixtures ?? [];
+  if (!fixtures.length) return;
+  const now = Date.now() / 1000;
+  const live = fixtures.filter((f) => matchState(f).kind === 'live');
+  const soon = fixtures.filter((f) => matchState(f).kind === 'upcoming' && f.kickoff - now < 72 * 3600);
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+  const liveEl = document.getElementById('foot-live');
+  if (liveEl) {
+    liveEl.hidden = !live.length;
+    if (live.length) {
+      liveEl.href = '#/board?when=live';
+      liveEl.innerHTML = `<span class="live-badge"><i></i>Live</span> ${plural(live.length, 'match', 'matches')} on now`;
+    }
+  }
+
+  // Competitions with something on, biggest first, then busiest.
+  const by = new Map();
+  for (const f of [...live, ...soon]) {
+    const k = f.league_id ?? f.league;
+    const e = by.get(k) ?? { id: f.league_id, name: f.league ?? '', n: 0, live: 0, rank: f.rank ?? 6 };
+    e.n++;
+    if (matchState(f).kind === 'live') e.live++;
+    e.rank = Math.min(e.rank, f.rank ?? 6);
+    by.set(k, e);
+  }
+  const comps = [...by.values()].filter((e) => e.name)
+    .sort((a, b) => b.live - a.live || a.rank - b.rank || b.n - a.n).slice(0, FOOT_COMPS);
+  const compsEl = document.getElementById('foot-comps');
+  if (compsEl) {
+    compsEl.innerHTML = comps.length
+      ? comps.map((e) => `<a class="foot-comp" href="${e.id ? `#/league/${encodeURIComponent(e.id)}` : esc(boardHash(state.hours, e.name))}">
+          <span>${esc(e.name)}</span><small>${e.live ? 'on now' : plural(e.n, 'game', 'games')}</small></a>`).join('')
+      : '<p class="foot-quiet">Nothing kicks off in the next three days.</p>';
+  }
+
+  // The next kick-offs we have a call on, then the biggest games coming, so
+  // the list is full without filling it with matches nobody came for.
+  const byTime = (a, b) => a.kickoff - b.kickoff;
+  const called = soon.filter(hasCall).sort(byTime);
+  const big = soon.filter((f) => !hasCall(f)).sort((a, b) => (a.rank ?? 6) - (b.rank ?? 6) || byTime(a, b));
+  const next = [...called, ...big].slice(0, FOOT_NEXT).sort(byTime);
+  const nextEl = document.getElementById('foot-next');
+  const nextCol = document.getElementById('foot-next-col');
+  if (nextEl && nextCol) {
+    nextCol.hidden = !next.length;
+    nextEl.innerHTML = next.map((f) => `<a class="foot-fx" href="#/fixture/${encodeURIComponent(f.id)}">
+        <small>${esc(kickoffLabel(f.kickoff))}</small><span>${esc(f.home)} v ${esc(f.away)}</span></a>`).join('');
+  }
+
+  // The band above: what is happening now, in one line.
+  const kicker = document.getElementById('foot-kicker');
+  const line = document.getElementById('foot-line');
+  const btn = document.getElementById('foot-cta-btn');
+  const day = new Date().toDateString();
+  const today = soon.filter((f) => hasCall(f) && new Date(f.kickoff * 1000).toDateString() === day).length;
+  if (kicker && line && btn) {
+    if (live.length) {
+      kicker.textContent = 'on right now';
+      line.textContent = `${plural(live.length, 'match', 'matches')} being played.`;
+      btn.textContent = 'Follow them live';
+      btn.setAttribute('href', '#/board?when=live');
+    } else if (today) {
+      kicker.textContent = 'the board is up';
+      line.textContent = `${plural(today, 'call', 'calls')} on today's games.`;
+      btn.textContent = "See today's board";
+      btn.setAttribute('href', '#/board');
+    } else if (next[0]) {
+      kicker.textContent = 'every call, and how it went';
+      line.textContent = `Next kick-off ${kickoffLabel(next[0].kickoff).replace(/^(Today|Tomorrow)/, (w) => w.toLowerCase())}.`;
+      btn.textContent = 'See the board';
+      btn.setAttribute('href', '#/board');
+    }
+  }
+
+  const stats = document.getElementById('foot-stats');
+  if (stats) {
+    stats.innerHTML = `
+      <div><b>88</b><span>Competitions we cover</span></div>
+      <div><b>${fixtures.length.toLocaleString()}</b><span>Games on the board</span></div>
+      <div><b>15 min</b><span>Between analysis updates</span></div>
+      <div><b>30 sec</b><span>Between live score updates</span></div>`;
+  }
+  const year = document.getElementById('foot-year');
+  if (year) year.textContent = String(new Date().getFullYear());
+}
+
 async function health() {
-  try {
-    const h = await getJSON('/api/health');
-    document.getElementById('foot-stats').innerHTML = `
-      <div><b>88</b><span>Leagues</span></div>
-      <div><b>${(h.fixtures ?? 0).toLocaleString()}</b><span>Games on the board</span></div>
-      <div><b>Every 15 min</b><span>Refreshed</span></div>`;
-  } catch { /* the dot stays grey, which is the honest state */ }
   // The header's tally, on every page. The board is only fetched for it where
   // a page has not already loaded one; the settled record is small.
   try {
@@ -7306,6 +7401,7 @@ async function health() {
       state.board ? state.board : loadBoard().catch(() => null),
     ]);
     paintTally(board?.fixtures ?? [], recent);
+    paintFooter(board);
   } catch { /* stays hidden */ }
 }
 

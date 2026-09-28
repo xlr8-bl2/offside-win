@@ -376,7 +376,7 @@ export async function leaguePage(env: SeoEnv, id: number, site: string): Promise
     <table class="tbl"><thead><tr><th>Pos</th><th>Team</th><th>Played</th><th>Points</th></tr></thead><tbody>
       ${rs.map((r) => `<tr><td>${esc(r.position)}</td><td>${esc(r.team)}</td><td>${esc(r.played)}</td><td>${esc(r.points)}</td></tr>`).join('')}
     </tbody></table>`).join('');
-  const c = crumbs([[SITE, '/'], ['Leagues', '/leagues'], [name, leaguePath(id, name)]], site);
+  const c = crumbs([[SITE, '/'], ['Competitions', '/leagues'], [name, leaguePath(id, name)]], site);
   const leader = rows.find((r) => Number(r.position) === 1 && !r.group);
   return {
     title: leagueTitle(name),
@@ -480,7 +480,7 @@ function staticPage(path: string, site: string): Page | null {
       title: TITLES.leagues,
       description: 'Eighty-eight competitions, from the Premier League and the Champions League down. Fixtures, results, tables and our call on every match.',
       canonical: `${site}/leagues`,
-      body: `<article class="wrap section narrow seo"><h1 class="display">Leagues</h1>
+      body: `<article class="wrap section narrow seo"><h1 class="display">Competitions</h1>
         <p>Eighty-eight competitions, with fixtures, results, the table and our call on every match. <a href="/today">Today's board</a> has every match on right now.</p></article>`,
       jsonLd: [],
     };
