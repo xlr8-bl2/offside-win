@@ -4287,3 +4287,115 @@ html.pay-open { overflow: hidden; }
 .co-check a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }
 .paid-confirm { max-width: var(--maxw-read); margin: 0 0 var(--space-6); color: var(--chalk-3); font-size: var(--text-sm); line-height: var(--leading-normal); }
 .paid-confirm a { color: var(--chalk-2); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ------------------------------------------------------------------ live events
+ *
+ * What a match in play does on the page (app.js, tickClocks and playFlashes).
+ * The clock ticks every second between polls; a goal pops the score that
+ * changed and washes its row in the floodlight colour; a whistle pulses the
+ * badge; a new line in the open match's timeline slides in and glows. One
+ * moment each, then still: motion here means something happened.
+ */
+.minute.ticking { font-variant-numeric: tabular-nums; min-width: 4ch; display: inline-block; }
+
+@keyframes goal-pop {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(1.45); color: var(--floodlight-hi); }
+  60%  { transform: scale(0.94); }
+  100% { transform: scale(1); }
+}
+.goal-pop { display: inline-block; animation: goal-pop 900ms var(--ease-out) 2; }
+
+@keyframes row-flash {
+  0%   { background-color: var(--floodlight-dim); box-shadow: inset 3px 0 0 var(--floodlight); }
+  70%  { background-color: var(--floodlight-dim); }
+  100% { background-color: transparent; box-shadow: inset 3px 0 0 transparent; }
+}
+@keyframes row-flash-soft {
+  0%   { background-color: var(--terrace); }
+  100% { background-color: transparent; }
+}
+.flash-goal { animation: row-flash 3.2s var(--ease-out); }
+.flash-whistle, .flash-var { animation: row-flash-soft 2.4s var(--ease-out); }
+/* The match header is a picture with a wash over it; it glows rather than fills. */
+.hero.flash-goal { animation: none; }
+.hero.flash-goal .fx-stack { animation: row-flash 3.2s var(--ease-out); border-radius: var(--radius); }
+
+@keyframes badge-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+.badge-pop { animation: badge-pop 600ms var(--ease-out) 2; }
+
+@keyframes ev-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes ev-glow {
+  0%   { background-color: var(--floodlight-dim); }
+  100% { background-color: transparent; }
+}
+.ev-new { animation: ev-in 600ms var(--ease-out) both, ev-glow 3.5s var(--ease-out); border-radius: var(--radius-sm); }
+
+/* The alert: under the header, centred, one at a time. */
+.toast-rack {
+  position: fixed;
+  top: calc(var(--header-h) + env(safe-area-inset-top, 0px) + var(--space-4));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-overlay);
+  width: min(420px, calc(100vw - 2 * var(--space-5)));
+  pointer-events: none;
+}
+.live-toast {
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-4);
+  row-gap: 2px;
+  padding: var(--space-4) var(--space-5);
+  background: var(--terrace);
+  border: var(--border) solid var(--floodlight);
+  border-radius: var(--radius-lg);
+  color: var(--chalk);
+  text-decoration: none;
+  animation: toast-in var(--dur-slow) var(--ease-out);
+}
+.live-toast > .ev-ico, .live-toast > .toast-whistle { grid-row: span 2; width: 22px; height: 22px; }
+.live-toast .toast-kind {
+  font-family: var(--display);
+  font-variation-settings: 'wdth' var(--condensed);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  color: var(--floodlight-hi);
+}
+.live-toast .toast-kind em { font-style: normal; color: var(--chalk-2); font-variant-numeric: tabular-nums; margin-left: var(--space-2); }
+.live-toast .toast-line { font-size: var(--text-sm); color: var(--chalk-2); min-width: 0; overflow-wrap: anywhere; }
+.live-toast .toast-line b { color: var(--chalk); font-weight: var(--weight-bold); }
+.live-toast.is-red { border-color: var(--lost); }
+.live-toast.is-red .toast-kind { color: var(--chalk); }
+.live-toast.is-halftime, .live-toast.is-fulltime { border-color: var(--hairline); }
+.live-toast.is-halftime .toast-kind, .live-toast.is-fulltime .toast-kind { color: var(--chalk); }
+.live-toast.out { animation: toast-out var(--dur-normal) var(--ease-in-out) forwards; }
+.toast-whistle {
+  display: inline-block;
+  border-radius: 50%;
+  border: 2px solid var(--chalk-2);
+  box-sizing: border-box;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-10px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes toast-out {
+  to { opacity: 0; transform: translateY(-8px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .goal-pop, .badge-pop { animation: none; }
+  .ev-new { animation: ev-glow 3.5s linear; }
+  .live-toast, .live-toast.out { animation: none; }
+  .live-toast.out { opacity: 0; }
+}
