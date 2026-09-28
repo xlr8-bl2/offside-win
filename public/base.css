@@ -546,6 +546,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .burger[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
 .burger[aria-expanded="true"] span:nth-child(3) { transform: translateY(-5px) rotate(-45deg); }
 .burger:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.burger[aria-expanded="true"] { background: var(--terrace); }
 
 /* Between a laptop and a tablet the box gives way to the glass. */
 @media (max-width: 1180px) {
@@ -586,16 +587,17 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
     gap: 2px;
     padding: var(--space-4) var(--space-5);
     border-radius: var(--radius);
-    font-family: var(--display);
-    font-size: 1.75rem;
+    font-family: var(--body);
+    font-size: 1.1875rem;
     font-weight: var(--weight-bold);
-    line-height: 1;
+    letter-spacing: -0.015em;
+    line-height: 1.2;
     color: var(--chalk-2);
   }
   .nav a small {
     display: block;
-    font-family: var(--body);
     font-size: var(--text-sm);
+    letter-spacing: 0;
     font-weight: var(--weight-normal);
     color: var(--chalk-3);
   }
