@@ -4928,17 +4928,43 @@ async function viewLeague(id, params = new URLSearchParams()) {
     if (!byDay.has(k)) byDay.set(k, []);
     byDay.get(k).push(f);
   }
-  const gamesHTML = ahead.length ? [...byDay.entries()].map(([day, list]) => `
+  /*
+   * Beyond the board: the competition's own fixture list and latest results
+   * (kept by the engine every few hours, leagueinfo.ts). The board reaches
+   * three days ahead, so between rounds, and all through an international
+   * break, a competition's page had no games on it at all. These are plain
+   * fixtures: the analysis and the call open three days before kick-off.
+   */
+  const onBoard = new Set(fixtures.map((f) => Number(f.id)));
+  const nextList = (Array.isArray(d.next) ? d.next : []).filter((g) => !onBoard.has(Number(g.id)));
+  const lastList = (Array.isArray(d.last) ? d.last : []).filter((g) => !onBoard.has(Number(g.id)));
+  const listRow = (g) => `
+    <div class="fl-row">
+      <span class="fl-when">${esc(g.score ? dayLabel(g.kickoff) : kickoffLabel(g.kickoff))}</span>
+      <span class="fl-side home"><span>${esc(g.home)}</span>${crest(g.home, 'sm', g.home_id)}</span>
+      <span class="fl-mid">${g.score ? `<b>${esc(g.score[0])}–${esc(g.score[1])}</b>` : 'v'}</span>
+      <span class="fl-side away">${crest(g.away, 'sm', g.away_id)}<span>${esc(g.away)}</span></span>
+    </div>`;
+  const listBlock = (title, list, note = '') => list.length ? `
+    <section class="league-block fixture-list">
+      <h3 class="league-head">${esc(title)} <span class="count">${list.length}</span></h3>
+      ${list.map(listRow).join('')}
+      ${note ? `<p class="fl-note">${esc(note)}</p>` : ''}
+    </section>` : '';
+
+  const gamesHTML = (ahead.length ? [...byDay.entries()].map(([day, list]) => `
     <section class="league-block">
       <h3 class="league-head">${esc(day)} <span class="count">${list.length}</span></h3>
       ${list.map(rowHTML).join('')}
-    </section>`).join('') : '';
+    </section>`).join('') : '')
+    + listBlock(ahead.length ? 'Further ahead' : 'Coming up', nextList,
+      'The analysis and the call open three days before kick-off.');
 
-  const resultsHTML = played.length ? `
+  const resultsHTML = (played.length ? `
     <section class="league-block">
       <h3 class="league-head">Played <span class="count">${played.length}</span></h3>
       ${played.map(rowHTML).join('')}
-    </section>` : '';
+    </section>` : '') + listBlock(played.length ? 'Earlier' : 'Latest results', lastList);
 
   // The table. Columns the feed did not fill are left out rather than shown
   // as noughts.
@@ -5033,7 +5059,8 @@ async function viewLeague(id, params = new URLSearchParams()) {
 
   const sub = [
     lg.country,
-    ahead.length ? `${ahead.length} game${ahead.length === 1 ? '' : 's'} coming up` : null,
+    ahead.length ? `${ahead.length} game${ahead.length === 1 ? '' : 's'} coming up`
+      : nextList[0] ? `Next games ${kickoffLabel(nextList[0].kickoff).replace(/^(Today|Tomorrow)/, (w) => w.toLowerCase())}` : null,
     calls ? `${calls} call${calls === 1 ? '' : 's'}` : null,
     live ? `${live} on now` : null,
   ].filter(Boolean).join('. ');
@@ -7303,6 +7330,9 @@ function renderRegion() {
  * and a live line only while matches are being played.
  */
 const FOOT_COMPS = 7;
+// The big competitions have their own fixed links (index.html); "This week"
+// lists the others that have something on.
+const FOOT_FIXED = new Set([7, 1, 3, 4, 5, 6]);
 const FOOT_NEXT = 5;
 function paintFooter(board) {
   const fixtures = board?.fixtures ?? [];
@@ -7331,14 +7361,14 @@ function paintFooter(board) {
     e.rank = Math.min(e.rank, f.rank ?? 6);
     by.set(k, e);
   }
-  const comps = [...by.values()].filter((e) => e.name)
+  const comps = [...by.values()].filter((e) => e.name && !FOOT_FIXED.has(Number(e.id)))
     .sort((a, b) => b.live - a.live || a.rank - b.rank || b.n - a.n).slice(0, FOOT_COMPS);
   const compsEl = document.getElementById('foot-comps');
-  if (compsEl) {
-    compsEl.innerHTML = comps.length
-      ? comps.map((e) => `<a class="foot-comp" href="${e.id ? `#/league/${encodeURIComponent(e.id)}` : esc(boardHash(state.hours, e.name))}">
-          <span>${esc(e.name)}</span><small>${e.live ? 'on now' : plural(e.n, 'game', 'games')}</small></a>`).join('')
-      : '<p class="foot-quiet">Nothing kicks off in the next three days.</p>';
+  const compsCol = document.getElementById('foot-comps-col');
+  if (compsEl && compsCol) {
+    compsCol.hidden = !comps.length;
+    compsEl.innerHTML = comps.map((e) => `<a class="foot-comp" href="${e.id ? `#/league/${encodeURIComponent(e.id)}` : esc(boardHash(state.hours, e.name))}">
+          <span>${esc(e.name)}</span><small>${e.live ? 'on now' : plural(e.n, 'game', 'games')}</small></a>`).join('');
   }
 
   // The next kick-offs we have a call on, then the biggest games coming, so

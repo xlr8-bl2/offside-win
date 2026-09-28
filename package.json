@@ -33,6 +33,7 @@
     "lab:odds": "npm -w engine run lab:odds",
     "lab:tune": "npm -w engine run lab:tune",
     "lab:backfill": "npm -w engine run lab:backfill",
+    "leagues:refresh": "npm -w engine run leagues:refresh",
     "trace": "npm -w engine run trace",
     "backtest": "npm -w engine run backtest",
     "migrate": "npm -w engine run migrate",
