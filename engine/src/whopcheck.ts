@@ -45,6 +45,20 @@ export async function whopCheck(): Promise<void> {
   try { me = JSON.parse(mt); } catch { /* not json */ }
   console.log('membership read:', m.status, m.status === 403 ? 'NOT ALLOWED - add member:basic:read' : 'allowed', JSON.stringify(me?.error ?? '').slice(0, 200));
 
+  // Can the key stop a membership renewing? Switching plans stops the old
+  // one at the end of what was paid for before the new one is bought, so
+  // nobody is charged for two. A made-up id cancels nothing: 403 means the
+  // key lacks membership:cancel, 404 means it has it.
+  const c = await fetch('https://api.whop.com/api/v1/memberships/mem_doesnotexist000/cancel', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${key}`, accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({ cancellation_mode: 'at_period_end' }),
+  });
+  const ct = await c.text();
+  let ce: any = null;
+  try { ce = JSON.parse(ct); } catch { /* not json */ }
+  console.log('membership cancel:', c.status, c.status === 403 ? 'NOT ALLOWED - add membership:cancel' : 'allowed', JSON.stringify(ce?.error ?? '').slice(0, 200));
+
   // Can the key take a payment from our own checkout page? A made-up token
   // cannot charge anything: 403 means the key lacks payment:charge (the page
   // then falls back to Whop's checkout), anything else means it has it.

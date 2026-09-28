@@ -55,6 +55,7 @@ export async function sendMail(env: MailEnv, to: string, mail: Mail): Promise<bo
 const PLAN_NAME: Record<string, string> = {
   matchday: 'Matchday pass',
   monthly: 'Monthly membership',
+  quarter: '3-month membership',
   season: 'Season ticket',
 };
 

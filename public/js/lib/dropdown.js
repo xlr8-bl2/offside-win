@@ -63,7 +63,7 @@ function open(select, button) {
     ${searchable ? `<div class="dd-find"><input type="search" autocomplete="off" spellcheck="false"
       placeholder="Type to find" aria-label="Find in ${esc(title.toLowerCase())}" aria-controls="${id}"></div>` : ''}
     <ul class="dd-list" id="${id}" role="listbox" tabindex="-1" aria-label="${esc(title)}">
-      ${opts.map((o, i) => `<li class="dd-opt" role="option" id="${id}-${i}" data-i="${i}" aria-selected="${o.selected}">
+      ${opts.map((o, i) => `<li class="dd-opt${o.dataset.dim !== undefined ? ' is-dim' : ''}" role="option" id="${id}-${i}" data-i="${i}" aria-selected="${o.selected}">
         ${TICK}<span class="dd-text">${esc(o.textContent.trim())}</span>${o.dataset.meta ? `<small>${esc(o.dataset.meta)}</small>` : ''}</li>`).join('')}
     </ul>
     <p class="dd-none" hidden>Nothing matches that.</p>`;
@@ -96,7 +96,7 @@ function open(select, button) {
     const changed = select.value !== o.value;
     select.value = o.value;
     sync(select, button);
-    close({ focus: true });
+    close({ focus: !sheet });
     if (changed) select.dispatchEvent(new Event('change', { bubbles: true }));
   };
 
@@ -127,13 +127,14 @@ function open(select, button) {
   setActive(items[active]);
   // A keyboard on a phone would cover the list it is meant to narrow, so the
   // box waits for a tap there; on a laptop typing goes straight into it.
-  (find && !sheet ? find : list).focus({ preventScroll: true });
+  if (sheet) { panel.tabIndex = -1; panel.focus({ preventScroll: true }); }
+  else (find ?? list).focus({ preventScroll: true });
 
   list.addEventListener('click', (e) => { const li = e.target.closest('.dd-opt'); if (li) choose(li); });
   list.addEventListener('pointermove', (e) => { const li = e.target.closest('.dd-opt'); if (li && !li.classList.contains('is-active')) setActive(li, false); });
-  panel.querySelector('.dd-x')?.addEventListener('click', () => close({ focus: true }));
+  panel.querySelector('.dd-x')?.addEventListener('click', () => close({ focus: !sheet }));
   if (sheet) dragToClose(panel, list, scrim);
-  scrim?.addEventListener('click', () => close({ focus: true }));
+  scrim?.addEventListener('click', () => close());
 
   find?.addEventListener('input', () => {
     const q = find.value.trim().toLowerCase();
@@ -204,7 +205,7 @@ function dragToClose(panel, list, scrim) {
     if (dy > panel.offsetHeight * 0.3 || (dy > 24 && speed > 0.5)) {
       panel.style.transform = 'translateY(100%)';
       scrim.style.opacity = '0';
-      setTimeout(() => { if (openOne?.panel === panel) close({ focus: true }); }, reduce ? 0 : 190);
+      setTimeout(() => { if (openOne?.panel === panel) close(); }, reduce ? 0 : 190);
     } else {
       panel.style.transform = '';
       scrim.style.opacity = '';
@@ -270,8 +271,11 @@ export function enhanceSelect(select) {
   button.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); open(select, button); }
   });
-  // A page that sets the value itself (a reset, a saved choice) is followed.
+  // A page that sets the value itself (a reset, a saved choice, options
+  // rebuilt) is followed: 'change' when it says so, 'sync' when it only
+  // redrew the options.
   select.addEventListener('change', () => sync(select, button));
+  select.addEventListener('sync', () => sync(select, button));
   // A <label for> pointing at the hidden select opens this instead.
   if (select.id) for (const l of document.querySelectorAll(`label[for="${CSS.escape(select.id)}"]`)) {
     l.addEventListener('click', (e) => { e.preventDefault(); button.focus(); });

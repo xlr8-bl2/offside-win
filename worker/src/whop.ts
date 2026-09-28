@@ -199,6 +199,13 @@ export interface WhopCheckoutInput {
   plan: { id: string; name: string; amountMinor: number; currency: string; days: number; renews: boolean };
   user: { id: string; email: string | null };
   returnUrl: string;
+  /**
+   * Days before the first charge, for a reader switching plans: the days
+   * already paid for on the plan they are leaving. Nothing is charged at
+   * checkout and the new price starts when the old paid time runs out, so no
+   * day is paid for twice and none is lost.
+   */
+  trialDays?: number;
 }
 
 /**
@@ -229,13 +236,29 @@ export function inlinePlan(input: WhopCheckoutInput): Record<string, unknown> {
     visibility: 'hidden',
     product: { external_identifier: 'offside-win-membership', title: 'offside.win membership' },
     ...(plan.renews
-      ? { plan_type: 'renewal', billing_period: plan.days, renewal_price: price, initial_price: 0 }
+      ? { plan_type: 'renewal', billing_period: plan.days, renewal_price: price, initial_price: 0,
+          ...(input.trialDays && input.trialDays > 0 ? { trial_period_days: Math.round(input.trialDays) } : {}) }
       : { plan_type: 'one_time', initial_price: price, expiration_days: plan.days }),
   };
 }
 
 const whopMetadata = (input: WhopCheckoutInput) =>
-  ({ user_id: input.user.id, plan: input.plan.id, ...(input.user.email ? { email: input.user.email } : {}) });
+  ({ user_id: input.user.id, plan: input.plan.id, ...(input.user.email ? { email: input.user.email } : {}),
+     ...(input.trialDays ? { switch: '1' } : {}) });
+
+/**
+ * Stop a membership renewing: it keeps running to the end of what was paid
+ * for and then ends. Returns the HTTP status, so a key without
+ * membership:cancel (403) can be told apart from a membership already gone.
+ */
+export async function cancelWhopAtPeriodEnd(apiKey: string, membershipId: string, base = 'https://api.whop.com/api/v1'): Promise<number> {
+  const res = await fetch(`${base}/memberships/${encodeURIComponent(membershipId)}/cancel`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ cancellation_mode: 'at_period_end' }),
+  });
+  return res.status;
+}
 
 /**
  * A payment on our own checkout page: the buyer's card, from Whop's payment

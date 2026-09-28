@@ -2463,17 +2463,19 @@ async function viewBoard(params = new URLSearchParams()) {
   // thing a reader would want to share -- "the La Liga card for the next two
   // days" -- was the one thing they could not.
   const hours = Number(params.get('hours'));
-  if ([24, 48, 72, 120, 240].includes(hours)) state.hours = hours;
-  else if (params.has('hours')) state.hours = 72;
-  if (params.has('league')) state.leagueName = params.get('league');
+  state.hours = [24, 48, 72, 120, 240].includes(hours) ? hours : 72;
+  // The address is the whole filter. A competition chosen earlier used to
+  // stay on invisibly, so "Picks" from the menu opened on one league's
+  // games with nothing on screen saying so.
+  state.leagueName = params.get('league') ?? '';
   if (params.has('when')) {
     const w = params.get('when');
     state.when = WHEN.some((x) => x.id === w) ? w : 'upcoming';
   }
 
-  app.innerHTML = `<div class="wrap section dense">
+  placeholder(`<div class="wrap section dense">
     <div class="rows">${'<div class="skeleton skeleton-row"></div>'.repeat(8)}</div>
-  </div>`;
+  </div>`);
   let board;
   try { board = await loadBoard(); } catch (err) {
     return errorState(err);
@@ -2509,8 +2511,19 @@ async function viewBoard(params = new URLSearchParams()) {
     if (k === 'upcoming' || k === 'off') return 'upcoming';
     return 'played';
   };
+  /*
+   * The counts on the tabs are for what the reader has chosen. They were
+   * for the whole board whatever the competition filter said, so "To play 1"
+   * sat over an empty page with one league picked, and the obvious reading
+   * was that the filters were broken.
+   */
+  const inLeague = (f) => !state.leagueName || f.league === state.leagueName;
   const counts = { upcoming: 0, live: 0, played: 0 };
-  for (const f of fixtures) counts[whenOf(f)]++;
+  const recount = () => {
+    for (const k of Object.keys(counts)) counts[k] = 0;
+    for (const f of fixtures) if (inLeague(f)) counts[whenOf(f)]++;
+  };
+  recount();
 
   /*
    * Land on a page with something on it.
@@ -2533,17 +2546,34 @@ async function viewBoard(params = new URLSearchParams()) {
    * satisfies all three. An address that names a tab is still obeyed; this
    * only decides where an unspecified board opens.
    */
-  if (!params.has('when')) {
-    const holds = (when) => fixtures.filter((f) =>
-      whenOf(f) === when
-      && (!state.leagueName || f.league === state.leagueName)).length;
-    const order = ['upcoming', 'live', 'played'];
-    state.when = order.find(holds)
-      ?? order.find((w) => counts[w])
-      ?? 'upcoming';
-  } else if (!counts[state.when]) {
-    state.when = counts.upcoming ? 'upcoming' : counts.live ? 'live' : 'played';
-  }
+  // An address that names a tab is obeyed even when the tab is empty: the
+  // empty page then says why and offers the way out, rather than the board
+  // quietly moving the reader somewhere they did not ask to go.
+  const ORDER = ['upcoming', 'live', 'played'];
+  if (!params.has('when')) state.when = ORDER.find((w) => counts[w]) ?? 'upcoming';
+
+  /*
+   * The competition list, for the tab being looked at: the ones with calls
+   * in it first, most first, each with its number; the rest after them,
+   * greyed, so a reader can see before choosing that a league has nothing
+   * here right now.
+   */
+  const leagueOptions = () => {
+    const n = new Map();
+    for (const f of fixtures) if (whenOf(f) === state.when) n.set(f.league, (n.get(f.league) ?? 0) + 1);
+    const names = [...new Set([...leagues, ...(state.leagueName ? [state.leagueName] : [])])]
+      .sort((a, b) => (n.get(b) ?? 0) - (n.get(a) ?? 0) || a.localeCompare(b));
+    const all = [...n.values()].reduce((a, b) => a + b, 0);
+    return `<option value="" data-meta="${all}"${state.leagueName ? '' : ' selected'}>All competitions</option>`
+      + names.map((l) => {
+        const c = n.get(l) ?? 0;
+        return `<option value="${esc(l)}"${l === state.leagueName ? ' selected' : ''} data-meta="${c}"${c ? '' : ' data-dim'}>${esc(l)}</option>`;
+      }).join('');
+  };
+  const WHEN_WORDS = { upcoming: 'still to play', live: 'being played', played: 'already played' };
+  const windowWords = () => (state.hours <= 48 ? `next ${state.hours} hours` : `next ${state.hours / 24} days`);
+  // Said once, under the bar, when the board moved the reader or a filter is on.
+  let moved = null;
 
   const kickoffs = fixtures.map((f) => f.kickoff).filter(Boolean);
   const furthest = kickoffs.length ? Math.max(...kickoffs) : null;
@@ -2583,14 +2613,11 @@ async function viewBoard(params = new URLSearchParams()) {
           ${[24, 48, 72, 120, 240].map((h) => `<option value="${h}"${h === state.hours ? ' selected' : ''}>${h <= 48 ? `Next ${h} hours` : `Next ${h / 24} days`}</option>`).join('')}
         </select>
         <select id="league-filter" aria-label="Competition" data-icon="cup" data-title="Competition">
-          <option value="">All competitions</option>
-          ${leagues.map((l) => {
-            const n = fixtures.filter((f) => f.league === l).length;
-            return `<option${l === state.leagueName ? ' selected' : ''} data-meta="${n}">${esc(l)}</option>`;
-          }).join('')}
+          ${leagueOptions()}
         </select>
       </div>
     </div>
+    <p class="board-note" id="board-note" hidden></p>
     <div class="rows" id="grid"></div>
     ${capped ? `<p class="board-foot">That is everything the board carries today.
       A longer window will not add to it until more fixtures are published.</p>` : ''}
@@ -2685,8 +2712,26 @@ async function viewBoard(params = new URLSearchParams()) {
     // And the competitions themselves lead with whoever is on next.
     const groupsSorted = [...groups.entries()].sort((a, b) => order(a[1].list[0], b[1].list[0]));
 
+    const note = document.getElementById('board-note');
+    if (state.leagueName) {
+      note.innerHTML = `${moved ? `${esc(state.leagueName)} has nothing ${esc(WHEN_WORDS[moved])}, so this is what it has ${esc(WHEN_WORDS[state.when])}. ` : `Only ${esc(state.leagueName)}. `}<button type="button" data-clear-league>Show every competition</button>`;
+      note.hidden = false;
+    } else {
+      note.hidden = true;
+    }
+
+    // Where else there is something, for the empty page's buttons.
+    const elsewhere = ORDER.filter((w) => w !== state.when && counts[w]);
     document.getElementById('grid').innerHTML =
-      shown.length
+      !shown.length && fixtures.length
+        ? `<div class="empty-state"><b>Nothing ${esc(WHEN_WORDS[state.when])}${state.leagueName ? ` from ${esc(state.leagueName)}` : ''} in the ${esc(windowWords())}</b>
+             <span>${state.leagueName ? 'Other competitions may have calls, or this one may have some in another tab.' : 'The board only carries games we have a call on.'}</span>
+             <p class="member-actions co-center">
+               ${elsewhere.map((w) => `<button type="button" class="btn btn-primary" data-go-when="${w}">${esc(WHEN.find((x) => x.id === w).label)} (${counts[w]})</button>`).join('')}
+               ${state.leagueName ? '<button type="button" class="btn btn-ghost" data-clear-league>Every competition</button>' : ''}
+               ${!elsewhere.length && state.hours < 240 ? '<button type="button" class="btn btn-ghost" data-hours="240">Look ten days ahead</button>' : ''}
+             </p></div>`
+      : shown.length
         ? groupsSorted.map(([name, g]) => `
             <section class="league-block">
               <h3 class="league-head">
@@ -2709,29 +2754,67 @@ async function viewBoard(params = new URLSearchParams()) {
                <a class="btn btn-primary" href="#/results">See the results</a></div>`;
   };
 
-  for (const b of app.querySelectorAll('.when-tabs button')) {
-    b.onclick = () => {
-      state.when = b.dataset.when;
-      history.replaceState(null, '', boardHash());
-      for (const o of app.querySelectorAll('.when-tabs button')) {
-        o.classList.toggle('on', o === b);
-        o.setAttribute('aria-selected', String(o === b));
-      }
-      paint();
-    };
-  }
-  // A longer window needs the board fetched again, so it goes through the
-  // router. A league is a filter over what is already here, so it repaints in
-  // place and only rewrites the address -- replaceState does not fire
-  // hashchange, which is what keeps that from turning into a second render.
-  document.getElementById('hours-filter').onchange = (e) => {
-    location.hash = boardHash(Number(e.target.value), state.leagueName);
+  const tabs = () => app.querySelectorAll('.when-tabs button');
+  const leagueSel = document.getElementById('league-filter');
+  const syncTabs = () => {
+    for (const b of tabs()) {
+      const on = b.dataset.when === state.when;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-selected', String(on));
+      b.querySelector('i').textContent = counts[b.dataset.when] ?? 0;
+      b.disabled = !counts[b.dataset.when] && !on;
+    }
+    // The competition list is counted for this tab, so it follows it.
+    leagueSel.innerHTML = leagueOptions();
+    leagueSel.dispatchEvent(new Event('sync'));
   };
-  document.getElementById('league-filter').onchange = (e) => {
-    state.leagueName = e.target.value;
+  const setWhen = (w) => {
+    state.when = w;
+    moved = null;
     history.replaceState(null, '', boardHash());
+    syncTabs();
     paint();
   };
+  for (const b of tabs()) b.onclick = () => setWhen(b.dataset.when);
+
+  // A longer window needs the board fetched again, so it goes through the
+  // router, and it keeps the tab and the competition exactly as they were:
+  // it used to drop the tab, and the board reopened wherever the first
+  // game happened to be, which was usually "Played".
+  const reopen = (h) => {
+    const q = new URLSearchParams();
+    if (h !== 72) q.set('hours', String(h));
+    if (state.leagueName) q.set('league', state.leagueName);
+    q.set('when', state.when);
+    location.hash = `#/board?${q}`;
+  };
+  document.getElementById('hours-filter').onchange = (e) => reopen(Number(e.target.value));
+
+  // A competition is a filter over what is already here, so it repaints in
+  // place. If it has nothing in the tab being looked at, the board goes to
+  // the tab where it does, and the note under the bar says so.
+  const setLeague = (name) => {
+    state.leagueName = name;
+    recount();
+    moved = null;
+    if (!counts[state.when]) {
+      const to = ORDER.find((w) => counts[w]);
+      if (to) { moved = state.when; state.when = to; }
+    }
+    history.replaceState(null, '', boardHash());
+    syncTabs();
+    paint();
+  };
+  leagueSel.onchange = (e) => setLeague(e.target.value);
+
+  app.querySelector('.section.dense').addEventListener('click', (e) => {
+    if (e.target.closest('[data-clear-league]')) setLeague('');
+    const w = e.target.closest('[data-go-when]');
+    if (w) setWhen(w.dataset.goWhen);
+    const h = e.target.closest('[data-hours]');
+    if (h) reopen(Number(h.dataset.hours));
+  });
+  syncTabs();
   paint();
 
   /*
@@ -2754,13 +2837,8 @@ async function viewBoard(params = new URLSearchParams()) {
       const fresh = await loadBoard({ fresh: true });
       fixtures.length = 0;
       fixtures.push(...(fresh.fixtures ?? []));
-      for (const k of Object.keys(counts)) counts[k] = 0;
-      for (const f of fixtures) counts[whenOf(f)]++;
-      for (const b of app.querySelectorAll('.when-tabs button')) {
-        const i = b.querySelector('i');
-        if (i) i.textContent = counts[b.dataset.when] ?? 0;
-        b.disabled = !counts[b.dataset.when];
-      }
+      recount();
+      syncTabs();
       paint();
     } catch { /* a failed refresh leaves the last good board on screen */ }
   };
@@ -4854,9 +4932,9 @@ function recapCardHTML(x) {
  * the rest follow under their own heading rather than being mixed in.
  */
 async function viewLeagues() {
-  app.innerHTML = `<div class="wrap section dense">
+  placeholder(`<div class="wrap section dense">
     <div class="rows">${'<div class="skeleton skeleton-row"></div>'.repeat(8)}</div>
-  </div>`;
+  </div>`);
   const board = state.board ?? (await loadBoard());
   const fixtures = board.fixtures ?? [];
 
@@ -5416,6 +5494,7 @@ async function openEmbeddedCheckout(plan, consent) {
 const PLAN_LINE = {
   matchday: 'Matchday pass: seven days, one payment',
   monthly: 'Monthly membership: renews each month',
+  quarter: '3-month membership: renews every three months',
   season: 'Season ticket: renews each year',
 };
 
@@ -5483,7 +5562,7 @@ async function viewPricing() {
   const free = freeId ? await getJSON(`/api/fixture/${encodeURIComponent(freeId)}`).catch(() => null) : null;
   const money = (minor, cur) => new Intl.NumberFormat('en-GB', { style: 'currency', currency: cur || 'GBP', minimumFractionDigits: minor % 100 ? 2 : 0 }).format(minor / 100);
   const byId = Object.fromEntries((plans ?? []).map((p) => [p.id, p]));
-  const order = ['matchday', 'monthly', 'season'].filter((id) => byId[id]);
+  const order = ['matchday', 'monthly', 'quarter'].filter((id) => byId[id]);
 
   /*
    * What each plan is, in the reader's words.
@@ -5495,19 +5574,27 @@ async function viewPricing() {
   const COPY = {
     matchday: { blurb: 'A weekend of every call. One payment, seven days, and it stops.', renews: false, tag: null },
     monthly:  { blurb: 'All the calls, all month. Renews each month until you cancel.', renews: true, tag: 'Most take this' },
-    season:   { blurb: 'The whole season for less than half the monthly price.', renews: true, tag: 'Best value' },
+    quarter:  { blurb: 'Three months of every call, cheaper by the month. Renews every three months until you cancel.', renews: true, tag: 'Best value' },
   };
-  const perMonth = (p) => p.days >= 300 ? money(Math.round(p.amount_minor / 12), p.currency) + ' a month' : null;
+  const perMonth = (p) => p.days >= 80 ? money(Math.round(p.amount_minor / Math.round(p.days / 30)), p.currency) + ' a month' : null;
+  const per = (p) => (p.days === 7 ? 'for the week' : p.days >= 300 ? 'a year' : p.days >= 80 ? 'for three months' : 'a month');
 
   // What each plan's button does for this reader: buy it, or, for a member,
   // nothing (it is theirs), an upgrade, or a switch that has to wait for the
   // renewing plan to be cancelled so nobody pays for two.
+  /*
+   * A member moving plans keeps every day already paid for: the new plan
+   * starts now and its first payment is on the date the old one was paid
+   * to. So the button says so, and the card says when the new price begins.
+   */
   const buttonFor = (id, p) => {
-    const buy = p.days === 7 ? 'Get the weekend' : p.days >= 300 ? 'Get the season' : 'Join for the month';
+    const buy = p.days === 7 ? 'Get the weekend' : p.days >= 80 ? 'Get three months' : 'Join for the month';
     if (!mine) return { label: buy };
     if (mine.plan_id === id) return { label: 'Your plan', mine: true };
-    if (renewsItself(mine)) return { label: 'Switch to this', quiet: true };
-    return { label: mine.plan_id === 'matchday' ? `Upgrade to ${p.days >= 300 ? 'the season' : 'monthly'}` : buy };
+    if (id === 'matchday') return { label: 'Covered by yours', covered: true };
+    const up = p.days > (PLAN_DAYS[mine.plan_id] ?? 0);
+    return { label: up ? 'Upgrade' : 'Switch', quiet: !up,
+      note: `Nothing to pay today. ${money(p.amount_minor, p.currency)} from ${shortDate(mine.expires_at)}, when what you have paid for runs out.` };
   };
 
   app.innerHTML = `
@@ -5541,12 +5628,15 @@ async function viewPricing() {
           ${b.mine ? `<span class="plan-tagline is-mine">Yours to ${esc(shortDate(mine.expires_at))}</span>` : !mine && c.tag ? `<span class="plan-tagline">${esc(c.tag)}</span>` : ''}
           <h2>${esc(p.name)}</h2>
           <p class="plan-price"><b>${esc(money(p.amount_minor, p.currency))}</b>
-            <span>${p.days === 7 ? 'for the week' : p.days >= 300 ? 'a year' : 'a month'}</span></p>
+            <span>${esc(per(p))}</span></p>
           ${perMonth(p) ? `<p class="plan-per">${esc(perMonth(p))}</p>` : ''}
           <p class="plan-blurb">${esc(c.blurb)}</p>
+          ${b.note ? `<p class="plan-switch">${esc(b.note)}</p>` : ''}
           ${b.mine
             ? `<a class="btn btn-ghost btn-lg" href="#/account?tab=membership">Your plan</a>`
-            : `<button class="btn ${b.quiet ? 'btn-ghost' : lead ? 'btn-accent' : 'btn-primary'} btn-lg" data-buy="${esc(id)}">${esc(b.label)}</button>`}
+            : b.covered
+              ? `<button class="btn btn-ghost btn-lg" type="button" disabled>${esc(b.label)}</button>`
+              : `<button class="btn ${b.quiet ? 'btn-ghost' : lead || !mine ? 'btn-accent' : 'btn-primary'} btn-lg" data-buy="${esc(id)}">${esc(b.label)}</button>`}
         </section>`;
       }).join('')}
     </div>
@@ -5580,6 +5670,10 @@ async function viewPricing() {
         and prices come in, so a call can change, or come down if we stop backing it. At kick-off it closes:
         calls are not sold once a match is on, and each one is graded at full time. The bet slip is the
         exception: once it is posted it stays exactly as it is, and it is graded on the legs it went up with.</p>
+      <p><b>Moving plans is fair.</b> Go from a matchday pass to a month, or from a month to three,
+        whenever you like. Every day you have already paid for is kept: the new plan starts straight
+        away, nothing is charged until your paid time runs out, and the plan you leave stops renewing.
+        You never pay twice for the same day.</p>
       <p><b>It starts when you pay.</b> At checkout you ask for access straight away, which ends the 14-day
         right to cancel for a change of mind. If anything of ours fails, you get it put right or your money back.
         <a href="#/legal/refunds">How refunds work</a>. Cancel a renewing plan in one tap;
@@ -5631,6 +5725,11 @@ const PLAN_TERMS = {
     runs: 'A month from when you pay.',
     after: 'Then the same again each month until you cancel. Cancel in one tap and keep it to the end of the month you paid for.',
   },
+  quarter: {
+    per: 'every three months',
+    runs: 'Three months from when you pay.',
+    after: 'Then the same again every three months until you cancel. Cancel in one tap and keep it to the end of the three months you paid for.',
+  },
   season: {
     per: 'a year',
     runs: 'A year from when you pay.',
@@ -5646,17 +5745,7 @@ const PLAN_TERMS = {
 function checkoutBlock(m, planId) {
   if (!m) return null;
   const have = PLAN_NAME[m.plan_id] ?? 'membership';
-  const want = PLAN_NAME[planId] ?? 'plan';
   const until = longDate(m.expires_at);
-  const manage = whopManageUrl(m);
-  if (m.plan_id === planId && m.plan_id === 'matchday') {
-    return {
-      title: 'Your matchday pass is still running',
-      body: `It runs to ${until}. Buy the next one once it has finished, or go monthly now and carry on without a gap.`,
-      actions: `<a class="btn btn-accent" href="#/checkout?plan=monthly">Go monthly</a>
-        <a class="btn btn-ghost" href="#/board">Today's calls</a>`,
-    };
-  }
   if (m.plan_id === planId) {
     return {
       title: 'This one is already yours',
@@ -5665,11 +5754,11 @@ function checkoutBlock(m, planId) {
         <a class="btn btn-ghost" href="#/account?tab=membership">Your membership</a>`,
     };
   }
-  if (renewsItself(m)) {
+  if (planId === 'matchday') {
     return {
-      title: `You are on the ${have.toLowerCase()}`,
-      body: `It renews by itself, so paying here as well would charge you for both. To switch, cancel it first${manage ? ' on Whop' : ''}: you keep it to ${until}. Then come back for the ${want.toLowerCase()}.`,
-      actions: `${manage ? `<a class="btn btn-primary" href="${esc(manage)}" target="_blank" rel="noopener noreferrer">Cancel on Whop</a>` : `<a class="btn btn-primary" href="#/account?tab=membership">Your membership</a>`}
+      title: 'Your membership already covers this week',
+      body: `Your ${have.toLowerCase()} runs to ${until}. A matchday pass on top would buy nothing.`,
+      actions: `<a class="btn btn-accent" href="#/board">Today's calls</a>
         <a class="btn btn-ghost" href="#/pricing">Back to the plans</a>`,
     };
   }
@@ -5723,6 +5812,8 @@ async function viewCheckout(params) {
   const price = money(plan.amount_minor, plan.currency);
   const name = PLAN_NAME[planId] ?? plan.name;
   const renews = planId !== 'matchday';
+  // A member moving plans: nothing today, the new price from their paid-to date.
+  const moving = m && !block ? m : null;
 
   app.innerHTML = `
   <div class="wrap section checkout" data-plan="${esc(planId)}">
@@ -5730,8 +5821,14 @@ async function viewCheckout(params) {
     <div class="co-grid">
       <section class="co-summary" aria-labelledby="co-name">
         <h1 class="display" id="co-name">${esc(name)}</h1>
+        ${moving ? `
+        <p class="co-price"><b>${esc(money(0, plan.currency))}</b> <span>today</span></p>
+        <p class="co-terms"><b>Then ${esc(price)} ${esc(terms.per)}, from ${esc(longDate(moving.expires_at))}.</b>
+          Your ${esc((PLAN_NAME[moving.plan_id] ?? 'membership').toLowerCase())} is paid up to that date, so the ${esc(name.toLowerCase())}
+          starts now and its first payment waits until then. The ${esc((PLAN_NAME[moving.plan_id] ?? 'membership').toLowerCase())} stops renewing.
+          You keep every day you have paid for and pay for none twice.</p>` : `
         <p class="co-price"><b>${esc(price)}</b> <span>${esc(terms.per)}</span></p>
-        <p class="co-terms"><b>${esc(terms.runs)}</b> ${esc(terms.after)}</p>
+        <p class="co-terms"><b>${esc(terms.runs)}</b> ${esc(terms.after)}</p>`}
         <ul class="ticks co-ticks">
           <li><b>Every open call</b> the moment it goes up</li>
           <li><b>The bet slip's legs</b>, before the first one kicks off</li>
@@ -5751,9 +5848,10 @@ async function viewCheckout(params) {
         <h2 class="co-pay-title" id="co-pay-title">${esc(block.title)}</h2>
         <p class="co-block">${esc(block.body)}</p>
         <div class="member-actions">${block.actions}</div>` : `
-        <h2 class="co-pay-title" id="co-pay-title">Pay by card, Apple Pay or Google Pay</h2>
-        ${m ? `<p class="co-upgrade">Your ${esc((PLAN_NAME[m.plan_id] ?? 'membership').toLowerCase())} runs to
-          ${esc(longDate(m.expires_at))}. The ${esc(name.toLowerCase())} starts as soon as you pay.</p>` : ''}
+        <h2 class="co-pay-title" id="co-pay-title">${moving ? `Switch to the ${esc(name.toLowerCase())}` : 'Pay by card, Apple Pay or Google Pay'}</h2>
+        ${moving ? `<p class="co-upgrade">Nothing is charged today. Whop keeps your card for the first payment on
+          ${esc(longDate(moving.expires_at))}. If you stop before the end, your ${esc((PLAN_NAME[moving.plan_id] ?? 'membership').toLowerCase())}
+          simply runs to that date.</p>` : ''}
         <fieldset class="co-agree">
           <legend class="visually-hidden">Before you pay</legend>
           <label class="co-check"><input type="checkbox" id="co-adult">
@@ -5769,7 +5867,7 @@ async function viewCheckout(params) {
         </div>
         <button class="btn btn-accent btn-lg co-button" id="co-pay" type="button" disabled>Pay ${esc(price)}</button>
         <p class="co-error" role="alert" hidden></p>
-        <p class="co-note">${renews ? `By paying you agree to ${esc(price)} ${esc(terms.per)} until you cancel. ` : ''}Card details go
+        <p class="co-note">${renews ? `By ${moving ? 'switching' : 'paying'} you agree to ${esc(price)} ${esc(terms.per)}${moving ? ` from ${esc(shortDate(moving.expires_at))}` : ''} until you cancel. ` : ''}Card details go
           straight to Whop, who take the payment. They never reach offside.win.</p>`}
       </section>
     </div>
@@ -5813,6 +5911,11 @@ async function viewCheckout(params) {
     idle();
   };
 
+  if (moving) {
+    await fallback();
+    button.textContent = 'Switch, nothing to pay today';
+    return;
+  }
   if (!cfg?.whopAccount) { await fallback(); return; }
   try {
     state.payHandle = await mountPayment({
@@ -6010,7 +6113,8 @@ async function viewSignin() {
   };
 }
 
-const PLAN_NAME = { matchday: 'Matchday pass', monthly: 'Monthly membership', season: 'Season ticket' };
+const PLAN_NAME = { matchday: 'Matchday pass', monthly: 'Monthly membership', quarter: '3-month membership', season: 'Season ticket' };
+const PLAN_DAYS = { matchday: 7, monthly: 30, quarter: 90, season: 365 };
 
 /*
  * The account.
@@ -6217,6 +6321,11 @@ async function viewAccount() {
           : `<a class="btn btn-accent" href="#/pricing">See the plans</a>`}
       </div>
     </section>
+    ${active && m.plan_id !== 'quarter' && m.card_brand !== 'complimentary' ? `
+    <a class="acct-upgrade" href="#/checkout?plan=${m.plan_id === 'matchday' ? 'monthly' : 'quarter'}">
+      <b>${m.plan_id === 'matchday' ? 'Carry on by the month' : 'Go to three months and pay less a month'}</b>
+      <span>Nothing to pay today: the new plan's first payment is on ${esc(when(m.expires_at))}, when what you have paid for runs out.</span>
+    </a>` : active ? `<p class="acct-line"><a href="#/pricing">Change plan</a></p>` : ''}
     ${account.receipts?.length ? `
       <h2 class="acct-sub">Payments</h2>
       <table class="tbl"><tbody>
@@ -6973,8 +7082,31 @@ document.addEventListener('click', (e) => {
  * where the page already has content and swapping it for a skeleton for one
  * frame is exactly the flash this is meant to remove.
  */
+/*
+ * And only when the wait is long enough to notice. It used to go up at once
+ * on every page change, so even a page that was ready in a tenth of a second
+ * went old page, then a short grey skeleton with the footer pulled up under
+ * it, then the real page pushing everything back down: a flicker and a jump
+ * on every tap. Now the old page stays until the new one is ready, and the
+ * skeleton is only shown if that takes more than a quarter of a second. Any
+ * write the view makes first cancels it.
+ */
+let placeholderTimer = null;
 function placeholder(html) {
-  if (!state.soft) app.innerHTML = html;
+  if (state.soft) return;
+  clearTimeout(placeholderTimer);
+  placeholderTimer = setTimeout(() => {
+    placeholderTimer = null;
+    app.innerHTML = html;
+    jumpTo(0);
+  }, 400);
+}
+new MutationObserver(() => { if (placeholderTimer) { clearTimeout(placeholderTimer); placeholderTimer = null; } })
+  .observe(app, { childList: true });
+
+/** Straight there. Never animated: a page change is not a scroll. */
+function jumpTo(y) {
+  window.scrollTo({ top: y, left: 0, behavior: 'instant' });
 }
 
 async function route({ soft = false } = {}) {
@@ -7011,7 +7143,6 @@ async function route({ soft = false } = {}) {
   if (!soft) {
     document.getElementById('nav').classList.remove('open');
     document.getElementById('burger').setAttribute('aria-expanded', 'false');
-    window.scrollTo(0, 0);
   }
   try {
     await render(name, parts, params);
@@ -7041,7 +7172,16 @@ async function route({ soft = false } = {}) {
     const target = state.scrollTarget;
     state.scrollTarget = null;
     if (target && !soft && backTo === undefined) target.scrollIntoView({ block: 'center' });
-    else window.scrollTo(0, soft ? keepY : (backTo ?? 0));
+    else jumpTo(soft ? keepY : (backTo ?? 0));
+    clearTimeout(placeholderTimer);
+    placeholderTimer = null;
+    // The new page arrives in one piece, with a short fade so the swap reads
+    // as a change of page and not as the old one breaking.
+    if (!soft) {
+      app.classList.remove('page-in');
+      void app.offsetWidth;
+      app.classList.add('page-in');
+    }
   }
 }
 
@@ -7313,8 +7453,12 @@ async function headerAuth() {
   }
   if (upgrade) {
     upgrade.hidden = member;
-    upgrade.textContent = user ? 'Upgrade' : 'Get the calls';
+    // The long words on a laptop, one word on a phone, where it sits in the
+    // bar in place of "Sign in" (which moves into the menu).
+    upgrade.innerHTML = user ? '<span>Upgrade</span>' : '<span class="ul-long">Get the calls</span><span class="ul-short">Join</span>';
   }
+  const navSignin = document.getElementById('nav-signin');
+  if (navSignin) navSignin.hidden = Boolean(user);
 }
 
 /**
