@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Offside.win: football predictions for today&#39;s biggest games</title>
-<meta name="description" content="Football predictions for today&#39;s biggest games across 88 leagues: our call on every match, the reason behind it, team news, and every result, the misses included.">
+<meta name="description" content="Football predictions for today&#39;s biggest games across 88 competitions: our call on every match, the reason behind it, team news, and every result, the misses included.">
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
 <meta name="application-name" content="Offside.win">
 <meta name="apple-mobile-web-app-title" content="Offside.win">
-<meta name="theme-color" content="#0c0b09">
+<meta name="theme-color" content="#0a0a0c">
 <meta name="color-scheme" content="dark">
 
 <!-- A shared link previewed as a blank card until now: no og:image, no card type. -->
@@ -22,14 +22,14 @@
 <meta property="og:site_name" content="Offside.win">
 <meta property="og:locale" content="en_GB">
 <meta property="og:title" content="Offside.win: football predictions for today&#39;s biggest games">
-<meta property="og:description" content="Football predictions for today&#39;s biggest games across 88 leagues: our call on every match, the reason behind it, team news, and every result, the misses included.">
+<meta property="og:description" content="Football predictions for today&#39;s biggest games across 88 competitions: our call on every match, the reason behind it, team news, and every result, the misses included.">
 <meta property="og:image" content="https://offside.win/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Offside.win: football predictions with the reason behind every call">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Offside.win: football predictions for today&#39;s biggest games">
-<meta name="twitter:description" content="Football predictions for today&#39;s biggest games across 88 leagues: our call on every match, the reason behind it, team news, and every result, the misses included.">
+<meta name="twitter:description" content="Football predictions for today&#39;s biggest games across 88 competitions: our call on every match, the reason behind it, team news, and every result, the misses included.">
 <meta name="twitter:image" content="https://offside.win/og.png">
 
 <!-- Who the site is, for search engines: the WebSite name is what Google
@@ -84,13 +84,13 @@
       footer, where there is room for a symbol and no need for the name twice.
     -->
     <a class="brand" href="#/home" aria-label="offside.win, home">
-      <span class="wordmark" aria-hidden="true">off<i class="wm-line"></i>side<span class="wm-tld">.win</span></span>
+      <span class="wordmark" aria-hidden="true">offside<i class="wm-ball"></i><span class="wm-tld">win</span></span>
     </a>
     <nav class="nav" id="nav" aria-label="Main">
-      <a href="#/home" data-route="home">Home</a>
-      <a href="#/board" data-route="board">Picks</a>
-      <a href="#/leagues" data-route="leagues">Leagues</a>
-      <a href="#/results" data-route="results">Results</a>
+      <a href="#/home" data-route="home"><span class="nl">Home</span><small>The biggest games today</small></a>
+      <a href="#/board" data-route="board"><span class="nl">Picks</span><small>Every game we cover, and our call on it</small></a>
+      <a href="#/leagues" data-route="leagues"><span class="nl">Competitions</span><small>Tables, fixtures and results</small></a>
+      <a href="#/results" data-route="results"><span class="nl">Results</span><small>Every call we have made, the misses too</small></a>
       <!--
         Membership, in the menu, because on a phone there was no route to it at
         all: the header's primary button is hidden under 560px, the menu had
@@ -99,7 +99,7 @@
         money. It is hidden above the burger breakpoint, where the button in
         the header already says it.
       -->
-      <a href="#/pricing" data-route="pricing" class="nav-only-menu" data-member-link>Membership</a>
+      <a href="#/pricing" data-route="pricing" class="nav-only-menu" data-member-link><span class="nl">Membership</span><small>Every call, every day</small></a>
     </nav>
     <!--
       The plan state, in the header, on every page.
@@ -118,8 +118,10 @@
            on a wide screen, none of which was where to go next. The tally is
            on the front page; membership shows as a ring on the reader's own
            picture. -->
-      <a class="search-link" id="search-link" href="#/search" aria-label="Search games">
+      <a class="nav-live" id="nav-live" href="#/board?when=live" hidden><i></i><span>Live</span> <b></b></a>
+      <a class="search-link" id="search-link" href="#/search" aria-label="Search games" aria-keyshortcuts="/">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+        <span>Search</span><kbd aria-hidden="true">/</kbd>
       </a>
       <a class="btn btn-ghost btn-sm" id="account-link" href="#/signin">Sign in</a>
       <a class="btn btn-primary btn-sm" id="upgrade-link" href="#/pricing">Get the calls</a>
@@ -139,33 +141,50 @@
 </div></main>
 
 <footer class="foot">
+  <!--
+    Every link here goes somewhere with something on it, at any time of
+    year. The big competitions are fixed, and go to their own pages, which
+    always carry the table, the scorers, the next games and the latest
+    results (leagueinfo.ts). They used to open the board filtered to that
+    competition, which was empty for two weeks of every international break.
+    "This week" and "Next up" are drawn from the board: the other
+    competitions with games in the next three days, and the next kick-offs.
+  -->
   <div class="foot-top">
     <div class="foot-cta">
-      <p>the whole record is public</p>
-      <h2 class="display">Tonight's are on the board.</h2>
+      <p id="foot-kicker">every call, and how it went</p>
+      <h2 class="display" id="foot-line">The whole record is public.</h2>
     </div>
-    <a class="btn btn-primary btn-lg" href="#/board">See today's board</a>
+    <a class="btn btn-primary btn-lg" id="foot-cta-btn" href="#/board">See the board</a>
   </div>
   <div class="foot-inner">
     <div class="foot-cols">
       <div class="foot-col">
         <h4>Picks</h4>
+        <a href="#/board" id="foot-live" hidden></a>
         <a href="#/board">Today's board</a>
-        <a href="#/leagues">By league</a>
+        <a href="#/slip">Bet slip</a>
         <a href="#/results">Results</a>
+        <a href="#/search">Find a game</a>
         <a href="#/pricing" data-member-link>Membership</a>
       </div>
       <div class="foot-col">
-        <!-- Every one of these used to be a bare #/board, so four links went to
-             the same unfiltered page and the headings were decoration. The
-             board reads `league` from the query string, so they can just say
-             what they mean. -->
         <h4>Competitions</h4>
-        <a href="#/board?league=Premier%20League">Premier League</a>
-        <a href="#/board?league=La%20Liga">La Liga</a>
-        <a href="#/board?league=Serie%20A">Serie A</a>
-        <a href="#/board?league=Bundesliga">Bundesliga</a>
-        <a href="#/leagues">All 88 leagues</a>
+        <a href="#/league/7">Champions League</a>
+        <a href="#/league/1">Premier League</a>
+        <a href="#/league/3">La Liga</a>
+        <a href="#/league/4">Serie A</a>
+        <a href="#/league/5">Bundesliga</a>
+        <a href="#/league/6">Ligue 1</a>
+        <a href="#/leagues" class="foot-all">All 88 competitions</a>
+      </div>
+      <div class="foot-col" id="foot-comps-col" hidden>
+        <h4>This week</h4>
+        <div id="foot-comps"></div>
+      </div>
+      <div class="foot-col foot-col-next" id="foot-next-col" hidden>
+        <h4>Next up</h4>
+        <div id="foot-next"></div>
       </div>
       <div class="foot-col">
         <h4>Legal</h4>
@@ -177,8 +196,19 @@
         <a href="#/legal/responsible">Responsible gambling</a>
         <a href="#/legal/contact">Contact</a>
       </div>
-      <div class="foot-col">
-        <h4>Follow</h4>
+    </div>
+    <div class="foot-base">
+      <div class="foot-about-block">
+        <a class="brand foot-brand" href="#/home" aria-label="offside.win, home">
+          <span class="wordmark" aria-hidden="true">offside<i class="wm-ball"></i><span class="wm-tld">win</span></span>
+        </a>
+        <!-- What the site is, in the page itself rather than only in what the
+             script draws: search engines and Google's brand verification read
+             this without running anything. -->
+        <p class="foot-about">offside.win publishes analysis of the biggest football matches, a call on each
+          one with the reason behind it, and every result afterwards, the misses included.</p>
+      </div>
+      <div class="foot-follow">
         <div class="socials">
           <a href="https://x.com/offsidewin" target="_blank" rel="noopener noreferrer" aria-label="X">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.24 2.25h3.31l-7.23 8.26 8.5 11.24h-6.66l-5.22-6.82-5.96 6.82H1.67l7.73-8.84L1.25 2.25h6.83l4.71 6.23zm-1.16 17.52h1.83L7.02 4.13H5.06z"/></svg></a>
@@ -189,17 +219,9 @@
           <a href="https://youtube.com/@offsidewin" target="_blank" rel="noopener noreferrer" aria-label="YouTube">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M23 12s0-3.7-.47-5.47a2.86 2.86 0 0 0-2-2C18.75 4 12 4 12 4s-6.75 0-8.53.5a2.86 2.86 0 0 0-2 2.03C1 8.3 1 12 1 12s0 3.7.47 5.47a2.86 2.86 0 0 0 2 2C5.25 20 12 20 12 20s6.75 0 8.53-.5a2.86 2.86 0 0 0 2-2.03C23 15.7 23 12 23 12zM9.8 15.4V8.6l5.7 3.4z"/></svg></a>
         </div>
+        <p class="foot-follow-note">Calls, results and the odd rant, as they happen.</p>
       </div>
     </div>
-    <div class="foot-brand">
-      <svg class="brand-symbol" viewBox="480 288 578 462" aria-hidden="true"><clipPath id="footc"><circle cx="946" cy="583" r="97"/></clipPath><clipPath id="footk"><polygon points="916.3,466 1083,466 1083,700 789.4,700"/></clipPath> <path d="M 699 368.969 C 622.149 376.503, 554.702 422.767, 516.720 494 C 480.503 561.921, 490.986 625.681, 543.799 658.704 C 582.904 683.156, 643.733 685.647, 693.718 664.844 C 700.296 662.106, 701.188 661.381, 703.774 656.670 C 705.335 653.826, 715.862 634.850, 727.168 614.500 C 738.475 594.150, 752.685 568.500, 758.748 557.500 C 772.399 532.732, 802.995 477.400, 815.977 454 C 821.317 444.375, 827.830 432.542, 830.449 427.704 L 835.212 418.908 829.308 411.704 C 812.558 391.265, 784.245 376.389, 751 370.558 C 739.966 368.623, 711.424 367.751, 699 368.969 M 689.303 435.990 C 632.321 444.052, 581.689 496.517, 578.412 550.896 C 576.120 588.928, 600.593 613, 641.549 613 C 672.131 613, 699.727 601.820, 726.044 578.770 C 769.671 540.559, 782.539 482.354, 753.729 453.544 C 739.739 439.554, 713.892 432.512, 689.303 435.990 " style="fill:var(--chalk)" fill-rule="evenodd"/> <path d="M 939.7 309.0 L 981.9 309.0 L 763.6 711.7 Q 753.1 731.0 731.1 731.0 L 688.9 731.0 L 907.2 328.3 Q 917.7 309.0 939.7 309.0 Z" style="fill:var(--floodlight)"/> <g clip-path="url(#footk)"><circle cx="946" cy="583" r="97" style="fill:var(--chalk)"/><g clip-path="url(#footc)"><path d="M 1044.6 528.1 L 1040.9 524.3 L 1037.0 520.7 L 1032.8 517.1 L 1028.3 513.7 L 1023.6 510.5 L 1018.7 507.5 L 1013.7 504.7 L 1008.6 502.2 L 1006.7 504.9 L 1004.5 507.9 L 1002.2 511.1 L 999.7 514.5 L 997.0 518.1 L 994.3 521.9 L 991.4 525.7 L 988.5 529.7 L 991.8 534.6 L 995.1 539.8 L 998.3 545.1 L 1001.4 550.5 L 1004.3 556.0 L 1007.0 561.6 L 1009.6 567.1 L 1012.0 572.6 L 1016.9 572.4 L 1021.8 572.2 L 1026.5 572.0 L 1031.1 571.9 L 1035.4 571.8 L 1039.4 571.7 L 1043.2 571.7 L 1046.6 571.6 L 1047.3 566.0 L 1047.7 560.4 L 1047.8 554.8 L 1047.7 549.2 L 1047.3 543.7 L 1046.6 538.3 L 1045.7 533.1 Z M 871.9 565.7 L 876.7 566.0 L 881.8 566.4 L 887.1 566.8 L 892.5 567.2 L 898.1 567.7 L 903.9 568.2 L 909.6 568.8 L 915.4 569.3 L 918.2 564.0 L 921.2 558.6 L 924.3 553.3 L 927.4 548.0 L 930.6 542.8 L 933.8 537.7 L 937.0 532.8 L 940.2 528.1 L 936.6 523.9 L 933.0 519.8 L 929.3 515.8 L 925.7 512.0 L 922.1 508.4 L 918.7 505.0 L 915.3 501.8 L 912.0 498.9 L 906.4 501.1 L 900.8 503.5 L 895.2 506.2 L 889.8 509.0 L 884.5 512.1 L 879.4 515.3 L 874.5 518.7 L 869.8 522.2 L 869.4 527.1 L 869.2 532.3 L 869.1 537.6 L 869.3 543.1 L 869.6 548.7 L 870.2 554.4 L 871.0 560.1 Z M 954.8 677.5 L 960.2 675.4 L 965.6 673.0 L 971.1 670.4 L 976.5 667.6 L 981.9 664.5 L 987.1 661.2 L 992.1 657.8 L 997.0 654.2 L 996.2 649.8 L 995.3 645.1 L 994.2 640.2 L 993.0 635.1 L 991.7 629.9 L 990.3 624.6 L 988.8 619.3 L 987.2 613.9 L 981.4 614.0 L 975.5 614.0 L 969.5 613.9 L 963.4 613.7 L 957.2 613.5 L 951.0 613.1 L 944.9 612.7 L 938.9 612.3 L 936.3 617.5 L 933.7 622.7 L 931.1 627.9 L 928.5 632.9 L 926.0 637.9 L 923.5 642.7 L 921.1 647.2 L 918.8 651.6 L 923.1 655.4 L 927.5 659.2 L 932.1 662.8 L 936.6 666.2 L 941.2 669.4 L 945.8 672.4 L 950.3 675.1 Z M 867.8 670.2 L 868.0 668.2 L 868.5 665.9 L 869.2 663.4 L 870.0 660.7 L 871.1 657.7 L 872.3 654.6 L 873.8 651.3 L 875.4 647.9 L 871.8 643.1 L 868.3 638.1 L 865.0 632.8 L 861.9 627.4 L 859.0 621.9 L 856.4 616.3 L 854.0 610.6 L 851.9 605.0 L 848.2 604.7 L 844.8 604.3 L 841.6 603.8 L 838.6 603.3 L 836.0 602.8 L 833.6 602.1 L 831.5 601.5 L 829.8 600.8 L 830.0 606.0 L 830.5 611.3 L 831.3 616.6 L 832.4 621.7 L 833.8 626.8 L 835.5 631.8 L 837.4 636.5 L 839.6 641.1 L 842.2 645.3 L 845.1 649.4 L 848.3 653.4 L 851.8 657.2 L 855.5 660.8 L 859.4 664.2 L 863.5 667.4 Z" style="fill:var(--stand)"/></g></g></svg>
-      <span class="wordmark" aria-label="offside.win">off<i class="wm-line"></i>side<span class="wm-tld">.win</span></span>
-    </div>
-    <!-- What the site is, in the page itself rather than only in what the
-         script draws: search engines and Google's brand verification read
-         this without running anything. -->
-    <p class="foot-about">offside.win publishes analysis of the biggest football matches, a call on each
-      one with the reason behind it, and every result afterwards, the misses included.</p>
     <div class="foot-stats" id="foot-stats"></div>
     <!--
       Where the reader is, because it decides which bookmaker gets named beside
@@ -208,10 +230,13 @@
       one tap.
     -->
     <div class="region-pick" id="region-pick"></div>
-    <p class="foot-note">
-      For information only. Nothing here is a promise of profit, and no pick is advice to place a bet.
-      18+. <a href="https://www.begambleaware.org" rel="noopener noreferrer" target="_blank">BeGambleAware.org</a>
-    </p>
+    <div class="foot-legal">
+      <p class="foot-note">
+        For information only. Nothing here is a promise of profit, and no pick is advice to place a bet.
+        18+. <a href="https://www.begambleaware.org" rel="noopener noreferrer" target="_blank">BeGambleAware.org</a>
+      </p>
+      <p class="foot-copy">© <span id="foot-year">2026</span> offside.win</p>
+    </div>
   </div>
 </footer>
 

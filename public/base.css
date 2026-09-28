@@ -299,7 +299,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   top: 0;
   z-index: var(--z-header);
   background: var(--pitch);
-  background: color-mix(in srgb, var(--pitch) 88%, transparent);
+  background: color-mix(in srgb, var(--pitch) 86%, transparent);
   backdrop-filter: saturate(160%) blur(14px);
   -webkit-backdrop-filter: saturate(160%) blur(14px);
   border-bottom: var(--border) solid var(--hairline);
@@ -312,92 +312,69 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 }
 
 /*
- * Three tracks, so the rail is centred on the page rather than on whatever is
- * left over.
+ * The bar: the name and the sections on the left, reading as one line, and
+ * what the reader does (live games, search, their account, the membership)
+ * on the right.
  *
- * It was a flex row with `margin-inline: auto` on the rail, which centres it
- * between the mark and the controls -- and those are not the same width, so
- * the rail sat seventy-four pixels left of the middle of the page at 1440.
- * Equal outer tracks put it dead centre and hold it there as the controls
- * change width, which they do: the plan tag appears on sign-in and the
- * primary button disappears on a small screen.
+ * The sections used to sit in a grey trough dead centre with the current one
+ * filled white: a segmented control, which is what every dashboard kit ships
+ * and which put the sections as far from the name as the bar allowed. Now they
+ * follow the name, and the current one is marked the way a pitch is: a violet
+ * line on the bar's bottom edge, under the word.
  */
 .top-inner {
   max-width: var(--maxw);
   margin-inline: auto;
   min-height: var(--header-h);
-  padding: var(--space-2) var(--gutter);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  padding: 0 var(--gutter);
+  display: flex;
   align-items: center;
-  gap: var(--space-5);
+  gap: var(--space-7);
 }
-.top-inner .brand { justify-self: start; }
-.top-inner .top-right { justify-self: end; }
 
 .brand { display: inline-flex; align-items: center; flex: none; }
 /*
- * The wordmark: the offside line drawn through the name.
+ * The wordmark: "offside", a violet ball for the full stop, "win" quieter.
  *
- * Three marks preceded it. Three diagonal strokes said nothing. A raised
- * linesman's flag read as an icon rather than a name. A hand-drawn ring
- * standing in for the "o" was the telestrator, which is the product's voice
- * but not its subject, and a circle among condensed capitals read as a
- * stray "O".
- *
- * The subject is the call, and the purest picture of a call in football is
- * the line: the one the broadcaster draws across the pitch to show whether a
- * forward was level. Here it is drawn through the word itself, between "off"
- * and "side", in the one colour on the site that belongs to us, running a
- * little past the capitals top and bottom the way the broadcast line runs
- * off the players. The mark (see .mark and public/icon.svg) is the same
- * idea as a symbol: a ball, the line through it, and the sliver of the ball
- * past the line in violet.
- *
- * Set in the display face at its heaviest, tracked a touch open because Big
- * Shoulders at 800 closes up at small sizes. ".win" drops to the quiet
- * colour: it is the address, not the name.
+ * It used to draw the broadcaster's offside line through the word in the
+ * condensed display face ("off|side"), which read as a cursor or a typo,
+ * and sat oddly beside a symbol that drew the same line again. The name is
+ * now set plainly in the UI face at its heaviest, tracked tight so it holds
+ * together as one word, and the one bit of character is the ball. The icon
+ * (public/icon.svg) is the same idea: an "o" and the ball.
  */
 .wordmark {
   display: inline-flex;
   align-items: baseline;
-  font-family: var(--display);
-  font-weight: var(--weight-black);
-  font-size: var(--text-xl);
+  font-family: var(--body);
+  font-weight: var(--weight-bold);
+  font-size: 1.5rem;
   line-height: 1;
-  letter-spacing: 0.012em;
+  letter-spacing: -0.05em;
   color: var(--chalk);
   white-space: nowrap;
 }
-.wm-line {
-  align-self: stretch;
-  width: max(2px, 0.075em);
-  margin: -0.14em 0.07em -0.1em 0.075em;
-  border-radius: 1px;
+/* The full stop is the ball: round, violet, sitting on the line. */
+.wm-ball {
+  display: inline-block;
+  width: 0.24em;
+  height: 0.24em;
+  margin: 0 0.05em 0 0.07em;
+  border-radius: 50%;
   background: var(--floodlight-hi);
+  transition: transform var(--dur-fast) var(--ease-out);
 }
-.wm-tld { color: var(--chalk-3); letter-spacing: 0.005em; }
-.brand:hover .wm-line { background: var(--floodlight); }
+.wm-tld { color: var(--chalk-3); }
+.brand:hover .wm-ball { transform: translateY(-0.12em); }
+@media (prefers-reduced-motion: reduce) { .brand:hover .wm-ball { transform: none; } }
 
-/* The mark, where there is room for a symbol: the footer, the icons. */
-.brand-symbol { width: auto; height: 36px; aspect-ratio: 578 / 462; flex: none; color: var(--chalk); }
-
-/*
- * A pill rail, with the current route as a filled pill.
- *
- * The reference puts its navigation in a single rounded trough and fills the
- * active item solid — light pill, dark label — rather than underlining it. It
- * reads as a control rather than as a list of links, which is what a product's
- * navigation should look like, and it survives being three items or eight.
- */
 .nav {
   display: flex;
-  align-items: center;
-  gap: 2px;
-  flex: 0 0 auto;
-  padding: 3px;
-  border-radius: var(--radius);
-  background: rgba(247, 244, 237, 0.05);
+  align-items: stretch;
+  align-self: stretch;
+  gap: var(--space-2);
+  flex: 1 1 auto;
+  min-width: 0;
 }
 /* Above the burger breakpoint the header button already says this, so the nav
    would otherwise carry it twice. Declared here, before the media query that
@@ -405,28 +382,99 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
    would win whatever the width. */
 .nav a.nav-only-menu { display: none; }
 .nav a {
-  padding: var(--space-2) var(--space-5);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-4);
+  font-size: var(--text-md);
   font-weight: var(--weight-medium);
-  color: var(--chalk-2);
+  color: var(--chalk-3);
   white-space: nowrap;
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  transition: color var(--dur-fast) var(--ease-out);
 }
-.nav a:hover { color: var(--chalk); background: rgba(247, 244, 237, 0.06); }
-.nav a.on { color: var(--pitch); background: var(--chalk); }
+/* What each section holds: said in the phone's menu, where there is room. */
+.nav a small { display: none; }
+.nav a::after {
+  content: '';
+  position: absolute;
+  left: var(--space-4); right: var(--space-4); bottom: calc(var(--border) * -1);
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--floodlight);
+  transform: scaleX(0);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.nav a:hover { color: var(--chalk); }
+.nav a.on { color: var(--chalk); }
+.nav a.on::after { transform: scaleX(1); }
+.nav a:focus-visible { outline: none; color: var(--chalk); box-shadow: inset var(--focus-ring); border-radius: var(--radius-sm); }
 
-.top-right { display: flex; align-items: center; gap: var(--tap-gap); flex: none; }
-/* Search, one tap from every page. */
-.search-link {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: var(--tap); height: var(--tap); border-radius: 50%; color: var(--chalk-2);
+.top-right { display: flex; align-items: center; gap: var(--space-3); flex: none; margin-left: auto; }
+
+/*
+ * Games being played right now, in the bar on every page: a red dot and how
+ * many, straight to them. Hidden when nothing is on, so it never points at an
+ * empty list. Painted by paintNavLive() from the board and the live poll.
+ */
+.nav-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-4) 0 var(--space-3);
+  border: var(--border) solid rgba(203, 49, 49, 0.45);
+  border-radius: var(--radius-pill);
+  background: rgba(203, 49, 49, 0.1);
+  color: var(--chalk);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
-.search-link svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-.search-link:hover, .search-link[aria-current="page"] { color: var(--chalk); background: var(--terrace); }
+.nav-live[hidden] { display: none; }
+.nav-live i {
+  width: 7px; height: 7px; flex: none;
+  border-radius: 50%;
+  background: var(--lost);
+  animation: ping 1.8s var(--ease-in-out) infinite;
+}
+.nav-live:hover { background: rgba(203, 49, 49, 0.18); border-color: var(--lost); }
+.nav-live:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/*
+ * Search, one tap from every page. On a wide screen it looks like the box it
+ * opens, so it reads as "search" before anyone hovers it, and says the key
+ * that opens it; on a narrow one it is the glass alone.
+ */
+.search-link {
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  height: 36px; padding: 0 var(--space-3) 0 var(--space-4);
+  border: var(--border) solid var(--rule);
+  border-radius: var(--radius);
+  background: rgba(244, 246, 250, 0.03);
+  color: var(--chalk-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.search-link svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.search-link span { min-width: 9.5em; }
+.search-link kbd {
+  display: inline-grid; place-items: center;
+  min-width: 20px; height: 20px; padding: 0 5px;
+  border: var(--border) solid var(--rule);
+  border-radius: var(--radius-sm);
+  font: inherit; font-size: var(--text-2xs); color: var(--chalk-3);
+}
+.search-link:hover, .search-link[aria-current="page"] { color: var(--chalk); border-color: var(--rule-firm); }
 .search-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
 /* The header's right side is flex: none, so its buttons can hold one line. */
 .top-right .btn { white-space: nowrap; }
+/* Signing in is a word, not a box: the one box on the bar is the offer. */
+.top-right #account-link.btn { border-color: transparent; color: var(--chalk-2); padding-inline: var(--space-4); }
+.top-right #account-link.btn:hover { color: var(--chalk); background: rgba(244, 246, 250, 0.06); }
+.top-right .btn-sm { min-height: 36px; }
 
 /*
  * What tier the reader is on, stated rather than implied.
@@ -482,6 +530,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   width: var(--tap);
   height: var(--tap);
   margin-right: calc(var(--space-3) * -1);
+  border-radius: var(--radius);
 }
 .burger span {
   display: block;
@@ -489,63 +538,116 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   margin: 3px 0;
   border-radius: var(--radius-pill);
   background: var(--chalk);
-  transition: transform var(--dur-fast) var(--ease-out), opacity var(--dur-fast) linear;
+  transition: transform var(--dur-fast) var(--ease-out), opacity var(--dur-fast) linear, width var(--dur-fast) var(--ease-out);
 }
+/* Three lines of different lengths, so it reads as a menu and not a grille. */
+.burger span:nth-child(2) { width: 12px; margin-left: 6px; }
 .burger[aria-expanded="true"] span:nth-child(1) { transform: translateY(5px) rotate(45deg); }
 .burger[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
 .burger[aria-expanded="true"] span:nth-child(3) { transform: translateY(-5px) rotate(-45deg); }
+.burger:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
+/* Between a laptop and a tablet the box gives way to the glass. */
+@media (max-width: 1180px) {
+  .search-link { width: 36px; padding: 0; justify-content: center; border-color: transparent; background: none; }
+  .search-link span, .search-link kbd { display: none; }
+  .search-link svg { width: 20px; height: 20px; }
+  .top-inner { gap: var(--space-5); }
+}
+
+/*
+ * The menu on a phone: a sheet under the bar, the rest of the page dimmed
+ * behind it. Each section says what is in it, the current one carries the
+ * violet line down its edge, and the membership sits at the foot as the offer
+ * it is. It used to be a list with the current item filled white and written
+ * in violet, which measured 2.9:1.
+ */
 @media (max-width: 940px) {
   .nav {
-    position: fixed;
-    inset: calc(var(--header-h) + env(safe-area-inset-top, 0px)) 0 auto 0;
+    position: absolute;
+    top: 100%; left: 0; right: 0;
+    max-height: calc(100dvh - var(--header-h) - env(safe-area-inset-top, 0px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
     flex-direction: column;
     align-items: stretch;
-    gap: 0;
-    padding: var(--space-4) var(--gutter) var(--space-7);
+    gap: var(--space-1);
+    padding: var(--space-4) var(--gutter) calc(var(--space-7) + env(safe-area-inset-bottom, 0px));
     background: var(--stand);
     border-bottom: var(--border) solid var(--rule);
-    box-shadow: var(--elev-3);
+    box-shadow: var(--elev-3), 0 0 0 100vmax rgba(0, 0, 0, 0.55);
+    clip-path: inset(0 0 -100vmax 0);
   }
   .nav:not(.open) { display: none; }
-  /*
-   * With the rail behind the burger there is no element between the mark and
-   * the controls, so the `margin-inline: auto` that centres the rail on a
-   * laptop goes with it -- and the whole header collapsed to the left edge
-   * with a third of the bar empty beside it. The controls take the free space
-   * instead, which is where they sit at every other width anyway.
-   */
-  /* Two tracks with the rail gone, so the controls still end up on the right
-     edge rather than hard against the mark. */
-  .top-inner { grid-template-columns: minmax(0, 1fr) auto; }
-  .nav a { padding: var(--space-4); font-size: var(--text-lg); }
-  .nav a.on::after { display: none; }
-  .nav a.on { color: var(--floodlight-hi); }
+  .nav.open { animation: menu-in var(--dur-fast) var(--ease-out); }
+  .nav a {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: var(--space-4) var(--space-5);
+    border-radius: var(--radius);
+    font-family: var(--display);
+    font-size: 1.75rem;
+    font-weight: var(--weight-bold);
+    line-height: 1;
+    color: var(--chalk-2);
+  }
+  .nav a small {
+    display: block;
+    font-family: var(--body);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-normal);
+    color: var(--chalk-3);
+  }
+  .nav a::after {
+    left: 0; right: auto; top: var(--space-4); bottom: var(--space-4);
+    width: 3px; height: auto;
+    border-radius: 0 2px 2px 0;
+    transform: scaleY(0);
+  }
+  .nav a:hover { background: var(--terrace); }
+  .nav a.on { color: var(--chalk); background: var(--terrace); }
+  .nav a.on::after { transform: scaleY(1); }
+  .nav a.nav-only-menu {
+    display: flex;
+    margin-top: var(--space-4);
+    background: var(--floodlight-dim);
+    border: var(--border) solid rgba(122, 90, 248, 0.4);
+    color: var(--chalk);
+  }
+  .nav a.nav-only-menu small { color: var(--chalk-2); }
+  .nav a.nav-only-menu::after { display: none; }
   .burger { display: flex; }
   .live { display: none; }
-  /* Only in the menu, and only where there is a menu. */
-  .nav a.nav-only-menu { display: block; color: var(--floodlight-hi); }
+  .top-right { min-width: 0; justify-content: flex-end; }
 }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-6px); } }
+@media (prefers-reduced-motion: reduce) { .nav.open { animation: none; } }
 @media (max-width: 560px) {
   .top-right .btn-primary { display: none; }
 }
 /*
- * The header on a phone: the name, the account button and the menu, and
- * nothing that can collide with them. The name keeps its own width (it used
- * to sit in a column allowed to shrink to nothing, so the tally and the plan
- * tag slid over the top of it), and the smaller items leave in order of how
- * little they are missed.
+ * The bar on a phone: the name, the live count, search, the account and the
+ * menu, and nothing that can collide with them. The smaller items leave in
+ * order of how little they are missed.
  */
-@media (max-width: 940px) {
-  .top-inner { grid-template-columns: auto minmax(0, 1fr); }
-  .top-right { min-width: 0; justify-content: flex-end; }
-}
 /* Scoped under .top-right so it outranks .tally further down this file. */
 @media (max-width: 680px) { .top-right .tally { display: none; } }
 @media (max-width: 440px) {
   .top-right .plan-tag { display: none; }
   .wordmark { font-size: 1.375rem; }
-  .top-right { gap: var(--space-3); }
+  .top-right { gap: var(--space-2); }
+  .nav-live { padding: 0 var(--space-3); }
+  .nav-live span { display: none; }
+}
+/* The smallest phones: the live count keeps its dot and gives up the number. */
+@media (max-width: 360px) {
+  .wordmark { font-size: 1.25rem; }
+  .top-inner { gap: var(--space-3); }
+  .top-right { gap: var(--space-1); }
+  .nav-live { width: 28px; padding: 0; justify-content: center; }
+  .nav-live b { display: none; }
+  .top-right #account-link.btn { padding-inline: var(--space-3); }
 }
 
 /* --------------------------------------------------------------- buttons */
@@ -689,7 +791,16 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 
 /* ---------------------------------------------------------------- footer */
 
-.foot { border-top: var(--border) solid var(--hairline); background: var(--stand); }
+/*
+ * The footer fades from the raised surface into the page colour, so it ends
+ * on the same colour as whatever a phone shows past the bottom of the page.
+ * It was a flat grey slab, and scrolling right to the end on a phone showed
+ * a band of darker page colour under it: the footer looked cut off.
+ */
+.foot {
+  border-top: var(--border) solid var(--hairline);
+  background: linear-gradient(to bottom, var(--stand), var(--pitch) 70%);
+}
 
 .foot-top {
   max-width: var(--maxw);
@@ -721,7 +832,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 }
 .foot-cols {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: 1fr 1.25fr 1.4fr 1fr 1fr;
   gap: var(--space-7);
   padding-bottom: var(--space-8);
   border-bottom: var(--border) solid var(--hairline);
@@ -766,10 +877,37 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .socials a:hover { color: var(--chalk); border-color: var(--rule-firm); }
 .socials svg { width: 15px; height: 15px; }
 
-.foot-brand { display: inline-flex; align-items: center; gap: var(--space-4); color: var(--chalk-2); }
+/* A competition with games coming, and how many. */
+.foot-col .foot-comp, .foot-col .foot-fx {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.foot-comp span, .foot-fx span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.foot-comp small { flex: none; font-size: var(--text-2xs); color: var(--chalk-3); font-variant-numeric: tabular-nums; }
+/* The next kick-offs: the time above the match, so a long name has the row. */
+.foot-col .foot-fx { flex-direction: column; align-items: flex-start; gap: 1px; }
+.foot-fx small { font-size: var(--text-2xs); color: var(--floodlight-hi); font-variant-numeric: tabular-nums; }
+.foot-fx span { max-width: 100%; }
+.foot-col .foot-all { margin-top: var(--space-2); color: var(--chalk); font-weight: var(--weight-medium); }
+.foot-quiet { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--chalk-3); }
+.foot-col #foot-live { display: flex; align-items: center; gap: var(--space-3); color: var(--chalk); }
+.foot-follow-note { margin: var(--space-4) 0 0; font-size: var(--text-xs); color: var(--chalk-3); max-width: 24ch; }
+
+.foot-base {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-8);
+}
+.foot-follow { display: grid; justify-items: end; }
+.foot-follow .foot-follow-note { text-align: right; }
+.foot-brand { display: inline-flex; align-items: center; }
 .foot-brand .wordmark { font-size: var(--text-2xl); }
-.foot-about { max-width: 60ch; margin: var(--space-4) 0 0; font-size: var(--text-sm); color: var(--chalk-3); }
-.foot-stats { display: flex; gap: var(--space-9); flex-wrap: wrap; }
+.foot-about { max-width: 56ch; margin: var(--space-4) 0 0; font-size: var(--text-sm); color: var(--chalk-3); }
+.foot-stats { display: grid; grid-template-columns: repeat(4, auto); gap: var(--space-4) var(--space-8); }
 .foot-stats div b {
   display: block;
   font-family: var(--display);
@@ -794,6 +932,16 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 }
 .region-pick b { color: var(--chalk-2); font-weight: var(--weight-medium); }
 
+.foot-legal {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4) var(--space-8);
+  flex-wrap: wrap;
+  padding-top: var(--space-6);
+  border-top: var(--border) solid var(--hairline);
+}
+.foot-copy { margin: 0; font-size: var(--text-xs); color: var(--chalk-3); }
 .foot-note {
   margin: 0;
   max-width: 76ch;
@@ -804,9 +952,18 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .foot-note a { color: var(--chalk-2); text-decoration: underline; text-underline-offset: 2px; }
 .foot-note a:hover { color: var(--chalk); }
 
+@media (max-width: 1080px) {
+  .foot-cols { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .foot-base { grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .foot-follow { justify-items: start; }
+  .foot-follow .foot-follow-note { text-align: left; }
+  .foot-stats { grid-template-columns: repeat(4, auto); justify-content: start; }
+}
 @media (max-width: 760px) {
-  .foot-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-6); }
-  .foot-stats { gap: var(--space-7); }
+  .foot-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-7) var(--space-6); }
+  /* The live lists get the full width on a phone: names are long. */
+  .foot-col-next, #foot-comps-col { grid-column: 1 / -1; }
+  .foot-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5) var(--space-6); }
 }
 
 /* ------------------------------------------------------------ utilities */

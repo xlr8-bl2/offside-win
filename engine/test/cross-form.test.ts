@@ -97,3 +97,9 @@ test('in the country\'s match the writer is told both, and a national side never
   assert.ok(facts.includes('Romelu Lukaku scored twice in five games at the World Cup in the summer'), all);
   assert.ok(!/paid|€/.test(all), 'no transfer fee against a national side');
 });
+
+test('the country is named even when the match table does not know the national team', () => {
+  const bare = new Map([...meta].map(([k, v]) => [k, { ...v, home: null, away: null }]));
+  const x = crossForm(rows, bare, { clubId: FENER, nationalId: BELGIUM, since, kickoff: at(2026, 10, 18), national: false, countryName: 'Belgium' });
+  assert.equal(x.country?.team, 'Belgium');
+});

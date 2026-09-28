@@ -400,6 +400,7 @@ async function liveTick({ force = false } = {}) {
         for (const [id, sig] of before) if (signature(id, live) !== sig) redraw = true;
         // Views that keep a read between routes get the new state too.
         for (const o of [state.board, state.hero, state.heroDetail]) if (o) withLive(o);
+        paintNavLive(state.board);
       }
     }
     if (detailDue && live.focus === focus) {
@@ -2039,6 +2040,9 @@ async function viewSearch(params = new URLSearchParams()) {
 
   const input = document.getElementById('search-q');
   const out = document.getElementById('search-out');
+  // Straight into the box with a keyboard and a mouse; on a phone the keyboard
+  // waits for a tap rather than covering the page on arrival.
+  if (!initial && matchMedia('(pointer: fine)').matches) input.focus({ preventScroll: true });
   let seq = 0;
   let timer = null;
 
@@ -2572,7 +2576,7 @@ async function viewBoard(params = new URLSearchParams()) {
           ${[24, 48, 72, 120, 240].map((h) => `<option value="${h}"${h === state.hours ? ' selected' : ''}>Next ${h}h</option>`).join('')}
         </select>
         <select id="league-filter" aria-label="League">
-          <option value="">All leagues</option>
+          <option value="">All competitions</option>
           ${leagues.map((l) => `<option${l === state.leagueName ? ' selected' : ''}>${esc(l)}</option>`).join('')}
         </select>
       </div>
@@ -4871,7 +4875,7 @@ async function viewLeagues() {
   app.innerHTML = `
   <div class="wrap section dense">
     <div class="page-head">
-      <h1 class="display xl">Leagues</h1>
+      <h1 class="display xl">Competitions</h1>
       <p class="page-sub">${all.length} ${all.length === 1 ? 'competition' : 'competitions'} on the board right now,
         out of 88 we cover. ${totalCalls
           ? `${totalCalls} ${totalCalls === 1 ? 'call' : 'calls'} between them.`
@@ -4928,17 +4932,43 @@ async function viewLeague(id, params = new URLSearchParams()) {
     if (!byDay.has(k)) byDay.set(k, []);
     byDay.get(k).push(f);
   }
-  const gamesHTML = ahead.length ? [...byDay.entries()].map(([day, list]) => `
+  /*
+   * Beyond the board: the competition's own fixture list and latest results
+   * (kept by the engine every few hours, leagueinfo.ts). The board reaches
+   * three days ahead, so between rounds, and all through an international
+   * break, a competition's page had no games on it at all. These are plain
+   * fixtures: the analysis and the call open three days before kick-off.
+   */
+  const onBoard = new Set(fixtures.map((f) => Number(f.id)));
+  const nextList = (Array.isArray(d.next) ? d.next : []).filter((g) => !onBoard.has(Number(g.id)));
+  const lastList = (Array.isArray(d.last) ? d.last : []).filter((g) => !onBoard.has(Number(g.id)));
+  const listRow = (g) => `
+    <div class="fl-row">
+      <span class="fl-when">${esc(g.score ? dayLabel(g.kickoff) : kickoffLabel(g.kickoff))}</span>
+      <span class="fl-side home"><span>${esc(g.home)}</span>${crest(g.home, 'sm', g.home_id)}</span>
+      <span class="fl-mid">${g.score ? `<b>${esc(g.score[0])}–${esc(g.score[1])}</b>` : 'v'}</span>
+      <span class="fl-side away">${crest(g.away, 'sm', g.away_id)}<span>${esc(g.away)}</span></span>
+    </div>`;
+  const listBlock = (title, list, note = '') => list.length ? `
+    <section class="league-block fixture-list">
+      <h3 class="league-head">${esc(title)} <span class="count">${list.length}</span></h3>
+      ${list.map(listRow).join('')}
+      ${note ? `<p class="fl-note">${esc(note)}</p>` : ''}
+    </section>` : '';
+
+  const gamesHTML = (ahead.length ? [...byDay.entries()].map(([day, list]) => `
     <section class="league-block">
       <h3 class="league-head">${esc(day)} <span class="count">${list.length}</span></h3>
       ${list.map(rowHTML).join('')}
-    </section>`).join('') : '';
+    </section>`).join('') : '')
+    + listBlock(ahead.length ? 'Further ahead' : 'Coming up', nextList,
+      'The analysis and the call open three days before kick-off.');
 
-  const resultsHTML = played.length ? `
+  const resultsHTML = (played.length ? `
     <section class="league-block">
       <h3 class="league-head">Played <span class="count">${played.length}</span></h3>
       ${played.map(rowHTML).join('')}
-    </section>` : '';
+    </section>` : '') + listBlock(played.length ? 'Earlier' : 'Latest results', lastList);
 
   // The table. Columns the feed did not fill are left out rather than shown
   // as noughts.
@@ -5033,7 +5063,8 @@ async function viewLeague(id, params = new URLSearchParams()) {
 
   const sub = [
     lg.country,
-    ahead.length ? `${ahead.length} game${ahead.length === 1 ? '' : 's'} coming up` : null,
+    ahead.length ? `${ahead.length} game${ahead.length === 1 ? '' : 's'} coming up`
+      : nextList[0] ? `Next games ${kickoffLabel(nextList[0].kickoff).replace(/^(Today|Tomorrow)/, (w) => w.toLowerCase())}` : null,
     calls ? `${calls} call${calls === 1 ? '' : 's'}` : null,
     live ? `${live} on now` : null,
   ].filter(Boolean).join('. ');
@@ -6978,6 +7009,7 @@ async function route({ soft = false } = {}) {
     state.soft = false;
     liveTick();
     playFlashes();
+    if (state.board) paintFooter(state.board);
     if (state.liveFixture) markLiveEvents(Number(state.liveFixture.id), document.getElementById('live-centre'));
     smartQuotes(app);
     crawlable(app);
@@ -7251,7 +7283,9 @@ async function headerAuth() {
   // member, and the plans for anyone else.
   for (const a of document.querySelectorAll('a[data-member-link]')) {
     const hash = member ? '#/account?tab=membership' : '#/pricing';
-    a.textContent = member ? 'Your membership' : 'Membership';
+    (a.querySelector('.nl') ?? a).textContent = member ? 'Your membership' : 'Membership';
+    const sub = a.querySelector('small');
+    if (sub) sub.textContent = member ? 'When it runs to, and your payments' : 'Every call, every day';
     if (a.dataset.hash) { a.dataset.hash = hash; a.setAttribute('href', member ? '/#/account?tab=membership' : '/pricing'); }
     else a.setAttribute('href', hash);
   }
@@ -7290,14 +7324,123 @@ function renderRegion() {
     : `<p>Prices shown from books that take customers in most countries.</p>`;
 }
 
+/*
+ * The footer, drawn from the board rather than typed in.
+ *
+ * It used to carry fixed links to the Premier League, La Liga, Serie A and
+ * the Bundesliga, a "88 leagues" that were really competitions, and "Tonight's
+ * are on the board" at five in the morning. During an international break the
+ * big leagues are two weeks from their next game and those links led to empty
+ * pages. Now every link goes somewhere with something on it: the competitions
+ * with games in the next three days, the next kick-offs we have a call on,
+ * and a live line only while matches are being played.
+ */
+const FOOT_COMPS = 7;
+// The big competitions have their own fixed links (index.html); "This week"
+// lists the others that have something on.
+const FOOT_FIXED = new Set([7, 1, 3, 4, 5, 6]);
+const FOOT_NEXT = 5;
+/* The live count in the bar: how many games on the board are being played. */
+function paintNavLive(board) {
+  const el = document.getElementById('nav-live');
+  if (!el) return;
+  const n = (board?.fixtures ?? []).filter((f) => matchState(f).kind === 'live').length;
+  el.hidden = !n;
+  if (!n) return;
+  el.querySelector('b').textContent = String(n);
+  el.setAttribute('aria-label', `${n} ${n === 1 ? 'game' : 'games'} being played now`);
+}
+
+function paintFooter(board) {
+  paintNavLive(board);
+  const fixtures = board?.fixtures ?? [];
+  if (!fixtures.length) return;
+  const now = Date.now() / 1000;
+  const live = fixtures.filter((f) => matchState(f).kind === 'live');
+  const soon = fixtures.filter((f) => matchState(f).kind === 'upcoming' && f.kickoff - now < 72 * 3600);
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+  const liveEl = document.getElementById('foot-live');
+  if (liveEl) {
+    liveEl.hidden = !live.length;
+    if (live.length) {
+      liveEl.href = '#/board?when=live';
+      liveEl.innerHTML = `<span class="live-badge"><i></i>Live</span> ${plural(live.length, 'match', 'matches')} on now`;
+    }
+  }
+
+  // Competitions with something on, biggest first, then busiest.
+  const by = new Map();
+  for (const f of [...live, ...soon]) {
+    const k = f.league_id ?? f.league;
+    const e = by.get(k) ?? { id: f.league_id, name: f.league ?? '', n: 0, live: 0, rank: f.rank ?? 6 };
+    e.n++;
+    if (matchState(f).kind === 'live') e.live++;
+    e.rank = Math.min(e.rank, f.rank ?? 6);
+    by.set(k, e);
+  }
+  const comps = [...by.values()].filter((e) => e.name && !FOOT_FIXED.has(Number(e.id)))
+    .sort((a, b) => b.live - a.live || a.rank - b.rank || b.n - a.n).slice(0, FOOT_COMPS);
+  const compsEl = document.getElementById('foot-comps');
+  const compsCol = document.getElementById('foot-comps-col');
+  if (compsEl && compsCol) {
+    compsCol.hidden = !comps.length;
+    compsEl.innerHTML = comps.map((e) => `<a class="foot-comp" href="${e.id ? `#/league/${encodeURIComponent(e.id)}` : esc(boardHash(state.hours, e.name))}">
+          <span>${esc(e.name)}</span><small>${e.live ? 'on now' : plural(e.n, 'game', 'games')}</small></a>`).join('');
+  }
+
+  // The next kick-offs we have a call on, then the biggest games coming, so
+  // the list is full without filling it with matches nobody came for.
+  const byTime = (a, b) => a.kickoff - b.kickoff;
+  const called = soon.filter(hasCall).sort(byTime);
+  const big = soon.filter((f) => !hasCall(f)).sort((a, b) => (a.rank ?? 6) - (b.rank ?? 6) || byTime(a, b));
+  const next = [...called, ...big].slice(0, FOOT_NEXT).sort(byTime);
+  const nextEl = document.getElementById('foot-next');
+  const nextCol = document.getElementById('foot-next-col');
+  if (nextEl && nextCol) {
+    nextCol.hidden = !next.length;
+    nextEl.innerHTML = next.map((f) => `<a class="foot-fx" href="#/fixture/${encodeURIComponent(f.id)}">
+        <small>${esc(kickoffLabel(f.kickoff))}</small><span>${esc(f.home)} v ${esc(f.away)}</span></a>`).join('');
+  }
+
+  // The band above: what is happening now, in one line.
+  const kicker = document.getElementById('foot-kicker');
+  const line = document.getElementById('foot-line');
+  const btn = document.getElementById('foot-cta-btn');
+  const day = new Date().toDateString();
+  const today = soon.filter((f) => hasCall(f) && new Date(f.kickoff * 1000).toDateString() === day).length;
+  if (kicker && line && btn) {
+    if (live.length) {
+      kicker.textContent = 'on right now';
+      line.textContent = `${plural(live.length, 'match', 'matches')} being played.`;
+      btn.textContent = 'Follow them live';
+      btn.setAttribute('href', '#/board?when=live');
+    } else if (today) {
+      kicker.textContent = 'the board is up';
+      line.textContent = `${plural(today, 'call', 'calls')} on today's games.`;
+      btn.textContent = "See today's board";
+      btn.setAttribute('href', '#/board');
+    } else if (next[0]) {
+      kicker.textContent = 'every call, and how it went';
+      line.textContent = `Next kick-off ${kickoffLabel(next[0].kickoff).replace(/^(Today|Tomorrow)/, (w) => w.toLowerCase())}.`;
+      btn.textContent = 'See the board';
+      btn.setAttribute('href', '#/board');
+    }
+  }
+
+  const stats = document.getElementById('foot-stats');
+  if (stats) {
+    stats.innerHTML = `
+      <div><b>88</b><span>Competitions we cover</span></div>
+      <div><b>${fixtures.length.toLocaleString()}</b><span>Games on the board</span></div>
+      <div><b>15 min</b><span>Between analysis updates</span></div>
+      <div><b>30 sec</b><span>Between live score updates</span></div>`;
+  }
+  const year = document.getElementById('foot-year');
+  if (year) year.textContent = String(new Date().getFullYear());
+}
+
 async function health() {
-  try {
-    const h = await getJSON('/api/health');
-    document.getElementById('foot-stats').innerHTML = `
-      <div><b>88</b><span>Leagues</span></div>
-      <div><b>${(h.fixtures ?? 0).toLocaleString()}</b><span>Games on the board</span></div>
-      <div><b>Every 15 min</b><span>Refreshed</span></div>`;
-  } catch { /* the dot stays grey, which is the honest state */ }
   // The header's tally, on every page. The board is only fetched for it where
   // a page has not already loaded one; the settled record is small.
   try {
@@ -7306,13 +7449,36 @@ async function health() {
       state.board ? state.board : loadBoard().catch(() => null),
     ]);
     paintTally(board?.fixtures ?? [], recent);
+    paintFooter(board);
   } catch { /* stays hidden */ }
 }
 
-document.getElementById('burger').onclick = (e) => {
-  const open = document.getElementById('nav').classList.toggle('open');
-  e.currentTarget.setAttribute('aria-expanded', String(open));
-};
+function setMenu(open) {
+  document.getElementById('nav').classList.toggle('open', open);
+  document.getElementById('burger').setAttribute('aria-expanded', String(open));
+}
+document.getElementById('burger').onclick = () => setMenu(!document.getElementById('nav').classList.contains('open'));
+// The page behind the open menu is dimmed; a tap on it closes the menu rather
+// than following whatever was underneath.
+document.addEventListener('click', (e) => {
+  if (!document.getElementById('nav').classList.contains('open')) return;
+  if (e.target.closest?.('#nav, #burger')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  setMenu(false);
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('nav').classList.contains('open')) {
+    setMenu(false);
+    document.getElementById('burger').focus();
+  }
+  // "/" opens search from anywhere but a field being typed in.
+  if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.target.closest?.('input, textarea, select, [contenteditable]')) {
+    e.preventDefault();
+    if (parseHash().parts[0] === 'search') document.getElementById('search-q')?.focus();
+    else location.hash = '#/search';
+  }
+});
 
 window.addEventListener('hashchange', route);
 // Back and forward between a match's real address (/match/…) and a hash

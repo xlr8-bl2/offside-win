@@ -249,6 +249,15 @@ const commands: Record<string, () => Promise<unknown>> = {
     await kvSetJSON('lab:tune', { at: Math.floor(Date.now() / 1000), ...report });
   },
 
+  // Every competition's table, scorers, next games and results, now rather
+  // than at the next three-hourly pass (leagueinfo.ts).
+  async 'leagues:refresh'() {
+    requireEnv();
+    await ensureSchema();
+    const { refreshLeagueInfo } = await import('./leagueinfo.ts');
+    await refreshLeagueInfo(Math.floor(Date.now() / 1000), true);
+  },
+
   async 'lab:backfill'() {
     requireEnv();
     await ensureSchema();
