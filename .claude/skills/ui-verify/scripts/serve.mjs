@@ -8,7 +8,7 @@
  *
  *   node serve.mjs                 # serve the real API
  *   FREE=1 node serve.mjs          # pass every response through the paywall
- *   LIVE_MOCK=1 node serve.mjs     # made-up matches in play, a postponement, a moved kick-off
+ *   LIVE_MOCK=1 node serve.mjs     # made-up matches that move on each poll: a goal, a restart, a red, full time
  *                                  # redaction, so you see what a signed-out
  *                                  # reader sees before the slate has run
  */
@@ -55,23 +55,32 @@ if (process.env.FREE) {
   redact = await import('/home/user/offside-win/engine/src/membership/redact.ts');
 }
 
-let mockTick = 0;
+let listTick = 0;
 let mockBoard = null;
+/*
+ * A story, one step per poll of /api/live, so the live layer's events can be
+ * watched: poll 1 sets the scene; poll 2 has a goal for the away side in the
+ * first match and the second match restarting after half time; poll 3 has a
+ * red card and then full time in the third.
+ */
+// Loaded up front, so the first poll is answered as quickly as the rest.
+if (process.env.LIVE_MOCK) mockBoard = await fetch(UP + '/api/board?hours=48').then((r) => r.json()).catch(() => null);
 async function liveMock(path) {
-  mockTick++;
+  if (path === '/api/live') listTick++;
   mockBoard ??= await fetch(UP + '/api/board?hours=48').then((r) => r.json()).catch(() => ({ fixtures: [] }));
   const now = Date.now() / 1000;
   const ahead = (mockBoard.fixtures ?? []).filter((f) => f.kickoff > now && (f.top_pick || f.locked));
   const [a, b, c, d, e] = ahead;
   const at = Math.floor(now);
+  const step = listTick;
   const m = (f, status, minute, score, ht = null) => f && ({
     id: f.id, league_id: f.league_id ?? null, league: f.league ?? null, home: f.home, away: f.away,
     home_id: f.home_id ?? null, away_id: f.away_id ?? null, kickoff: f.kickoff, status, minute, score, ht, pens: null,
   });
   const matches = [
-    m(a, '1st_half', 22 + mockTick, [1, 0]),
-    m(b, 'halftime', 45, [0, 0], [0, 0]),
-    m(c, '2nd_half', 70 + mockTick, [2, 1], [1, 1]),
+    m(a, '1st_half', 22 + step, step >= 2 ? [1, 1] : [1, 0]),
+    step >= 2 ? m(b, '2nd_half', 46, [0, 0], [0, 0]) : m(b, 'halftime', 45, [0, 0], [0, 0]),
+    step >= 3 ? m(c, 'finished', 90, [2, 1], [1, 1]) : m(c, '2nd_half', 70 + step, [2, 1], [1, 1]),
   ].filter(Boolean);
   const iso = (t) => new Date(t * 1000).toISOString();
   const changes = [
@@ -87,10 +96,11 @@ async function liveMock(path) {
     ...(match.score[1] ? [{ t: 'goal', side: 'away', minute: 40, player: 'D. Nine', kind: 'penalty', score: [1, 1] }] : []),
     ...(match.score[0] > 1 ? [{ t: 'goal', side: 'home', minute: 63, player: 'A. Striker', kind: 'regular', score: [2, 1] },
       { t: 'sub', side: 'away', minute: 66, in: 'E. Fresh', out: 'D. Nine' }] : []),
+    ...(match.score[0] > 1 && step >= 3 ? [{ t: 'card', side: 'away', minute: 72, player: 'F. Hothead', card: 'red', reason: 'Violent conduct' }] : []),
   ] : [];
   const stats = match ? {
-    home: { possession: 55 + (mockTick % 3), shots: 6 + mockTick, on_target: 3, corners: 4, fouls: 7, yellow: 0, offsides: 1, saves: 2, big_chances: 2 },
-    away: { possession: 45 - (mockTick % 3), shots: 4, on_target: 2, corners: 2, fouls: 9, yellow: 1, offsides: 0, saves: 2, big_chances: 1 },
+    home: { possession: 55 + (step % 3), shots: 6 + step, on_target: 3, corners: 4, fouls: 7, yellow: 0, offsides: 1, saves: 2, big_chances: 2 },
+    away: { possession: 45 - (step % 3), shots: 4, on_target: 2, corners: 2, fouls: 9, yellow: 1, offsides: 0, saves: 2, big_chances: 1 },
   } : null;
   return { enabled: true, at, match, report: { events, ht: match?.ht ?? null, stats } };
 }

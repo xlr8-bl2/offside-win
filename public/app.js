@@ -16,7 +16,7 @@ import { cleanProse } from './js/lib/vocabulary.js';
 import { LEGAL, SUPPORT_EMAIL, TERMS_VERSION, UPDATED as TERMS_DATE, legalHTML } from './js/lib/legal.js';
 import { mountPayment, openCheckout } from './js/lib/whop.js';
 import { absenceReason } from './js/lib/absence.js';
-import { eachFixture, fixtureIdOf, ingest, inPlayWindow, overlay, signature } from './js/lib/live.js';
+import { anchorClock, clockText, diffEvents, eachFixture, eventKey, fixtureIdOf, ingest, inPlayWindow, overlay, signature } from './js/lib/live.js';
 import { TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle, ukDay } from './js/lib/titles.js';
 import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, prepareGoogleRedirect, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, siteConfig, viewingAsFree } from './js/lib/auth.js';
 
@@ -204,6 +204,12 @@ const live = {
   focus: null,
   detail: new Map(),
   busy: false,
+  /** Each match's clock, ticking between polls (js/lib/live.js, anchorClock). */
+  clock: new Map(),
+  /** Events waiting to be played on the page once it has redrawn. */
+  flash: [],
+  /** Timeline events already on screen, per match, so a new one can be marked. */
+  evSeen: new Map(),
 };
 
 function withLive(data) {
@@ -216,17 +222,148 @@ function withLive(data) {
   return data;
 }
 
-/** The minute beside a match in play, marked so a poll can move it on. */
+/**
+ * The clock beside a match in play: minutes and seconds, ticking every second
+ * (tickClocks) from the provider's last minute, so a live page never sits
+ * still between polls. Without the live feed it is the slate's minute, as
+ * before.
+ */
 function minuteHTML(f) {
-  if (f?.live_minute == null) return '';
-  return `<span class="minute" data-lm="${esc(fixtureIdOf(f))}">${esc(f.live_minute)}'</span>`;
+  const id = fixtureIdOf(f);
+  const a = live.clock.get(id);
+  if (!a && f?.live_minute == null) return '';
+  return `<span class="minute${a ? ' ticking' : ''}" data-lm="${esc(id)}">${esc(a ? clockText(a) : `${f.live_minute}'`)}</span>`;
 }
 
-function patchMinutes() {
+function tickClocks() {
+  if (document.hidden) return;
+  const now = Date.now();
   for (const el of document.querySelectorAll('[data-lm]')) {
-    const m = live.byId.get(Number(el.dataset.lm));
-    if (m && Number.isFinite(m.minute) && m.status !== 'halftime') el.textContent = `${m.minute}\u2019`;
+    const a = live.clock.get(Number(el.dataset.lm));
+    if (!a) continue;
+    const t = clockText(a, now);
+    if (el.textContent !== t) el.textContent = t;
+    if (!el.classList.contains('ticking')) el.classList.add('ticking');
   }
+}
+
+/*
+ * Something happened: play it where it is on the page. The score that changed
+ * pops, the row or the match header flashes, a whistle pulses the badge. Run
+ * once the page has redrawn with the new score, and then forgotten, so a
+ * later redraw does not play it again.
+ */
+function restartClass(el, cls) {
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+  const done = (ev) => { if (ev.target === el) { el.classList.remove(cls); el.removeEventListener('animationend', done); } };
+  el.addEventListener('animationend', done);
+}
+
+function playFlashes() {
+  if (!live.flash.length) return;
+  const now = Date.now();
+  const due = live.flash.filter((e) => now - e.at < 15000);
+  live.flash = [];
+  for (const e of due) {
+    // Links are rewritten to real addresses after drawing (crawlable), and
+    // keep the route in data-hash; either form finds the match.
+    const h = `#/fixture/${e.id}`;
+    const sel = `a.row[href="${h}"], a.row[data-hash="${h}"], a.side-item[href="${h}"], a.side-item[data-hash="${h}"], [data-fx="${e.id}"]`;
+    for (const el of document.querySelectorAll(sel)) {
+      restartClass(el, e.kind === 'goal' ? 'flash-goal' : e.kind === 'disallowed' ? 'flash-var' : 'flash-whistle');
+      if (e.kind === 'goal') {
+        const nums = el.querySelectorAll('.row-goals, .gf');
+        const num = nums.length === 2 ? nums[e.side === 'away' ? 1 : 0] : el.querySelector('[data-score]');
+        if (num) restartClass(num, 'goal-pop');
+      } else {
+        const badge = el.querySelector('.live-badge');
+        if (badge) restartClass(badge, 'badge-pop');
+      }
+    }
+  }
+}
+
+/*
+ * The alert for a moment worth interrupting for: a goal, a goal ruled out, a
+ * red card, half and full time. Only for matches a reader has a reason to
+ * care about (one we have a call on, their club, the match they have open),
+ * one at a time, five seconds each, and a tap goes to the match. Announced
+ * politely to screen readers.
+ */
+const toasts = [];
+let toastOn = false;
+function announceable(id) {
+  if (Number(state.liveFixture?.id) === id) return true;
+  const f = (state.board?.fixtures ?? []).find((x) => Number(x.id) === id);
+  const club = myClubId();
+  return Boolean(f && (hasCall(f) || (club && (Number(f.home_id) === club || Number(f.away_id) === club))));
+}
+function toast(e) {
+  if (document.hidden || !announceable(e.id)) return;
+  const f = (state.board?.fixtures ?? []).find((x) => Number(x.id) === e.id) ?? state.liveFixture;
+  const home = f?.home ?? e.m?.home ?? 'Home';
+  const away = f?.away ?? e.m?.away ?? 'Away';
+  const sc = Array.isArray(e.score) ? e.score : null;
+  const line = sc
+    ? `${e.kind === 'goal' && e.side === 'home' ? `<b>${esc(home)}</b>` : esc(home)} ${sc[0]}–${sc[1]} ${e.kind === 'goal' && e.side === 'away' ? `<b>${esc(away)}</b>` : esc(away)}`
+    : `${esc(home)} v ${esc(away)}`;
+  const kind = { goal: 'Goal', disallowed: 'Goal ruled out', halftime: 'Half time', fulltime: 'Full time', red: 'Red card' }[e.kind];
+  if (!kind) return;
+  const icon = e.kind === 'goal' ? EV_ICON.goal : e.kind === 'red' ? EV_ICON.red : '<i class="toast-whistle" aria-hidden="true"></i>';
+  const minute = e.kind === 'goal' || e.kind === 'red' ? (live.clock.get(e.id) ? clockText(live.clock.get(e.id)).split(':')[0] : e.minute) : null;
+  toasts.push({
+    id: e.id,
+    html: `${icon}<span class="toast-kind">${kind}${minute ? ` <em>${esc(minute)}'</em>` : ''}</span>
+      <span class="toast-line">${e.kind === 'red' && e.player ? `${esc(e.player)}, ${esc(e.side === 'away' ? away : home)}` : line}</span>`,
+    kind: e.kind,
+  });
+  while (toasts.length > 3) toasts.shift();
+  if (!toastOn) nextToast();
+}
+function nextToast() {
+  const t = toasts.shift();
+  if (!t) { toastOn = false; return; }
+  toastOn = true;
+  let rack = document.getElementById('toast-rack');
+  if (!rack) {
+    rack = document.createElement('div');
+    rack.id = 'toast-rack';
+    rack.className = 'toast-rack';
+    rack.setAttribute('aria-live', 'polite');
+    document.body.appendChild(rack);
+  }
+  const a = document.createElement('a');
+  a.className = `live-toast is-${t.kind}`;
+  a.href = `#/fixture/${t.id}`;
+  a.innerHTML = t.html;
+  rack.replaceChildren(a);
+  setTimeout(() => {
+    a.classList.add('out');
+    setTimeout(() => { a.remove(); nextToast(); }, 260);
+  }, 5000);
+}
+
+/*
+ * The open match's timeline: a goal, card or change that was not on screen
+ * last time slides in and glows, and a red card gets the alert.
+ */
+function markLiveEvents(id, box) {
+  const events = live.detail.get(id)?.body?.report?.events;
+  // Nothing loaded yet: no first view to compare against.
+  if (!events) return;
+  const keys = new Set(events.map(eventKey));
+  const seen = live.evSeen.get(id);
+  live.evSeen.set(id, keys);
+  // The first view of this match's timeline: everything on it is old news.
+  if (!seen) return;
+  for (const e of events) {
+    if (e.t === 'card' && (e.card === 'red' || e.card === 'second_yellow') && !seen.has(eventKey(e))) {
+      toast({ id, kind: 'red', player: e.player, side: e.side, minute: e.minute });
+    }
+  }
+  if (box) for (const el of box.querySelectorAll('[data-ev]')) if (!seen.has(el.dataset.ev)) restartClass(el, 'ev-new');
 }
 
 async function liveTick({ force = false } = {}) {
@@ -235,7 +372,9 @@ async function liveTick({ force = false } = {}) {
   const listDue = force || now - live.fetchedAt >= (live.watching ? LIVE_EVERY : QUIET_EVERY) - 1000;
   const focus = live.focus;
   const had = focus ? live.detail.get(focus) : null;
-  const detailDue = focus && (!had || now - had.at >= LIVE_EVERY - 1000);
+  // The open match's timeline is read with the scores, so a goal and its
+  // scorer arrive together.
+  const detailDue = focus && (!had || listDue || now - had.at >= LIVE_EVERY - 1000);
   if (!listDue && !detailDue) return;
   live.busy = true;
   let redraw = false;
@@ -246,7 +385,18 @@ async function liveTick({ force = false } = {}) {
       live.fetchedAt = Date.now();
       if (body && body.enabled === false) { live.enabled = false; return; }
       if (body) {
+        const prevById = live.byId;
         Object.assign(live, ingest(body, live.byId));
+        const now = Date.now();
+        for (const [id, m] of live.byId) {
+          const a = anchorClock(live.clock.get(id) ?? null, m.minute, m.status, now);
+          if (a) live.clock.set(id, a); else live.clock.delete(id);
+        }
+        for (const e of diffEvents(prevById, live.byId)) {
+          if (!live.seen.has(e.id)) continue;
+          live.flash.push({ ...e, at: now });
+          toast(e);
+        }
         for (const [id, sig] of before) if (signature(id, live) !== sig) redraw = true;
         // Views that keep a read between routes get the new state too.
         for (const o of [state.board, state.hero, state.heroDetail]) if (o) withLive(o);
@@ -257,14 +407,14 @@ async function liveTick({ force = false } = {}) {
       const text = res.ok ? await res.text() : null;
       if (text && text !== had?.text) {
         live.detail.set(focus, { at: Date.now(), text, body: JSON.parse(text) });
-        if (!patchLiveCentre(focus)) redraw = true;
+        if (!patchLiveCentre(focus)) { markLiveEvents(focus, null); redraw = true; }
       } else if (had) had.at = Date.now();
     }
   } catch { /* the last good frame stays up */ } finally {
     live.busy = false;
   }
   if (redraw) softRefresh();
-  else patchMinutes();
+  else { tickClocks(); playFlashes(); }
 }
 
 /*
@@ -1511,7 +1661,7 @@ function liveNowHTML(fixtures) {
           <span class="side-thumb">${crest(f.home, 'sm', f.home_id)}${crest(f.away, 'sm', f.away_id)}</span>
           <span class="side-body">
             <span class="side-sel">${esc(f.home)} v ${esc(f.away)}</span>
-            <span class="side-meta"><span class="side-league">${esc(f.league ?? '')}</span><b>${sc ? `${sc[0]}–${sc[1]}` : 'under way'}</b>${
+            <span class="side-meta"><span class="side-league">${esc(f.league ?? '')}</span><b data-score>${sc ? `${sc[0]}–${sc[1]}` : 'under way'}</b>${
               minuteHTML(f)}${trackHTML(liveTrack(f.top_pick, f))}</span>
           </span>
         </a>`;
@@ -3209,7 +3359,7 @@ function reportHTML(f, { title = 'Match report', inPlay = false } = {}) {
       const kind = /own/i.test(e.kind ?? '') ? ' <small>own goal</small>' : /pen/i.test(e.kind ?? '') ? ' <small>pen</small>' : '';
       const who = `<b>${playerLink(e.player_id, e.player ?? 'Goal', f.league_id)}</b>${kind}${
         e.assist ? `<small class="rep-assist">${EV_ICON.assist}${(f._link ?? ((h) => h))(esc(e.assist))}</small>` : ''}`;
-      return `<li class="rep-goal ${e.side === 'away' ? 'away' : 'home'}">
+      return `<li class="rep-goal ${e.side === 'away' ? 'away' : 'home'}" data-ev="${esc(eventKey(e))}">
         <span class="rg-who">${who}</span>
         <span class="rg-mid"><em>${/own/i.test(e.kind ?? '') ? EV_ICON.own : EV_ICON.goal}${esc(minuteOf(e))}</em>${e.score ? `<b>${esc(e.score[0])}–${esc(e.score[1])}</b>` : ''}</span>
       </li>`;
@@ -3219,7 +3369,7 @@ function reportHTML(f, { title = 'Match report', inPlay = false } = {}) {
     : inPlay && Array.isArray(f.live_score) && f.live_score[0] + f.live_score[1] > 0 ? ''
     : `<p class="rep-none">${inPlay ? 'No goals yet.' : 'No goals.'}</p>`;
   const cardsFor = (side) => events.filter((e) => e.t === 'card' && (e.side === 'away' ? 'away' : 'home') === side)
-    .map((e) => `<span class="rep-card">${EV_ICON[e.card] ?? EV_ICON.yellow}${esc(surname(e.player ?? ''))} ${esc(minuteOf(e))}</span>`).join('');
+    .map((e) => `<span class="rep-card" data-ev="${esc(eventKey(e))}">${EV_ICON[e.card] ?? EV_ICON.yellow}${esc(surname(e.player ?? ''))} ${esc(minuteOf(e))}</span>`).join('');
   const hc = cardsFor('home'), ac = cardsFor('away');
   const cardsHTML = hc || ac ? `
     <div class="rep-cards">
@@ -3231,7 +3381,7 @@ function reportHTML(f, { title = 'Match report', inPlay = false } = {}) {
       <summary>Every event <span>${events.length}</span></summary>
       <div class="rep-heads"><span>${esc(f.home)}</span><span>${esc(f.away)}</span></div>
       <div class="timeline">
-        ${events.map((e) => `<div class="ev ${e.side === 'away' ? 'away' : 'home'} is-${e.t}">
+        ${events.map((e) => `<div class="ev ${e.side === 'away' ? 'away' : 'home'} is-${e.t}" data-ev="${esc(eventKey(e))}">
             <span class="ev-min">${esc(minuteOf(e))}</span><span class="ev-body">${line(e)}</span></div>`).join('')}
       </div>
     </details>` : '';
@@ -3661,6 +3811,7 @@ function patchLiveCentre(id) {
   box.innerHTML = reportHTML({ ...f, report: rep }, { title: 'So far', inPlay: true });
   if (open) box.querySelector('details.rep-all')?.setAttribute('open', '');
   smartQuotes(box);
+  markLiveEvents(id, box);
   return true;
 }
 
@@ -4039,7 +4190,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
     : '';
 
   app.innerHTML = `
-  <section class="hero fx-top${wash}" data-shot="${f.venue_id ? 'yes' : 'none'}">
+  <section class="hero fx-top${wash}" data-shot="${f.venue_id ? 'yes' : 'none'}" data-fx="${esc(f.id)}">
     <div class="hero-media">${venueShot(f.venue_id, '', true)}</div>
     ${wash ? '<div class="fx-wash" aria-hidden="true"></div>' : ''}
     <div class="wrap hero-inner">
@@ -6826,6 +6977,8 @@ async function route({ soft = false } = {}) {
     if (!soft) countView();
     state.soft = false;
     liveTick();
+    playFlashes();
+    if (state.liveFixture) markLiveEvents(Number(state.liveFixture.id), document.getElementById('live-centre'));
     smartQuotes(app);
     crawlable(app);
     pageTitle(name);
@@ -7177,6 +7330,7 @@ renderRegion();
 // which is every thirty while a match on the page is being played. Coming
 // back to a backgrounded tab looks at once.
 setInterval(liveTick, 5000);
+setInterval(tickClocks, 1000);
 addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); });
 
 /**

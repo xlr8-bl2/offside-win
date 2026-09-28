@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 // @ts-expect-error -- plain browser module, no types
-import { eachFixture, ingest, inPlayWindow, overlay, signature } from '../../public/js/lib/live.js';
+import { anchorClock, clockText, diffEvents, eachFixture, eventKey, ingest, inPlayWindow, overlay, signature } from '../../public/js/lib/live.js';
 
 /**
  * The site's live overlay (public/js/lib/live.js): what a page shows once the
@@ -95,4 +95,46 @@ test('a minute ticking over is not a redraw; a goal is', () => {
   const c = ingest({ matches: [{ id: 7, status: '2nd_half', minute: 61, score: [1, 0] }] });
   assert.equal(signature(7, a), signature(7, b));
   assert.notEqual(signature(7, b), signature(7, c));
+});
+
+test('the clock ticks between polls, catches up with the provider, and never runs backwards', () => {
+  const t0 = 1_000_000;
+  let a = anchorClock(null, 67, '2nd_half', t0);
+  assert.equal(clockText(a, t0), '67:00');
+  assert.equal(clockText(a, t0 + 23_000), '67:23', 'seconds tick on the page');
+  // Thirty seconds later the provider still says 67: the clock keeps going.
+  a = anchorClock(a, 67, '2nd_half', t0 + 30_000);
+  assert.equal(clockText(a, t0 + 30_000), '67:30');
+  // Then 68: already inside it, so no jump.
+  a = anchorClock(a, 68, '2nd_half', t0 + 61_000);
+  assert.equal(clockText(a, t0 + 61_000), '68:01');
+  // A provider minute ahead of the page pulls it forward.
+  a = anchorClock(a, 71, '2nd_half', t0 + 70_000);
+  assert.equal(clockText(a, t0 + 70_000), '71:00');
+  // No word for a long time (a stoppage): the clock stops two minutes on, not runs away.
+  assert.equal(clockText(a, t0 + 70_000 + 600_000), '72:59');
+  // Half time, penalties and full time stop it.
+  assert.equal(anchorClock(a, 45, 'halftime', t0), null);
+  assert.equal(anchorClock(a, 90, 'finished', t0), null);
+  // A new half starts its own clock rather than carrying the first half's on.
+  const second = anchorClock(anchorClock(null, 47, '1st_half', t0), 46, '2nd_half', t0 + 900_000);
+  assert.equal(clockText(second, t0 + 900_000), '46:00');
+});
+
+test('what happened between two polls: goals by side, whistles, and nothing on the first poll', () => {
+  const before = ingest({ matches: [
+    { id: 1, status: '1st_half', minute: 20, score: [0, 0] },
+    { id: 2, status: '1st_half', minute: 44, score: [1, 1] },
+    { id: 3, status: '2nd_half', minute: 89, score: [2, 0] },
+  ] }).byId;
+  const after = ingest({ matches: [
+    { id: 1, status: '1st_half', minute: 21, score: [0, 1] },
+    { id: 2, status: 'halftime', minute: 45, score: [1, 1] },
+    { id: 3, status: 'finished', minute: 90, score: [2, 0] },
+    { id: 4, status: '1st_half', minute: 2, score: [1, 0] },
+  ] }).byId;
+  const ev = diffEvents(before, after).map((e: { id: number; kind: string; side?: string }) => [e.id, e.kind, e.side ?? null]);
+  assert.deepEqual(ev, [[1, 'goal', 'away'], [2, 'halftime', null], [3, 'fulltime', null]]);
+  assert.deepEqual(diffEvents(new Map(), after), [], 'first poll of a visit: no announcements');
+  assert.equal(eventKey({ t: 'goal', minute: 17, player: 'X' }), eventKey({ t: 'goal', minute: 17, player: 'X', score: [1, 0] }));
 });

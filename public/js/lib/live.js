@@ -171,3 +171,74 @@ export function signature(id, live) {
     c?.kickoff?.to ?? null, c?.status?.to ?? null,
   ]);
 }
+
+/* ------------------------------------------------------------------ clock */
+
+/** A match whose clock is running. Half time, penalties and full time stop it. */
+const RUNNING = new Set(['1st_half', '2nd_half', 'extra_time', 'live', 'inprogress']);
+
+/**
+ * Where a match's clock is, anchored to the provider's minute.
+ *
+ * The provider says which minute it is, twice a minute at best, and nothing
+ * finer. So the page keeps its own clock between polls: seconds played as of
+ * a moment, ticking forward. A new minute from the provider moves the clock
+ * forward to it if it is behind; a clock that has run ahead is left alone
+ * unless it is more than a minute past what the provider could have meant,
+ * so it never jumps backwards in front of the reader and never runs away
+ * during a stoppage the feed has not told us about.
+ */
+export function anchorClock(prev, minute, status, now = Date.now()) {
+  if (!Number.isFinite(minute) || !RUNNING.has(status)) return null;
+  const lo = minute * 60;
+  // The minute may be up to a minute old when it arrives (the provider's own
+  // cache, then ours): the true clock can be anywhere up to two minutes on.
+  const hi = lo + 119;
+  if (prev && prev.status === status) {
+    const est = prev.secs + (now - prev.t) / 1000;
+    if (est >= lo && est <= hi) return { secs: est, t: now, minute, status };
+    if (est > hi) return { secs: hi, t: now, minute, status };
+  }
+  return { secs: lo, t: now, minute, status };
+}
+
+/** "67:23": the clock as it stands now, never past its ceiling. */
+export function clockText(a, now = Date.now()) {
+  if (!a) return '';
+  const secs = Math.max(0, Math.min(a.secs + (now - a.t) / 1000, a.minute * 60 + 119));
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/* ----------------------------------------------------------------- events */
+
+/**
+ * What happened between two polls: goals (and which side scored), the half
+ * and full-time whistles, a match coming back from a stoppage. Compared only
+ * for matches in both polls, so the first poll of a visit announces nothing.
+ */
+export function diffEvents(prev, next) {
+  const out = [];
+  for (const [id, m] of next) {
+    const p = prev.get(id);
+    if (!p || p.gone) continue;
+    const ps = Array.isArray(p.score) ? p.score : null;
+    const ns = Array.isArray(m.score) ? m.score : null;
+    if (ps && ns) {
+      if (ns[0] > ps[0]) out.push({ id, kind: 'goal', side: 'home', score: ns, minute: m.minute, m });
+      if (ns[1] > ps[1]) out.push({ id, kind: 'goal', side: 'away', score: ns, minute: m.minute, m });
+      // A goal taken off by the video referee.
+      if (ns[0] < ps[0] || ns[1] < ps[1]) out.push({ id, kind: 'disallowed', score: ns, minute: m.minute, m });
+    }
+    if (p.status !== m.status) {
+      if (m.status === 'halftime') out.push({ id, kind: 'halftime', score: ns, m });
+      else if (m.status === 'finished') out.push({ id, kind: 'fulltime', score: ns, m });
+      else if (m.status === '2nd_half' && p.status === 'halftime') out.push({ id, kind: 'restart', score: ns, m });
+    }
+  }
+  return out;
+}
+
+/** A stable key for one timeline event, so a new one can be told from an old one. */
+export const eventKey = (e) => [e?.t, e?.minute ?? '', e?.added ?? '', e?.player ?? e?.in ?? '', e?.card ?? ''].join('|');
