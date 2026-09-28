@@ -139,6 +139,19 @@ const commands: Record<string, () => Promise<unknown>> = {
     return r;
   },
 
+  /**
+   * One slate pass that chooses every call still to kick off again, as if
+   * none had been made, and rebuilds a slip that has not started. For after a
+   * change to the engine. See runSlate.
+   */
+  async 'slate:fresh'() {
+    requireEnv();
+    await ensureSchema();
+    const report = await runSlate({ fresh: true });
+    await pruneBoard();
+    return report;
+  },
+
   async ratings() {
     requireEnv();
     await ensureSchema();

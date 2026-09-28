@@ -251,7 +251,15 @@ export function ahead<T, R>(items: T[], fn: (t: T) => Promise<R>, window: number
   };
 }
 
-export async function runSlate(): Promise<SlateReport> {
+/**
+ * `fresh` chooses every call still to kick off again from nothing: the calls
+ * standing from earlier runs get no say in the choice, and a slip whose first
+ * game has not started is taken down so one is built from the new calls. For
+ * a change of engine, when the calls should be the new engine's own. A match
+ * that has been called off still keeps what it had, and so does a slip
+ * already under way.
+ */
+export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Promise<SlateReport> {
   const now = Math.floor(Date.now() / 1000);
 
   // The day's allowance, across every run (see narrate/budget.ts). Set
@@ -366,6 +374,10 @@ export async function runSlate(): Promise<SlateReport> {
   // The calls in the open bet slip. A posted slip does not change, so on its
   // matches the slate keeps the slip's call (at a fresh price) instead of
   // choosing again, and never takes it down.
+  if (fresh) {
+    await dbExec('DELETE FROM slip WHERE settled_at IS NULL AND first_kickoff > ?', [now]);
+    console.log('Fresh: every call still to kick off is chosen again, and a slip not yet under way is rebuilt.');
+  }
   const pinned = await openSlipLegs();
   // The calls standing on fixtures still to kick off, and the day's market
   // mix they make, so this run keeps what still holds and varies the rest.
@@ -384,7 +396,7 @@ export async function runSlate(): Promise<SlateReport> {
   for (const e of candidates) {
     const id = num(e['id']);
     const k = toEpoch(e['event_date']);
-    const inc = id !== undefined ? incumbents.get(id) : undefined;
+    const inc = id !== undefined && !fresh ? incumbents.get(id) : undefined;
     if (inc && k !== undefined) mix.add(DayMix.dayOf(k), bucketOf(inc));
   }
   const heroCandidates: HeroCandidate[] = [];
@@ -502,7 +514,7 @@ export async function runSlate(): Promise<SlateReport> {
             // Matches under way keep whatever they had; the mix is for calls
             // still to be made.
             if (analysis.kickoff <= Math.floor(Date.now() / 1000)) return ranked.slice(0, 1);
-            const one = mix.choose(ranked, analysis.kickoff, incumbents.get(analysis.fixture_id) ?? null);
+            const one = mix.choose(ranked, analysis.kickoff, fresh ? null : incumbents.get(analysis.fixture_id) ?? null);
             return one ? [one] : [];
           })();
         return chosen.map((candidate) => {
