@@ -88,7 +88,15 @@ export interface BundlePlayer {
     apps?: number; starts?: number; goals?: number; assists?: number; clean_sheets?: number;
     team_games?: number; tracked_apps?: number; tracked_starts?: number;
   } | null;
-  recent?: { apps?: number; goals?: number; assists?: number; scoredIn?: number } | null;
+  recent?: { apps?: number; goals?: number; assists?: number; scoredIn?: number; country?: number } | null;
+  /** For their country lately, and any finals tournament (players.ts, Country). */
+  country?: {
+    team?: string | null; apps?: number; goals?: number; assists?: number;
+    tournament?: { name?: string; apps?: number; goals?: number; assists?: number; ended?: number } | null;
+    lately?: { apps?: number; goals?: number; assists?: number } | null;
+  } | null;
+  /** Club and country together, the last two weeks. */
+  load?: { games?: number; minutes?: number; country?: number } | null;
   standout?: { opponent?: string | null; kickoff?: number; goals?: number; assists?: number; score?: string | null; won?: boolean | null } | null;
   strengths?: string[];
   tags?: string[];
@@ -520,7 +528,10 @@ export function extrasFacts(b: Bundle): PubFact[] {
   for (const p of b.players ?? []) {
     const e = p.id !== undefined ? x.players?.[String(p.id)] : undefined;
     if (!e || !p.name || !p.side) continue;
-    if (e.signed && e.signed.fee >= 15_000_000 && p.status !== 'out') {
+    // A transfer is a club's business: never said of a national side, even if
+    // the data somehow put one there.
+    const national = str(e.country) === teamOf(p.side) || !!str(p.club);
+    if (e.signed && e.signed.fee >= 15_000_000 && p.status !== 'out' && !national) {
       out.push({ text: `${teamOf(p.side)} paid ${feeWord(e.signed.fee)} to bring ${p.name} from ${e.signed.from} ${windowWord(e.signed.at, now)}`, side: p.side, weight: 40 });
     }
     const country = str(e.country);
@@ -529,6 +540,25 @@ export function extrasFacts(b: Bundle): PubFact[] {
       const caps = e.caps ? ` in ${n(e.caps)} games` : '';
       out.push({ text: `${p.name} has ${n(e.goals)} goals${caps} for ${country}`, side: p.side, weight: forThisCountry ? 55 : 30 });
     }
+  }
+
+  // Against sides above or below them, whichever this opponent is. Said only
+  // when it is a story: none won, or nearly all of them.
+  const pos = (side: 'home' | 'away') => b.standings?.[side]?.position ?? null;
+  for (const side of ['home', 'away'] as const) {
+    const mine = pos(side), theirs = pos(side === 'home' ? 'away' : 'home');
+    const split = x.split?.[side];
+    if (mine === null || theirs === null || mine === theirs || !split) continue;
+    const up = theirs < mine;
+    const r = up ? split.above : split.below;
+    if (!r) continue;
+    const games = r.w + r.d + r.l;
+    if (games < 3) continue;
+    const who = up ? 'sides above them in the table' : 'sides below them in the table';
+    const team = teamOf(side);
+    if (r.w === 0) out.push({ text: `${team} have won none of their last ${n(games)} against ${who}`, side, weight: up ? 54 : 58 });
+    else if (r.w / games >= 0.75 && games >= 4) out.push({ text: `${team} have won ${n(r.w)} of their last ${n(games)} against ${who}`, side, weight: up ? 56 : 46 });
+    else if (r.l === 0 && games >= 4) out.push({ text: `${team} have lost none of their last ${n(games)} against ${who}`, side, weight: up ? 58 : 48 });
   }
 
   if (x.referee?.name) out.push({ text: `${x.referee.name} has the whistle`, side: 'match', weight: 24 });
@@ -732,10 +762,52 @@ function onePlayer(p: BundlePlayer, team: string, side: 'home' | 'away'): PubFac
   const r = p.recent;
   const scoredIn = num(r?.scoredIn) ?? 0;
   const rg = num(r?.goals) ?? 0;
+  // The last five are wherever the player played them: a run that went on
+  // for the country in the break is still a run, and says so.
+  const mixed = (num(r?.country) ?? 0) > 0 && (num(r?.country) ?? 0) < (num(r?.apps) ?? 0);
+  const where = mixed ? ' for club and country' : '';
   if (worthIt && scoredIn >= 3) {
-    out.push({ text: `${name} ${absent ? 'had' : 'has'} scored in each of the last ${n(scoredIn)} games`, side, weight: lead - 2 });
+    out.push({ text: `${name} ${absent ? 'had' : 'has'} scored in each of the last ${n(scoredIn)} games${where}`, side, weight: lead - 2 });
   } else if (worthIt && rg >= 3 && (num(r?.apps) ?? 0) >= 4) {
-    out.push({ text: `${name} ${absent ? 'had' : 'has'} ${n(rg)} goals in the last ${n(num(r?.apps) ?? 5)} games`, side, weight: lead - 4 });
+    out.push({ text: `${name} ${absent ? 'had' : 'has'} ${n(rg)} goals in the last ${n(num(r?.apps) ?? 5)} games${where}`, side, weight: lead - 4 });
+  }
+
+  // 4b. Club and country. In a country's match, how the player has gone for
+  // it lately (the club season is already said above, "for" the club). In a
+  // club match, what the player did in the break just gone. Either way, a
+  // finals tournament in the last few months, and a heavy fortnight.
+  const c = p.country;
+  const cTeam = str(c?.team);
+  const forCountry = !!club; // the side is the country; the numbers above were the club's
+  if (c && cTeam && worthIt) {
+    const cg = num(c.goals) ?? 0, ca = num(c.assists) ?? 0, capps = num(c.apps) ?? 0;
+    if (forCountry && capps >= 2 && cg + ca > 0) {
+      const what = cg && ca ? `${goalsWord(cg)} and ${assistsWord(ca)}` : cg ? goalsWord(cg) : assistsWord(ca);
+      out.push({ text: `${name} has ${what} in the last ${n(capps)} games for ${cTeam}`, side, weight: lead - 3 });
+    }
+    const l = c.lately;
+    const lg = num(l?.goals) ?? 0, la = num(l?.assists) ?? 0, lapps = num(l?.apps) ?? 0;
+    if (!forCountry && lapps > 0) {
+      const did = didWhat(lg, la);
+      out.push(did
+        ? { text: `${name} ${did} for ${cTeam} in the international break`, side, weight: lead - 5 }
+        : { text: `${name} has just played ${lapps === 1 ? 'once' : lapps === 2 ? 'twice' : `${n(lapps)} times`} for ${cTeam} in the break`, side, weight: 40 });
+    }
+    const t = c.tournament;
+    const ended = num(t?.ended);
+    const now = Date.now() / 1000;
+    const tn = str(t?.name)?.replace(/^(FIFA|UEFA|CONMEBOL|CAF|AFC|CONCACAF|OFC)\s+/i, '').replace(/\s*20\d\d(\/\d\d)?$/, '');
+    if (t && tn && ended && now - ended <= 120 * 86400 && (num(t.apps) ?? 0) >= 2) {
+      const m = new Date(ended * 1000).getUTCMonth();
+      const when = m >= 5 && m <= 7 ? 'in the summer' : `in ${MONTHS[m]}`;
+      const did = didWhat(num(t.goals) ?? 0, num(t.assists) ?? 0);
+      const games = `${n(num(t.apps)!)} games at the ${tn} ${when}`;
+      out.push({ text: did ? `${name} ${did} in ${games}` : `${name} played ${games}`, side, weight: forCountry ? 52 : 38 });
+    }
+  }
+  const ld = p.load;
+  if (!absent && ld && (num(ld.country) ?? 0) > 0 && (num(ld.games) ?? 0) >= 3) {
+    out.push({ text: `${name} has played ${n(num(ld.games)!)} games in the last fortnight for club and country`, side, weight: 46 });
   }
 
   // 5. When the player is back, and whether it is really an absence at all.

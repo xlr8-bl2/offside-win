@@ -68,6 +68,29 @@ export interface Standout {
 export type Tag = 'top_scorer' | 'top_creator' | 'ever_present' | 'first_choice_keeper' | 'best_performer'
   | 'in_form' | 'defensive_rock' | 'chance_creator';
 
+/**
+ * A player's football for their country, beside the club season.
+ *
+ * A player's form is not one team's. Lukaku in a Belgium game is playing on
+ * what he has done at Fenerbahce and in his last few caps; the same player
+ * back at his club after a break has just played twice for Belgium, perhaps
+ * on another continent. Counts only, as everywhere else.
+ */
+export interface Country {
+  team: string | null;
+  /** For the country since the window opened (the club season or five months back, whichever is earlier). */
+  apps: number;
+  goals: number;
+  assists: number;
+  /** A finals tournament in that window (World Cup, Euros, Copa America, Cup of Nations...), when there was one. */
+  tournament: { name: string; apps: number; goals: number; assists: number; ended: number } | null;
+  /** The break just gone: the country's games in the three weeks before this match. */
+  lately: { apps: number; goals: number; assists: number } | null;
+}
+
+/** Games and minutes in the fortnight before this match, club and country together. */
+export interface Load { games: number; minutes: number; country: number }
+
 export interface PlayerProfile {
   id: number;
   name: string;
@@ -81,12 +104,17 @@ export interface PlayerProfile {
   reason: string | null;
   expectedReturn: string | null;
   season: PlayerSeason | null;
-  recent: { apps: number; goals: number; assists: number; scoredIn: number } | null;
+  /** The last five games anywhere; `country` of them for the country. */
+  recent: { apps: number; goals: number; assists: number; scoredIn: number; country?: number } | null;
   standout: Standout | null;
   strengths: string[];
   tags: Tag[];
   /** 0..1: how much of the side goes with him. Sizes the absence in the model. */
   importance: number;
+  /** For their country, when they have played for it lately. */
+  country: Country | null;
+  /** Club and country together, the last two weeks. */
+  load: Load | null;
 }
 
 export interface StatRow {
@@ -149,16 +177,17 @@ export function seasonStart(leagueId: number, kickoff: number): Promise<number> 
   return p;
 }
 
-export interface MatchMeta { id: number; kickoff: number; home_team_id: number; away_team_id: number; home_goals: number | null; away_goals: number | null; home: string | null; away: string | null; tracked?: boolean }
+export interface MatchMeta { id: number; kickoff: number; home_team_id: number; away_team_id: number; home_goals: number | null; away_goals: number | null; home: string | null; away: string | null; tracked?: boolean; league?: string | null }
 
 async function matchMeta(ids: number[]): Promise<Map<number, MatchMeta>> {
   if (!ids.length) return new Map();
   const rows = await select<MatchMeta>(
     `SELECT m.id, m.kickoff, m.home_team_id, m.away_team_id, m.home_goals, m.away_goals,
-            th.name AS home, ta.name AS away
+            th.name AS home, ta.name AS away, l.name AS league
        FROM match m
        LEFT JOIN team th ON th.id = m.home_team_id
        LEFT JOIN team ta ON ta.id = m.away_team_id
+       LEFT JOIN league l ON l.id = m.league_id
       WHERE m.id IN (${ids.map(() => '?').join(',')})`,
     ids,
   );
@@ -226,21 +255,22 @@ export async function buildProfile(
   const since = national
     ? (clubId ? await clubSeasonStart(clubId, ctx.kickoff) : ctx.kickoff - 330 * 86400)
     : await seasonStart(ctx.leagueId, ctx.kickoff);
-  const statsRaw = clubId
-    ? await bsdOrNull(`/api/v2/players/${req.id}/stats/`, {
-      team_id: clubId,
-      date_from: new Date(since * 1000).toISOString(),
-      date_to: new Date(ctx.kickoff * 1000).toISOString(),
-      limit: 80,
-    })
-    : null;
-  let rows = parseStats(statsRaw).filter((r) => r.minutes > 0 && (r.team_id === null || r.team_id === clubId));
+  // Every game, club and country, in one read: back to the start of the club
+  // season, or five months, whichever is further, so a summer tournament is
+  // in view in the autumn.
+  const from = Math.min(since, ctx.kickoff - 150 * 86400);
+  const statsRaw = await bsdOrNull(`/api/v2/players/${req.id}/stats/`, {
+    date_from: new Date(from * 1000).toISOString(),
+    date_to: new Date(ctx.kickoff * 1000).toISOString(),
+    limit: 150,
+  });
+  let all = parseStats(statsRaw).filter((r) => r.minutes > 0);
 
-  const meta = await matchMeta(rows.map((r) => r.event_id));
-  // Cup ties and games outside the leagues we track are not in our table, and
-  // without a date "his last five" and "his best game" would be in the wrong
-  // order. The provider's own record fills them in.
-  const missing = rows.filter((r) => !meta.has(r.event_id)).slice(0, 20);
+  const meta = await matchMeta(all.map((r) => r.event_id));
+  // Cup ties, internationals and games outside the leagues we track are not in
+  // our table, and without a date "his last five" and "his best game" would be
+  // in the wrong order. The provider's own record fills them in.
+  const missing = all.filter((r) => !meta.has(r.event_id)).slice(0, 40);
   await Promise.all(missing.map(async (r) => {
     const e = asRecord(await bsdOrNull(`/api/v2/events/${r.event_id}/`));
     const k = toEpoch(e?.['event_date']);
@@ -250,12 +280,14 @@ export async function buildProfile(
       home_team_id: num(e['home_team_id']) ?? 0, away_team_id: num(e['away_team_id']) ?? 0,
       home_goals: num(e['home_score']) ?? null, away_goals: num(e['away_score']) ?? null,
       home: str(e['home_team']) ?? null, away: str(e['away_team']) ?? null,
-      tracked: false,
+      tracked: false, league: str(e['league_name']) ?? null,
     });
   }));
-  for (const r of rows) r.kickoff ??= meta.get(r.event_id)?.kickoff ?? null;
-  rows = rows.filter((r) => r.kickoff !== null);
-  rows.sort((a, b) => (b.kickoff ?? 0) - (a.kickoff ?? 0));
+  for (const r of all) r.kickoff ??= meta.get(r.event_id)?.kickoff ?? null;
+  all = all.filter((r) => r.kickoff !== null);
+  all.sort((a, b) => (b.kickoff ?? 0) - (a.kickoff ?? 0));
+  const cross = crossForm(all, meta, { clubId, nationalId, since, kickoff: ctx.kickoff, national });
+  const rows = cross.club;
   // The best game's opponent by name, which our table lacks for a club it
   // does not hold (a player abroad, a cup tie against a lower division side).
   const best = bestGame(rows);
@@ -272,7 +304,87 @@ export async function buildProfile(
     }
   }
   const club$ = clubId ? await teamRecord(clubId, since, ctx.kickoff) : { games: 0, goals: 0 };
-  return assembleProfile(req, d ?? {}, rows, meta, club$, { ...ctx, national, clubId });
+  const profile = assembleProfile(req, d ?? {}, rows, meta, club$, { ...ctx, national, clubId });
+  return withCross(profile, cross);
+}
+
+/** A finals tournament, not a qualifier, a friendly or a league-format competition. */
+const FINALS = /world cup|euro(pean championship|\s?20\d\d|s)?\b|copa am[eé]rica|cup of nations|africa cup|asian cup|gold cup|arab cup/i;
+const NOT_FINALS = /qualif|friendl|nations league|club world cup|u-?\d\d|youth|women/i;
+/** Recognisably international, for when the player's own record does not name their country. */
+const INTERNATIONAL = /world cup|euro|copa am[eé]rica|cup of nations|africa cup|asian cup|gold cup|nations league|friendl|international|qualif/i;
+
+export interface Cross {
+  /** The club's games in the club season: what the season numbers are counted over. */
+  club: StatRow[];
+  /** The last five games anywhere, newest first, and how many were for the country. */
+  recent: StatRow[];
+  recentCountry: number;
+  country: Country | null;
+  load: Load | null;
+}
+
+/**
+ * Club and country, from one dated list of every game a player played.
+ * Pure: the tests hand it a list and read back what it concludes.
+ */
+export function crossForm(
+  all: StatRow[],
+  meta: Map<number, MatchMeta>,
+  o: { clubId: number | null; nationalId: number | null; since: number; kickoff: number; national: boolean },
+): Cross {
+  const isCountry = (r: StatRow) => (o.nationalId !== null && r.team_id === o.nationalId)
+    || (o.nationalId === null && r.team_id !== null && r.team_id !== o.clubId && INTERNATIONAL.test(meta.get(r.event_id)?.league ?? ''));
+  const dated = all.filter((r) => r.kickoff !== null && r.kickoff < o.kickoff).sort((a, b) => b.kickoff! - a.kickoff!);
+  const club = dated.filter((r) => !isCountry(r) && (r.team_id === null || r.team_id === o.clubId) && r.kickoff! >= o.since);
+  const intl = dated.filter(isCountry);
+  const sum = (xs: StatRow[]) => ({ apps: xs.length, goals: xs.reduce((a, r) => a + r.goals, 0), assists: xs.reduce((a, r) => a + r.assists, 0) });
+
+  let country: Country | null = null;
+  if (intl.length) {
+    const m0 = meta.get(intl[0]!.event_id);
+    const cid = intl[0]!.team_id;
+    const team = m0 ? (m0.home_team_id === cid ? m0.home : m0.away_team_id === cid ? m0.away : null) : null;
+    // The finals tournament with the most games in the window.
+    const byComp = new Map<string, StatRow[]>();
+    for (const r of intl) {
+      const lg = meta.get(r.event_id)?.league ?? '';
+      if (FINALS.test(lg) && !NOT_FINALS.test(lg)) byComp.set(lg, [...(byComp.get(lg) ?? []), r]);
+    }
+    const top = [...byComp].sort((a, b) => b[1].length - a[1].length)[0];
+    const lately = intl.filter((r) => o.kickoff - r.kickoff! <= 21 * 86400);
+    country = {
+      team: team ?? null,
+      ...sum(intl),
+      tournament: top ? { name: top[0], ...sum(top[1]), ended: Math.max(...top[1].map((r) => r.kickoff!)) } : null,
+      lately: lately.length ? sum(lately) : null,
+    };
+  }
+
+  const fortnight = dated.filter((r) => o.kickoff - r.kickoff! <= 14 * 86400);
+  const load = fortnight.length
+    ? { games: fortnight.length, minutes: fortnight.reduce((a, r) => a + r.minutes, 0), country: fortnight.filter(isCountry).length }
+    : null;
+  // His last five anywhere: form does not stop at the club gates. For a club
+  // match that means the break just gone counts; for a country's match, the
+  // club weekend before it does.
+  const recent = dated.filter((r) => r.team_id === null || r.team_id === o.clubId || isCountry(r)).slice(0, 5);
+  return { club, recent, recentCountry: recent.filter(isCountry).length, country, load };
+}
+
+/** The profile with its form read across club and country. */
+export function withCross(p: PlayerProfile, cross: Cross): PlayerProfile {
+  const last5 = cross.recent;
+  const recent = last5.length ? {
+    apps: last5.length,
+    goals: last5.reduce((a, r) => a + r.goals, 0),
+    assists: last5.reduce((a, r) => a + r.assists, 0),
+    scoredIn: (() => { let k = 0; for (const r of last5) { if (r.goals > 0) k++; else break; } return k; })(),
+    country: cross.recentCountry,
+  } : null;
+  const tags: Tag[] = p.tags.filter((t) => t !== 'in_form');
+  if (recent && (recent.goals + recent.assists >= 4 || recent.scoredIn >= 3)) tags.push('in_form');
+  return { ...p, recent, tags, country: cross.country, load: cross.load };
 }
 
 /** The game that shows it: most goal involvements, then the best rating. */
@@ -392,6 +504,8 @@ export function assembleProfile(
     // A club's share is not a country's: a player who carries Como carries
     // less of Croatia, where the squad is picked from every club's best.
     importance: Math.round(importanceOf(role, season, club$.goals || (national ? null : ctx.teamGoals)) * (national ? 0.6 : 1) * 1000) / 1000,
+    country: null,
+    load: null,
   };
 }
 
@@ -513,5 +627,6 @@ export function forBundle(p: PlayerProfile) {
       team_games: p.season.teamGames, tracked_apps: p.season.trackedApps, tracked_starts: p.season.trackedStarts,
     } : null,
     recent: p.recent, standout: p.standout, strengths: p.strengths, tags: p.tags, importance: p.importance,
+    country: p.country, load: p.load,
   };
 }

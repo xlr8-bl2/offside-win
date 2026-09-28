@@ -72,9 +72,14 @@ export interface RefereeLine {
   reds: number;
 }
 
+/** Results against sides above and below in the table, from the recent window. */
+export interface TableSplit { above: Record3 | null; below: Record3 | null }
+
 export interface Extras {
   /** The two sides' team ids, so a player row can be put on the right side. */
   teams: { home: number; away: number };
+  /** Each side's recent league results against teams above and below them. */
+  split?: { home: TableSplit | null; away: TableSplit | null };
   referee: RefereeLine | null;
   managers: { home: ManagerLine | null; away: ManagerLine | null };
   /** This league's team of the season so far, the members from these two sides. */
@@ -163,6 +168,20 @@ export function parseBestXi(raw: unknown, teamIds: number[]): BestXiRow[] {
   return out;
 }
 
+function record3(v: unknown): Record3 | null {
+  const r = rec(v);
+  const w = num(r?.['won']), d = num(r?.['drawn']), l = num(r?.['lost']);
+  return w !== null && d !== null && l !== null && w + d + l > 0 ? { w, d, l } : null;
+}
+
+/** A team's form, split by whether the opponent was above or below it. */
+export function parseTableSplit(raw: unknown): TableSplit | null {
+  const r = rec(raw);
+  if (!r) return null;
+  const above = record3(r['vs_stronger']), below = record3(r['vs_weaker']);
+  return above || below ? { above, below } : null;
+}
+
 /* ------------------------------------------------------------- fetching */
 
 /**
@@ -194,10 +213,14 @@ const playerExtra = (id: number, teamId: number, now: number) => cached<PlayerEx
   ]);
   const n = nationalTeam(nt);
   const country = n?.team_id ? await teamName(n.team_id) : null;
-  const signed = recentSigning(tr, teamId, now);
+  // Playing for their country here: a transfer has nothing to do with it.
+  const signed = n?.team_id === teamId ? null : recentSigning(tr, teamId, now);
   if (!n && !signed) return { caps: null, goals: null, country: null, signed: null };
   return { caps: n?.caps ?? null, goals: n?.goals ?? null, country, signed };
 });
+
+const tableSplit = (teamId: number, leagueId: number) => cached<TableSplit>(`x:split:${teamId}:${leagueId}`, DAY / 2, async () =>
+  parseTableSplit(await bsdOrNull(`/api/v2/teams/${teamId}/form/`, { last: 10, league_id: leagueId })));
 
 const bestXi = (leagueId: number, seasonId: number) => cached<unknown>(`x:bxi:${leagueId}:${seasonId}`, DAY, () =>
   bsdOrNull(`/api/v2/leagues/${leagueId}/bestxi/${seasonId}/`));
@@ -222,10 +245,12 @@ export async function gatherExtras(x: ExtrasInput): Promise<Extras> {
     const hist = await managerHistory(side.coachId);
     return { id: side.coachId, name: side.coachName, vs: hist ? recordVs(hist, opp, x.kickoff) : null };
   };
-  const [home, away, bxiRaw] = await Promise.all([
+  const [home, away, bxiRaw, splitHome, splitAway] = await Promise.all([
     manager(x.home, x.away.id),
     manager(x.away, x.home.id),
     x.seasonId ? bestXi(x.leagueId, x.seasonId) : Promise.resolve(null),
+    tableSplit(x.home.id, x.leagueId),
+    tableSplit(x.away.id, x.leagueId),
   ]);
   const best = bxiRaw ? parseBestXi(bxiRaw, [x.home.id, x.away.id]) : [];
 
@@ -250,5 +275,9 @@ export async function gatherExtras(x: ExtrasInput): Promise<Extras> {
       }
     : null;
 
-  return { teams: { home: x.home.id, away: x.away.id }, referee, managers: { home, away }, best_xi: best, players };
+  return {
+    teams: { home: x.home.id, away: x.away.id },
+    split: { home: splitHome, away: splitAway },
+    referee, managers: { home, away }, best_xi: best, players,
+  };
 }
