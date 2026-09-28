@@ -140,12 +140,13 @@
 
 <footer class="foot">
   <!--
-    The footer is drawn from what is on the board, not typed in: the
-    competitions with games in the next three days, the next kick-offs we
-    have a call on, and how many matches are live. The Premier League,
-    La Liga and the Bundesliga were fixed links here even during an
-    international break, two weeks from their next game. What is written
-    below is only what a reader (or a crawler) sees before the script runs.
+    Every link here goes somewhere with something on it, at any time of
+    year. The big competitions are fixed, and go to their own pages, which
+    always carry the table, the scorers, the next games and the latest
+    results (leagueinfo.ts). They used to open the board filtered to that
+    competition, which was empty for two weeks of every international break.
+    "This week" and "Next up" are drawn from the board: the other
+    competitions with games in the next three days, and the next kick-offs.
   -->
   <div class="foot-top">
     <div class="foot-cta">
@@ -166,9 +167,18 @@
         <a href="#/pricing" data-member-link>Membership</a>
       </div>
       <div class="foot-col">
-        <h4>Coming up</h4>
+        <h4>Competitions</h4>
+        <a href="#/league/7">Champions League</a>
+        <a href="#/league/1">Premier League</a>
+        <a href="#/league/3">La Liga</a>
+        <a href="#/league/4">Serie A</a>
+        <a href="#/league/5">Bundesliga</a>
+        <a href="#/league/6">Ligue 1</a>
+        <a href="#/leagues" class="foot-all">All 88 competitions</a>
+      </div>
+      <div class="foot-col" id="foot-comps-col" hidden>
+        <h4>This week</h4>
         <div id="foot-comps"></div>
-        <a href="#/leagues" class="foot-all">Every competition</a>
       </div>
       <div class="foot-col foot-col-next" id="foot-next-col" hidden>
         <h4>Next up</h4>
@@ -184,8 +194,19 @@
         <a href="#/legal/responsible">Responsible gambling</a>
         <a href="#/legal/contact">Contact</a>
       </div>
-      <div class="foot-col">
-        <h4>Follow</h4>
+    </div>
+    <div class="foot-base">
+      <div class="foot-about-block">
+        <a class="brand foot-brand" href="#/home" aria-label="offside.win, home">
+          <span class="wordmark" aria-hidden="true">offside<i class="wm-ball"></i><span class="wm-tld">win</span></span>
+        </a>
+        <!-- What the site is, in the page itself rather than only in what the
+             script draws: search engines and Google's brand verification read
+             this without running anything. -->
+        <p class="foot-about">offside.win publishes analysis of the biggest football matches, a call on each
+          one with the reason behind it, and every result afterwards, the misses included.</p>
+      </div>
+      <div class="foot-follow">
         <div class="socials">
           <a href="https://x.com/offsidewin" target="_blank" rel="noopener noreferrer" aria-label="X">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.24 2.25h3.31l-7.23 8.26 8.5 11.24h-6.66l-5.22-6.82-5.96 6.82H1.67l7.73-8.84L1.25 2.25h6.83l4.71 6.23zm-1.16 17.52h1.83L7.02 4.13H5.06z"/></svg></a>
@@ -199,19 +220,7 @@
         <p class="foot-follow-note">Calls, results and the odd rant, as they happen.</p>
       </div>
     </div>
-    <div class="foot-base">
-      <div class="foot-about-block">
-        <a class="brand foot-brand" href="#/home" aria-label="offside.win, home">
-          <span class="wordmark" aria-hidden="true">offside<i class="wm-ball"></i><span class="wm-tld">win</span></span>
-        </a>
-        <!-- What the site is, in the page itself rather than only in what the
-             script draws: search engines and Google's brand verification read
-             this without running anything. -->
-        <p class="foot-about">offside.win publishes analysis of the biggest football matches, a call on each
-          one with the reason behind it, and every result afterwards, the misses included.</p>
-      </div>
-      <div class="foot-stats" id="foot-stats"></div>
-    </div>
+    <div class="foot-stats" id="foot-stats"></div>
     <!--
       Where the reader is, because it decides which bookmaker gets named beside
       every price on the site. We guess it from the device and we are sometimes

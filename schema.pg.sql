@@ -1407,9 +1407,11 @@ $fn$;
 
 -- A competition's own page: the table, the top scorers, its games either side
 -- of today, and how our calls in it have gone. The table and the scorers are
--- written by the slate once per run per league (kv league:<id>:standings and
--- :scorers); the fixtures come through get_board, so they are walled exactly
--- as the board is; the settled record is public, as it is everywhere.
+-- kept in kv (league:<id>:standings and :scorers) by the slate and by
+-- leagueinfo.ts every three hours; the board's fixtures come through
+-- get_board, so they are walled exactly as the board is; the next games and
+-- latest results beyond the board are the plain fixture list (:next, :last);
+-- the settled record is public, as it is everywhere.
 CREATE OR REPLACE FUNCTION get_league(p_id bigint)
 RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   WITH t AS (SELECT floor(extract(epoch FROM now()))::bigint AS now)
@@ -1434,6 +1436,11 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
     'standings_at', (SELECT (try_json(v)->>'updated_at')::bigint FROM kv WHERE k = 'league:' || p_id || ':standings'),
     'scorers', coalesce((SELECT try_json(v)->'rows' FROM kv WHERE k = 'league:' || p_id || ':scorers'), '[]'::json),
     'fixtures', coalesce((SELECT get_board(t.now - 3 * 86400, t.now + 10 * 86400, p_id)->'fixtures' FROM t), '[]'::json),
+    -- The competition's next games and latest results from the provider,
+    -- whether or not they are on the board (leagueinfo.ts), so the page is
+    -- never empty between rounds. No calls in these: they are the fixture list.
+    'next', coalesce((SELECT try_json(v)->'rows' FROM kv WHERE k = 'league:' || p_id || ':next'), '[]'::json),
+    'last', coalesce((SELECT try_json(v)->'rows' FROM kv WHERE k = 'league:' || p_id || ':last'), '[]'::json),
     'record', (
       SELECT json_build_object('n', count(*), 'wins', count(*) FILTER (WHERE pk.result IN ('WON', 'HALF_WON')))
       FROM pick pk JOIN fixture f ON f.id = pk.fixture_id
