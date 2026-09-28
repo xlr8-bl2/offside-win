@@ -4680,3 +4680,22 @@ html.dd-locked, html.dd-locked body { overflow: hidden; }
   text-underline-offset: 3px;
 }
 .board-note button:hover { color: var(--chalk); }
+
+/* A member moving plans: when the new price begins, said on the card. */
+.plan-switch { margin: 0 0 var(--space-4); font-size: var(--text-sm); color: var(--chalk-2); }
+
+/* The account's one suggestion: a longer plan, with nothing to pay today. */
+.acct-upgrade {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: var(--space-4) 0 var(--space-6);
+  padding: var(--space-4) var(--space-5);
+  border: var(--border) solid rgba(122, 90, 248, 0.4);
+  border-radius: var(--radius-lg);
+  background: var(--floodlight-dim);
+  color: var(--chalk);
+}
+.acct-upgrade b { font-weight: var(--weight-bold); }
+.acct-upgrade span { font-size: var(--text-sm); color: var(--chalk-2); }
+.acct-upgrade:hover { border-color: var(--floodlight); }

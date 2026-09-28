@@ -10,7 +10,7 @@
  * page. One source, so the two can never disagree.
  */
 
-export const UPDATED = '27 September 2026';
+export const UPDATED = '28 September 2026';
 
 /*
  * The address on the contact page. It is referenced from the privacy policy and
@@ -36,7 +36,7 @@ const OPERATOR_HTML = OPERATOR.name && OPERATOR.address
   : `<p>Offside.win is operated by a sole trader established in the United Kingdom.</p>`;
 
 /* The date this version of the terms took effect, cited at checkout. */
-export const TERMS_VERSION = '2026-09-27';
+export const TERMS_VERSION = '2026-09-28';
 
 export const LEGAL = {
   privacy: {
@@ -499,8 +499,13 @@ export const LEGAL = {
       <ul>
         <li>the <b>Matchday Pass</b>, a single payment for a period of seven days, which does not renew;</li>
         <li>the <b>Monthly Membership</b>, which renews automatically at the end of each monthly period; and</li>
-        <li>the <b>Season Ticket</b>, which renews automatically at the end of each annual period.</li>
+        <li>the <b>Three-Month Membership</b>, which renews automatically at the end of each three-month period.</li>
       </ul>
+      <p><b>Changing Membership.</b> You may move from one renewing Membership to another, or from a
+         Matchday Pass to a renewing Membership, at any time. Every day of the period you have already
+         paid for is kept: the new Membership begins at once, no payment is taken for it until that
+         period ends, and its first payment is taken on that date. The Membership you leave does not
+         renew. You are not charged twice for any day and you lose none.</p>
       <p>The price, scope, duration and renewal terms of each Membership are stated on the pricing page
          and again at checkout before payment is taken. Prices include any VAT or sales tax we are
          required to charge. The final amount payable is shown at checkout in your currency.</p>
@@ -567,7 +572,7 @@ export const LEGAL = {
         id: 'stop',
         title: 'Cancellation of renewing Memberships',
         body: `
-      <p>You may cancel a Monthly Membership or Season Ticket at any time, in a single step, from your
+      <p>You may cancel a Monthly or Three-Month Membership at any time, in a single step, from your
          account page or from your account with the Payment Provider. No reason is required and no
          further step is necessary.</p>
       <p>Cancellation takes effect at the end of the period for which you have paid. You will retain
@@ -823,7 +828,7 @@ export const LEGAL = {
          14 days is preserved and will be honoured. Memberships purchased before 27 September 2026
          retain, in respect of that purchase, the 14-day refund offered at the time of purchase.</p>
       <h2>Cancellation of renewing Memberships</h2>
-      <p>A Matchday Pass expires automatically. A Monthly Membership or Season Ticket may be cancelled at
+      <p>A Matchday Pass expires automatically. A Monthly or Three-Month Membership may be cancelled at
          any time, in a single step, from your account page or from your account with the Payment
          Provider. Cancellation takes effect at the end of the period for which you have paid, and no
          further charge is made. No refund is made in respect of any part of a period that has
