@@ -87,10 +87,10 @@
       <span class="wordmark" aria-hidden="true">offside<i class="wm-ball"></i><span class="wm-tld">win</span></span>
     </a>
     <nav class="nav" id="nav" aria-label="Main">
-      <a href="#/home" data-route="home">Home</a>
-      <a href="#/board" data-route="board">Picks</a>
-      <a href="#/leagues" data-route="leagues">Competitions</a>
-      <a href="#/results" data-route="results">Results</a>
+      <a href="#/home" data-route="home"><span class="nl">Home</span><small>The biggest games today</small></a>
+      <a href="#/board" data-route="board"><span class="nl">Picks</span><small>Every game we cover, and our call on it</small></a>
+      <a href="#/leagues" data-route="leagues"><span class="nl">Competitions</span><small>Tables, fixtures and results</small></a>
+      <a href="#/results" data-route="results"><span class="nl">Results</span><small>Every call we have made, the misses too</small></a>
       <!--
         Membership, in the menu, because on a phone there was no route to it at
         all: the header's primary button is hidden under 560px, the menu had
@@ -99,7 +99,7 @@
         money. It is hidden above the burger breakpoint, where the button in
         the header already says it.
       -->
-      <a href="#/pricing" data-route="pricing" class="nav-only-menu" data-member-link>Membership</a>
+      <a href="#/pricing" data-route="pricing" class="nav-only-menu" data-member-link><span class="nl">Membership</span><small>Every call, every day</small></a>
     </nav>
     <!--
       The plan state, in the header, on every page.
@@ -118,8 +118,10 @@
            on a wide screen, none of which was where to go next. The tally is
            on the front page; membership shows as a ring on the reader's own
            picture. -->
-      <a class="search-link" id="search-link" href="#/search" aria-label="Search games">
+      <a class="nav-live" id="nav-live" href="#/board?when=live" hidden><i></i><span>Live</span> <b></b></a>
+      <a class="search-link" id="search-link" href="#/search" aria-label="Search games" aria-keyshortcuts="/">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+        <span>Search</span><kbd aria-hidden="true">/</kbd>
       </a>
       <a class="btn btn-ghost btn-sm" id="account-link" href="#/signin">Sign in</a>
       <a class="btn btn-primary btn-sm" id="upgrade-link" href="#/pricing">Get the calls</a>

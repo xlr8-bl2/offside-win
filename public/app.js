@@ -400,6 +400,7 @@ async function liveTick({ force = false } = {}) {
         for (const [id, sig] of before) if (signature(id, live) !== sig) redraw = true;
         // Views that keep a read between routes get the new state too.
         for (const o of [state.board, state.hero, state.heroDetail]) if (o) withLive(o);
+        paintNavLive(state.board);
       }
     }
     if (detailDue && live.focus === focus) {
@@ -2039,6 +2040,9 @@ async function viewSearch(params = new URLSearchParams()) {
 
   const input = document.getElementById('search-q');
   const out = document.getElementById('search-out');
+  // Straight into the box with a keyboard and a mouse; on a phone the keyboard
+  // waits for a tap rather than covering the page on arrival.
+  if (!initial && matchMedia('(pointer: fine)').matches) input.focus({ preventScroll: true });
   let seq = 0;
   let timer = null;
 
@@ -2572,7 +2576,7 @@ async function viewBoard(params = new URLSearchParams()) {
           ${[24, 48, 72, 120, 240].map((h) => `<option value="${h}"${h === state.hours ? ' selected' : ''}>Next ${h}h</option>`).join('')}
         </select>
         <select id="league-filter" aria-label="League">
-          <option value="">All leagues</option>
+          <option value="">All competitions</option>
           ${leagues.map((l) => `<option${l === state.leagueName ? ' selected' : ''}>${esc(l)}</option>`).join('')}
         </select>
       </div>
@@ -7279,7 +7283,9 @@ async function headerAuth() {
   // member, and the plans for anyone else.
   for (const a of document.querySelectorAll('a[data-member-link]')) {
     const hash = member ? '#/account?tab=membership' : '#/pricing';
-    a.textContent = member ? 'Your membership' : 'Membership';
+    (a.querySelector('.nl') ?? a).textContent = member ? 'Your membership' : 'Membership';
+    const sub = a.querySelector('small');
+    if (sub) sub.textContent = member ? 'When it runs to, and your payments' : 'Every call, every day';
     if (a.dataset.hash) { a.dataset.hash = hash; a.setAttribute('href', member ? '/#/account?tab=membership' : '/pricing'); }
     else a.setAttribute('href', hash);
   }
@@ -7334,7 +7340,19 @@ const FOOT_COMPS = 7;
 // lists the others that have something on.
 const FOOT_FIXED = new Set([7, 1, 3, 4, 5, 6]);
 const FOOT_NEXT = 5;
+/* The live count in the bar: how many games on the board are being played. */
+function paintNavLive(board) {
+  const el = document.getElementById('nav-live');
+  if (!el) return;
+  const n = (board?.fixtures ?? []).filter((f) => matchState(f).kind === 'live').length;
+  el.hidden = !n;
+  if (!n) return;
+  el.querySelector('b').textContent = String(n);
+  el.setAttribute('aria-label', `${n} ${n === 1 ? 'game' : 'games'} being played now`);
+}
+
 function paintFooter(board) {
+  paintNavLive(board);
   const fixtures = board?.fixtures ?? [];
   if (!fixtures.length) return;
   const now = Date.now() / 1000;
@@ -7435,10 +7453,32 @@ async function health() {
   } catch { /* stays hidden */ }
 }
 
-document.getElementById('burger').onclick = (e) => {
-  const open = document.getElementById('nav').classList.toggle('open');
-  e.currentTarget.setAttribute('aria-expanded', String(open));
-};
+function setMenu(open) {
+  document.getElementById('nav').classList.toggle('open', open);
+  document.getElementById('burger').setAttribute('aria-expanded', String(open));
+}
+document.getElementById('burger').onclick = () => setMenu(!document.getElementById('nav').classList.contains('open'));
+// The page behind the open menu is dimmed; a tap on it closes the menu rather
+// than following whatever was underneath.
+document.addEventListener('click', (e) => {
+  if (!document.getElementById('nav').classList.contains('open')) return;
+  if (e.target.closest?.('#nav, #burger')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  setMenu(false);
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('nav').classList.contains('open')) {
+    setMenu(false);
+    document.getElementById('burger').focus();
+  }
+  // "/" opens search from anywhere but a field being typed in.
+  if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.target.closest?.('input, textarea, select, [contenteditable]')) {
+    e.preventDefault();
+    if (parseHash().parts[0] === 'search') document.getElementById('search-q')?.focus();
+    else location.hash = '#/search';
+  }
+});
 
 window.addEventListener('hashchange', route);
 // Back and forward between a match's real address (/match/…) and a hash
