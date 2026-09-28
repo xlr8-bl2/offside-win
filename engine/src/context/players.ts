@@ -286,7 +286,13 @@ export async function buildProfile(
   for (const r of all) r.kickoff ??= meta.get(r.event_id)?.kickoff ?? null;
   all = all.filter((r) => r.kickoff !== null);
   all.sort((a, b) => (b.kickoff ?? 0) - (a.kickoff ?? 0));
-  const cross = crossForm(all, meta, { clubId, nationalId, since, kickoff: ctx.kickoff, national });
+  // The country's name: this side's when the player is on duty for it, else
+  // the player's record, else looked up. Our match table often lacks
+  // national teams, so the internationals' own rows cannot be relied on.
+  const countryName = national ? req.team
+    : str(asRecord(d?.['national_team'])?.['name']) ?? str(d?.['national_team_name'])
+      ?? (nationalId ? str(asRecord(await bsdOrNull(`/api/v2/teams/${nationalId}/`))?.['name']) : null) ?? null;
+  const cross = crossForm(all, meta, { clubId, nationalId, since, kickoff: ctx.kickoff, national, countryName });
   const rows = cross.club;
   // The best game's opponent by name, which our table lacks for a club it
   // does not hold (a player abroad, a cup tie against a lower division side).
@@ -331,7 +337,7 @@ export interface Cross {
 export function crossForm(
   all: StatRow[],
   meta: Map<number, MatchMeta>,
-  o: { clubId: number | null; nationalId: number | null; since: number; kickoff: number; national: boolean },
+  o: { clubId: number | null; nationalId: number | null; since: number; kickoff: number; national: boolean; countryName?: string | null },
 ): Cross {
   const isCountry = (r: StatRow) => (o.nationalId !== null && r.team_id === o.nationalId)
     || (o.nationalId === null && r.team_id !== null && r.team_id !== o.clubId && INTERNATIONAL.test(meta.get(r.event_id)?.league ?? ''));
@@ -354,7 +360,7 @@ export function crossForm(
     const top = [...byComp].sort((a, b) => b[1].length - a[1].length)[0];
     const lately = intl.filter((r) => o.kickoff - r.kickoff! <= 21 * 86400);
     country = {
-      team: team ?? null,
+      team: team ?? o.countryName ?? null,
       ...sum(intl),
       tournament: top ? { name: top[0], ...sum(top[1]), ended: Math.max(...top[1].map((r) => r.kickoff!)) } : null,
       lately: lately.length ? sum(lately) : null,

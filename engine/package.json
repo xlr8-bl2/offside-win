@@ -23,6 +23,7 @@
     "lab:odds": "tsx src/run.ts lab:odds",
     "lab:tune": "tsx src/run.ts lab:tune",
     "lab:backfill": "tsx src/run.ts lab:backfill",
+    "leagues:refresh": "tsx src/run.ts leagues:refresh",
     "trace": "tsx src/run.ts trace",
     "backtest": "tsx src/run.ts backtest",
     "migrate": "tsx src/run.ts migrate",

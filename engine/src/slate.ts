@@ -13,6 +13,7 @@ import { refreshSchedule } from './schedule.ts';
 import { pubFacts } from './narrate/facts.ts';
 import { forBundle } from './context/players.ts';
 import { gatherExtras, type Extras } from './context/extras.ts';
+import { refreshLeagueInfo } from './leagueinfo.ts';
 import { geminiWriter } from './narrate/gemini.ts';
 import { budgeted, keyId, spent, todays, type BudgetState } from './narrate/budget.ts';
 import { write, type Writer } from './narrate/write.ts';
@@ -1151,6 +1152,14 @@ export async function runSlate(): Promise<SlateReport> {
     if (named) console.log(`  named ${named} ground${named === 1 ? '' : 's'}`);
   } catch (err) {
     console.log(`  grounds skipped: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // Every competition's page, kept full between its games (leagueinfo.ts):
+  // at most every three hours, and never at the cost of the pass.
+  try {
+    await refreshLeagueInfo(now);
+  } catch (err) {
+    console.log(`  competition pages skipped: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   await kvSetJSON('narrate:ledger', ledger.snapshot());
