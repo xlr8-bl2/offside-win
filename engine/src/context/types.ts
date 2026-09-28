@@ -1,5 +1,6 @@
 import type { BookMarket, Factor, MatchRow, Quote, RefereeRate } from '../types.ts';
 import type { LoadedLeagueModel } from '../ratings/fit.ts';
+import type { PlayerProfile } from './players.ts';
 
 /** One squad member, as the provider reports them. */
 export interface SquadPlayer {
@@ -126,6 +127,12 @@ export interface FixtureContext {
   /** Raw event record — carries weather, derby, travel, pitch, attendance. */
   event: Record<string, unknown>;
   lineups: LineupInfo;
+  /**
+   * Who the absentees and the danger men are: season numbers, standing at the
+   * club, a game that shows it, current form. Null when not gathered (a light
+   * pass, or a match already played).
+   */
+  players?: PlayerProfile[] | null;
   referee: RefereeRate | null;
   standings: StandingRow[] | null;
   /** Total rounds in the season, to tell a dead rubber from a run-in. */

@@ -11,12 +11,16 @@ import { fillCrestColors } from './images/crest.ts';
 import { fillVenues } from './context/venue.ts';
 import { refreshSchedule } from './schedule.ts';
 import { pubFacts } from './narrate/facts.ts';
+import { forBundle } from './context/players.ts';
+import { gatherExtras, type Extras } from './context/extras.ts';
 import { geminiWriter } from './narrate/gemini.ts';
 import { budgeted, keyId, spent, todays, type BudgetState } from './narrate/budget.ts';
 import { write, type Writer } from './narrate/write.ts';
 import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
-import { buildCandidates, driversFor, floorForRank, isLean, marketLabel, select, selectConfident, setAsideFor, type CalibrationMap } from './select.ts';
+import { bucketOf, buildCandidates, DayMix, driversFor, floorForRank, isLean, marketLabel, rankConfident, select, setAsideFor, type CalibrationMap } from './select.ts';
+import { consensusMarkets } from './consensus.ts';
+import { snapshotOf } from './odds.ts';
 import { dbStats, exec as dbExec, insertMany, kvGetJSON, kvSetJSON, pickConflictTarget, select as dbSelect } from './store.ts';
 import type { CalibrationRow } from './select.ts';
 import { MARKET_FAMILY, type Candidate, type Factor, type MarketFamily } from './types.ts';
@@ -151,8 +155,25 @@ export function leagueRank(leagueId: number): number {
  * call, and re-reading a preview because a full-back is fit is not worth a
  * request.
  */
-export function narrativeKey(fixtureId: number, c: Candidate): string {
-  return `narr:${fixtureId}:${c.market}:${c.outcome}:${c.line ?? ''}`;
+export function narrativeKey(fixtureId: number, c: Candidate, news = ''): string {
+  return `narr:${fixtureId}:${c.market}:${c.outcome}:${c.line ?? ''}${news ? `:${fnv(news)}` : ''}`;
+}
+
+/**
+ * The team news a paragraph was written against: who is out, and whether the
+ * sheets are confirmed. A paragraph that says a striker is fit is wrong the
+ * moment he is ruled out, so a change here is worth a rewrite; nothing else
+ * about the fixture moves often enough to be.
+ */
+export function teamNews(lineups: { status?: string; unavailable?: Array<{ id: number }> } | null | undefined): string {
+  const out = (lineups?.unavailable ?? []).map((u) => u.id).sort((a, b) => a - b);
+  return `p1|${lineups?.status === 'confirmed' ? 'c' : 'p'}|${out.join(',')}`;
+}
+
+function fnv(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(36);
 }
 
 /** Long enough to outlive a fixture's build-up, short enough to expire. */
@@ -206,6 +227,27 @@ function buildWriters(): Array<{ model: string; writer: Writer }> | null {
       ratePerMinute: Number(process.env['GEMINI_RPM'] || 8),
     }),
   }));
+}
+
+/**
+ * Run `fn` over `items` up to `window` ahead of the one being asked for.
+ * Each result is handed out once, in order; a failure surfaces when its turn
+ * comes, not before.
+ */
+export function ahead<T, R>(items: T[], fn: (t: T) => Promise<R>, window: number): (i: number) => Promise<R> {
+  const started = new Map<number, Promise<R>>();
+  const start = (i: number) => {
+    if (i >= items.length || started.has(i)) return;
+    const p = fn(items[i]!);
+    p.catch(() => undefined); // observed when its turn comes
+    started.set(i, p);
+  };
+  return (i: number) => {
+    for (let k = i; k < i + Math.max(1, window); k++) start(k);
+    const p = started.get(i)!;
+    started.delete(i);
+    return p;
+  };
 }
 
 export async function runSlate(): Promise<SlateReport> {
@@ -291,6 +333,11 @@ export async function runSlate(): Promise<SlateReport> {
   // neither can today's board and yesterday's.
   const ledgerSeed = (await kvGetJSON<string[]>('narrate:ledger')) ?? [];
   const ledger = new RepetitionLedger(config.narrate.ledgerSize, ledgerSeed);
+  // Fit players named as the threat in a write-up, and when. A name stays
+  // rested for six days so the same star is not every preview's danger man.
+  const threatsSeen = (await kvGetJSON<Record<string, number>>('narrate:threats')) ?? {};
+  const THREAT_REST = 6 * 86400;
+  const recentThreats = () => Object.entries(threatsSeen).filter(([, t]) => now - t < THREAT_REST).map(([k]) => k);
 
   const report: SlateReport = {
     fixtures: events.length,
@@ -319,16 +366,43 @@ export async function runSlate(): Promise<SlateReport> {
   // matches the slate keeps the slip's call (at a fresh price) instead of
   // choosing again, and never takes it down.
   const pinned = await openSlipLegs();
+  // The calls standing on fixtures still to kick off, and the day's market
+  // mix they make, so this run keeps what still holds and varies the rest.
+  const incumbents = new Map<number, { market: string; outcome: string; line: number | null }>();
+  for (const r of await dbSelect<{ fixture_id: number; market: string; outcome: string; line: number | null }>(
+    `SELECT fixture_id, market, outcome, line FROM pick
+      WHERE kind = 'CONFIDENT' AND settled_at IS NULL AND kickoff > ?`,
+    [now],
+  )) incumbents.set(Number(r.fixture_id), { market: r.market, outcome: r.outcome, line: r.line === null ? null : Number(r.line) });
+  const fixturesByDay = new Map<string, number>();
+  for (const e of candidates) {
+    const k = toEpoch(e['event_date']);
+    if (k !== undefined) fixturesByDay.set(DayMix.dayOf(k), (fixturesByDay.get(DayMix.dayOf(k)) ?? 0) + 1);
+  }
+  const mix = new DayMix(fixturesByDay);
+  for (const e of candidates) {
+    const id = num(e['id']);
+    const k = toEpoch(e['event_date']);
+    const inc = id !== undefined ? incumbents.get(id) : undefined;
+    if (inc && k !== undefined) mix.add(DayMix.dayOf(k), bucketOf(inc));
+  }
   const heroCandidates: HeroCandidate[] = [];
 
   // The grounds on this slate, named once each after the loop.
   const venueIds = new Set<number>();
 
-  for (const event of candidates) {
+  // Gathering is nearly all waiting on the provider, and one fixture at a
+  // time made a pass of a hundred-odd fixtures take twenty minutes, longer
+  // than the fifteen between passes. So the next few fixtures' data is
+  // fetched while this one is being analysed; everything after the fetch
+  // stays in order, because the day mix, the writer's budget and the
+  // repetition ledger all depend on it.
+  const gatherAt = ahead(candidates, (e) => gatherFixture(e), config.slate.gatherAhead);
+  for (const [index, event] of candidates.entries()) {
     const venueId = num(event['venue_id']);
     if (venueId) venueIds.add(venueId);
     try {
-      const ctx = await gatherFixture(event);
+      const ctx = await gatherAt(index);
       if (!ctx) {
         report.skipped++;
         continue;
@@ -350,6 +424,26 @@ export async function runSlate(): Promise<SlateReport> {
       }
 
       const { analysis, factors, confidence } = analyseFixture(ctx);
+      const players = ctx.players ? ctx.players.map(forBundle) : null;
+      // The pub knowledge around the match: the referee, each manager against
+      // this opponent, the league's team of the season, big signings, goals
+      // for their country (context/extras.ts). For the next two days' games
+      // only, and cached in kv, so after the first pass it costs almost
+      // nothing. A failure costs the panel, never the fixture.
+      let extras: Extras | null = null;
+      if (analysis.kickoff - now < 48 * 3600) {
+        extras = await gatherExtras({
+          kickoff: analysis.kickoff,
+          now,
+          leagueId: analysis.league_id,
+          seasonId: num(event['season_id']) ?? null,
+          home: { id: ctx.home.team_id, coachId: ctx.home.manager?.id || null, coachName: ctx.home.manager?.name ?? null },
+          away: { id: ctx.away.team_id, coachId: ctx.away.manager?.id || null, coachName: ctx.away.manager?.name ?? null },
+          players: (ctx.players ?? []).map((p) => ({ id: p.id, teamId: p.side === 'home' ? ctx.home.team_id : ctx.away.team_id })),
+          referee: ctx.referee ? { name: ctx.referee.name ?? null, matches: ctx.referee.matches, yellows_per: ctx.referee.yellows_per, reds_per: ctx.referee.reds_per } : null,
+          leagueYellows: ctx.model.rates.yellows.leagueMean * 2 || null,
+        }).catch(() => null);
+      }
       const cands = buildCandidates(analysis.model, analysis.book, calibration);
       const selection = select(cands, analysis.book, factors, confidence);
 
@@ -380,22 +474,36 @@ export async function runSlate(): Promise<SlateReport> {
       // view on the price, so a fixture can produce a confident call, a value
       // bet, both, or neither, and each is stored with its own kind.
       const prediction = parsePrediction(ctx.prediction);
+      // The probability calls are chosen on: the consensus (consensus.ts) or,
+      // if configured back, the provider's. See config.confident.source.
+      const consensus = consensusMarkets(analysis.book, { home: analysis.lambda_home, away: analysis.lambda_away });
       const confidentVerdicts = (() => {
-        if (!prediction) return [];
-        const theirCands = buildCandidates(providerMarkets(prediction), analysis.book, calibration);
+        const useProvider = config.confident.source === 'provider';
+        if (useProvider && !prediction) return [];
+        const theirCands = buildCandidates(
+          useProvider ? providerMarkets(prediction!) : consensus.markets, analysis.book, calibration);
         // A game people came to the site for is answered even when it is close.
         // Champions League and the big five drop to the marquee floor; the call
         // then carries `lean` and the page frames it as a read on a tight game
         // rather than a strong call.
-        const pin = pinned.get(analysis.fixture_id);
+        // A match called off (postponed, cancelled, abandoned, suspended)
+        // gets no new call. One made before it was called off stays exactly
+        // as it was, in the record, where settle voids it the way a bookmaker
+        // does; taking it down would read as a result quietly removed.
+        const calledOff = /postpon|cancel|abandon|suspend|interrupt/i.test(String(event['status'] ?? ''));
+        const NOTHING = { market: '', outcome: '', line: null };
+        const pin = calledOff ? (incumbents.get(analysis.fixture_id) ?? NOTHING) : pinned.get(analysis.fixture_id);
         const chosen = pin
           ? theirCands.filter((c) => c.market === pin.market && String(c.outcome) === pin.outcome
               && (c.line ?? null) === pin.line).slice(0, 1)
-          : selectConfident(
-            theirCands,
-            floorForRank(leagueRank(analysis.league_id)),
-            calibration,
-          );
+          : (() => {
+            const ranked = rankConfident(theirCands, floorForRank(leagueRank(analysis.league_id)), calibration);
+            // Matches under way keep whatever they had; the mix is for calls
+            // still to be made.
+            if (analysis.kickoff <= Math.floor(Date.now() / 1000)) return ranked.slice(0, 1);
+            const one = mix.choose(ranked, analysis.kickoff, incumbents.get(analysis.fixture_id) ?? null);
+            return one ? [one] : [];
+          })();
         return chosen.map((candidate) => {
           const drivers = driversFor(candidate, factors);
           return {
@@ -408,7 +516,7 @@ export async function runSlate(): Promise<SlateReport> {
               awayTeam: analysis.away_team,
               fixtureId: analysis.fixture_id,
               ledger,
-              expectedGoals: prediction.expected_goals,
+              expectedGoals: prediction?.expected_goals ?? consensus.rates,
             }),
             drivers,
             set_aside: setAsideFor(candidate, factors, drivers),
@@ -443,7 +551,7 @@ export async function runSlate(): Promise<SlateReport> {
       if (writer && !writerGaveUp) {
         for (const v of confidentVerdicts) {
           // Written once per call, not once per run.
-          const key = narrativeKey(analysis.fixture_id, v.candidate);
+          const key = narrativeKey(analysis.fixture_id, v.candidate, teamNews(ctx.lineups));
           // Stored as { text, why } now; older entries are a bare string and
           // are rewritten, since they have no members' paragraph.
           const cached = await kvGetJSON<string | { text: string; why: string | null }>(key);
@@ -460,33 +568,37 @@ export async function runSlate(): Promise<SlateReport> {
             break;
           }
           narrateAttempts++;
+          const facts = pubFacts({
+            home: analysis.home_team,
+            away: analysis.away_team,
+            ledger: factors.map(forStorage),
+            form: {
+              home: (factors.find((f) => f.id === 'form.home')?.evidence ?? null) as Record<string, unknown> | null,
+              away: (factors.find((f) => f.id === 'form.away')?.evidence ?? null) as Record<string, unknown> | null,
+            },
+            h2h: (ctx.h2h ?? null) as Record<string, unknown> | null,
+            // Everything with a name on it. The writer used to get the
+            // lineup *status* and nothing else, so it could say the sheets
+            // were confirmed and not who was on them.
+            lineups: ctx.lineups
+              ? { status: ctx.lineups.status, home: ctx.lineups.home, away: ctx.lineups.away }
+              : null,
+            standings: ctx.standings
+              ? { home: ctx.home.standing ?? null, away: ctx.away.standing ?? null, size: ctx.standings.length }
+              : null,
+            goalscorers: ((analysis.external as { polymarket?: { goalscorers?: unknown } } | null)
+              ?.polymarket?.goalscorers ?? null) as Array<{ player?: string; price?: number }> | null,
+            managers: { home: ctx.home.manager?.name ?? null, away: ctx.away.manager?.name ?? null },
+            players: players ?? null,
+            extras,
+            recentThreats: recentThreats(),
+          });
           const result = await write({
             home: analysis.home_team,
             away: analysis.away_team,
             competition: ctx.league_name ?? 'this competition',
             call: plainCall(v.candidate, analysis.home_team, analysis.away_team),
-            facts: pubFacts({
-              home: analysis.home_team,
-              away: analysis.away_team,
-              ledger: factors.map(forStorage),
-              form: {
-                home: (factors.find((f) => f.id === 'form.home')?.evidence ?? null) as Record<string, unknown> | null,
-                away: (factors.find((f) => f.id === 'form.away')?.evidence ?? null) as Record<string, unknown> | null,
-              },
-              h2h: (ctx.h2h ?? null) as Record<string, unknown> | null,
-              // Everything with a name on it. The writer used to get the
-              // lineup *status* and nothing else, so it could say the sheets
-              // were confirmed and not who was on them.
-              lineups: ctx.lineups
-                ? { status: ctx.lineups.status, home: ctx.lineups.home, away: ctx.lineups.away }
-                : null,
-              standings: ctx.standings
-                ? { home: ctx.home.standing ?? null, away: ctx.away.standing ?? null, size: ctx.standings.length }
-                : null,
-              goalscorers: ((analysis.external as { polymarket?: { goalscorers?: unknown } } | null)
-                ?.polymarket?.goalscorers ?? null) as Array<{ player?: string; price?: number }> | null,
-              managers: { home: ctx.home.manager?.name ?? null, away: ctx.away.manager?.name ?? null },
-            }),
+            facts,
             odds: v.candidate.odds,
           }, writer);
           // Kept after every write, not only at the end, so a run that dies
@@ -497,6 +609,12 @@ export async function runSlate(): Promise<SlateReport> {
             v.narrative = result.text;
             v.why = result.why ?? null;
             narrateWritten++;
+            // The threats this write-up could have named, rested from now.
+            for (const f of facts.slice(0, 18)) {
+              for (const k of (f.threat ?? '').split('|').filter(Boolean)) threatsSeen[k] = now;
+            }
+            for (const [k, t] of Object.entries(threatsSeen)) if (now - t > 4 * THREAT_REST) delete threatsSeen[k];
+            await kvSetJSON('narrate:threats', threatsSeen);
             consecutiveErrors = 0;
             await kvSetJSON(key, { text: result.text, why: v.why }, NARRATIVE_TTL);
           } else {
@@ -671,6 +789,14 @@ export async function runSlate(): Promise<SlateReport> {
         // analysis into a link by looking it up here, so a name the writer
         // uses that is not in this list simply stays text.
         people: peopleOf(ctx),
+        // Who the absentees and the danger men are: season numbers, standing
+        // at the club, a game that shows it, current form. The writer's player
+        // lines come from here; kept so the page can show them too.
+        players: players ?? null,
+        // The referee, the managers against this opponent, the team of the
+        // season, signings and caps (context/extras.ts), for the page's
+        // "Who's who" panel and the writer's facts.
+        extras,
         // The players worth a link: the competition's top scorers. A name in
         // the analysis links only if it is one of these, and the link opens
         // the competition's chart at that name.
@@ -699,17 +825,7 @@ export async function runSlate(): Promise<SlateReport> {
           line: m.line,
           confidence: Number(m.confidence.toFixed(3)),
           model: Object.fromEntries([...m.probs].map(([k, v]) => [k, Number(v.toFixed(4))])),
-          book: Object.fromEntries(
-            [...(analysis.book.find((b) => b.market === m.market && b.line === m.line)?.fair ?? new Map())]
-              .map(([k, v]) => [k, Number((v as number).toFixed(4))]),
-          ),
-          best: Object.fromEntries(
-            [...(analysis.book.find((b) => b.market === m.market && b.line === m.line)?.best ?? new Map())]
-              .map(([k, v]) => [k, v]),
-          ),
-          overround: Number(
-            (analysis.book.find((b) => b.market === m.market && b.line === m.line)?.overround ?? 1).toFixed(4),
-          ),
+          ...snapshotOf(analysis.book.find((b) => b.market === m.market && b.line === m.line)),
         })),
         candidates: [...cands]
           .sort((a, b) => b.shrunk_edge - a.shrunk_edge)
@@ -1076,10 +1192,47 @@ export async function runSlate(): Promise<SlateReport> {
   return report;
 }
 
-/** Drop fixtures that have fallen out of the board window. */
+/**
+ * Drop fixtures that have fallen out of the board window, keeping the market
+ * snapshot of every finished one first (see market_snapshot in the schema):
+ * the prices, our probabilities, the provider's and the result are the lab's
+ * whole history, and this used to delete them every week.
+ */
 export async function pruneBoard(): Promise<void> {
   const cutoff = Math.floor(Date.now() / 1000) - 7 * 86400;
+  await archiveSnapshots(cutoff);
   await dbSelect('DELETE FROM fixture WHERE kickoff < ?', [cutoff]);
+}
+
+/** Copy finished fixtures' snapshots older than `before` into market_snapshot. */
+export async function archiveSnapshots(before: number): Promise<void> {
+  if (config.dbBackend !== 'postgres') return;
+  await dbExec(
+    `INSERT INTO market_snapshot (fixture_id, league_id, kickoff, home_goals, away_goals, snapshot, archived_at)
+     SELECT f.id, f.league_id, f.kickoff, f.home_goals, f.away_goals,
+            jsonb_build_object(
+              'rank', f.rank,
+              'markets', b.j->'markets',
+              'lambda', jsonb_build_array(b.j->'lambda_home', b.j->'lambda_away'),
+              'confidence', b.j->'confidence',
+              'provider', b.j->'external'->'bsd_prediction',
+              'corners', CASE WHEN r.j->'stats'->'home'->>'corners' IS NOT NULL AND r.j->'stats'->'away'->>'corners' IS NOT NULL
+                              THEN jsonb_build_array((r.j->'stats'->'home'->>'corners')::int, (r.j->'stats'->'away'->>'corners')::int) END,
+              'reds', CASE WHEN r.j->'stats'->'home' IS NOT NULL
+                           THEN coalesce((r.j->'stats'->'home'->>'red')::int, 0) + coalesce((r.j->'stats'->'away'->>'red')::int, 0) END
+            )::text,
+            floor(extract(epoch FROM now()))::bigint
+       FROM fixture f
+       CROSS JOIN LATERAL (SELECT try_json(f.bundle_json)::jsonb AS j) b
+       CROSS JOIN LATERAL (SELECT try_json(f.report_json)::jsonb AS j) r
+      WHERE f.kickoff < $1 AND f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
+        AND jsonb_typeof(b.j->'markets') = 'array'
+     -- A backfilled row (the market only) gives way to the board's own,
+     -- which carries our model's view too.
+     ON CONFLICT (fixture_id) DO UPDATE SET snapshot = EXCLUDED.snapshot, archived_at = EXCLUDED.archived_at
+      WHERE market_snapshot.snapshot LIKE '%"source":"backfill"%'`,
+    [before],
+  );
 }
 
 

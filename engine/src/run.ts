@@ -1,12 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { runBacktest } from './backtest.ts';
-import { stats as bsdStats } from './bsd.ts';
+import { clearCache, stats as bsdStats } from './bsd.ts';
 import { config, requireEnv } from './config.ts';
-import { backfillHistory } from './history.ts';
-import { probe, probePlayers, probeReport } from './probe.ts';
+import { backfillHistory, repairCards } from './history.ts';
+import { probe, probeExtras, probePlayers, probeProfiles, probeReds, probeReport } from './probe.ts';
 import { grant, plans } from './grant.ts';
 import { whopCheck } from './whopcheck.ts';
 import { geminiCheck } from './geminicheck.ts';
+import { mailSetup } from './mailsetup.ts';
+import { syncCards } from './cards/sync.ts';
+import { probeHistoricOdds, runLab } from './lab/run.ts';
+import { backfillSnapshots } from './lab/backfill.ts';
 import { trace } from './trace.ts';
 import { fitAllLeagues } from './ratings/fit.ts';
 import { syncTeamShots } from './images/sync.ts';
@@ -50,6 +54,23 @@ const commands: Record<string, () => Promise<unknown>> = {
   async 'probe:players'() {
     if (!config.bsd.key) throw new Error('BSD_API_KEY is required to probe.');
     return probePlayers();
+  },
+
+  async 'probe:profile'() {
+    requireEnv();
+    const ids = [process.env['GRANT_EMAIL'], process.env['GRANT_ARG'], ...process.argv.slice(3)]
+      .map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0);
+    return probeProfiles(ids);
+  },
+
+  async 'probe:extras'() {
+    requireEnv();
+    return probeExtras();
+  },
+
+  async 'probe:reds'() {
+    requireEnv();
+    return probeReds();
   },
 
   async 'probe:report'() {
@@ -108,6 +129,16 @@ const commands: Record<string, () => Promise<unknown>> = {
     return backfillHistory({ full: process.env.FULL_BACKFILL === 'true' });
   },
 
+  // Card counts the provider's stats left blank because nothing was shown.
+  async 'history:cards'() {
+    requireEnv();
+    await ensureSchema();
+    const days = Number(process.env['GRANT_EMAIL']) || 400;
+    const r = await repairCards(days);
+    console.log(`Cards: ${r.checked} matches without a count in the last ${days} days; ${r.repaired} read from the incidents, ${r.unpublished} still unpublished.`);
+    return r;
+  },
+
   async ratings() {
     requireEnv();
     await ensureSchema();
@@ -139,6 +170,47 @@ const commands: Record<string, () => Promise<unknown>> = {
     return report;
   },
 
+  /**
+   * The slate, every fifteen minutes, for most of a job's six hours.
+   *
+   * GitHub runs a fifteen-minute schedule when it has capacity to, which in
+   * practice was every three to six hours: the board said "re-analysed every
+   * fifteen minutes" and was often an afternoon old. One job that keeps
+   * going, started again by the schedule when it ends, is the cadence the
+   * board promises. Each pass starts from a clean provider cache, so it sees
+   * the prices and team news as they are now.
+   */
+  async 'slate:loop'() {
+    requireEnv();
+    await ensureSchema();
+    const every = config.slate.loopEveryMinutes * 60_000;
+    const end = Date.now() + config.slate.loopForMinutes * 60_000;
+    // Leave room for one more pass to finish inside the job's limit.
+    const lastStart = end - 25 * 60_000;
+    let pass = 0;
+    let failures = 0;
+    for (;;) {
+      const t0 = Date.now();
+      pass++;
+      clearCache();
+      try {
+        await commands.slate!();
+        failures = 0;
+      } catch (err) {
+        // One bad pass (a provider outage, a dropped connection) is not a
+        // reason to stop the board updating; three in a row is.
+        failures++;
+        console.error(`slate:loop: pass ${pass} failed:`, err instanceof Error ? err.message : err);
+        if (failures >= 3) throw err;
+      }
+      console.log(`slate:loop: pass ${pass} took ${((Date.now() - t0) / 60_000).toFixed(1)} min`);
+      const next = t0 + every;
+      if (next > lastStart) break;
+      if (next > Date.now()) await new Promise((r) => setTimeout(r, next - Date.now()));
+    }
+    console.log(`slate:loop: ${pass} passes`);
+  },
+
   async settle() {
     requireEnv();
     await ensureSchema();
@@ -158,6 +230,45 @@ const commands: Record<string, () => Promise<unknown>> = {
 
   async 'gemini:check'() {
     return geminiCheck();
+  },
+
+  // The market lab: which probability is most accurate and which selection
+  // rule earns, replayed on the prices we actually saw. See lab/markets.ts.
+  async lab() {
+    requireEnv({ provider: false });
+    await runLab();
+  },
+
+  // Search for the rule that lands most and still earns, on a three-way split.
+  async 'lab:tune'() {
+    requireEnv({ provider: false });
+    const { loadHistory } = await import('./lab/run.ts');
+    const { runTune } = await import('./lab/tune.ts');
+    const { kvSetJSON } = await import('./store.ts');
+    const report = runTune(await loadHistory());
+    await kvSetJSON('lab:tune', { at: Math.floor(Date.now() / 1000), ...report });
+  },
+
+  async 'lab:backfill'() {
+    requireEnv();
+    await ensureSchema();
+    await backfillSnapshots();
+  },
+
+  async 'lab:odds'() {
+    requireEnv();
+    await probeHistoricOdds();
+  },
+
+  // The share card of every match on the board, redrawn when it changes.
+  async cards() {
+    requireEnv({ provider: false });
+    await syncCards();
+  },
+
+  // Brevo: the key, the domain's DNS records, the sender, and a test email.
+  async 'mail:setup'() {
+    return mailSetup(process.argv[3] ?? (process.env['GRANT_EMAIL'] || undefined));
   },
 
   // The account a leaked call came from, by the code #/trace reads out of it.

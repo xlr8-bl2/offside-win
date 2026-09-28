@@ -1,0 +1,45 @@
+name: cards
+
+# The share card of every match: the picture a link to it unfurls into on
+# WhatsApp, X and iMessage. Redraws only the cards whose content changed since
+# the last run (a free call going up, a call, the final score, how a call
+# settled), so most runs draw a handful or none.
+#
+# Every half hour, which is as fresh as a link preview gets anyway: platforms
+# cache what they fetched. A push to a working branch runs it too, because a
+# workflow must exist on the default branch before it can be dispatched.
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+  push:
+    branches: ['claude/offside-win-context-sync-**']
+    paths:
+      - '.github/workflows/cards.yml'
+      - 'engine/src/cards/**'
+      - 'public/js/lib/cards.js'
+
+concurrency:
+  group: cards
+  cancel-in-progress: false
+
+jobs:
+  cards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+      # The runner has no browser preinstalled.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Draw the cards
+        env:
+          DB_BACKEND: postgres
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SITE: ${{ vars.SITE_URL || 'https://offside.win' }}
+        run: npm run cards

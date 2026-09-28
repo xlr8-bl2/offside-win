@@ -304,6 +304,20 @@ export interface BookMarket {
   method: 'shin' | 'multiplicative';
   /** §7.1 movement, per outcome, where the book reported it. */
   movement: Map<Outcome, { opening: number; current: number; dir: 'SHORTENING' | 'DRIFTING' | null }>;
+  /** How many books quoted the full set: a thin market's consensus is one opinion. */
+  books?: number;
+  /**
+   * The sharpest single book's de-vigged view (Pinnacle, else an exchange),
+   * when it quoted the full set. Kept beside the consensus so the lab can say
+   * which one to measure value against.
+   */
+  sharp?: { fair: Map<Outcome, number>; book: string } | null;
+  /**
+   * The same market as it opened: the sharp book's first prices de-vigged
+   * where it recorded all of them, else the consensus of the books that did.
+   * Beside `sharp` it says which way the money has gone since.
+   */
+  open?: { fair: Map<Outcome, number>; book: string } | null;
 }
 
 /** Our own price for the same market. */
@@ -339,6 +353,12 @@ export interface Candidate {
   kelly: number;
   confidence: number;
   family: MarketFamily;
+  /** How many books priced the full market. */
+  books?: number;
+  /** The sharp book's fair probability for this outcome, when it priced the market. */
+  sharp_prob?: number | null;
+  /** The market's probability for this outcome when it opened (odds.ts, `open`). */
+  open_prob?: number | null;
 }
 
 export interface Verdict {

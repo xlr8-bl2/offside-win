@@ -276,12 +276,28 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     (c) => {
       const pct = n(c.evidence.goal_share_pct);
       only(pct >= 30);
-      return `This is not a squad-depth question. ${cap(String(c.subject))} accounts for ${share(pct)} of what ${s(c.evidence.team)} score, and he is not in the side.`;
+      return `This is not a squad-depth question. ${cap(String(c.subject))} accounts for ${share(pct)} of what ${s(c.evidence.team)} score, and is not in the side.`;
     },
     (c) => {
       const pct = n(c.evidence.goal_share_pct);
-      only(pct < 5);
-      return `${s(c.evidence.team)} are without ${c.subject}, though the goal output that goes with him is marginal.`;
+      // Not for a keeper or a regular at the back, who matter without scoring.
+      only(pct < 5 && !/first_choice_keeper|ever_present|defensive_rock/.test(s(c.evidence.tags, '')));
+      return `${s(c.evidence.team)} are without ${c.subject}, though not many goals go with that absence.`;
+    },
+    (c) => {
+      const g = n(c.evidence.goals);
+      const a = n(c.evidence.assists);
+      only(g + a >= 4);
+      const what = g && a ? `${g} ${g === 1 ? 'goal' : 'goals'} and ${a} ${a === 1 ? 'assist' : 'assists'}` : g ? `${g} goals` : `${a} assists`;
+      return `${c.subject} has ${what} this season and is not available to ${s(c.evidence.team)}.`;
+    },
+    (c) => {
+      only(/first_choice_keeper/.test(s(c.evidence.tags, '')));
+      return `${s(c.evidence.team)} lose their first-choice keeper in ${c.subject}, and a change in goal is never nothing.`;
+    },
+    (c) => {
+      only(/ever_present|defensive_rock/.test(s(c.evidence.tags, '')) && s(c.evidence.role) === 'DEF');
+      return `${c.subject} has been a fixture at the back for ${s(c.evidence.team)} and misses out here.`;
     },
     (c) => {
       const role = ROLE_WORD[s(c.evidence.role, 'UNKNOWN')] ?? 'player';

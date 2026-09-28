@@ -264,9 +264,29 @@ export const config = {
    * "is the price wrong", this one asks "what is likely", and mixing the two
    * thresholds would mean a change to one silently moved the other.
    */
+  /** consensus.ts: how far the goals markets move from the market's rates toward our model's. */
+  consensus: {
+    modelWeight: num('CONSENSUS_MODEL_WEIGHT', 0.5),
+  },
+
   confident: {
-    /** Publish a call at or above this probability. */
-    floor: num('CONF_FLOOR', 0.8),
+    /**
+     * Publish a call at or above this probability.
+     *
+     * Chosen by lab:tune on 3,077 fixtures split three ways by date (tuned on
+     * the oldest half, chosen on the next quarter, checked once on the newest):
+     *
+     *   rule                                   landed           a day   return
+     *   provider, 80%+ (the old rule)          83 / 83 / 80%    ~23     -1.0 / -0.3 / -3.2%
+     *   consensus 72%+, within 1% of fair      77 / 78 / 78%    ~34     -0.5 / +0.4 / +3.0%
+     *   78%+, best price at or above the       80 / 81 / 81%    ~20     +2.2 / +3.3 / +6.3%
+     *     sharp book's fair price (this)
+     *
+     * The sharp-book test (minSharpEv) is what did it: over 1.5 goals, the
+     * market the old board leaned on, lost in both tuning periods when value
+     * was measured against the consensus.
+     */
+    floor: num('CONF_FLOOR', 0.78),
     /**
      * One call per fixture.
      *
@@ -284,7 +304,7 @@ export const config = {
      * goals is ~97% and prices near 1.02: true, worthless, and the fastest way
      * to look like every other tips site.
      */
-    ceiling: num('CONF_CEILING', 0.95),
+    ceiling: num('CONF_CEILING', 0.97),
     /**
      * And never publish one at a price this short whatever its probability. The
      * live board offered Ajax 1X at 1.04 — a 94% call returning fourpence in
@@ -308,7 +328,89 @@ export const config = {
      * than a strong call, which is the true statement and the only one worth
      * making.
      */
-    marqueeFloor: num('CONF_MARQUEE_FLOOR', 0.62),
+    // 0.62 cost about three points of landing on the rule as a whole; 0.70
+    // kept every big game answered and scored better than no exception at all:
+    // 81/82/83% landed, +3.7/+6.0/+8.5% (lab:tune, 3,077 fixtures).
+    marqueeFloor: num('CONF_MARQUEE_FLOOR', 0.7),
+    /**
+     * A higher floor for some league ranks. Rank 3 (Europa League, Nations
+     * League, the strong second-tier leagues) lost in both tuning periods at
+     * 78%; at 85% it earned in all three, and the rule as a whole went from
+     * 80/82/82% landed at +2.5/+5.2/+7.3% to 81/83/82% at +3.4/+6.0/+7.8%
+     * (lab:tune, 3,077 fixtures).
+     */
+    rankFloors: { 3: num('CONF_RANK3_FLOOR', 0.85) } as Record<number, number>,
+    /**
+     * Where a call's probability comes from: `consensus` (consensus.ts: the
+     * bookmakers' de-vigged view, with goals priced off market rates blended
+     * toward ours) or `provider` (the data provider's prediction, which the
+     * market lab scored least accurate on goals). See lab/markets.ts.
+     */
+    source: (process.env.CONF_SOURCE ?? 'consensus') as 'consensus' | 'provider',
+    /**
+     * Among the calls on a fixture that clear the floor, which one. `prob`
+     * takes the likeliest, which is nearly always the shortest price on the
+     * card (over 1.5 goals, a double chance) and made the board one market
+     * deep. `growth` weighs what it pays as well: p·ln(odds) plus the expected
+     * return at the best price, so a 78% call at 1.30 beats an 86% call at
+     * 1.13.
+     */
+    rankBy: (process.env.CONF_RANK_BY ?? 'prob') as 'prob' | 'growth',
+    /**
+     * The most any one market (and side of it) may take of a day's calls, as
+     * a share of the day's fixtures. A fixture whose first choice is full
+     * takes its next call that clears the floor, or none. 0 turns it off.
+     */
+    diversity: num('CONF_DIVERSITY', 0.3),
+    /**
+     * Never a call whose best price returns less than this per pound on its
+     * own probability; -1 turns it off. Near zero the best price has to be
+     * at or about the consensus's fair price: the one condition that separated
+     * the rules that earned in the lab from the ones that did not.
+     */
+    minEv: num('CONF_MIN_EV', -0.01),
+    /**
+     * A best price this far above the consensus's fair odds (odds × fair
+     * probability) is a book that has not moved, not an opportunity anyone
+     * could take, and the call is not made on it.
+     */
+    maxGap: num('CONF_MAX_GAP', 1.12),
+    /**
+     * Markets (market and side, as bucketOf names them) that are not called.
+     * Corners unders lost in both tuning periods under the sharp-book rule,
+     * and leaving them out took the held-out quarter from +6.3% to +7.3%
+     * (lab:tune, 3,077 fixtures). Comma-separated to override.
+     */
+    excludeMarkets: (process.env.CONF_EXCLUDE_MARKETS ?? 'total_corners under').split(',').map((x) => x.trim()).filter(Boolean),
+    /** Only markets at least this many books priced in full; 0 for any. */
+    minBooks: num('CONF_MIN_BOOKS', 0),
+    /**
+     * The value test against the sharp book as well, where it priced the
+     * market: the best price must be within this of its fair price. Null
+     * skips it.
+     */
+    minSharpEv: process.env.CONF_MIN_SHARP_EV ? Number(process.env.CONF_MIN_SHARP_EV) : (0 as number | null),
+    /**
+     * Price movement: leave a call the money has gone against since the market
+     * opened, by more than this (one point: 80% at the open, under 79% now).
+     *
+     * lab:tune, 2,645 fixtures with opening prices: among options the market
+     * prices alike, ones it drifted from by three points or more landed 1.8
+     * points under their price, ones it was backed into 1 to 1.4 points over.
+     * On the production rule, every limit from half a point to five improved
+     * both landing and return in all three periods; one point was chosen on A
+     * and B:
+     *
+     *                     landed (A / B / C)    return (A / B / C)
+     *   without           81.2 / 81.3 / 82.7    +3.8 / +5.0 / +9.0%
+     *   drift <= 1 point  81.6 / 81.4 / 84.0    +4.6 / +5.6 / +10.1%
+     *
+     * for about one call in twenty-five fewer. Null skips it. A call with no
+     * opening price recorded is judged without it.
+     */
+    maxDrift: process.env.CONF_MAX_DRIFT ? Number(process.env.CONF_MAX_DRIFT) : (0.01 as number | null),
+    /** Quarter handicap lines (-1.75, 0.25) are a split stake nobody can explain in a sentence. */
+    quarterLines: process.env.CONF_QUARTER_LINES === 'true',
     /** League rank at or below which a fixture counts as marquee. */
     marqueeRank: num('CONF_MARQUEE_RANK', 2),
     /**
@@ -378,6 +480,11 @@ export const config = {
   },
 
   slate: {
+    /** Fixtures whose data is fetched ahead of the one being analysed. */
+    gatherAhead: num('SLATE_GATHER_AHEAD', 6),
+    /** slate:loop: minutes between the starts of two passes, and how long one job keeps going. */
+    loopEveryMinutes: num('SLATE_LOOP_EVERY', 15),
+    loopForMinutes: num('SLATE_LOOP_FOR', 330),
     /** How far ahead to price. */
     horizonHours: num('SLATE_HORIZON_HOURS', 72),
     /** Keep finished fixtures on the board briefly so results are visible. */

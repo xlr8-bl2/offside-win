@@ -109,6 +109,9 @@ export function buildCandidates(
         kelly: kelly(modelProb, bestQuote.odds, config.selection.kellyFraction),
         confidence: mm.confidence,
         family,
+        books: bm.books ?? 0,
+        sharp_prob: bm.sharp?.fair.get(outcome as Outcome) ?? null,
+        open_prob: bm.open?.fair.get(outcome as Outcome) ?? null,
       });
     }
   }
@@ -341,7 +344,7 @@ export function setAsideFor(candidate: Candidate, factors: Factor[], drivers: Fa
 export function floorForRank(rank: number): number {
   return rank <= config.confident.marqueeRank
     ? config.confident.marqueeFloor
-    : config.confident.floor;
+    : config.confident.rankFloors[rank] ?? config.confident.floor;
 }
 
 /** Whether a published call cleared the normal bar or only the marquee one. */
@@ -349,28 +352,62 @@ export function isLean(c: Candidate): boolean {
   return c.model_prob < config.confident.floor;
 }
 
+/** The market a call counts against for diversity: the market and the side of it. */
+export function bucketOf(c: { market: string; outcome: string }): string {
+  const o = String(c.outcome);
+  const side = o === 'HOME' || o === '1X' ? 'home' : o === 'AWAY' || o === 'X2' ? 'away' : o;
+  return `${c.market} ${side}`;
+}
+
+/** What a qualifying call is ranked on; see config.confident.rankBy. */
+export function confidentScore(c: Candidate, rankBy = config.confident.rankBy): number {
+  const ev = c.model_prob * c.odds - 1;
+  return rankBy === 'prob' ? c.model_prob : c.model_prob * Math.log(c.odds) + ev;
+}
+
+/** Whether a call clears the published bar on its own terms. */
+export function confidentEligible(c: Candidate, floor = config.confident.floor, calibration: CalibrationMap = new Map()): boolean {
+  return (
+    // A family that has been overclaiming has to clear a higher bar, by
+    // exactly what it has been overclaiming. This is the loop the engine
+    // is built around finally reaching the calls that get published: the
+    // floor was flat, so a market landing 57% while claiming 80% kept
+    // publishing at the same rate as one landing 84%.
+    c.model_prob >= floor + overclaim(MARKET_FAMILY[c.market], calibration) &&
+    c.model_prob <= config.confident.ceiling &&
+    c.odds >= config.confident.minOdds &&
+    (config.confident.minEv <= -1 || c.model_prob * c.odds - 1 >= config.confident.minEv) &&
+    c.odds * c.book_prob <= config.confident.maxGap &&
+    (c.books ?? 0) >= config.confident.minBooks &&
+    !config.confident.excludeMarkets.includes(bucketOf(c)) &&
+    (config.confident.minSharpEv === null || c.sharp_prob == null || c.sharp_prob * c.odds - 1 >= config.confident.minSharpEv) &&
+    // The money has not gone against it: the market's view now (the sharp
+    // book, else the consensus) at most `maxDrift` below where it opened.
+    (config.confident.maxDrift === null || c.open_prob == null
+      || (c.sharp_prob ?? c.book_prob) - c.open_prob >= -config.confident.maxDrift) &&
+    (config.confident.quarterLines || c.line === null || Math.abs((c.line * 4) % 2) !== 1)
+  );
+}
+
+/** Every call on a fixture that clears the bar, best first. */
+export function rankConfident(
+  candidates: Candidate[],
+  floor = config.confident.floor,
+  calibration: CalibrationMap = new Map(),
+): Candidate[] {
+  return candidates
+    .filter((c) => confidentEligible(c, floor, calibration))
+    .sort((a, b) => confidentScore(b) - confidentScore(a));
+}
+
 export function selectConfident(
   candidates: Candidate[],
   floor = config.confident.floor,
   calibration: CalibrationMap = new Map(),
 ): Candidate[] {
-  const eligible = candidates
-    .filter(
-      (c) =>
-        // A family that has been overclaiming has to clear a higher bar, by
-        // exactly what it has been overclaiming. This is the loop the engine
-        // is built around finally reaching the calls that get published: the
-        // floor was flat, so a market landing 57% while claiming 80% kept
-        // publishing at the same rate as one landing 84%.
-        c.model_prob >= floor + overclaim(MARKET_FAMILY[c.market], calibration) &&
-        c.model_prob <= config.confident.ceiling &&
-        c.odds >= config.confident.minOdds,
-    )
-    .sort((a, b) => b.model_prob - a.model_prob);
-
   const seen = new Set<MarketFamily>();
   const out: Candidate[] = [];
-  for (const c of eligible) {
+  for (const c of rankConfident(candidates, floor, calibration)) {
     const family = MARKET_FAMILY[c.market];
     if (seen.has(family)) continue;
     seen.add(family);
@@ -378,4 +415,58 @@ export function selectConfident(
     if (out.length >= config.confident.perFixture) break;
   }
   return out;
+}
+
+/**
+ * The day's market mix, so no one market takes the board.
+ *
+ * Measured on the live board, the likeliest call on most fixtures is over 1.5
+ * goals or a double chance at 1.13 to 1.20, so choosing each fixture on its
+ * own made the board one market deep. The mix counts each day's calls by
+ * market and side; a fixture whose first choice already holds its share takes
+ * the next call that clears the bar.
+ *
+ * A call already standing on a fixture keeps its place while it still clears
+ * the bar, so a call a member has seen does not change because another game
+ * was analysed first this time.
+ */
+export class DayMix {
+  private counts = new Map<string, Map<string, number>>();
+  constructor(private readonly fixturesPerDay: Map<string, number>, private readonly share = config.confident.diversity) {}
+
+  static dayOf(kickoff: number): string {
+    return new Date(kickoff * 1000).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  }
+
+  private cap(day: string): number {
+    return Math.max(2, Math.ceil(this.share * (this.fixturesPerDay.get(day) ?? 1)));
+  }
+
+  count(day: string, bucket: string): number {
+    return this.counts.get(day)?.get(bucket) ?? 0;
+  }
+
+  add(day: string, bucket: string, by = 1): void {
+    const m = this.counts.get(day) ?? new Map<string, number>();
+    m.set(bucket, Math.max(0, (m.get(bucket) ?? 0) + by));
+    this.counts.set(day, m);
+  }
+
+  /**
+   * One call from a fixture's ranked list. `incumbent` is the call standing
+   * on it from an earlier run, already counted in the mix.
+   */
+  choose(ranked: Candidate[], kickoff: number, incumbent: { market: string; outcome: string; line: number | null } | null): Candidate | null {
+    const day = DayMix.dayOf(kickoff);
+    const same = (c: Candidate) => incumbent && c.market === incumbent.market
+      && String(c.outcome) === String(incumbent.outcome) && (c.line ?? null) === (incumbent.line ?? null);
+    const kept = ranked.find(same);
+    if (kept) return kept;
+    if (incumbent) this.add(day, bucketOf(incumbent), -1);
+    const pick = this.share > 0
+      ? ranked.find((c) => this.count(day, bucketOf(c)) < this.cap(day)) ?? null
+      : ranked[0] ?? null;
+    if (pick) this.add(day, bucketOf(pick));
+    return pick;
+  }
 }

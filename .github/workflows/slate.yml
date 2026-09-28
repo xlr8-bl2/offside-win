@@ -15,17 +15,26 @@ on:
     # and a thirty-minute cadence meant half of that window could pass before
     # the board caught up. The run is idempotent and the provider is not the
     # bottleneck, so the extra passes cost little and close the gap.
+    #
+    # GitHub starts a schedule this frequent only when it has capacity, which
+    # was every three to six hours. So the job itself loops (slate:loop): a
+    # pass every fifteen minutes for five and a half hours, and this schedule
+    # only has to start the next job when one ends. A trigger that arrives
+    # while a job is running waits as the next one.
     - cron: '*/15 * * * *'
   workflow_dispatch:
 
+# Its own lock, because a job now lasts hours: settle and ratings must not
+# queue behind it. They write different rows (settled picks, ratings) from
+# the ones the slate writes, and Postgres keeps each write whole.
 concurrency:
-  group: engine-write
+  group: slate
   cancel-in-progress: false
 
 jobs:
   slate:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -51,4 +60,4 @@ jobs:
           GEMINI_MODELS: ${{ vars.GEMINI_MODELS }}
           GEMINI_RPM: ${{ vars.GEMINI_RPM }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
-        run: npm run slate
+        run: npm run slate:loop

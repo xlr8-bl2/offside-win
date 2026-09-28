@@ -1,6 +1,7 @@
 import { config } from '../config.ts';
 import { adj, clamp, computed, effect, thin, unavailable } from '../ledger.ts';
 import type { Claim, Factor } from '../types.ts';
+import type { PlayerProfile } from './players.ts';
 import type { FixtureContext, LineupInfo, ScorerRow, SideContext, SquadPlayer } from './types.ts';
 
 /**
@@ -19,8 +20,13 @@ import type { FixtureContext, LineupInfo, ScorerRow, SideContext, SquadPlayer } 
  *
  * **The size comes from the player, not from a constant.** A "star out" flag
  * that subtracts a fixed amount treats a 25-goal striker and a squad forward
- * identically. Here the reduction is the player's measured share of his team's
- * league goals, damped for the fact that a replacement is not worth zero.
+ * identically. Here the reduction is how much of the side goes with the player
+ * (`importanceOf` in players.ts: his share of the goals and assists for a
+ * forward or a creator, how much of the football he plays for a defender or a
+ * keeper), damped for the fact that a replacement is not worth zero. Before
+ * the profiles existed it was the goal share alone, which made a first-choice
+ * centre-back or keeper count as nobody; that is still the fallback when no
+ * profile could be built.
  */
 
 /** Position groups, from whatever spelling the provider uses. */
@@ -215,9 +221,22 @@ export function availabilityFactors(ctx: FixtureContext): Factor[] {
       continue;
     }
 
-    // Rank by measured output share so the narrative leads with the player who
-    // actually matters, not whoever the list happened to put first.
-    absences.sort((a, b) => b.goalShare - a.goalShare);
+    // How much of the side goes with each player: the profile's measure when
+    // there is one, the goal share when not. A doubt counts for half, since he
+    // may well play.
+    const profiles = (ctx.players ?? []).filter((p) => p.side === which && p.status !== 'fit');
+    const profileOf = (a: Absence): PlayerProfile | undefined =>
+      profiles.find((p) => p.id === a.id) ?? profiles.find((p) => nameKey(p.name) === nameKey(a.name));
+    const sized = absences.map((a) => {
+      const p = profileOf(a);
+      const measured = !!p?.season || a.measured;
+      const base = p?.season ? p.importance : a.goalShare;
+      const doubt = p?.status === 'doubtful' || /doubt/i.test(a.reason ?? '');
+      return { a, p, measured, weight: base * (doubt ? 0.5 : 1), doubt };
+    });
+    // Leads with the player who actually matters, not whoever the list
+    // happened to put first.
+    sized.sort((x, y) => y.weight - x.weight);
 
     let ownGoalsEffect = 0;
     let oppGoalsEffect = 0;
@@ -226,13 +245,14 @@ export function availabilityFactors(ctx: FixtureContext): Factor[] {
     const claims: Claim[] = [];
     const detail: Array<Record<string, unknown>> = [];
 
-    for (const a of absences) {
-      const impact = ROLE_IMPACT[a.role];
-      const { damping, cover } = depthDamping(side, a.role);
+    for (const { a, p, measured, weight: w, doubt } of sized) {
+      const role = p && p.role !== 'UNKNOWN' ? p.role : a.role;
+      const impact = ROLE_IMPACT[role];
+      const { damping, cover } = depthDamping(side, role);
 
       // An unmeasured absence still counts for something, but only a little:
       // assuming an unknown player is a star is exactly the error §13 warns off.
-      const weight = a.measured ? a.goalShare : 0.05;
+      const weight = measured ? w : 0.05;
       const scaled = weight * damping;
 
       ownGoalsEffect += scaled * impact.ownGoals;
@@ -242,26 +262,31 @@ export function availabilityFactors(ctx: FixtureContext): Factor[] {
 
       detail.push({
         player: a.name,
-        role: a.role,
+        role,
         reason: a.reason,
         goal_share: Number(a.goalShare.toFixed(3)),
-        measured: a.measured,
+        importance: Number(weight.toFixed(3)),
+        measured,
+        doubtful: doubt,
         cover_at_position: cover,
+        ...(p?.tags.length ? { tags: p.tags } : {}),
       });
 
       // Only the absences big enough to change a price are worth a sentence.
-      if (a.measured && a.goalShare >= 0.12) {
+      if (measured && weight >= 0.1) {
         claims.push({
           subject: a.name,
           predicate: a.suspended ? 'suspension' : 'absence',
           polarity: -1,
-          magnitude: clamp(a.goalShare * 2.2, 0.2, 1),
+          magnitude: clamp(weight * 2.2, 0.2, 1),
           evidence: {
             team: side.team_name,
             goal_share_pct: Math.round(a.goalShare * 100),
-            role: a.role,
+            role,
             cover_at_position: cover,
             ...(a.reason ? { reason: a.reason } : {}),
+            ...(p?.season ? { goals: p.season.goals, assists: p.season.assists, apps: p.season.apps } : {}),
+            ...(p?.tags.length ? { tags: p.tags.join(',') } : {}),
           },
           section: '§2.4',
           tier: 1,
@@ -276,8 +301,11 @@ export function availabilityFactors(ctx: FixtureContext): Factor[] {
       adj('cards', 'both', effect(cardsEffect * 2.0)),
     ].filter((a) => Math.abs(a.multiplier - 1) > 1e-4);
 
-    const measuredCount = absences.filter((a) => a.measured).length;
+    const measuredCount = sized.filter((x) => x.measured).length;
     const totalShare = absences.reduce((s, a) => s + a.goalShare, 0);
+    const totalWeight = sized.reduce((s, x) => s + (x.measured ? x.weight : 0), 0);
+    // Said in words: the players who matter, by name. No share, no percentage.
+    const key = sized.filter((x) => x.measured && x.weight >= 0.1).map((x) => x.a.name);
 
     out.push(
       computed({
@@ -286,18 +314,21 @@ export function availabilityFactors(ctx: FixtureContext): Factor[] {
         tier: 1,
         note:
           `${side.team_name} are without ${absences.length} player${absences.length === 1 ? '' : 's'}` +
-          (measuredCount > 0
-            ? `, together ${Math.round(totalShare * 100)}% of the side's league goals.`
-            : `, none of whom register in the league's scoring records.`),
+          (key.length
+            ? `, and ${key.length === 1 ? `${key[0]} is a real loss.` : `${key.slice(0, -1).join(', ')} and ${key[key.length - 1]} are real losses.`}`
+            : measuredCount > 0
+              ? ', none of them central to how the side plays.'
+              : ', none of whom register in the scoring records.'),
         evidence: {
           count: absences.length,
           measured: measuredCount,
           combined_goal_share: Number(totalShare.toFixed(3)),
+          combined_importance: Number(totalWeight.toFixed(3)),
           players: detail,
         },
         adjustments,
         claims,
-        strength: clamp(totalShare * 2.5, 0.15, 1),
+        strength: clamp(totalWeight * 2.5, 0.15, 1),
       }),
     );
   }

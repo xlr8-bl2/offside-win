@@ -1,6 +1,7 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { matchPage, render, seoResponse, sitemap, slug, stateOf, todayPage } from '../src/seo.ts';
+import { matchPage, render, seoResponse, sitemap, slipPage, slug, stateOf, todayPage } from '../src/seo.ts';
+import { fullTitle, matchTitle } from '../../public/js/lib/titles.js';
 import { findBannedInProse } from '../../engine/src/vocabulary.ts';
 
 const realFetch = globalThis.fetch;
@@ -8,6 +9,7 @@ afterEach(() => { globalThis.fetch = realFetch; });
 
 const SHELL = `<!doctype html><html><head><title>offside.win: x</title>
 <meta name="description" content="old">
+<meta name="robots" content="index, follow">
 <link rel="canonical" href="https://offside.win/">
 <meta property="og:title" content="old"><meta property="og:description" content="old">
 <meta name="twitter:title" content="old"><meta name="twitter:description" content="old">
@@ -80,7 +82,7 @@ test('in play, the call is closed, not offered', async () => {
 
 test('the shell gets this page\'s head and first screen, escaped', () => {
   const html = render(SHELL, { title: 'A <b> v B', description: 'd "q"', canonical: 'https://offside.win/x', body: '<p>hi</p>', jsonLd: [{ a: '</script>' }] });
-  assert.match(html, /<title>A &lt;b&gt; v B \| offside.win<\/title>/);
+  assert.match(html, /<title>A &lt;b&gt; v B \| Offside.win<\/title>/);
   assert.match(html, /content="d &quot;q&quot;"/);
   assert.match(html, /<link rel="canonical" href="https:\/\/offside.win\/x">/);
   assert.match(html, /<main id="app"><p>hi<\/p><\/main>/);
@@ -116,4 +118,61 @@ test('today\'s board counts what is on and names the free call', async () => {
   assert.match(p.title, /2 calls/);
   assert.match(p.body, /Today's free call is/);
   assert.deepEqual(findBannedInProse(p.body.replace(/<[^>]+>/g, ' ')).map((v) => v.term), []);
+});
+
+test('the slip page gives the count and the odds, never the open legs', async () => {
+  const p = await slipPage(env({ get_slip: {
+    current: { id: 2, odds: 2.41, chance: 0.61, first_kickoff: now + 3600, legs_count: 3, legs: null },
+    recent: [{ id: 1, odds: 2.2, result: 'WON', first_kickoff: now - 86400 * 2, legs: [{ fixture_id: 5, home: 'Real Madrid', away: 'Barcelona' }] }],
+    record: { n: 1, won: 1 },
+  } }) as any, 'https://offside.win');
+  assert.equal(p.title, "Today's bet slip: 3 legs at total odds of 2.41");
+  assert.equal(p.canonical, 'https://offside.win/slip');
+  assert.match(p.body, /\/match\/5\/real-madrid-v-barcelona/);
+  assert.doesNotMatch(p.body + p.description, /61|per ?cent|%/);
+  // The prices are the one decimal a page is meant to carry.
+  assert.deepEqual(findBannedInProse(p.body.replace(/<[^>]+>/g, ' '), ['2.41', '2.20']).map((v) => v.term), []);
+});
+
+test('the tab and the search result use one title, with the name last', async () => {
+  const p = (await matchPage(env({ get_fixture: FIX }) as any, 212602, 'https://offside.win'))!;
+  assert.equal(p.title, matchTitle({ home: 'Iceland', away: 'Estonia', state: 'upcoming' }));
+  assert.equal(fullTitle(p.title), 'Iceland v Estonia prediction, preview and team news | Offside.win');
+});
+
+test('a withdrawn page swaps the robots line for noindex rather than adding a second', () => {
+  const html = render(SHELL, { title: 'x', description: 'd', canonical: 'https://offside.win/x', body: '', jsonLd: [], noindex: true });
+  assert.equal((html.match(/name="robots"/g) ?? []).length, 1);
+  assert.match(html, /<meta name="robots" content="noindex">/);
+  const ok = render(SHELL, { title: 'x', description: 'd', canonical: 'https://offside.win/x', body: '', jsonLd: [] });
+  assert.match(ok, /<meta name="robots" content="index, follow">/);
+});
+
+test('a match page names its own share card as the link preview, changing address at full time', async () => {
+  const shell = SHELL.replace('</head>', '<meta property="og:image" content="https://offside.win/og.png"><meta property="og:image:alt" content="x"><meta name="twitter:image" content="https://offside.win/og.png"></head>');
+  const pre = (await matchPage(env({ get_fixture: FIX }) as any, 212602, 'https://offside.win'))!;
+  const html = render(shell, pre);
+  assert.match(html, /<meta property="og:image" content="https:\/\/offside.win\/og\/212602.jpg\?s=pre">/);
+  assert.match(html, /<meta name="twitter:image" content="https:\/\/offside.win\/og\/212602.jpg\?s=pre">/);
+  assert.match(html, /og:image:alt" content="Iceland v Estonia"/);
+  const ft = (await matchPage(env({ get_fixture: { ...FIX, status: 'finished', score: [0, 1] } }) as any, 212602, 'https://offside.win'))!;
+  assert.equal(ft.image!.url, 'https://offside.win/og/212602.jpg?s=ft-0-1');
+  // A page without its own picture keeps the site's.
+  const other = render(shell, { title: 'x', description: 'd', canonical: 'https://offside.win/today', body: '', jsonLd: [] });
+  assert.match(other, /og:image" content="https:\/\/offside.win\/og.png"/);
+});
+
+test('a card that is not drawn yet falls back to the site picture instead of a broken image', async () => {
+  const { cardImage } = await import('../src/seo.ts');
+  const e = { ...env({}), ASSETS: { fetch: async () => new Response('png', { headers: { 'content-type': 'image/png' } }) } };
+  globalThis.fetch = (async () => new Response('{"error":"not found"}', { status: 400, headers: { 'content-type': 'application/json' } })) as any;
+  const miss = await cardImage(e as any, 5, 'https://offside.win');
+  assert.equal(miss.headers.get('x-card'), 'fallback');
+  globalThis.fetch = (async (u: any) => {
+    assert.match(String(u), /\/storage\/v1\/object\/public\/shots\/og\/5\.jpg$/);
+    return new Response('jpg', { headers: { 'content-type': 'image/jpeg' } });
+  }) as any;
+  const hit = await cardImage(e as any, 5, 'https://offside.win');
+  assert.equal(hit.headers.get('x-card'), 'match');
+  assert.equal(hit.headers.get('content-type'), 'image/jpeg');
 });
