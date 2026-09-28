@@ -25,6 +25,7 @@
  */
 
 import { absenceReason } from '../context/absence.ts';
+import type { Extras } from '../context/extras.ts';
 
 export interface PubFact {
   /** The sayable line. */
@@ -68,6 +69,8 @@ interface Bundle {
   recentThreats?: string[] | null;
   /** Now, for how recent a standout game is. Defaults to the clock. */
   now?: number;
+  /** The referee, managers against this opponent, team of the season, signings, caps (context/extras.ts). */
+  extras?: Extras | null;
 }
 
 /** What `forBundle` stores. Everything optional: older bundles have none of it. */
@@ -451,6 +454,87 @@ function managerNameFacts(b: Bundle): PubFact[] {
 }
 
 
+/* ----------------------------------------------------------------- extras */
+
+/** "€60m": a fee as it is said. Never a decimal. */
+export function feeWord(eur: number): string {
+  return eur >= 1_000_000 ? `€${Math.round(eur / 1_000_000)}m` : `€${Math.round(eur / 1000)}k`;
+}
+
+/** "in the summer", "in January", "in the summer of 2025": when a move happened. */
+export function windowWord(at: number, now: number): string {
+  const d = new Date(at * 1000);
+  const m = d.getUTCMonth();
+  const y = d.getUTCFullYear();
+  const thisYear = new Date(now * 1000).getUTCFullYear();
+  const when = m >= 5 && m <= 8 ? 'the summer' : m <= 1 ? 'January' : MONTHS[m]!;
+  return y === thisYear ? `in ${when}` : `in ${when} ${when === 'the summer' ? 'of ' : ''}${y}`;
+}
+
+/**
+ * The pub knowledge: each manager against this opponent, the team of the
+ * season, the money, the caps. Counts only, and names rather than pronouns.
+ */
+export function extrasFacts(b: Bundle): PubFact[] {
+  const x = b.extras;
+  if (!x) return [];
+  const out: PubFact[] = [];
+  const now = b.now ?? Math.floor(Date.now() / 1000);
+  const teamOf = (side: 'home' | 'away') => (side === 'home' ? b.home : b.away);
+  const other = (side: 'home' | 'away') => (side === 'home' ? b.away : b.home);
+
+  for (const side of ['home', 'away'] as const) {
+    const m = x.managers?.[side];
+    const v = m?.vs;
+    const name = str(m?.name);
+    if (!v || !name) continue;
+    const games = v.w + v.d + v.l;
+    if (games < 3) continue;
+    const opp = other(side);
+    if (v.w === 0) {
+      out.push({ text: `${name} has never beaten ${opp} in ${n(games)} attempts`, side, weight: 62 });
+    } else if (v.w / games >= 0.7 && games >= 4) {
+      out.push({ text: `${name} has won ${n(v.w)} of ${n(games)} games against ${opp}`, side, weight: 60 });
+    } else if (v.l === 0 && games >= 4) {
+      out.push({ text: `${name} has never lost to ${opp} in ${n(games)} games`, side, weight: 58 });
+    } else {
+      out.push({ text: `${name} has won ${n(v.w)} of ${n(games)} games against ${opp}`, side, weight: 44 });
+    }
+  }
+
+  // The team of the season: an absentee in it is a bigger loss, a fit one a
+  // bigger threat. Two at most.
+  const status = new Map((b.players ?? []).map((p) => [p.id, p.status]));
+  const best = [...(x.best_xi ?? [])].sort((p, q) => (q.goals + q.assists) - (p.goals + p.assists));
+  for (const p of best.slice(0, 2)) {
+    const side: 'home' | 'away' = p.team_id === x.teams?.away ? 'away' : 'home';
+    const out0 = status.get(p.id) === 'out';
+    out.push(out0
+      ? { text: `${p.name}, in the league's team of the season so far, is out`, side, weight: 56 }
+      : { text: `${p.name} is in the league's team of the season so far`, side, weight: 42 });
+  }
+
+  // The money and the caps, for the players the bundle already profiles.
+  // Goals for their country lead when the country is playing; otherwise they
+  // are background, and only a real record is worth the line.
+  for (const p of b.players ?? []) {
+    const e = p.id !== undefined ? x.players?.[String(p.id)] : undefined;
+    if (!e || !p.name || !p.side) continue;
+    if (e.signed && e.signed.fee >= 15_000_000 && p.status !== 'out') {
+      out.push({ text: `${teamOf(p.side)} paid ${feeWord(e.signed.fee)} to bring ${p.name} from ${e.signed.from} ${windowWord(e.signed.at, now)}`, side: p.side, weight: 40 });
+    }
+    const country = str(e.country);
+    const forThisCountry = country && (country === b.home || country === b.away);
+    if (e.goals && e.goals >= 5 && country && (forThisCountry || e.goals >= 20)) {
+      const caps = e.caps ? ` in ${n(e.caps)} games` : '';
+      out.push({ text: `${p.name} has ${n(e.goals)} goals${caps} for ${country}`, side: p.side, weight: forThisCountry ? 55 : 30 });
+    }
+  }
+
+  if (x.referee?.name) out.push({ text: `${x.referee.name} has the whistle`, side: 'match', weight: 24 });
+  return out;
+}
+
 /* ---------------------------------------------------------------- players */
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
@@ -713,6 +797,7 @@ export function pubFacts(bundle: Bundle): PubFact[] {
   out.push(...scorerFacts(bundle));
   out.push(...playerFacts(bundle));
   out.push(...managerNameFacts(bundle));
+  out.push(...extrasFacts(bundle));
 
   if (bundle.lineups?.status === 'confirmed') {
     out.push({ text: 'the team sheets are confirmed', side: 'match', weight: 20 });
