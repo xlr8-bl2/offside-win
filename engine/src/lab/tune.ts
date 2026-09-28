@@ -309,6 +309,38 @@ export function runTune(rows: HistRow[]): Record<string, unknown> {
     report['movement'] = rows;
   }
 
+  // The referee. Does a referee who sends players off more often make "no red
+  // card" land less often than its price says? The record is counted from
+  // games before each match, so this cannot peek at the result.
+  {
+    const refRows = new Map(sorted.map((r) => [r.id, r]));
+    const noRed = all.filter((x) => ((x.o.market === 'red_card' && x.o.outcome === 'no') || (x.o.market === 'total_red_cards' && x.o.outcome === 'under')));
+    const rate = (id: number) => { const r = refRows.get(id)?.ref; return r && r.n >= 15 ? r.reds / r.n : null; };
+    // `all` is flattened options; find each option's fixture through the cache.
+    const owner = new Map<Option, number>();
+    for (const r of sorted) for (const o of cache.get(r.id) ?? []) owner.set(o, r.id);
+    const known = noRed.filter((x) => rate(owner.get(x.o) ?? -1) !== null);
+    console.log(`\nNo red card, by how often the referee sends players off (${known.length} of ${noRed.length} options with 15+ games of referee history):`);
+    for (const [lo, hi, label] of [[0, 0.15, 'rarely (under 0.15 a game)'], [0.15, 0.25, 'sometimes'], [0.25, 0.35, 'often'], [0.35, 9, 'a lot (0.35+ a game)']] as const) {
+      const d = known.filter((x) => { const v = rate(owner.get(x.o)!)!; return v >= lo && v < hi; });
+      if (d.length < 40) continue;
+      const said = d.reduce((acc, x) => acc + (x.o.sharp ?? x.o.book), 0) / d.length;
+      const landed = d.reduce((acc, x) => acc + x.y, 0) / d.length;
+      console.log(`  ${label.padEnd(28)} n ${String(d.length).padStart(5)}  priced ${pct(said)}  landed ${pct(landed)}  (${landed >= said ? '+' : ''}${((landed - said) * 100).toFixed(1)} pts)`);
+    }
+    const refs: unknown[] = [];
+    for (const maxRefReds of [0.2, 0.25, 0.3, 0.35, 0.45]) {
+      const p: Policy = { ...PROD, name: `production, no-red calls only under referees at ${maxRefReds} reds a game or fewer`, maxRefReds };
+      const ra = simulate(p, a, cacheFor(p)), rb = simulate(p, b, cacheFor(p)), rc = simulate(p, c, cacheFor(p));
+      console.log(`\n  ${p.name}`);
+      console.log(line('A', ra));
+      console.log(line('B', rb));
+      console.log(line('C', rc));
+      refs.push({ name: p.name, a: ra, b: rb, c: rc });
+    }
+    report['referee'] = refs;
+  }
+
   const finalists: unknown[] = [];
   for (const s of top) {
     const rc = simulate(s.p, c, cacheFor(s.p));
