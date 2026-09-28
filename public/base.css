@@ -123,9 +123,10 @@ html {
   /* The board is long and the fixture page has anchors in it. */
   scroll-padding-top: calc(var(--header-h) + var(--space-5));
 }
-@media (prefers-reduced-motion: no-preference) {
-  html { scroll-behavior: smooth; }
-}
+/* No smooth scrolling on the page as a whole. It turned every page change
+   into a slide: a tap on a footer link scrolled the whole way back up while
+   the next page drew, which read as the site jumping to the footer and back.
+   An in-page jump that should glide asks for it itself. */
 
 body {
   margin: 0;
@@ -1086,3 +1087,11 @@ table, .tbl, .odds, .price, .row-goals, .slip-odds, .mc-count, [data-countdown] 
 @supports (text-box: trim-both cap alphabetic) {
   .wordmark { text-box: trim-both cap alphabetic; }
 }
+
+/* The page area is always at least a screen tall, so the footer never rides
+   up under a page that is still loading and then gets shoved back down. */
+main#app { min-height: calc(100dvh - var(--header-h) - env(safe-area-inset-top, 0px)); }
+@media (prefers-reduced-motion: no-preference) {
+  main#app.page-in { animation: page-in 160ms var(--ease-out); }
+}
+@keyframes page-in { from { opacity: 0.4; } }
