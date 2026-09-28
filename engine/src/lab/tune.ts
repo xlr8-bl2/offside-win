@@ -276,6 +276,39 @@ export function runTune(rows: HistRow[]): Record<string, unknown> {
     console.log(line('B', simulate(p, b, cacheFor(p))));
     console.log(line('C', simulate(p, c, cacheFor(p))));
   }
+  // Price movement. Does the money since the open know something the price
+  // now does not? Asked first as a question of calibration (among options
+  // the market rates alike, do the ones it moved toward land more?), then as
+  // a rule on top of production, judged the same way as everything else.
+  {
+    const moved = (o: Option) => (o.open === null ? null : (o.sharp ?? o.book) - o.open);
+    const withOpen = all.filter((x) => moved(x.o) !== null);
+    console.log(`\nPrice movement since the open (recorded on ${pct(withOpen.length / Math.max(1, all.length))} of options):`);
+    if (withOpen.length >= 300) {
+      const now = (o: Option) => o.sharp ?? o.book;
+      for (const [lo, hi, label] of [[-1, -0.03, 'drifted 3+ pts'], [-0.03, -0.01, 'drifted 1-3'], [-0.01, 0.01, 'flat'], [0.01, 0.03, 'backed 1-3'], [0.03, 1, 'backed 3+ pts']] as const) {
+        const d = withOpen.filter((x) => now(x.o) >= 0.6 && moved(x.o)! >= lo && moved(x.o)! < hi);
+        if (d.length < 50) continue;
+        const said = d.reduce((acc, x) => acc + now(x.o), 0) / d.length;
+        const landed = d.reduce((acc, x) => acc + x.y, 0) / d.length;
+        console.log(`  ${label.padEnd(15)} n ${String(d.length).padStart(5)}  priced ${pct(said)}  landed ${pct(landed)}  (${landed >= said ? '+' : ''}${((landed - said) * 100).toFixed(1)} pts)`);
+      }
+    }
+    const moves: Policy[] = [];
+    for (const maxDrift of [0.005, 0.01, 0.02, 0.03, 0.05]) moves.push({ ...PROD, name: `production, drift <= ${maxDrift}`, maxDrift });
+    for (const minSteam of [0, 0.005, 0.01]) moves.push({ ...PROD, name: `production, backed >= ${minSteam}`, minSteam });
+    const rows: unknown[] = [];
+    for (const p of moves) {
+      const ra = simulate(p, a, cacheFor(p)), rb = simulate(p, b, cacheFor(p)), rc = simulate(p, c, cacheFor(p));
+      console.log(`\n  ${p.name}`);
+      console.log(line('A', ra));
+      console.log(line('B', rb));
+      console.log(line('C', rc));
+      rows.push({ name: p.name, a: ra, b: rb, c: rc });
+    }
+    report['movement'] = rows;
+  }
+
   const finalists: unknown[] = [];
   for (const s of top) {
     const rc = simulate(s.p, c, cacheFor(s.p));
