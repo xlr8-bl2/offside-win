@@ -522,30 +522,42 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   100% { box-shadow: 0 0 0 0 rgba(61, 180, 104, 0); }
 }
 
+/*
+ * Three lines that turn into an X. Each line is placed from the centre of the
+ * button rather than stacked in a column, so the X crosses dead centre: in a
+ * column the short middle line pulled the other two off true and the X was
+ * drawn lopsided, with one arm running into the button's edge.
+ */
 .burger {
+  position: relative;
   display: none;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: var(--tap);
-  height: var(--tap);
-  margin-right: calc(var(--space-3) * -1);
+  width: 40px;
+  height: 40px;
+  flex: none;
   border-radius: var(--radius);
+  transition: background var(--dur-fast) var(--ease-out);
 }
 .burger span {
-  display: block;
-  width: 18px; height: 2px;
-  margin: 3px 0;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 18px;
+  height: 2px;
+  margin: -1px 0 0 -9px;
   border-radius: var(--radius-pill);
   background: var(--chalk);
-  transition: transform var(--dur-fast) var(--ease-out), opacity var(--dur-fast) linear, width var(--dur-fast) var(--ease-out);
+  transition: transform var(--dur-fast) var(--ease-out), opacity var(--dur-fast) linear;
 }
-/* Three lines of different lengths, so it reads as a menu and not a grille. */
-.burger span:nth-child(2) { width: 12px; margin-left: 6px; }
-.burger[aria-expanded="true"] span:nth-child(1) { transform: translateY(5px) rotate(45deg); }
+.burger span:nth-child(1) { transform: translateY(-6px); }
+/* The middle line shorter, so it reads as a menu and not a grille. */
+.burger span:nth-child(2) { width: 12px; margin-left: -3px; }
+.burger span:nth-child(3) { transform: translateY(6px); }
+.burger[aria-expanded="true"] span:nth-child(1) { transform: rotate(45deg); }
 .burger[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
-.burger[aria-expanded="true"] span:nth-child(3) { transform: translateY(-5px) rotate(-45deg); }
+.burger[aria-expanded="true"] span:nth-child(3) { transform: rotate(-45deg); }
+.burger:hover { background: rgba(244, 246, 250, 0.06); }
 .burger:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.burger[aria-expanded="true"] { background: var(--terrace); }
 
 /* Between a laptop and a tablet the box gives way to the glass. */
 @media (max-width: 1180px) {
@@ -586,16 +598,17 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
     gap: 2px;
     padding: var(--space-4) var(--space-5);
     border-radius: var(--radius);
-    font-family: var(--display);
-    font-size: 1.75rem;
+    font-family: var(--body);
+    font-size: 1.1875rem;
     font-weight: var(--weight-bold);
-    line-height: 1;
+    letter-spacing: -0.015em;
+    line-height: 1.2;
     color: var(--chalk-2);
   }
   .nav a small {
     display: block;
-    font-family: var(--body);
     font-size: var(--text-sm);
+    letter-spacing: 0;
     font-weight: var(--weight-normal);
     color: var(--chalk-3);
   }
