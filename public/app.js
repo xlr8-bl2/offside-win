@@ -16,6 +16,7 @@ import { cleanProse } from './js/lib/vocabulary.js';
 import { LEGAL, SUPPORT_EMAIL, TERMS_VERSION, UPDATED as TERMS_DATE, legalHTML } from './js/lib/legal.js';
 import { mountPayment, openCheckout } from './js/lib/whop.js';
 import { absenceReason } from './js/lib/absence.js';
+import { enhanceSelects } from './js/lib/dropdown.js';
 import { anchorClock, clockText, diffEvents, eachFixture, eventKey, fixtureIdOf, ingest, inPlayWindow, overlay, signature } from './js/lib/live.js';
 import { TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle, ukDay } from './js/lib/titles.js';
 import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, prepareGoogleRedirect, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, siteConfig, viewingAsFree } from './js/lib/auth.js';
@@ -2557,27 +2558,36 @@ async function viewBoard(params = new URLSearchParams()) {
         <p id="board-lede"></p>
         ${CALLS_NOTE}
       </div>
-      <div class="filters">
-        <!--
-          The board's primary axis is time, not whether we fancied it.
-          "With a call / Everything" was in this slot and it answered a
-          question nobody arrives with; what a reader wants first is today's
-          games, what is on right now, and what has already finished. That was
-          the one thing the board could not do: everything played dropped off
-          after six hours, so by the evening the page could say what was coming
-          and not what had happened.
-        -->
-        <div class="seg" role="group" aria-label="When">
-          ${WHEN.map((w) => `
-            <button type="button" data-when="${w.id}"${state.when === w.id ? ' class="on"' : ''}
-              ${counts[w.id] ? '' : 'disabled'}>${esc(w.label)} <i>${counts[w.id]}</i></button>`).join('')}
-        </div>
-        <select id="hours-filter" aria-label="Time window">
-          ${[24, 48, 72, 120, 240].map((h) => `<option value="${h}"${h === state.hours ? ' selected' : ''}>Next ${h}h</option>`).join('')}
+    </div>
+    <!--
+      The board's primary axis is time, not whether we fancied it.
+      "With a call / Everything" was in this slot and it answered a
+      question nobody arrives with; what a reader wants first is today's
+      games, what is on right now, and what has already finished. That was
+      the one thing the board could not do: everything played dropped off
+      after six hours, so by the evening the page could say what was coming
+      and not what had happened.
+
+      Tabs on a rule, the current one underlined in violet: the same mark the
+      header uses for the page you are on, so the two read as one system. It
+      was a white pill in a grey trough, the header's old look.
+    -->
+    <div class="board-bar">
+      <div class="when-tabs" role="tablist" aria-label="When">
+        ${WHEN.map((w) => `
+          <button type="button" role="tab" data-when="${w.id}" aria-selected="${state.when === w.id}"${state.when === w.id ? ' class="on"' : ''}
+            ${counts[w.id] ? '' : 'disabled'}>${w.id === 'live' ? '<span class="wt-dot" aria-hidden="true"></span>' : ''}${esc(w.label)} <i>${counts[w.id]}</i></button>`).join('')}
+      </div>
+      <div class="board-picks">
+        <select id="hours-filter" aria-label="Time window" data-icon="clock" data-title="How far ahead">
+          ${[24, 48, 72, 120, 240].map((h) => `<option value="${h}"${h === state.hours ? ' selected' : ''}>${h <= 48 ? `Next ${h} hours` : `Next ${h / 24} days`}</option>`).join('')}
         </select>
-        <select id="league-filter" aria-label="League">
+        <select id="league-filter" aria-label="Competition" data-icon="cup" data-title="Competition">
           <option value="">All competitions</option>
-          ${leagues.map((l) => `<option${l === state.leagueName ? ' selected' : ''}>${esc(l)}</option>`).join('')}
+          ${leagues.map((l) => {
+            const n = fixtures.filter((f) => f.league === l).length;
+            return `<option${l === state.leagueName ? ' selected' : ''} data-meta="${n}">${esc(l)}</option>`;
+          }).join('')}
         </select>
       </div>
     </div>
@@ -2635,7 +2645,7 @@ async function viewBoard(params = new URLSearchParams()) {
     const next = inTab.map((f) => f.kickoff).filter(Boolean);
     const last = next.length ? Math.max(...next) : null;
     return `${calls}${where} on matches still to play.${
-      last ? ` The last of them kicks off ${dayLabel(last).toLowerCase()}.` : ''}`;
+      last ? ` The last of them kicks off ${/^(Today|Tomorrow)$/.test(dayLabel(last)) ? dayLabel(last).toLowerCase() : `on ${dayLabel(last)}`}.` : ''}`;
   };
 
   const paint = () => {
@@ -2682,7 +2692,7 @@ async function viewBoard(params = new URLSearchParams()) {
               <h3 class="league-head">
                 ${g.id ? `<a href="#/league/${encodeURIComponent(g.id)}">${crest(name, 'xs', g.id, 'league')}${esc(name)}</a>`
                        : `${crest(name, 'xs', g.id, 'league')}${esc(name)}`}
-                <span class="count">${g.list.length}</span>
+                <span class="count">${g.list.length} ${g.list.length === 1 ? 'call' : 'calls'}</span>
               </h3>
               ${g.list.map(rowHTML).join('')}
             </section>`).join('')
@@ -2699,11 +2709,14 @@ async function viewBoard(params = new URLSearchParams()) {
                <a class="btn btn-primary" href="#/results">See the results</a></div>`;
   };
 
-  for (const b of app.querySelectorAll('.seg button')) {
+  for (const b of app.querySelectorAll('.when-tabs button')) {
     b.onclick = () => {
       state.when = b.dataset.when;
       history.replaceState(null, '', boardHash());
-      for (const o of app.querySelectorAll('.seg button')) o.classList.toggle('on', o === b);
+      for (const o of app.querySelectorAll('.when-tabs button')) {
+        o.classList.toggle('on', o === b);
+        o.setAttribute('aria-selected', String(o === b));
+      }
       paint();
     };
   }
@@ -2743,7 +2756,7 @@ async function viewBoard(params = new URLSearchParams()) {
       fixtures.push(...(fresh.fixtures ?? []));
       for (const k of Object.keys(counts)) counts[k] = 0;
       for (const f of fixtures) counts[whenOf(f)]++;
-      for (const b of app.querySelectorAll('.seg button')) {
+      for (const b of app.querySelectorAll('.when-tabs button')) {
         const i = b.querySelector('i');
         if (i) i.textContent = counts[b.dataset.when] ?? 0;
         b.disabled = !counts[b.dataset.when];
@@ -6136,7 +6149,7 @@ async function viewAccount() {
 
       <fieldset class="acct-choice">
         <legend>Your club</legend>
-        <select id="club" class="acct-select">
+        <select id="club" class="acct-select" data-icon="shirt" aria-label="Your club">
           <option value="0">No club</option>
           ${clubChoices.map((t) => `<option value="${esc(t.id)}"${club && Number(club.id) === Number(t.id) ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}
         </select>
@@ -7010,6 +7023,7 @@ async function route({ soft = false } = {}) {
     liveTick();
     playFlashes();
     if (state.board) paintFooter(state.board);
+    enhanceSelects(app);
     if (state.liveFixture) markLiveEvents(Number(state.liveFixture.id), document.getElementById('live-centre'));
     smartQuotes(app);
     crawlable(app);
