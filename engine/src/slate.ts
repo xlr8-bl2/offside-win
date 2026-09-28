@@ -486,7 +486,13 @@ export async function runSlate(): Promise<SlateReport> {
         // Champions League and the big five drop to the marquee floor; the call
         // then carries `lean` and the page frames it as a read on a tight game
         // rather than a strong call.
-        const pin = pinned.get(analysis.fixture_id);
+        // A match called off (postponed, cancelled, abandoned, suspended)
+        // gets no new call. One made before it was called off stays exactly
+        // as it was, in the record, where settle voids it the way a bookmaker
+        // does; taking it down would read as a result quietly removed.
+        const calledOff = /postpon|cancel|abandon|suspend|interrupt/i.test(String(event['status'] ?? ''));
+        const NOTHING = { market: '', outcome: '', line: null };
+        const pin = calledOff ? (incumbents.get(analysis.fixture_id) ?? NOTHING) : pinned.get(analysis.fixture_id);
         const chosen = pin
           ? theirCands.filter((c) => c.market === pin.market && String(c.outcome) === pin.outcome
               && (c.line ?? null) === pin.line).slice(0, 1)
