@@ -111,6 +111,7 @@ export function buildCandidates(
         family,
         books: bm.books ?? 0,
         sharp_prob: bm.sharp?.fair.get(outcome as Outcome) ?? null,
+        open_prob: bm.open?.fair.get(outcome as Outcome) ?? null,
       });
     }
   }
@@ -380,6 +381,10 @@ export function confidentEligible(c: Candidate, floor = config.confident.floor, 
     (c.books ?? 0) >= config.confident.minBooks &&
     !config.confident.excludeMarkets.includes(bucketOf(c)) &&
     (config.confident.minSharpEv === null || c.sharp_prob == null || c.sharp_prob * c.odds - 1 >= config.confident.minSharpEv) &&
+    // The money has not gone against it: the market's view now (the sharp
+    // book, else the consensus) at most `maxDrift` below where it opened.
+    (config.confident.maxDrift === null || c.open_prob == null
+      || (c.sharp_prob ?? c.book_prob) - c.open_prob >= -config.confident.maxDrift) &&
     (config.confident.quarterLines || c.line === null || Math.abs((c.line * 4) % 2) !== 1)
   );
 }

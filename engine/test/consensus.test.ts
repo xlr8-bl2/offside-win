@@ -74,6 +74,17 @@ test('a price more than 1% below fair is not a call, however likely', () => {
   assert.ok(!out.includes(bad));
 });
 
+test('a call the money has drifted from since the open is left; one it came for is kept (lab:tune)', () => {
+  const drifted = { ...cand('over_under_15', 'over', 0.86, 1.18), sharp_prob: 0.86, open_prob: 0.9 };
+  const backed = { ...cand('over_under_15', 'over', 0.86, 1.18), sharp_prob: 0.86, open_prob: 0.82 };
+  const barely = { ...cand('over_under_15', 'over', 0.86, 1.18), sharp_prob: 0.86, open_prob: 0.865 };
+  const unknown = { ...cand('over_under_15', 'over', 0.86, 1.18), sharp_prob: 0.86, open_prob: null };
+  assert.deepEqual(rankConfident([drifted], 0.78), [], 'four points against it');
+  assert.equal(rankConfident([backed], 0.78).length, 1);
+  assert.equal(rankConfident([barely], 0.78).length, 1, 'half a point is within the limit');
+  assert.equal(rankConfident([unknown], 0.78).length, 1, 'no opening price: judged without it');
+});
+
 test('the day mix caps one market and keeps a standing call', () => {
   const kick = Date.UTC(2026, 8, 27, 15) / 1000;
   const day = DayMix.dayOf(kick);

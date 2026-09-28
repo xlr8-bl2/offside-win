@@ -390,6 +390,25 @@ export const config = {
      * skips it.
      */
     minSharpEv: process.env.CONF_MIN_SHARP_EV ? Number(process.env.CONF_MIN_SHARP_EV) : (0 as number | null),
+    /**
+     * Price movement: leave a call the money has gone against since the market
+     * opened, by more than this (one point: 80% at the open, under 79% now).
+     *
+     * lab:tune, 2,645 fixtures with opening prices: among options the market
+     * prices alike, ones it drifted from by three points or more landed 1.8
+     * points under their price, ones it was backed into 1 to 1.4 points over.
+     * On the production rule, every limit from half a point to five improved
+     * both landing and return in all three periods; one point was chosen on A
+     * and B:
+     *
+     *                     landed (A / B / C)    return (A / B / C)
+     *   without           81.2 / 81.3 / 82.7    +3.8 / +5.0 / +9.0%
+     *   drift <= 1 point  81.6 / 81.4 / 84.0    +4.6 / +5.6 / +10.1%
+     *
+     * for about one call in twenty-five fewer. Null skips it. A call with no
+     * opening price recorded is judged without it.
+     */
+    maxDrift: process.env.CONF_MAX_DRIFT ? Number(process.env.CONF_MAX_DRIFT) : (0.01 as number | null),
     /** Quarter handicap lines (-1.75, 0.25) are a split stake nobody can explain in a sentence. */
     quarterLines: process.env.CONF_QUARTER_LINES === 'true',
     /** League rank at or below which a fixture counts as marquee. */
