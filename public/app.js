@@ -2463,9 +2463,11 @@ async function viewBoard(params = new URLSearchParams()) {
   // thing a reader would want to share -- "the La Liga card for the next two
   // days" -- was the one thing they could not.
   const hours = Number(params.get('hours'));
-  if ([24, 48, 72, 120, 240].includes(hours)) state.hours = hours;
-  else if (params.has('hours')) state.hours = 72;
-  if (params.has('league')) state.leagueName = params.get('league');
+  state.hours = [24, 48, 72, 120, 240].includes(hours) ? hours : 72;
+  // The address is the whole filter. A competition chosen earlier used to
+  // stay on invisibly, so "Picks" from the menu opened on one league's
+  // games with nothing on screen saying so.
+  state.leagueName = params.get('league') ?? '';
   if (params.has('when')) {
     const w = params.get('when');
     state.when = WHEN.some((x) => x.id === w) ? w : 'upcoming';
@@ -2509,8 +2511,19 @@ async function viewBoard(params = new URLSearchParams()) {
     if (k === 'upcoming' || k === 'off') return 'upcoming';
     return 'played';
   };
+  /*
+   * The counts on the tabs are for what the reader has chosen. They were
+   * for the whole board whatever the competition filter said, so "To play 1"
+   * sat over an empty page with one league picked, and the obvious reading
+   * was that the filters were broken.
+   */
+  const inLeague = (f) => !state.leagueName || f.league === state.leagueName;
   const counts = { upcoming: 0, live: 0, played: 0 };
-  for (const f of fixtures) counts[whenOf(f)]++;
+  const recount = () => {
+    for (const k of Object.keys(counts)) counts[k] = 0;
+    for (const f of fixtures) if (inLeague(f)) counts[whenOf(f)]++;
+  };
+  recount();
 
   /*
    * Land on a page with something on it.
@@ -2533,17 +2546,34 @@ async function viewBoard(params = new URLSearchParams()) {
    * satisfies all three. An address that names a tab is still obeyed; this
    * only decides where an unspecified board opens.
    */
-  if (!params.has('when')) {
-    const holds = (when) => fixtures.filter((f) =>
-      whenOf(f) === when
-      && (!state.leagueName || f.league === state.leagueName)).length;
-    const order = ['upcoming', 'live', 'played'];
-    state.when = order.find(holds)
-      ?? order.find((w) => counts[w])
-      ?? 'upcoming';
-  } else if (!counts[state.when]) {
-    state.when = counts.upcoming ? 'upcoming' : counts.live ? 'live' : 'played';
-  }
+  // An address that names a tab is obeyed even when the tab is empty: the
+  // empty page then says why and offers the way out, rather than the board
+  // quietly moving the reader somewhere they did not ask to go.
+  const ORDER = ['upcoming', 'live', 'played'];
+  if (!params.has('when')) state.when = ORDER.find((w) => counts[w]) ?? 'upcoming';
+
+  /*
+   * The competition list, for the tab being looked at: the ones with calls
+   * in it first, most first, each with its number; the rest after them,
+   * greyed, so a reader can see before choosing that a league has nothing
+   * here right now.
+   */
+  const leagueOptions = () => {
+    const n = new Map();
+    for (const f of fixtures) if (whenOf(f) === state.when) n.set(f.league, (n.get(f.league) ?? 0) + 1);
+    const names = [...new Set([...leagues, ...(state.leagueName ? [state.leagueName] : [])])]
+      .sort((a, b) => (n.get(b) ?? 0) - (n.get(a) ?? 0) || a.localeCompare(b));
+    const all = [...n.values()].reduce((a, b) => a + b, 0);
+    return `<option value="" data-meta="${all}"${state.leagueName ? '' : ' selected'}>All competitions</option>`
+      + names.map((l) => {
+        const c = n.get(l) ?? 0;
+        return `<option value="${esc(l)}"${l === state.leagueName ? ' selected' : ''} data-meta="${c}"${c ? '' : ' data-dim'}>${esc(l)}</option>`;
+      }).join('');
+  };
+  const WHEN_WORDS = { upcoming: 'still to play', live: 'being played', played: 'already played' };
+  const windowWords = () => (state.hours <= 48 ? `next ${state.hours} hours` : `next ${state.hours / 24} days`);
+  // Said once, under the bar, when the board moved the reader or a filter is on.
+  let moved = null;
 
   const kickoffs = fixtures.map((f) => f.kickoff).filter(Boolean);
   const furthest = kickoffs.length ? Math.max(...kickoffs) : null;
@@ -2583,14 +2613,11 @@ async function viewBoard(params = new URLSearchParams()) {
           ${[24, 48, 72, 120, 240].map((h) => `<option value="${h}"${h === state.hours ? ' selected' : ''}>${h <= 48 ? `Next ${h} hours` : `Next ${h / 24} days`}</option>`).join('')}
         </select>
         <select id="league-filter" aria-label="Competition" data-icon="cup" data-title="Competition">
-          <option value="">All competitions</option>
-          ${leagues.map((l) => {
-            const n = fixtures.filter((f) => f.league === l).length;
-            return `<option${l === state.leagueName ? ' selected' : ''} data-meta="${n}">${esc(l)}</option>`;
-          }).join('')}
+          ${leagueOptions()}
         </select>
       </div>
     </div>
+    <p class="board-note" id="board-note" hidden></p>
     <div class="rows" id="grid"></div>
     ${capped ? `<p class="board-foot">That is everything the board carries today.
       A longer window will not add to it until more fixtures are published.</p>` : ''}
@@ -2685,8 +2712,26 @@ async function viewBoard(params = new URLSearchParams()) {
     // And the competitions themselves lead with whoever is on next.
     const groupsSorted = [...groups.entries()].sort((a, b) => order(a[1].list[0], b[1].list[0]));
 
+    const note = document.getElementById('board-note');
+    if (state.leagueName) {
+      note.innerHTML = `${moved ? `${esc(state.leagueName)} has nothing ${esc(WHEN_WORDS[moved])}, so this is what it has ${esc(WHEN_WORDS[state.when])}. ` : `Only ${esc(state.leagueName)}. `}<button type="button" data-clear-league>Show every competition</button>`;
+      note.hidden = false;
+    } else {
+      note.hidden = true;
+    }
+
+    // Where else there is something, for the empty page's buttons.
+    const elsewhere = ORDER.filter((w) => w !== state.when && counts[w]);
     document.getElementById('grid').innerHTML =
-      shown.length
+      !shown.length && fixtures.length
+        ? `<div class="empty-state"><b>Nothing ${esc(WHEN_WORDS[state.when])}${state.leagueName ? ` from ${esc(state.leagueName)}` : ''} in the ${esc(windowWords())}</b>
+             <span>${state.leagueName ? 'Other competitions may have calls, or this one may have some in another tab.' : 'The board only carries games we have a call on.'}</span>
+             <p class="member-actions co-center">
+               ${elsewhere.map((w) => `<button type="button" class="btn btn-primary" data-go-when="${w}">${esc(WHEN.find((x) => x.id === w).label)} (${counts[w]})</button>`).join('')}
+               ${state.leagueName ? '<button type="button" class="btn btn-ghost" data-clear-league>Every competition</button>' : ''}
+               ${!elsewhere.length && state.hours < 240 ? '<button type="button" class="btn btn-ghost" data-hours="240">Look ten days ahead</button>' : ''}
+             </p></div>`
+      : shown.length
         ? groupsSorted.map(([name, g]) => `
             <section class="league-block">
               <h3 class="league-head">
@@ -2709,29 +2754,67 @@ async function viewBoard(params = new URLSearchParams()) {
                <a class="btn btn-primary" href="#/results">See the results</a></div>`;
   };
 
-  for (const b of app.querySelectorAll('.when-tabs button')) {
-    b.onclick = () => {
-      state.when = b.dataset.when;
-      history.replaceState(null, '', boardHash());
-      for (const o of app.querySelectorAll('.when-tabs button')) {
-        o.classList.toggle('on', o === b);
-        o.setAttribute('aria-selected', String(o === b));
-      }
-      paint();
-    };
-  }
-  // A longer window needs the board fetched again, so it goes through the
-  // router. A league is a filter over what is already here, so it repaints in
-  // place and only rewrites the address -- replaceState does not fire
-  // hashchange, which is what keeps that from turning into a second render.
-  document.getElementById('hours-filter').onchange = (e) => {
-    location.hash = boardHash(Number(e.target.value), state.leagueName);
+  const tabs = () => app.querySelectorAll('.when-tabs button');
+  const leagueSel = document.getElementById('league-filter');
+  const syncTabs = () => {
+    for (const b of tabs()) {
+      const on = b.dataset.when === state.when;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-selected', String(on));
+      b.querySelector('i').textContent = counts[b.dataset.when] ?? 0;
+      b.disabled = !counts[b.dataset.when] && !on;
+    }
+    // The competition list is counted for this tab, so it follows it.
+    leagueSel.innerHTML = leagueOptions();
+    leagueSel.dispatchEvent(new Event('sync'));
   };
-  document.getElementById('league-filter').onchange = (e) => {
-    state.leagueName = e.target.value;
+  const setWhen = (w) => {
+    state.when = w;
+    moved = null;
     history.replaceState(null, '', boardHash());
+    syncTabs();
     paint();
   };
+  for (const b of tabs()) b.onclick = () => setWhen(b.dataset.when);
+
+  // A longer window needs the board fetched again, so it goes through the
+  // router, and it keeps the tab and the competition exactly as they were:
+  // it used to drop the tab, and the board reopened wherever the first
+  // game happened to be, which was usually "Played".
+  const reopen = (h) => {
+    const q = new URLSearchParams();
+    if (h !== 72) q.set('hours', String(h));
+    if (state.leagueName) q.set('league', state.leagueName);
+    q.set('when', state.when);
+    location.hash = `#/board?${q}`;
+  };
+  document.getElementById('hours-filter').onchange = (e) => reopen(Number(e.target.value));
+
+  // A competition is a filter over what is already here, so it repaints in
+  // place. If it has nothing in the tab being looked at, the board goes to
+  // the tab where it does, and the note under the bar says so.
+  const setLeague = (name) => {
+    state.leagueName = name;
+    recount();
+    moved = null;
+    if (!counts[state.when]) {
+      const to = ORDER.find((w) => counts[w]);
+      if (to) { moved = state.when; state.when = to; }
+    }
+    history.replaceState(null, '', boardHash());
+    syncTabs();
+    paint();
+  };
+  leagueSel.onchange = (e) => setLeague(e.target.value);
+
+  app.querySelector('.section.dense').addEventListener('click', (e) => {
+    if (e.target.closest('[data-clear-league]')) setLeague('');
+    const w = e.target.closest('[data-go-when]');
+    if (w) setWhen(w.dataset.goWhen);
+    const h = e.target.closest('[data-hours]');
+    if (h) reopen(Number(h.dataset.hours));
+  });
+  syncTabs();
   paint();
 
   /*
@@ -2754,13 +2837,8 @@ async function viewBoard(params = new URLSearchParams()) {
       const fresh = await loadBoard({ fresh: true });
       fixtures.length = 0;
       fixtures.push(...(fresh.fixtures ?? []));
-      for (const k of Object.keys(counts)) counts[k] = 0;
-      for (const f of fixtures) counts[whenOf(f)]++;
-      for (const b of app.querySelectorAll('.when-tabs button')) {
-        const i = b.querySelector('i');
-        if (i) i.textContent = counts[b.dataset.when] ?? 0;
-        b.disabled = !counts[b.dataset.when];
-      }
+      recount();
+      syncTabs();
       paint();
     } catch { /* a failed refresh leaves the last good board on screen */ }
   };

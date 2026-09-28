@@ -620,7 +620,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   }
   .nav a:hover { background: var(--terrace); }
   .nav a.on { color: var(--chalk); background: var(--terrace); }
-  .nav a.on::after { transform: scaleY(1); }
+  .nav a.on::after { display: none; }
   .nav a.nav-only-menu {
     display: flex;
     margin-top: var(--space-4);
