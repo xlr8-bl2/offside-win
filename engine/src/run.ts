@@ -3,7 +3,7 @@ import { runBacktest } from './backtest.ts';
 import { clearCache, stats as bsdStats } from './bsd.ts';
 import { config, requireEnv } from './config.ts';
 import { backfillHistory, repairCards } from './history.ts';
-import { probe, probePlayers, probeProfiles, probeReds, probeReport } from './probe.ts';
+import { probe, probeExtras, probePlayers, probeProfiles, probeReds, probeReport } from './probe.ts';
 import { grant, plans } from './grant.ts';
 import { whopCheck } from './whopcheck.ts';
 import { geminiCheck } from './geminicheck.ts';
@@ -61,6 +61,11 @@ const commands: Record<string, () => Promise<unknown>> = {
     const ids = [process.env['GRANT_EMAIL'], process.env['GRANT_ARG'], ...process.argv.slice(3)]
       .map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0);
     return probeProfiles(ids);
+  },
+
+  async 'probe:extras'() {
+    requireEnv();
+    return probeExtras();
   },
 
   async 'probe:reds'() {

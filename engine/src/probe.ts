@@ -557,3 +557,60 @@ export async function probeReds(): Promise<void> {
   }
   console.log(`stored count matches the incidents on ${agree}, not on ${disagree}`);
 }
+
+/**
+ * `probe:extras`: the shape of every endpoint the live layer and the new
+ * facts are built on, one sample each. Public football data only.
+ */
+export async function probeExtras(): Promise<void> {
+  const show = (label: string, v: unknown, n = 1400) => console.log(`\n== ${label}\n${JSON.stringify(v, null, 0)?.slice(0, n) ?? 'null'}`);
+  const first = (v: unknown): any => {
+    const r = v as Record<string, any> | null;
+    const list = Array.isArray(r) ? r : r?.['results'] ?? r?.['events'] ?? r?.['changes'] ?? r?.['matches'] ?? r?.['data'];
+    return Array.isArray(list) ? list[0] : r;
+  };
+  const live = await bsdOrNull<Record<string, any>>('/api/v2/events/live/');
+  show('events/live keys', live && (Array.isArray(live) ? `array ${live.length}` : Object.keys(live)));
+  show('events/live first', first(live));
+  const liveId = Number(first(live)?.['id']);
+  const since = new Date(Date.now() - 48 * 3600e3).toISOString();
+  const changes = await bsdOrNull<Record<string, any>>('/api/v2/fixtures/changes/', { since });
+  show('fixtures/changes keys', changes && Object.keys(changes));
+  show('fixtures/changes first', first(changes));
+  const ch2 = await bsdOrNull<Record<string, any>>('/api/v2/fixtures/changes/');
+  show('fixtures/changes (no params)', ch2, 1200);
+  // A finished match from yesterday for the rest.
+  const from = new Date(Date.now() - 30 * 3600e3).toISOString().slice(0, 10);
+  const evs = await bsdList<Record<string, any>>('/api/v2/events/', { date_from: from, date_to: from, league_id: 1 }, { limit: 50, max: 50 });
+  const done = evs.find((e) => /finish/i.test(String(e['status']))) ?? evs[0];
+  const id = liveId || Number(done?.['id']);
+  show('event detail', await bsdOrNull(`/api/v2/events/${id}/`), 2500);
+  show('event availability', await bsdOrNull(`/api/v2/events/${id}/availability/`));
+  const inc = await bsdOrNull<Record<string, any>>(`/api/v2/events/${id}/incidents/`);
+  show('incidents', inc, 2000);
+  const st = await bsdOrNull<Record<string, any>>(`/api/v2/events/${id}/stats/`);
+  show('stats keys', st && Object.keys(st));
+  show('stats.stats', st?.['stats'], 1500);
+  const ev = await bsdOrNull<Record<string, any>>(`/api/v2/events/${Number(done?.['id']) || id}/`);
+  const teamId = Number(ev?.['home_team_id']);
+  const refId = Number(ev?.['referee_id']);
+  const coachId = Number(ev?.['home_coach_id']);
+  show('team form', await bsdOrNull(`/api/v2/teams/${teamId}/form/`), 2500);
+  if (refId) show('referee', await bsdOrNull(`/api/v2/referees/${refId}/`), 1500);
+  if (coachId) {
+    show('manager', await bsdOrNull(`/api/v2/managers/${coachId}/`), 1200);
+    show('manager matches', first(await bsdOrNull(`/api/v2/managers/${coachId}/matches/`, { limit: 3 })), 800);
+  }
+  const sc = await bsdOrNull<Record<string, any>>('/api/v2/leagues/1/top/scorers/', { limit: 1 });
+  const pid = Number((sc?.['leaders'] ?? [])[0]?.['player_id']);
+  if (pid) {
+    show('player transfers', await bsdOrNull(`/api/v2/players/${pid}/transfers/`), 900);
+    show('player national team', await bsdOrNull(`/api/v2/players/${pid}/national-team/`), 600);
+    show('player career', await bsdOrNull(`/api/v2/players/${pid}/career/`), 1500);
+  }
+  const season = await bsdOrNull<Record<string, any>>('/api/v2/leagues/1/season/');
+  const sid = Number(season?.['season']?.['id']);
+  if (sid) show('bestxi', await bsdOrNull(`/api/v2/leagues/1/bestxi/${sid}/`), 1500);
+  const oq = await bsdList<Record<string, any>>('/api/v2/odds/', { event_id: Number(evs[0]?.['id']) || id }, { limit: 3, max: 3 });
+  show('one odds row', oq[0]);
+}
