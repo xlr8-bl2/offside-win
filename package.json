@@ -21,6 +21,7 @@
     "ratings": "npm -w engine run ratings",
     "slate": "npm -w engine run slate",
     "slate:loop": "npm -w engine run slate:loop",
+    "slate:fresh": "npm -w engine run slate:fresh",
     "poster:preview": "npm -w engine run poster:preview",
     "settle": "npm -w engine run settle",
     "grant": "npm -w engine run grant --",
