@@ -3665,6 +3665,76 @@ function patchLiveCentre(id) {
 }
 
 /*
+ * Who's who: what a supporter knows about a match that is not about the
+ * price. Each manager against this opponent over a whole career, the league's
+ * team of the season from these two sides, the money paid for a player, their
+ * goals for their country, and the referee. Written by the slate for the next
+ * two days' games (engine/src/context/extras.ts). Counts said as a supporter
+ * says them; no rates, and a panel with nothing in it is not drawn.
+ */
+const SMALL = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+const say = (v) => (Number.isInteger(v) && v >= 0 && v < SMALL.length ? SMALL[v] : String(v));
+const feeSaid = (eur) => (eur >= 1e6 ? `€${Math.round(eur / 1e6)}m` : `€${Math.round(eur / 1e3)}k`);
+const MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function windowSaid(at) {
+  const d = new Date(at * 1000);
+  const m = d.getUTCMonth();
+  const when = m >= 5 && m <= 8 ? 'the summer' : m <= 1 ? 'January' : MONTH[m];
+  return d.getUTCFullYear() === new Date().getUTCFullYear() ? `in ${when}` : `in ${when}${when === 'the summer' ? ' of' : ''} ${d.getUTCFullYear()}`;
+}
+const XI_ROLE = { G: 'goalkeeper', D: 'defender', M: 'midfielder', F: 'forward' };
+
+function whosWhoHTML(f) {
+  const x = f?.extras;
+  if (!x) return '';
+  const rows = [];
+  for (const side of ['home', 'away']) {
+    const m = x.managers?.[side];
+    const v = m?.vs;
+    if (!m?.name || !v) continue;
+    const opp = side === 'home' ? f.away : f.home;
+    const n = v.w + v.d + v.l;
+    const last = v.last
+      ? ` Last time: ${v.last.result === 'W' ? 'won' : v.last.result === 'L' ? 'lost' : 'drew'} ${esc(v.last.score.replace('-', '–'))} in ${MONTH[new Date(v.last.kickoff * 1000).getUTCMonth()]} ${new Date(v.last.kickoff * 1000).getUTCFullYear()}.`
+      : '';
+    const games = say(n);
+    rows.push({ label: esc(m.name), note: `Manages ${esc(side === 'home' ? f.home : f.away)}. ${games[0].toUpperCase()}${games.slice(1)} ${n === 1 ? 'game' : 'games'} against ${esc(opp)} in every job so far: won ${v.w}, drawn ${v.d}, lost ${v.l}.${last}` });
+  }
+  // One row per player, whatever there is to say about them.
+  const people = new Map();
+  const teamOf = (teamId) => (teamId === x.teams?.away ? f.away : f.home);
+  for (const b of x.best_xi ?? []) {
+    const goals = b.goals ? `${say(b.goals)} goal${b.goals === 1 ? '' : 's'}` : null;
+    const assists = b.assists ? `${say(b.assists)} assist${b.assists === 1 ? '' : 's'}` : null;
+    const did = [goals, assists].filter(Boolean).join(' and ');
+    people.set(String(b.id), { name: b.name, notes: [`In the league's team of the season so far, as a ${XI_ROLE[b.position] ?? 'player'}${did ? `: ${did} in ${say(b.matches)} games` : ''}.`], team: teamOf(b.team_id) });
+  }
+  const profiled = new Map((f.players ?? []).map((p) => [String(p.id), p]));
+  for (const [id, e] of Object.entries(x.players ?? {})) {
+    const p = profiled.get(id);
+    const row = people.get(id) ?? { name: p?.name, notes: [], team: p?.side === 'away' ? f.away : f.home };
+    if (!row.name) continue;
+    if (e.signed?.fee >= 5e6) row.notes.push(`Cost ${esc(row.team)} ${feeSaid(e.signed.fee)} from ${esc(e.signed.from)} ${windowSaid(e.signed.at)}.`);
+    if (e.goals >= 3 && e.country) row.notes.push(`${say(e.goals)[0].toUpperCase()}${say(e.goals).slice(1)} goals${e.caps ? ` in ${say(e.caps)} games` : ''} for ${esc(e.country)}.`);
+    if (row.notes.length) people.set(id, row);
+  }
+  for (const [id, r] of people) rows.push({ label: playerLink(Number(id), r.name, f.league_id), note: r.notes.join(' ') });
+  const ref = x.referee;
+  if (ref?.name) {
+    const cards = ref.matches >= 5
+      ? ` ${ref.yellows} yellow card${ref.yellows === 1 ? '' : 's'} in ${say(ref.matches)} games${ref.usual ? `, where ${ref.usual} would be usual in this league` : ''}, and ${ref.reds ? `${say(ref.reds)} red${ref.reds === 1 ? '' : 's'}` : 'nobody sent off'}.`
+      : '';
+    rows.push({ label: 'The referee', note: `${esc(ref.name)}.${cards}` });
+  }
+  if (!rows.length) return '';
+  return `
+    <div class="panel whos-who">
+      <p class="panel-head">Who's who</p>
+      <div class="reads">${rows.map((r) => `<div class="read"><b>${r.label}</b><p>${r.note}</p></div>`).join('')}</div>
+    </div>`;
+}
+
+/*
  * A fixture that has changed since it was written: a kick-off moved, or a
  * match called off. Said at the top of the match page, in plain words, and
  * what it means for a bet on it.
@@ -3882,6 +3952,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
           </div>
         </div>` : ''}
         ${formPanel(f.form, f.home, f.away)}
+        ${whosWhoHTML(f)}
         ${f.venue_id ? `<div class="panel venue" data-shot="yes">
           <p class="panel-head">${esc(f.venue?.name || 'The ground')}</p>
           ${f.venue?.city || f.venue?.capacity ? `<p class="venue-meta">${esc([f.venue.city ? `In ${f.venue.city}` : '', f.venue.capacity ? `holds ${Number(f.venue.capacity).toLocaleString('en-GB')}` : ''].filter(Boolean).join(', ').replace(/^h/, 'H'))}.</p>` : ''}

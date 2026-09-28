@@ -12,6 +12,7 @@ import { fillVenues } from './context/venue.ts';
 import { refreshSchedule } from './schedule.ts';
 import { pubFacts } from './narrate/facts.ts';
 import { forBundle } from './context/players.ts';
+import { gatherExtras, type Extras } from './context/extras.ts';
 import { geminiWriter } from './narrate/gemini.ts';
 import { budgeted, keyId, spent, todays, type BudgetState } from './narrate/budget.ts';
 import { write, type Writer } from './narrate/write.ts';
@@ -424,6 +425,25 @@ export async function runSlate(): Promise<SlateReport> {
 
       const { analysis, factors, confidence } = analyseFixture(ctx);
       const players = ctx.players ? ctx.players.map(forBundle) : null;
+      // The pub knowledge around the match: the referee, each manager against
+      // this opponent, the league's team of the season, big signings, goals
+      // for their country (context/extras.ts). For the next two days' games
+      // only, and cached in kv, so after the first pass it costs almost
+      // nothing. A failure costs the panel, never the fixture.
+      let extras: Extras | null = null;
+      if (analysis.kickoff - now < 48 * 3600) {
+        extras = await gatherExtras({
+          kickoff: analysis.kickoff,
+          now,
+          leagueId: analysis.league_id,
+          seasonId: num(event['season_id']) ?? null,
+          home: { id: ctx.home.team_id, coachId: ctx.home.manager?.id || null, coachName: ctx.home.manager?.name ?? null },
+          away: { id: ctx.away.team_id, coachId: ctx.away.manager?.id || null, coachName: ctx.away.manager?.name ?? null },
+          players: (ctx.players ?? []).map((p) => ({ id: p.id, teamId: p.side === 'home' ? ctx.home.team_id : ctx.away.team_id })),
+          referee: ctx.referee ? { name: ctx.referee.name ?? null, matches: ctx.referee.matches, yellows_per: ctx.referee.yellows_per, reds_per: ctx.referee.reds_per } : null,
+          leagueYellows: ctx.model.rates.yellows.leagueMean * 2 || null,
+        }).catch(() => null);
+      }
       const cands = buildCandidates(analysis.model, analysis.book, calibration);
       const selection = select(cands, analysis.book, factors, confidence);
 
@@ -564,6 +584,7 @@ export async function runSlate(): Promise<SlateReport> {
               ?.polymarket?.goalscorers ?? null) as Array<{ player?: string; price?: number }> | null,
             managers: { home: ctx.home.manager?.name ?? null, away: ctx.away.manager?.name ?? null },
             players: players ?? null,
+            extras,
             recentThreats: recentThreats(),
           });
           const result = await write({
@@ -766,6 +787,10 @@ export async function runSlate(): Promise<SlateReport> {
         // at the club, a game that shows it, current form. The writer's player
         // lines come from here; kept so the page can show them too.
         players: players ?? null,
+        // The referee, the managers against this opponent, the team of the
+        // season, signings and caps (context/extras.ts), for the page's
+        // "Who's who" panel and the writer's facts.
+        extras,
         // The players worth a link: the competition's top scorers. A name in
         // the analysis links only if it is one of these, and the link opens
         // the competition's chart at that name.
