@@ -97,3 +97,20 @@ test('the extras become lines a supporter would say, with no decimal and no pron
     assert.ok(!/\d\.\d/.test(t), `decimal in: ${t}`);
   }
 });
+
+test('form against the table: the split the provider gives, said only when it is a story', async () => {
+  const { parseTableSplit } = await import('../src/context/extras.ts');
+  const { pubFacts } = await import('../src/narrate/facts.ts');
+  const split = parseTableSplit({ vs_stronger: { won: 0, drawn: 1, lost: 4 }, vs_weaker: { won: 4, drawn: 1, lost: 0 } });
+  assert.deepEqual(split, { above: { w: 0, d: 1, l: 4 }, below: { w: 4, d: 1, l: 0 } });
+  assert.equal(parseTableSplit({ vs_stronger: { won: 0, drawn: 0, lost: 0 } }), null);
+  const base = { teams: { home: 1, away: 2 }, referee: null, managers: { home: null, away: null }, best_xi: [], players: {} };
+  // Necaxa (14th) host Club América (2nd): América are above them.
+  const text = pubFacts({
+    home: 'Club Necaxa', away: 'Club América',
+    standings: { home: { position: 14 }, away: { position: 2 }, size: 18 },
+    extras: { ...base, split: { home: split, away: { above: null, below: { w: 5, d: 0, l: 0 } } } },
+  }).map((f) => f.text);
+  assert.ok(text.includes('Club Necaxa have won none of their last five against sides above them in the table'), text.join(' | '));
+  assert.ok(text.includes('Club América have won five of their last five against sides below them in the table'));
+});

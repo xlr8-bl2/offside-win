@@ -3700,6 +3700,14 @@ function whosWhoHTML(f) {
     const games = say(n);
     rows.push({ label: esc(m.name), note: `Manages ${esc(side === 'home' ? f.home : f.away)}. ${games[0].toUpperCase()}${games.slice(1)} ${n === 1 ? 'game' : 'games'} against ${esc(opp)} in every job so far: won ${v.w}, drawn ${v.d}, lost ${v.l}.${last}` });
   }
+  // How each side does against teams above and below them in the table.
+  for (const side of ['home', 'away']) {
+    const sp = x.split?.[side];
+    const bits = [['above', sp?.above], ['below', sp?.below]]
+      .filter(([, r]) => r && r.w + r.d + r.l >= 2)
+      .map(([k, r]) => `Against sides ${k} them in the table, their last ${say(r.w + r.d + r.l)}: won ${r.w}, drawn ${r.d}, lost ${r.l}.`);
+    if (bits.length) rows.push({ label: esc(side === 'home' ? f.home : f.away), note: bits.join(' ') });
+  }
   // One row per player, whatever there is to say about them.
   const people = new Map();
   const teamOf = (teamId) => (teamId === x.teams?.away ? f.away : f.home);
@@ -3714,9 +3722,46 @@ function whosWhoHTML(f) {
     const p = profiled.get(id);
     const row = people.get(id) ?? { name: p?.name, notes: [], team: p?.side === 'away' ? f.away : f.home };
     if (!row.name) continue;
-    if (e.signed?.fee >= 5e6) row.notes.push(`Cost ${esc(row.team)} ${feeSaid(e.signed.fee)} from ${esc(e.signed.from)} ${windowSaid(e.signed.at)}.`);
+    // A transfer is a club's business: never shown against a national side.
+    const nationalSide = e.country === row.team || !!p?.club;
+    if (e.signed?.fee >= 5e6 && !nationalSide) row.notes.push(`Cost ${esc(row.team)} ${feeSaid(e.signed.fee)} from ${esc(e.signed.from)} ${windowSaid(e.signed.at)}.`);
     if (e.goals >= 3 && e.country) row.notes.push(`${say(e.goals)[0].toUpperCase()}${say(e.goals).slice(1)} goals${e.caps ? ` in ${say(e.caps)} games` : ''} for ${esc(e.country)}.`);
     if (row.notes.length) people.set(id, row);
+  }
+  // Club and country: a player's form is not one team's. In a country's match
+  // the club season comes first; in a club's, the break just gone. And a
+  // finals tournament in the last few months, and a heavy fortnight.
+  const count = (v, one, many) => `${say(v)} ${v === 1 ? one : many}`;
+  const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+  for (const p of f.players ?? []) {
+    if (!p?.id || !p.name) continue;
+    const c = p.country;
+    const notes = [];
+    const team = p.side === 'away' ? f.away : f.home;
+    if (p.club && p.season?.apps >= 2) {
+      notes.push(cap(`${count(p.season.goals ?? 0, 'goal', 'goals')} in ${count(p.season.apps, 'game', 'games')} for ${esc(p.club)} this season.`));
+    }
+    if (c?.team && p.club && c.apps >= 1) {
+      notes.push(cap(`${count(c.goals ?? 0, 'goal', 'goals')} in the last ${count(c.apps, 'game', 'games')} for ${esc(c.team)}.`));
+    }
+    if (c?.team && !p.club && c.lately?.apps) {
+      const l = c.lately;
+      notes.push(l.goals
+        ? cap(`${count(l.goals, 'goal', 'goals')} for ${esc(c.team)} in the international break.`)
+        : `Played ${l.apps === 1 ? 'once' : l.apps === 2 ? 'twice' : `${say(l.apps)} times`} for ${esc(c.team)} in the break.`);
+    }
+    const t = c?.tournament;
+    if (t?.name && t.apps >= 2 && Date.now() / 1000 - t.ended <= 120 * 86400) {
+      const name = t.name.replace(/^(FIFA|UEFA|CONMEBOL|CAF|AFC|CONCACAF|OFC)\s+/i, '').replace(/\s*20\d\d(\/\d\d)?$/, '');
+      notes.push(`Played ${say(t.apps)} games at the ${esc(name)}${t.goals ? `, with ${count(t.goals, 'goal', 'goals')}` : ''}.`);
+    }
+    if (p.status === 'fit' && p.load?.country > 0 && p.load.games >= 3) {
+      notes.push(cap(`${say(p.load.games)} games in the last fortnight for club and country.`));
+    }
+    if (!notes.length) continue;
+    const row = people.get(String(p.id)) ?? { name: p.name, notes: [], team };
+    row.notes.push(...notes);
+    people.set(String(p.id), row);
   }
   for (const [id, r] of people) rows.push({ label: playerLink(Number(id), r.name, f.league_id), note: r.notes.join(' ') });
   const ref = x.referee;
