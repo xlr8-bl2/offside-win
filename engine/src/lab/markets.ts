@@ -40,6 +40,8 @@ export interface Snap {
   books?: number;
   /** The sharpest single book's de-vigged view, when recorded. */
   sharp?: { book: string; fair: Record<string, number> } | null;
+  /** How the market opened, de-vigged, when recorded (odds.ts, `open`). */
+  open?: { book: string; fair: Record<string, number> } | null;
 }
 
 export interface HistRow {
@@ -73,9 +75,12 @@ export function fixBookFair(markets: Snap[]): Snap[] {
   const sr = markets.find((m) => m.market === '1x2' && m.line === null)?.sharp?.fair;
   const sH = sr?.['HOME'], sD = sr?.['DRAW'], sA = sr?.['AWAY'];
   const sharpOk = sH !== undefined && sD !== undefined && sA !== undefined;
+  const or = markets.find((m) => m.market === '1x2' && m.line === null)?.open?.fair;
+  const oH = or?.['HOME'], oD = or?.['DRAW'], oA = or?.['AWAY'];
+  const openOk = oH !== undefined && oD !== undefined && oA !== undefined;
   return markets.map((m) => {
-    if (m.market === 'double_chance') return { ...m, book: { '1X': H + D, '12': H + A, 'X2': D + A }, sharp: sharpOk ? { book: 'sharp', fair: { '1X': sH + sD, '12': sH + sA, 'X2': sD + sA } } : null };
-    if (m.market === 'draw_no_bet') return { ...m, book: { HOME: H / (H + A), AWAY: A / (H + A) }, sharp: sharpOk ? { book: 'sharp', fair: { HOME: sH / (sH + sA), AWAY: sA / (sH + sA) } } : null };
+    if (m.market === 'double_chance') return { ...m, book: { '1X': H + D, '12': H + A, 'X2': D + A }, sharp: sharpOk ? { book: 'sharp', fair: { '1X': sH + sD, '12': sH + sA, 'X2': sD + sA } } : null, open: openOk ? { book: 'open', fair: { '1X': oH + oD, '12': oH + oA, 'X2': oD + oA } } : null };
+    if (m.market === 'draw_no_bet') return { ...m, book: { HOME: H / (H + A), AWAY: A / (H + A) }, sharp: sharpOk ? { book: 'sharp', fair: { HOME: sH / (sH + sA), AWAY: sA / (sH + sA) } } : null, open: openOk && oH + oA > 0 ? { book: 'open', fair: { HOME: oH / (oH + oA), AWAY: oA / (oH + oA) } } : null };
     return m;
   });
 }
@@ -131,6 +136,8 @@ export interface Option {
   sharp: number | null;
   /** How many books priced the market, when recorded. */
   books: number | null;
+  /** The probability when the market opened, when recorded. */
+  open: number | null;
 }
 
 const GOALS_MARKETS = new Set<MarketCode>(['1x2', 'double_chance', 'draw_no_bet', 'btts', 'over_under_05', 'over_under_15', 'over_under_25', 'over_under_35', 'asian_handicap', 'european_handicap']);
@@ -204,6 +211,7 @@ export function optionsFor(row: HistRow, modelWeight: number): Option[] {
         push: fromMx?.push.get(o as Outcome) ?? 0,
         sharp: typeof m.sharp?.fair?.[o] === 'number' ? m.sharp.fair[o]! : null,
         books: typeof m.books === 'number' ? m.books : null,
+        open: typeof m.open?.fair?.[o] === 'number' ? m.open.fair[o]! : null,
       });
     }
   }
@@ -323,6 +331,15 @@ export interface Policy {
    */
   minSharpEv?: number;
   /**
+   * Price movement. The money since the market opened: the market's view now
+   * (the sharp book, else the consensus) less its view at the open, for this
+   * outcome. A call the money has moved against by more than `maxDrift` is
+   * left; `minSteam` asks for money to have come for it. Undefined skips it,
+   * and so does an option with no opening price recorded.
+   */
+  maxDrift?: number;
+  minSteam?: number;
+  /**
    * A second rule for a fixture with nothing this one would take: the strict
    * rule first, and only then the looser one.
    */
@@ -395,6 +412,11 @@ export function ranked(policy: Policy, row: HistRow, options?: Option[]): Pick[]
     if (policy.excludeRanks?.includes(row.rank)) continue;
     if (policy.requireSharp && o.sharp === null) continue;
     if (policy.minSharpEv !== undefined && o.sharp !== null && evOf(o.sharp, o) < policy.minSharpEv) continue;
+    if (o.open !== null && (policy.maxDrift !== undefined || policy.minSteam !== undefined)) {
+      const moved = (o.sharp ?? o.book) - o.open;
+      if (policy.maxDrift !== undefined && moved < -policy.maxDrift) continue;
+      if (policy.minSteam !== undefined && moved < policy.minSteam) continue;
+    }
     // A price far beyond what the consensus thinks is fair is almost always a
     // book that has not updated, not an opportunity anyone could take.
     if (o.odds * o.book > policy.maxGap) continue;

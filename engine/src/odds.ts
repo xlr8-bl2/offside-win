@@ -190,6 +190,30 @@ export function buildBookMarkets(quotes: Quote[]): BookMarket[] {
       sharp = { fair: new Map(wanted.map((o, i) => [o, d.probs[i]!])), book: slug };
       break;
     }
+    // The market as it opened: the sharp book's first prices where it kept
+    // every one of them, else the weighted consensus of books that did.
+    let open: BookMarket['open'] = null;
+    const opening = (m: Map<Outcome, Quote>) => wanted.every((o) => (m.get(o)?.opening_decimal_odds ?? 0) > 1);
+    for (const slug of SHARP_ORDER) {
+      const m = byBook.get(slug);
+      if (!m || !opening(m)) continue;
+      const d = devig(wanted.map((o) => m.get(o)!.opening_decimal_odds!));
+      open = { fair: new Map(wanted.map((o, i) => [o, d.probs[i]!])), book: slug };
+      break;
+    }
+    if (!open) {
+      const acc = new Map<Outcome, number>();
+      let w = 0;
+      for (const [slug, m] of byBook) {
+        if (!opening(m)) continue;
+        const d = devig(wanted.map((o) => m.get(o)!.opening_decimal_odds!));
+        const bw = BOOK_WEIGHT[slug] ?? DEFAULT_BOOK_WEIGHT;
+        wanted.forEach((o, i) => acc.set(o, (acc.get(o) ?? 0) + bw * d.probs[i]!));
+        w += bw;
+      }
+      if (w > 0) open = { fair: new Map([...acc].map(([o, v]) => [o, v / w])), book: 'consensus' };
+    }
+
     let weightTotal = 0;
     let overroundAcc = 0;
     let overroundWeight = 0;
@@ -257,6 +281,7 @@ export function buildBookMarkets(quotes: Quote[]): BookMarket[] {
       movement,
       books,
       sharp,
+      open,
     });
   }
 
@@ -284,6 +309,16 @@ export function deriveFromResult(markets: BookMarket[]): BookMarket[] {
     }
   } else {
     for (const m of markets) if (m.market === 'double_chance' || m.market === 'draw_no_bet') m.sharp = null;
+  }
+  // And how they opened, from how the result market opened.
+  const ro = r?.open;
+  const oH = ro?.fair.get('HOME'), oD = ro?.fair.get('DRAW'), oA = ro?.fair.get('AWAY');
+  for (const m of markets) {
+    if (m.market !== 'double_chance' && m.market !== 'draw_no_bet') continue;
+    if (!ro || oH === undefined || oD === undefined || oA === undefined) { m.open = null; continue; }
+    m.open = m.market === 'double_chance'
+      ? { book: ro.book, fair: new Map<Outcome, number>([['1X', oH + oD], ['12', oH + oA], ['X2', oD + oA]]) }
+      : oH + oA > 0 ? { book: ro.book, fair: new Map<Outcome, number>([['HOME', oH / (oH + oA)], ['AWAY', oA / (oH + oA)]]) } : null;
   }
   const H = r?.fair.get('HOME');
   const D = r?.fair.get('DRAW');
@@ -321,13 +356,16 @@ const r4 = (v: number) => Number(v.toFixed(4));
  * lab reads both alike.
  */
 export function snapshotOf(b: BookMarket | undefined) {
-  if (!b) return { book: {}, best: {}, overround: 1, books: 0, sharp: null };
+  if (!b) return { book: {}, best: {}, overround: 1, books: 0, sharp: null, open: null };
+  const view = (v: { book: string; fair: Map<Outcome, number> } | null | undefined) =>
+    v ? { book: v.book, fair: Object.fromEntries([...v.fair].map(([k, x]) => [k, r4(x)])) } : null;
   return {
     book: Object.fromEntries([...b.fair].map(([k, v]) => [k, r4(v)])),
     best: Object.fromEntries(b.best),
     overround: r4(b.overround),
     books: b.books ?? 0,
-    sharp: b.sharp ? { book: b.sharp.book, fair: Object.fromEntries([...b.sharp.fair].map(([k, v]) => [k, r4(v)])) } : null,
+    sharp: view(b.sharp),
+    open: view(b.open),
   };
 }
 

@@ -73,13 +73,18 @@ export async function backfillSnapshots(): Promise<void> {
   }));
   console.log(`lab:backfill: archived ${kept}, ${empty} had no usable market; ${bsdStats.requests - start} requests spent`);
 
-  // Snapshots archived before the sharp book's view and the book count were
-  // kept: fetched again while the provider still holds their prices, and the
-  // markets rewritten with both. What the slate stored of our own model's view
-  // is kept as it was.
+  // Snapshots archived before the sharp book's view, the book count or the
+  // opening prices were kept: fetched again while the provider still holds
+  // their prices. A market with no sharp view is rewritten whole; one that
+  // has it only gains the opening prices, so what the slate saw before kick-off
+  // is not replaced by what the provider holds after it. What the slate stored
+  // of our own model's view is kept as it was. A match whose prices have gone
+  // is marked, so later runs do not ask again.
   const stale = await select<{ fixture_id: number; snapshot: string }>(
     `SELECT fixture_id, snapshot FROM market_snapshot
-      WHERE kickoff BETWEEN $1 AND $2 AND snapshot NOT LIKE '%"sharp"%'
+      WHERE kickoff BETWEEN $1 AND $2
+        AND (snapshot NOT LIKE '%"sharp"%' OR snapshot NOT LIKE '%"open"%')
+        AND snapshot NOT LIKE '%"open_none"%'
       ORDER BY kickoff DESC`,
     [now - days * 86400, now - 3 * 3600],
   );
@@ -90,7 +95,11 @@ export async function backfillSnapshots(): Promise<void> {
     let snap: Record<string, any>;
     try { snap = JSON.parse(r.snapshot); } catch { return; }
     const quotes = await fetchQuotes(Number(r.fixture_id), '2015-01-01T00:00:00Z');
-    if (quotes.length < 12) { gone++; return; }
+    if (quotes.length < 12) {
+      gone++;
+      await exec('UPDATE market_snapshot SET snapshot = $1 WHERE fixture_id = $2', [JSON.stringify({ ...snap, open_none: true }), r.fixture_id]);
+      return;
+    }
     const fresh = new Map(buildBookMarkets(quotes).map((b) => [`${b.market}|${b.line}`, b]));
     const old: Array<Record<string, any>> = Array.isArray(snap['markets']) ? snap['markets'] : [];
     const seen = new Set<string>();
@@ -98,7 +107,8 @@ export async function backfillSnapshots(): Promise<void> {
       const k = `${m['market']}|${m['line'] ?? null}`;
       seen.add(k);
       const b = fresh.get(k);
-      return b ? { ...m, ...snapshotOf(b) } : m;
+      if (!b) return m;
+      return m['sharp'] === undefined ? { ...m, ...snapshotOf(b) } : { ...m, open: snapshotOf(b).open };
     });
     for (const [k, b] of fresh) if (!seen.has(k)) markets.push({ market: b.market, line: b.line, model: {}, ...snapshotOf(b) });
     await exec('UPDATE market_snapshot SET snapshot = $1 WHERE fixture_id = $2', [JSON.stringify({ ...snap, markets }), r.fixture_id]);
@@ -107,5 +117,5 @@ export async function backfillSnapshots(): Promise<void> {
   await Promise.all(Array.from({ length: 8 }, async () => {
     while (nextStale < stale.length && bsdStats.requests - start < budget) await redo(stale[nextStale++]!);
   }));
-  console.log(`lab:backfill: ${stale.length} older snapshots lacked the sharp view; refreshed ${refreshed}, ${gone} no longer held by the provider`);
+  console.log(`lab:backfill: ${stale.length} older snapshots lacked the sharp view or the opening prices; refreshed ${refreshed}, ${gone} no longer held by the provider`);
 }

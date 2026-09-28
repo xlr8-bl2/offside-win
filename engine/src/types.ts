@@ -312,6 +312,12 @@ export interface BookMarket {
    * which one to measure value against.
    */
   sharp?: { fair: Map<Outcome, number>; book: string } | null;
+  /**
+   * The same market as it opened: the sharp book's first prices de-vigged
+   * where it recorded all of them, else the consensus of the books that did.
+   * Beside `sharp` it says which way the money has gone since.
+   */
+  open?: { fair: Map<Outcome, number>; book: string } | null;
 }
 
 /** Our own price for the same market. */
