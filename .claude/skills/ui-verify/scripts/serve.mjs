@@ -8,6 +8,7 @@
  *
  *   node serve.mjs                 # serve the real API
  *   FREE=1 node serve.mjs          # pass every response through the paywall
+ *   LIVE_MOCK=1 node serve.mjs     # made-up matches in play, a postponement, a moved kick-off
  *                                  # redaction, so you see what a signed-out
  *                                  # reader sees before the slate has run
  */
@@ -54,6 +55,46 @@ if (process.env.FREE) {
   redact = await import('/home/user/offside-win/engine/src/membership/redact.ts');
 }
 
+let mockTick = 0;
+let mockBoard = null;
+async function liveMock(path) {
+  mockTick++;
+  mockBoard ??= await fetch(UP + '/api/board?hours=48').then((r) => r.json()).catch(() => ({ fixtures: [] }));
+  const now = Date.now() / 1000;
+  const ahead = (mockBoard.fixtures ?? []).filter((f) => f.kickoff > now && (f.top_pick || f.locked));
+  const [a, b, c, d, e] = ahead;
+  const at = Math.floor(now);
+  const m = (f, status, minute, score, ht = null) => f && ({
+    id: f.id, league_id: f.league_id ?? null, league: f.league ?? null, home: f.home, away: f.away,
+    home_id: f.home_id ?? null, away_id: f.away_id ?? null, kickoff: f.kickoff, status, minute, score, ht, pens: null,
+  });
+  const matches = [
+    m(a, '1st_half', 22 + mockTick, [1, 0]),
+    m(b, 'halftime', 45, [0, 0], [0, 0]),
+    m(c, '2nd_half', 70 + mockTick, [2, 1], [1, 1]),
+  ].filter(Boolean);
+  const iso = (t) => new Date(t * 1000).toISOString();
+  const changes = [
+    d && { id: d.id, kind: 'status', from: 'notstarted', to: 'postponed', at, kickoff: d.kickoff },
+    e && { id: e.id, kind: 'kickoff', from: iso(e.kickoff), to: iso(e.kickoff + 9000), at, kickoff: e.kickoff + 9000 },
+  ].filter(Boolean);
+  if (path === '/api/live') return { enabled: true, at, matches, changes };
+  const id = Number(path.split('/').pop());
+  const match = matches.find((x) => x.id === id) ?? null;
+  const events = match && match.score[0] + match.score[1] > 0 ? [
+    { t: 'goal', side: 'home', minute: 17, player: 'A. Striker', kind: 'regular', score: [1, 0], assist: 'B. Winger' },
+    { t: 'card', side: 'away', minute: 31, player: 'C. Holder', card: 'yellow', reason: 'Foul' },
+    ...(match.score[1] ? [{ t: 'goal', side: 'away', minute: 40, player: 'D. Nine', kind: 'penalty', score: [1, 1] }] : []),
+    ...(match.score[0] > 1 ? [{ t: 'goal', side: 'home', minute: 63, player: 'A. Striker', kind: 'regular', score: [2, 1] },
+      { t: 'sub', side: 'away', minute: 66, in: 'E. Fresh', out: 'D. Nine' }] : []),
+  ] : [];
+  const stats = match ? {
+    home: { possession: 55 + (mockTick % 3), shots: 6 + mockTick, on_target: 3, corners: 4, fouls: 7, yellow: 0, offsides: 1, saves: 2, big_chances: 2 },
+    away: { possession: 45 - (mockTick % 3), shots: 4, on_target: 2, corners: 2, fouls: 9, yellow: 1, offsides: 0, saves: 2, big_chances: 1 },
+  } : null;
+  return { enabled: true, at, match, report: { events, ht: match?.ht ?? null, stats } };
+}
+
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
 
@@ -95,6 +136,17 @@ http.createServer(async (req, res) => {
       res.writeHead(502);
       res.end(String(e));
     }
+    return;
+  }
+
+  // LIVE_MOCK=1: /api/live and /api/live/:id made up from the live board, so
+  // the live layer can be looked at when nothing is being played. Three
+  // called matches are put in play (first half, half time, second half), one
+  // is postponed and one has its kick-off moved; the minute moves on by one
+  // every request so the in-place patch can be seen working.
+  if (process.env.LIVE_MOCK && (url.pathname === '/api/live' || url.pathname.startsWith('/api/live/'))) {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(await liveMock(url.pathname)));
     return;
   }
 

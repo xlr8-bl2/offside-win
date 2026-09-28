@@ -8,11 +8,14 @@
  * untouched — never parsed, never rebuilt — which is what keeps a 300-fixture
  * board inside Cloudflare's free-tier budget of 10 ms of CPU per request.
  *
- * It holds no secret worth stealing. The provider key and the database
- * credentials live in Actions; what ships here is Supabase's anon key, which is
- * public by design and is confined to reading by row-level security and
- * SELECT-only grants declared in schema.pg.sql. The site is public, so public
- * reads of the serving tables change nothing.
+ * The database credentials live in Actions; what ships here is Supabase's anon
+ * key, which is public by design and is confined to reading by row-level
+ * security and SELECT-only grants declared in schema.pg.sql. The site is
+ * public, so public reads of the serving tables change nothing.
+ *
+ * One exception to "computes nothing": live scores (live.ts). A match in play
+ * cannot wait for a schedule, so /api/live asks the provider directly, with
+ * the provider key held as a Worker secret and never sent to a browser.
  *
  * Since memberships, one more thing passes through: a reader's own Supabase
  * JWT. It is still not verified here. It is swapped into the header this file
@@ -25,8 +28,9 @@ import { cardImage, seoResponse, sitemap } from './seo.ts';
 import { bearer, jsonHeaders } from './http.ts';
 import { charge, checkout, confirm, payStatus, sweepWhop, renewal, webhook, type PayEnv } from './pay.ts';
 import { deleteAccount } from './account.ts';
+import { fixtureChanges, liveList, liveMatch, type LiveEnv } from './live.ts';
 
-interface Env extends PayEnv {
+interface Env extends PayEnv, LiveEnv {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   GOOGLE_CLIENT_ID?: string;
@@ -114,7 +118,7 @@ export default {
     ctx.waitUntil(sweepWhop(env));
   },
 
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx?: { waitUntil(p: Promise<unknown>): void }): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
 
@@ -175,6 +179,15 @@ export default {
       // kind from a fixed list is passed on.
       if (path === '/api/hit') return await hit(request, env);
       if (path === '/api/board') return await board(url, env, jwt);
+      // Live scores, thirty seconds old at most, and fixture changes. Nothing
+      // walled: a score is not a call. live.ts.
+      if (path === '/api/live') return await liveList(env, ctx);
+      if (path.startsWith('/api/live/')) {
+        const id = Number(path.slice('/api/live/'.length));
+        if (!Number.isInteger(id) || id <= 0) return fail('bad match id', 400);
+        return await liveMatch(env, id, ctx);
+      }
+      if (path === '/api/changes') return await fixtureChanges(env, ctx);
       if (path.startsWith('/api/fixture/')) return await fixture(path, env, jwt);
       // A competition's page. The token goes with it because the fixtures
       // inside are walled exactly as the board is.
