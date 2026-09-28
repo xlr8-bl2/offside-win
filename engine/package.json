@@ -6,6 +6,7 @@
     "probe": "tsx src/run.ts probe",
     "probe:profile": "tsx src/run.ts probe:profile",
     "probe:reds": "tsx src/run.ts probe:reds",
+    "probe:extras": "tsx src/run.ts probe:extras",
     "history": "tsx src/run.ts history",
     "history:cards": "tsx src/run.ts history:cards",
     "ratings": "tsx src/run.ts ratings",
