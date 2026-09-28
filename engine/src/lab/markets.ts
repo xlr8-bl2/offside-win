@@ -57,6 +57,12 @@ export interface HistRow {
   markets: Snap[];
   /** The data provider's probabilities, keyed market::line. */
   provider: Map<string, Map<Outcome, number>> | null;
+  /**
+   * The referee's record before this match (matches, reds and yellows shown),
+   * counted from games before kick-off only, so the lab cannot see the result
+   * it is scoring. Null when no referee is recorded.
+   */
+  ref?: { n: number; reds: number; yellows: number } | null;
 }
 
 export const keyOf = (market: string, line: number | null) => `${market}::${line === null ? 'x' : Number(line).toFixed(2)}`;
@@ -340,6 +346,12 @@ export interface Policy {
   maxDrift?: number;
   minSteam?: number;
   /**
+   * The referee. A "no red card" call (or under on the red card line) is left
+   * when the referee has shown more reds a game than this, over fifteen or
+   * more games before this one.
+   */
+  maxRefReds?: number;
+  /**
    * A second rule for a fixture with nothing this one would take: the strict
    * rule first, and only then the looser one.
    */
@@ -412,6 +424,8 @@ export function ranked(policy: Policy, row: HistRow, options?: Option[]): Pick[]
     if (policy.excludeRanks?.includes(row.rank)) continue;
     if (policy.requireSharp && o.sharp === null) continue;
     if (policy.minSharpEv !== undefined && o.sharp !== null && evOf(o.sharp, o) < policy.minSharpEv) continue;
+    if (policy.maxRefReds !== undefined && row.ref && row.ref.n >= 15 && row.ref.reds / row.ref.n > policy.maxRefReds
+      && ((o.market === 'red_card' && o.outcome === 'no') || (o.market === 'total_red_cards' && o.outcome === 'under'))) continue;
     if (o.open !== null && (policy.maxDrift !== undefined || policy.minSteam !== undefined)) {
       const moved = (o.sharp ?? o.book) - o.open;
       if (policy.maxDrift !== undefined && moved < -policy.maxDrift) continue;

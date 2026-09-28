@@ -36,3 +36,18 @@ test('no opening price recorded: the movement rule does not apply', () => {
   const r = row(null);
   assert.equal(ranked({ ...P, maxDrift: 0.01, minSteam: 0.01 }, r, optionsFor(r, 0)).length, 1);
 });
+
+test('a no-red-card call is left under a referee who sends players off a lot, and kept under one who does not', () => {
+  const r = (ref: HistRow['ref']): HistRow => ({
+    id: 2, league_id: 1, rank: 1, kickoff: 0, score: [1, 0], corners: null, reds: 0, lambda: null, confidence: 0, provider: null, ref,
+    markets: [{
+      market: 'red_card', line: null, model: {},
+      book: { yes: 0.18, no: 0.82 }, best: { yes: { odds: 5 }, no: { odds: 1.2 } }, overround: 1.04,
+      sharp: { book: 'pinnacle', fair: { yes: 0.18, no: 0.82 } },
+    }],
+  });
+  const strict = { ...P, maxRefReds: 0.3 };
+  assert.equal(ranked(strict, r({ n: 40, reds: 18, yellows: 160 }), optionsFor(r({ n: 40, reds: 18, yellows: 160 }), 0)).length, 0, 'nearly half a red a game');
+  assert.equal(ranked(strict, r({ n: 40, reds: 6, yellows: 160 }), optionsFor(r({ n: 40, reds: 6, yellows: 160 }), 0)).length, 1);
+  assert.equal(ranked(strict, r({ n: 8, reds: 6, yellows: 30 }), optionsFor(r({ n: 8, reds: 6, yellows: 30 }), 0)).length, 1, 'too few games to judge');
+});

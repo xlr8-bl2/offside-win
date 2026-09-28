@@ -79,10 +79,19 @@ export async function loadHistory(): Promise<HistRow[]> {
     const page = await select<{
       fixture_id: number; league_id: number; kickoff: number; home_goals: number; away_goals: number; snapshot: string;
       hc: number | null; ac: number | null; hr: number | null; ar: number | null;
+      ref_n: number | null; ref_reds: number | null; ref_yel: number | null;
     }>(
+      // The referee's record from games before this one only.
       `SELECT s.fixture_id, s.league_id, s.kickoff, s.home_goals, s.away_goals, s.snapshot,
-              m.home_corners AS hc, m.away_corners AS ac, m.home_reds AS hr, m.away_reds AS ar
+              m.home_corners AS hc, m.away_corners AS ac, m.home_reds AS hr, m.away_reds AS ar,
+              r.n AS ref_n, r.reds AS ref_reds, r.yel AS ref_yel
          FROM market_snapshot s LEFT JOIN match m ON m.id = s.fixture_id
+         LEFT JOIN LATERAL (
+           SELECT count(*) AS n, sum(p.home_reds + p.away_reds) AS reds, sum(coalesce(p.home_yellows, 0) + coalesce(p.away_yellows, 0)) AS yel
+             FROM match p
+            WHERE m.referee_id IS NOT NULL AND p.referee_id = m.referee_id AND p.kickoff < m.kickoff
+              AND p.home_reds IS NOT NULL AND p.away_reds IS NOT NULL
+         ) r ON true
         WHERE s.kickoff > $1 ORDER BY s.kickoff LIMIT 1000`,
       [from],
     );
@@ -93,14 +102,17 @@ export async function loadHistory(): Promise<HistRow[]> {
       try { s = JSON.parse(r.snapshot); } catch { continue; }
       if (r.hr !== null && r.ar !== null) s['reds'] = Number(r.hr) + Number(r.ar);
       if (r.hc !== null && r.ac !== null) s['corners'] = [Number(r.hc), Number(r.ac)];
+      const ref = r.ref_n && Number(r.ref_n) > 0
+        ? { n: Number(r.ref_n), reds: Number(r.ref_reds ?? 0), yellows: Number(r.ref_yel ?? 0) } : null;
       if (seen.has(Number(r.fixture_id))) {
         const live = byId.get(Number(r.fixture_id));
         const snap = toHistRow({ ...s, id: r.fixture_id, league_id: r.league_id, kickoff: r.kickoff, score: [r.home_goals, r.away_goals] });
         if (live && snap) mergeMarkets(live, snap);
+        if (live) live.ref = ref;
         continue;
       }
       const h = toHistRow({ ...s, id: r.fixture_id, league_id: r.league_id, kickoff: r.kickoff, score: [r.home_goals, r.away_goals] });
-      if (h) out.push(h);
+      if (h) { h.ref = ref; out.push(h); }
     }
     if (page.length < 1000) break;
   }
@@ -116,6 +128,7 @@ function mergeMarkets(live: HistRow, snap: HistRow): void {
     if (!o) continue;
     if (m.sharp === undefined) m.sharp = o.sharp;
     if (m.books === undefined) m.books = o.books;
+    if (m.open === undefined) m.open = o.open;
     from.delete(key(m));
   }
   live.markets.push(...from.values());
