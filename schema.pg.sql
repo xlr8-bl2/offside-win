@@ -746,10 +746,11 @@ $fn$;
 -- fallback for a database the new slate has not written yet.
 CREATE OR REPLACE FUNCTION free_fixture_id()
 RETURNS bigint LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
-  SELECT coalesce(
-    (SELECT (try_json(v)->>'fixture_id')::bigint FROM kv WHERE k = 'free:today'),
-    (SELECT (try_json(v)->>'fixture_id')::bigint FROM kv WHERE k = 'hero:today')
-  );
+  -- Only the call engine/src/free.ts chose. It writes null on a day with no
+  -- call to give, and the headline fixture used to stand in then: its call,
+  -- often days away, went out free under "Today's free call", and a headline
+  -- with no call at all was marked as the free one.
+  SELECT (try_json(v)->>'fixture_id')::bigint FROM kv WHERE k = 'free:today';
 $fn$;
 
 -- ------------------------------------------------------------ the writes
