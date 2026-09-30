@@ -29,6 +29,23 @@ measure it, and it is on every page with a call.
 None of these were catchable by reading. All three took under a minute to find
 once something rendered the page and measured it.
 
+## Three more tools, for things one page at a time cannot show
+
+- `node .claude/skills/ui-verify/scripts/nav.mjs` drives navigation: two taps
+  racing, Back to a filtered board or a match, focus after a page change,
+  missing pages, the menu, the offer popup, tab keys, titles. `BASE=` points it
+  at another server, as for check.mjs.
+- The deployed copy is `dist/` (`node scripts/build-public.mjs`), minified and
+  versioned. Check it, not only `public/`, after touching imports or the build:
+  `ROOT=dist PORT=8791 node .claude/skills/ui-verify/scripts/serve.mjs &` then
+  `BASE=http://127.0.0.1:8791` in front of either checker.
+- `.github/workflows/speed.yml` runs Lighthouse against the live site from
+  GitHub (the sandbox's browser cannot reach it): three runs a page, the median
+  printed, with the cause of any layout shift. Run it before and after anything
+  that could move the numbers. Layout shift is the one to watch: every first
+  visit was at 0.37 until the cookie notice and the offer bar stopped pushing
+  the page down.
+
 ## How to run it
 
 Two terminals' worth of work, both backgroundable:

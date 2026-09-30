@@ -25,7 +25,7 @@
 
 import { describe as describeCall } from '../../public/js/lib/markets.js';
 import { findBannedInProse } from '../../engine/src/vocabulary.ts';
-import { SITE_NAME, TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle } from '../../public/js/lib/titles.js';
+import { HOME_DESCRIPTION, SITE_NAME, TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle } from '../../public/js/lib/titles.js';
 import { cardPath, cardState } from '../../public/js/lib/cards.js';
 
 export interface SeoEnv {
@@ -165,6 +165,8 @@ export interface Page {
   noindex?: boolean;
   /** The link preview's picture, when the page has its own (a match's card). */
   image?: { url: string; alt: string };
+  /** An image to start fetching from the head: the front page's masthead photograph. */
+  preloadImage?: string;
 }
 
 const SITE = SITE_NAME;
@@ -291,6 +293,9 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
   // query changes at full time so a platform that cached the preview card
   // fetches the result card; the Worker ignores it and serves the latest.
   const image = { url: `${site}/og/${Number(f.id)}.jpg?s=${cardState(f)}`, alt: `${home} v ${away}${score ? `, ${score[0]}–${score[1]}` : ''}` };
+  // The event's picture too: Google lists `image` among an event's
+  // recommended properties, and the share card is exactly that.
+  event['image'] = [image.url];
   return { title, description: clip(description), canonical, body, jsonLd: [event, c.ld], image };
 }
 
@@ -463,6 +468,79 @@ export async function slipPage(env: SeoEnv, site: string): Promise<Page> {
   };
 }
 
+/**
+ * The front page, for a crawler and for the first paint of a first visit.
+ *
+ * It was the static shell: no heading, 176 words and two links, so the page
+ * most searches land on said nothing a search engine could read and led
+ * nowhere but the sitemap. It now carries what the app's front page leads
+ * with in text: today's free call, the matches of the next two days by
+ * competition, and the way to the record.
+ */
+export async function homePage(env: SeoEnv, site: string): Promise<Page> {
+  const now = Math.floor(Date.now() / 1000);
+  const [b, hero] = await Promise.all([
+    read<Rec>(env, 'get_board', { p_from: now - 3 * 3600, p_to: now + 48 * 3600 }),
+    read<Rec>(env, 'get_hero', {}).catch(() => null),
+  ]);
+  // The masthead's photograph is the largest thing on the front page. Named
+  // in the head, it starts downloading with the HTML instead of after the
+  // script has run and drawn the page.
+  const shot = Number(hero?.shot_venue_id);
+  const fixtures: Rec[] = Array.isArray(b?.fixtures) ? b!.fixtures : [];
+  const calls = fixtures.filter((f) => f.top_pick || f.locked || f.called).length;
+  const comps = new Set(fixtures.map((f) => f.league)).size;
+  const free = fixtures.find((f) => f.free_call && f.top_pick);
+  return {
+    title: '',
+    description: HOME_DESCRIPTION,
+    canonical: `${site}/`,
+    ...(Number.isFinite(shot) && shot > 0 ? { preloadImage: `https://sports.bzzoiro.com/img/venue/${shot}/` } : {}),
+    body: `
+  <article class="wrap section narrow seo">
+    <h1 class="display">Football predictions for today's biggest games</h1>
+    <p>${esc(fixtures.length ? `${fixtures.length} matches in the next two days across ${comps} competitions, with ${calls} calls.` : 'The next matches go up as soon as they are analysed.')} Every call comes with the reason behind it, and <a href="/results">every result stays on the record</a>, the misses included. One call a day is free.</p>
+    ${free ? `<p>Today's free call is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
+    ${byDayAndLeague(fixtures)}
+    <p><a href="/today">Today's board</a> <span aria-hidden="true">/</span> <a href="/slip">The bet slip</a> <span aria-hidden="true">/</span> <a href="/leagues">Every competition</a></p>
+  </article>`,
+    jsonLd: [],
+  };
+}
+
+/**
+ * Every competition we cover, each a link. The page said "eighty-eight
+ * competitions" and linked to none of them, so a crawler could only find a
+ * competition's page through the sitemap.
+ */
+export async function leaguesPage(env: SeoEnv, site: string): Promise<Page> {
+  const now = Math.floor(Date.now() / 1000);
+  const b = await read<Rec>(env, 'get_board', { p_from: now - 5 * 86400, p_to: now + 10 * 86400 });
+  const fixtures: Rec[] = Array.isArray(b?.fixtures) ? b!.fixtures : [];
+  const leagues = new Map<number, { name: string; n: number }>();
+  for (const f of fixtures) {
+    if (!f.league_id || !f.league) continue;
+    const l = leagues.get(Number(f.league_id)) ?? { name: String(f.league), n: 0 };
+    l.n++;
+    leagues.set(Number(f.league_id), l);
+  }
+  const list = [...leagues].sort((a, b) => a[1].name.localeCompare(b[1].name, 'en-GB'));
+  const c = crumbs([[SITE, '/'], ['Competitions', '/leagues']], site);
+  return {
+    title: TITLES.leagues,
+    description: 'Every competition we cover, from the Premier League and the Champions League down: fixtures, results, the table and our call on every match.',
+    canonical: `${site}/leagues`,
+    body: `<article class="wrap section narrow seo">
+      ${c.html}
+      <h1 class="display">Competitions</h1>
+      <p>Fixtures, results, the table and our call on every match. <a href="/today">Today's board</a> has every match on right now.</p>
+      ${list.length ? `<h2>Playing this fortnight</h2><ul class="seo-list">${list.map(([id, l]) =>
+        `<li><a href="${esc(leaguePath(id, l.name))}">${esc(l.name)}</a>, ${esc(word(l.n))} ${l.n === 1 ? 'match' : 'matches'}</li>`).join('')}</ul>` : ''}
+    </article>`,
+    jsonLd: [c.ld],
+  };
+}
+
 function staticPage(path: string, site: string): Page | null {
   if (path === '/pricing') {
     return {
@@ -472,16 +550,6 @@ function staticPage(path: string, site: string): Page | null {
       body: `<article class="wrap section narrow seo"><h1 class="display">One call a day is free. Members get all of them.</h1>
         <p>Every preview, every team sheet and the whole record stay free. Membership is every open call the moment it goes up, the legs of the bet slip, and the reason behind each call. ${esc(MOVES)}</p>
         <p><a href="/today">Today's board</a> <span aria-hidden="true">/</span> <a href="/results">The record</a></p></article>`,
-      jsonLd: [],
-    };
-  }
-  if (path === '/leagues') {
-    return {
-      title: TITLES.leagues,
-      description: 'Eighty-eight competitions, from the Premier League and the Champions League down. Fixtures, results, tables and our call on every match.',
-      canonical: `${site}/leagues`,
-      body: `<article class="wrap section narrow seo"><h1 class="display">Competitions</h1>
-        <p>Eighty-eight competitions, with fixtures, results, the table and our call on every match. <a href="/today">Today's board</a> has every match on right now.</p></article>`,
       jsonLd: [],
     };
   }
@@ -498,15 +566,15 @@ export function render(shell: string, page: Page): string {
     .replace(/<title>[\s\S]*?<\/title>/, `<title>${esc(t)}</title>`)
     .replace(/<meta name="description" content="[^"]*">/, `<meta name="description" content="${esc(page.description)}">`)
     .replace(/<link rel="canonical" href="[^"]*">/, `<link rel="canonical" href="${esc(page.canonical)}">`)
-    .replace(/<meta property="og:title" content="[^"]*">/, `<meta property="og:title" content="${esc(page.title)}">`)
+    .replace(/<meta property="og:title" content="[^"]*">/, `<meta property="og:title" content="${esc(page.title || t)}">`)
     .replace(/<meta property="og:description" content="[^"]*">/, `<meta property="og:description" content="${esc(page.description)}">`)
-    .replace(/<meta name="twitter:title" content="[^"]*">/, `<meta name="twitter:title" content="${esc(page.title)}">`)
+    .replace(/<meta name="twitter:title" content="[^"]*">/, `<meta name="twitter:title" content="${esc(page.title || t)}">`)
     .replace(/<meta name="twitter:description" content="[^"]*">/, `<meta name="twitter:description" content="${esc(page.description)}">`)
     .replace(/<meta property="og:image" content="[^"]*">/, (m) => (page.image ? `<meta property="og:image" content="${esc(page.image.url)}">` : m))
     .replace(/<meta property="og:image:alt" content="[^"]*">/, (m) => (page.image ? `<meta property="og:image:alt" content="${esc(page.image.alt)}">` : m))
     .replace(/<meta name="twitter:image" content="[^"]*">/, (m) => (page.image ? `<meta name="twitter:image" content="${esc(page.image.url)}">` : m))
     .replace(/<meta name="robots" content="[^"]*">/, page.noindex ? '<meta name="robots" content="noindex">' : '$&')
-    .replace('</head>', `<meta property="og:url" content="${esc(page.canonical)}">\n${ld}\n</head>`);
+    .replace('</head>', `<meta property="og:url" content="${esc(page.canonical)}">\n${page.preloadImage ? `<link rel="preload" as="image" href="${esc(page.preloadImage)}" fetchpriority="high">\n` : ''}${ld}\n</head>`);
   html = html.replace(/<main id="app">[\s\S]*?<\/main>/, `<main id="app">${page.body}</main>`);
   return html;
 }
@@ -543,6 +611,10 @@ export async function seoResponse(request: Request, env: SeoEnv): Promise<Respon
     page = await resultsPage(env, site);
   } else if (path === '/slip') {
     page = await slipPage(env, site);
+  } else if (path === '/') {
+    page = await homePage(env, site);
+  } else if (path === '/leagues') {
+    page = await leaguesPage(env, site);
   } else {
     page = staticPage(path, site);
   }

@@ -140,13 +140,21 @@ export const checkoutHref = (p) => `#/checkout?plan=${encodeURIComponent(p.plan_
 
 /* ---------------------------------------------------------------- styles */
 
+/** Load promo.css once; resolves when it has applied (or failed), so nothing is drawn unstyled. */
+let stylesReady = null;
 export function ensureStyles() {
-  if (document.getElementById('promo-css')) return;
-  const l = document.createElement('link');
-  l.id = 'promo-css';
-  l.rel = 'stylesheet';
-  l.href = '/promo.css';
-  document.head.append(l);
+  if (stylesReady) return stylesReady;
+  const existing = document.getElementById('promo-css');
+  if (existing?.sheet) return (stylesReady = Promise.resolve());
+  const l = existing ?? document.createElement('link');
+  stylesReady = new Promise((ok) => { l.addEventListener('load', ok, { once: true }); l.addEventListener('error', ok, { once: true }); });
+  if (!existing) {
+    l.id = 'promo-css';
+    l.rel = 'stylesheet';
+    l.href = '/promo.css';
+    document.head.append(l);
+  }
+  return stylesReady;
 }
 
 /* ----------------------------------------------------------- the clock */
@@ -384,19 +392,30 @@ export function showBar(p, { anchor }) {
   bar.setAttribute('role', 'region');
   bar.setAttribute('aria-label', p.kind === 'notice' ? 'Notice' : 'Offer');
   bar.innerHTML = barHTML(p);
-  anchor.parentNode.insertBefore(bar, anchor);
+  // Over the foot of the screen (promo.css): it is laid over the page, never
+  // put into it, so nothing the reader is looking at moves when it arrives.
+  const room = () => document.documentElement.style.setProperty('--pb-h', bar.isConnected ? `${Math.ceil(bar.getBoundingClientRect().height)}px` : '0px');
+  const gone = () => { bar.remove(); room(); removeEventListener('resize', room); };
+  // The clock is drawn before the bar goes on screen: anchored at the bottom,
+  // anything that made it taller afterwards moved its top edge up, which
+  // counts as the page shifting.
   const clock = bar.querySelector('.pb-clock');
-  if (clock) mountClock(clock, p.ends_at, { compact: true, onEnd: () => bar.remove() });
+  if (clock) mountClock(clock, p.ends_at, { compact: true, onEnd: gone });
+  document.body.append(bar);
+  room();
+  addEventListener('resize', room);
   if (!reduced()) {
-    bar.animate([{ gridTemplateRows: '0fr', opacity: 0 }, { gridTemplateRows: '1fr', opacity: 1 }], { duration: 700, easing: EXPO, fill: 'both' });
+    // Up from below, on a transform: moving it moves nothing else.
+    bar.animate([{ transform: 'translateY(100%)' }, { transform: 'translateY(0)' }], { duration: 700, easing: EXPO, fill: 'both' });
     bar.querySelector('.pb-inner').animate([{ backgroundPosition: '-60% 0' }, { backgroundPosition: '160% 0' }], { duration: 1600, delay: 300, easing: 'cubic-bezier(0.65, 0, 0.35, 1)' });
   }
   bar.querySelector('.pb-x').onclick = () => {
     remember('closed', p.id);
-    if (reduced()) { bar.remove(); return; }
-    bar.animate([{ gridTemplateRows: '1fr', opacity: 1 }, { gridTemplateRows: '0fr', opacity: 0 }], { duration: 360, easing: QUART_IN, fill: 'forwards' })
-      .finished.then(() => bar.remove(), () => bar.remove());
+    if (reduced()) { gone(); return; }
+    bar.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(100%)' }], { duration: 360, easing: QUART_IN, fill: 'forwards' })
+      .finished.then(gone, gone);
   };
+  bar.remove = ((remove) => () => { remove.call(bar); document.documentElement.style.setProperty('--pb-h', '0px'); })(bar.remove);
   return bar;
 }
 
@@ -437,7 +456,14 @@ export async function runPromos({ route, signedIn, member, returning = false, an
   const bar = mine.find((p) => !(mem.closed ?? []).includes(p.id));
   const shown = document.getElementById('promo-bar');
   if (NO_BAR.has(route) || !bar) shown?.remove();
-  else if (!shown || shown.dataset.id !== bar.id) showBar(bar, { anchor }).dataset.id = bar.id;
+  else if (!shown || shown.dataset.id !== bar.id) {
+    // After the faces have loaded: a font arriving under a bar already on
+    // screen changes its height, and a bar anchored at the bottom then moves.
+    // And after its own stylesheet: unstyled, it sat in the page for a frame
+    // before the stylesheet pinned it to the foot of the screen.
+    await Promise.race([Promise.all([document.fonts?.ready, ensureStyles()]), new Promise((ok) => setTimeout(ok, 2500))]).catch(() => {});
+    if (!document.getElementById('promo-bar')) showBar(bar, { anchor }).dataset.id = bar.id;
+  }
 
   if (armed || NO_POPUP.has(route)) return;
   const pop = mine.find((p) => p.kind !== 'notice' && !(mem.seen ?? []).includes(p.id));

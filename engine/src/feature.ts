@@ -32,6 +32,14 @@ export interface HeroPick {
   star_away: number | null;
   /** Why this fixture won, kept so the choice can be audited from the board. */
   reason: string;
+  /**
+   * The first ground, of this match's and the other candidates', that has a
+   * real photograph (firstVenuePhoto in slate.ts). Many grounds have none and
+   * the image service answers with a 70-byte blank, which the page used to
+   * discover by loading candidates one after another: eight seconds before
+   * the masthead had a picture.
+   */
+  shot_venue_id?: number | null;
 }
 
 /**

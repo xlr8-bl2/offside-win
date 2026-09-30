@@ -211,7 +211,20 @@
 
 /* ------------------------------------------------------------------ the bar */
 
-.pb { display: grid; grid-template-rows: 1fr; }
+/*
+ * Over the foot of the screen, not in the page under the header. Put in
+ * above the page once the offers had loaded, it pushed everything down: a
+ * layout shift on every first visit while an offer ran. Fixed at the bottom it
+ * moves nothing, sits under the thumb, and the page ends above it (--pb-h).
+ */
+.pb {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: var(--z-header);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--stand);
+  box-shadow: var(--elev-3);
+}
 .pb-inner {
   min-height: 0;
   overflow: hidden;
@@ -220,7 +233,7 @@
   justify-content: center;
   gap: var(--space-4) var(--space-6);
   padding: 0 var(--space-6);
-  border-bottom: var(--border) solid var(--hairline);
+  border-top: var(--border) solid var(--hairline);
   background:
     linear-gradient(100deg, transparent 38%, rgba(158, 134, 255, 0.18) 50%, transparent 62%) -60% 0 / 60% 100% no-repeat,
     linear-gradient(90deg, rgba(122, 90, 248, 0.1), rgba(122, 90, 248, 0.03) 50%, rgba(122, 90, 248, 0.1)),

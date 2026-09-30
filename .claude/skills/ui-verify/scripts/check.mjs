@@ -153,6 +153,10 @@ for (const width of WIDTHS) {
         // so they are drawings, not layout. The <svg> element itself is still
         // checked against its siblings.
         if (parent.closest('svg')) continue;
+        // A countdown digit rolling over (promo.js mountClock): the old digit
+        // slides out as the new one slides in, both in one slot for 360ms.
+        // Caught mid-roll, that is the animation, not a layout fault.
+        if (parent.classList?.contains('pc-slot')) continue;
         const kids = [...parent.children].filter((k) => {
           const cs = getComputedStyle(k);
           if (cs.position !== 'static' && cs.position !== 'relative') return false;
