@@ -298,6 +298,15 @@ const commands: Record<string, () => Promise<unknown>> = {
     await runSlices(await loadHistory());
   },
 
+  // Correct the price's known biases family by family, and judge it on
+  // matches the correction never saw (lab/calib.ts).
+  async 'lab:calib'() {
+    requireEnv({ provider: false });
+    const { loadHistory } = await import('./lab/run.ts');
+    const { runCalib } = await import('./lab/calib.ts');
+    runCalib(await loadHistory());
+  },
+
   // The lab's replay of the production rule against what the live engine
   // actually published, over the period it has run that rule (lab/live.ts).
   async 'lab:live'() {
