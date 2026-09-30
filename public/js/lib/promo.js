@@ -416,8 +416,10 @@ function busy() {
 
 // Moving page takes the popup down with the page it was opened on: Back from
 // under it used to leave it standing over the next page.
-addEventListener('hashchange', () => open?.close(true));
-addEventListener('popstate', () => open?.close(true));
+if (typeof window !== 'undefined') {
+  window.addEventListener('hashchange', () => open?.close(true));
+  window.addEventListener('popstate', () => open?.close(true));
+}
 
 const NO_POPUP = new Set(['pricing', 'checkout', 'signin', 'account', 'admin', 'legal', 'trace', 'dev']);
 const NO_BAR = new Set(['checkout', 'admin']);
