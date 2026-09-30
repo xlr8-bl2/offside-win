@@ -293,6 +293,25 @@ export function runModel(rows: HistRow[]): Record<string, unknown> {
   }
   report['blend'] = blendRows;
 
+  // 6. Is the money's signal steady, or one period's luck? Among options the
+  // price rates 70%+, landed against priced by which way the price has moved
+  // since the open, period by period.
+  console.log('\n6. The money since the open, period by period (the price says 70%+):');
+  const moveRows: unknown[] = [];
+  for (const [label, d] of [['A', LA], ['B', LB], ['C', LC]] as const) {
+    const parts: string[] = [];
+    for (const [lo, hi, name] of [[-1, -0.01, 'drifted 1+'], [-0.01, 0, 'drifted under 1'], [0, 0.01, 'flat or backed under 1'], [0.01, 1, 'backed 1+']] as const) {
+      const x = d.filter((e) => e.o.open !== null && ref(e.o) >= 0.7 && ref(e.o) - e.o.open >= lo && ref(e.o) - e.o.open < hi);
+      if (x.length < 50) continue;
+      const priced = x.reduce((t, e) => t + ref(e.o), 0) / x.length;
+      const landed = x.reduce((t, e) => t + e.y, 0) / x.length;
+      moveRows.push({ period: label, name, n: x.length, priced, landed });
+      parts.push(`${name} ${landed >= priced ? '+' : ''}${((landed - priced) * 100).toFixed(1)} (n ${x.length})`);
+    }
+    console.log(`  ${label}  ${parts.join('   ')}`);
+  }
+  report['movement'] = moveRows;
+
   report['production'] = { b: prodB, c: prodC };
   report['finalists'] = finalists;
   return report;
