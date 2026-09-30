@@ -70,7 +70,9 @@ export async function findDue(now: number): Promise<Due[]> {
     `SELECT m.user_id, m.plan_id, m.expires_at, m.attempts, m.dunning_from,
             pm.origin_ref, p.amount_minor, p.currency, p.days
      FROM membership m
-     JOIN plan p ON p.id = m.plan_id AND p.active = 1
+     -- Not only plans on sale: taking a plan off sale stops new purchases,
+     -- it does not quietly end the membership of everyone already on it.
+     JOIN plan p ON p.id = m.plan_id
      LEFT JOIN payment_method pm ON pm.user_id = m.user_id
      WHERE m.auto_renew = 1
        AND m.cancelled_at IS NULL

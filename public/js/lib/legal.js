@@ -10,7 +10,7 @@
  * page. One source, so the two can never disagree.
  */
 
-export const UPDATED = '28 September 2026';
+export const UPDATED = '30 September 2026';
 
 /*
  * The address on the contact page. It is referenced from the privacy policy and
@@ -41,7 +41,7 @@ export const TERMS_VERSION = '2026-09-28';
 export const LEGAL = {
   privacy: {
     title: 'Privacy Policy',
-    version: '2.0',
+    version: '2.1',
     standfirst: `This Privacy Policy describes how Offside.win collects, uses, discloses and retains
       personal data in connection with the website at offside.win and the services made available
       through it, the legal bases on which it does so, and the rights available to you. It should be
@@ -225,6 +225,7 @@ export const LEGAL = {
         <tbody>
           <tr><td>Account data and preferences</td><td>Until the Account is deleted</td></tr>
           <tr><td>Payment records</td><td>Six years from the end of the tax year to which they relate, as required by tax law; following deletion of an Account, without the associated email address</td></tr>
+          <tr><td>Whether a deleted Account had a Membership</td><td>Six years from deletion, held only as a one-way fingerprint of the email address, so that a free trial is given once per person</td></tr>
           <tr><td>Checkout confirmations</td><td>Six years from the end of the Membership concerned, being the limitation period for claims in contract</td></tr>
           <tr><td>Records of investigations into disclosure of Members’ Content</td><td>Until the investigation is concluded; where action is taken, six years thereafter</td></tr>
           <tr><td>Correspondence</td><td>Two years from the conclusion of the correspondence, or longer where it relates to a dispute</td></tr>

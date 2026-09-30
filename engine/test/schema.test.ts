@@ -21,7 +21,7 @@ test('postgres schema declares tables', () => {
 //
 // Listing a table here is a decision, and the test below turns it into one that
 // cannot be undone by accident.
-const PRIVATE = new Set(['payment', 'payment_method', 'page_view', 'profile', 'follow', 'entitlement_grant', 'purchase_consent', 'market_snapshot', 'admin_log', 'promo']);
+const PRIVATE = new Set(['payment', 'payment_method', 'page_view', 'profile', 'follow', 'entitlement_grant', 'purchase_consent', 'market_snapshot', 'admin_log', 'promo', 'former_member']);
 
 // Tables with paid content in them, readable only through a serving function.
 const SERVED = new Set(['fixture', 'pick', 'kv', 'slip', 'entitlement']);
@@ -121,7 +121,7 @@ test('migrate() sends whole statements, function bodies included', () => {
 // even a mistaken grant would run them as anon, which has no write privilege on
 // either table -- but "it would fail anyway" is not a reason to hand out the
 // call, so the absence of a grant is asserted instead.
-const PRIVATE_FUNCTIONS = new Set(['record_payment', 'revoke_membership', 'record_entitlement', 'revoke_entitlement', 'delete_account_data']);
+const PRIVATE_FUNCTIONS = new Set(['record_payment', 'revoke_membership', 'record_entitlement', 'revoke_entitlement', 'delete_account_data', 'stop_entitlement_renewal']);
 
 // The Worker's read path. The serving functions over the paid tables run as
 // their owner, because those tables grant the public roles nothing -- so each

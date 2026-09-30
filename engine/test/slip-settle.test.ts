@@ -113,3 +113,24 @@ test('regrading takes the finished record over the fixture\'s own copy, and reac
   assert.deepEqual([f!.home_goals, f!.away_goals], [1, 2], 'the fixture shows the final score too');
   await store.exec('DELETE FROM match WHERE id IN (1, 2)');
 });
+
+test('a lean is never a slip leg: every leg has to clear the normal bar', { skip: !enabled }, async () => {
+  const { config } = await import('../src/config.ts');
+  const now = K - 86400;
+  const kick = now + 6 * 3600;
+  for (const id of [1, 2, 3]) {
+    await store.exec(
+      `INSERT INTO fixture (id, league_id, kickoff, home_team, away_team, status, board_json, bundle_json, computed_at)
+       VALUES (?, 64, ?, 'H', 'A', 'notstarted', '{}', '{}', ?)`, [id, kick, now]);
+  }
+  const call = async (id: number, prob: number, odds: number) => store.exec(
+    `INSERT INTO pick (fixture_id, kickoff, market, outcome, line, kind, model_prob, book_prob, edge, shrunk_edge, odds,
+                       confidence, provisional, narrative, evidence_json, created_at)
+     VALUES (?, ?, 'match_result', 'home', NULL, 'CONFIDENT', ?, ?, 0, 0, ?, 1, 0, '', '{}', ?)`,
+    [id, kick, prob, prob, odds, now]);
+  // Two strong calls that make 1.69 together, and a lean at 1.45 that would take it into the band.
+  await call(1, 0.9, 1.3); await call(2, 0.88, 1.3); await call(3, config.confident.floor - 0.03, 1.45);
+  const made = await slip.refreshSlip(now);
+  assert.equal(made, null, 'no slip rather than one resting on a lean');
+  assert.equal((await store.select('SELECT id FROM slip')).length, 0);
+});

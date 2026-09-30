@@ -8,16 +8,19 @@
  *
  *   1. Ask GoTrue who the token belongs to. The Worker does not verify JWTs
  *      itself; GoTrue does, and an expired or forged token stops here.
- *   2. Remove what we hold about that id (delete_account_data: profile,
- *      follows, stored card reference, membership). Payment records stay,
+ *   2. Stop any Whop subscription renewing, or stop here: it would carry on
+ *      charging an account that no longer exists.
+ *   3. Remove what we hold about that id (delete_account_data: profile,
+ *      follows, stored card reference, membership, the Whop entitlement and
+ *      the email on it). Payment records stay,
  *      because tax law requires them and the privacy policy says so.
- *   3. Remove the sign-in, so the email can no longer log in to anything.
+ *   4. Remove the sign-in, so the email can no longer log in to anything.
  *
  * The id comes only from step 1, never from the request body, so nobody can
  * name someone else's account to delete.
  */
 
-import type { PayEnv } from './pay.ts';
+import { provider, stopRenewals, type PayEnv } from './pay.ts';
 
 interface Env extends PayEnv {
   SUPABASE_URL: string;
@@ -45,14 +48,23 @@ export async function deleteAccount(request: Request, env: Env, jwt: string | nu
     headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${jwt}` },
   });
   if (!who.ok) return say('Your sign-in has expired. Sign in again, then delete the account.', 401);
-  const id = String(((await who.json()) as { id?: unknown }).id ?? '');
+  const me = (await who.json()) as { id?: unknown; email?: unknown };
+  const id = String(me.id ?? '');
+  const email = typeof me.email === 'string' && me.email ? me.email.toLowerCase() : null;
   if (!UUID.test(id)) return say('Your sign-in has expired. Sign in again, then delete the account.', 401);
+
+  // A Whop subscription bills whether or not the account exists, so it is
+  // stopped before anything is removed. Deleting first left members paying
+  // every month for a membership they could no longer sign in to.
+  if (provider(env) === 'whop' && env.WHOP_API_KEY && !(await stopRenewals(env, { id, email }))) {
+    return say('Nothing was deleted: your membership with Whop could not be stopped just now, and deleting would leave it charging. Try again in a minute.', 503);
+  }
 
   const admin = { apikey: env.SUPABASE_SERVICE_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` };
   const data = await fetch(new URL('/rest/v1/rpc/delete_account_data', env.SUPABASE_URL), {
     method: 'POST',
     headers: { ...admin, 'content-type': 'application/json' },
-    body: JSON.stringify({ p_user: id }),
+    body: JSON.stringify({ p_user: id, p_email: email }),
   });
   if (!data.ok) return say('Nothing was deleted: the database refused. Try again in a minute.', 502);
 

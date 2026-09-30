@@ -5576,7 +5576,7 @@ async function afterSignIn() {
   if (intent?.startsWith('buy')) {
     history.replaceState(null, '', `${location.pathname}#/pricing`);
     await route();
-    await startCheckout(intent.split(':')[1] || 'monthly');
+    await startCheckout(intent.split(':')[1] || 'monthly', intent.split(':')[2] || null);
     headerAuth();
     return;
   }
@@ -5585,19 +5585,21 @@ async function afterSignIn() {
   headerAuth();
 }
 
-async function startCheckout(plan = 'monthly') {
+async function startCheckout(plan = 'monthly', promoId = null) {
   /*
    * Signed in first, always. The membership is attached to the account that
    * asked for it (its id travels with the payment), so whatever email the
    * buyer gives the card form, it lands on the right account. A reader who is
    * signed out is sent to sign in and comes straight back to this plan.
    */
+  // The offer the reader clicked, if any, goes with them through sign-in.
+  const promoQ = promoId ? `&promo=${encodeURIComponent(promoId)}` : '';
   if (!(await currentUser())) {
-    setIntent(`buy:${plan}`);
+    setIntent(`buy:${plan}${promoId ? `:${promoId}` : ''}`);
     location.hash = '#/signin';
     return;
   }
-  location.hash = `#/checkout?plan=${encodeURIComponent(plan)}`;
+  location.hash = `#/checkout?plan=${encodeURIComponent(plan)}${promoQ}`;
 }
 
 /**
@@ -5647,12 +5649,21 @@ const PLAN_LINE = {
 };
 
 /** Turn renewal on or off. Takes effect immediately, both ways. */
-async function setRenewal(on) {
+async function setRenewal(on, button) {
+  // One request per tap: the button waits for the answer, and a failure is
+  // said beside it rather than in a browser alert.
+  if (button) button.disabled = true;
+  button?.parentElement?.querySelector('.acct-note')?.remove();
   try {
     await postJSON('/api/pay/renewal', { auto_renew: on });
     await viewAccount();
   } catch (err) {
-    alert(err.message);
+    if (button) {
+      button.disabled = false;
+      button.insertAdjacentHTML('afterend', `<span class="acct-note bad" role="status">${esc(err.message)}</span>`);
+    } else {
+      alert(err.message);
+    }
   }
 }
 
@@ -5710,7 +5721,7 @@ async function viewPricing() {
   // A deal or a free trial on a plan, when one is running and this reader
   // may have it (js/lib/promo.js). Checkout finds the same one by the plan.
   const promo = Array.isArray(running) && running.length && !mine ? await import('./js/lib/promo.js').catch(() => null) : null;
-  const offerOn = (id) => (promo ? running.find((o) => o.plan_id === id && o.kind !== 'notice' && promo.eligible(o, { signedIn: !!user, member: false })) ?? null : null);
+  const offerOn = (id) => (promo ? running.find((o) => o.plan_id === id && o.kind !== 'notice' && promo.eligible(o, { signedIn: !!user, member: false, returning: !!account?.returning })) ?? null : null);
   if (promo && order0(plans).some((id) => offerOn(id))) promo.ensureStyles();
   // The free call is its own fixture, chosen by the slate: not the headline
   // match. Pointing this line at the headline sent readers to a locked call
@@ -5797,7 +5808,7 @@ async function viewPricing() {
             ? `<a class="btn btn-ghost btn-lg" href="#/account?tab=membership">Your plan</a>`
             : b.covered
               ? `<button class="btn btn-ghost btn-lg" type="button" disabled>${esc(b.label)}</button>`
-              : `<button class="btn ${b.quiet ? 'btn-ghost' : lead || !mine ? 'btn-accent' : 'btn-primary'} btn-lg" data-buy="${esc(id)}">${esc(o ? (o.cta || (o.kind === 'trial' ? 'Start the free days' : 'Get the deal')) : b.label)}</button>`}
+              : `<button class="btn ${b.quiet ? 'btn-ghost' : lead || !mine ? 'btn-accent' : 'btn-primary'} btn-lg" data-buy="${esc(id)}"${o ? ` data-promo="${esc(o.id)}"` : ''}>${esc(o ? (o.cta || (o.kind === 'trial' ? 'Start the free days' : 'Get the deal')) : b.label)}</button>`}
         </section>`;
       }).join('')}
     </div>
@@ -5848,7 +5859,7 @@ async function viewPricing() {
   </div>`;
 
   for (const b of app.querySelectorAll('[data-buy]')) {
-    b.onclick = () => startCheckout(b.dataset.buy);
+    b.onclick = () => startCheckout(b.dataset.buy, b.dataset.promo || null);
   }
   for (const c of app.querySelectorAll('.plan-clock')) promo?.mountClock(c, Number(c.dataset.ends), { compact: true, onEnd: () => route({ soft: true }) });
 }
@@ -5867,7 +5878,8 @@ function liveMembership(account) {
 /** Does it take money again by itself? A matchday pass never does. */
 function renewsItself(m) {
   if (!m || m.plan_id === 'matchday' || m.card_brand === 'complimentary') return false;
-  return m.via === 'whop' || Number(m.auto_renew) === 1;
+  // A Whop membership carries whether it still renews (stopped from here or not).
+  return Number(m.auto_renew) === 1;
 }
 
 /** Whop's page for this membership, when it is one of Whop's. */
@@ -5939,13 +5951,14 @@ function checkoutBlock(m, planId) {
  */
 async function viewCheckout(params) {
   const planId = /^[a-z0-9_-]{1,40}$/.test(params.get('plan') ?? '') ? params.get('plan') : 'monthly';
+  const promoId = /^[a-z0-9_-]{1,40}$/i.test(params.get('promo') ?? '') ? params.get('promo') : null;
   // A soft refresh (the header catching up on the account) must not wipe
   // half-typed card details by drawing the page again.
   if (state.soft && app.querySelector(`.checkout[data-plan="${planId}"]`)) return;
   placeholder(skeletonHTML());
 
   const user = await currentUser();
-  if (!user) { setIntent(`buy:${planId}`); goInstead('#/signin'); return; }
+  if (!user) { setIntent(`buy:${planId}${promoId ? `:${promoId}` : ''}`); goInstead('#/signin'); return; }
   const [plans, account, cfg] = await Promise.all([
     getJSON('/api/plans').catch(() => []),
     getJSON('/api/account', { fresh: true }).catch(() => null),
@@ -5978,7 +5991,7 @@ async function viewCheckout(params) {
   // A deal or a free trial running on this plan (js/lib/promo.js). Only its
   // id goes with the payment; the Worker checks it and sets the price.
   const promo = moving || block ? null : await import('./js/lib/promo.js').catch(() => null);
-  const offer = promo ? await promo.offerForPlan(planId, { signedIn: true, member: !!m }).catch(() => null) : null;
+  const offer = promo ? await promo.offerForPlan(planId, { signedIn: true, member: !!m, returning: !!account?.returning }, promoId).catch(() => null) : null;
   const trial = offer?.kind === 'trial' ? offer : null;
   const deal = offer?.kind === 'deal' ? offer : null;
   const amount = deal ? deal.price_minor : Number(plan.amount_minor);
@@ -6550,7 +6563,11 @@ async function viewAccount() {
               // this membership. A matchday pass is one payment and stops.
               ? (m.plan_id === 'matchday'
                   ? `<span>One payment. It stops by itself.</span>`
-                  : `<span>Renews through Whop until you cancel</span><a class="btn btn-ghost btn-sm" href="${esc(m.manage_url && /^https:\/\/(www\.)?whop\.com\//.test(m.manage_url) ? m.manage_url : 'https://whop.com/')}" target="_blank" rel="noopener noreferrer">Manage or cancel</a>`)
+                  // One tap, like any other membership: the Worker tells Whop
+                  // to end it at the end of the paid period.
+                  : Number(m.auto_renew)
+                    ? `<span>Renews through Whop until you stop it</span><button class="btn btn-quiet btn-sm" id="cancel">Stop renewing</button>`
+                    : `<span>Does not renew. Yours until ${esc(when(m.expires_at))}.</span>${whopManageUrl(m) ? `<a class="btn btn-ghost btn-sm" href="${esc(whopManageUrl(m))}" target="_blank" rel="noopener noreferrer">Renew on Whop</a>` : ''}`)
               : m.card_brand === 'complimentary'
                 ? `<span>Complimentary</span>`
                 : m.auto_renew
@@ -6559,6 +6576,9 @@ async function viewAccount() {
           : `<a class="btn btn-accent" href="#/pricing">See the plans</a>`}
       </div>
     </section>
+    ${active && m.via !== 'whop' && account.whop?.renewing ? `
+    <p class="acct-line">You also have a membership through Whop that renews on ${esc(when(account.whop.until))}.
+      <button class="btn btn-quiet btn-sm" id="cancel">Stop it renewing</button></p>` : ''}
     ${active && m.plan_id !== 'quarter' && m.card_brand !== 'complimentary' ? `
     <a class="acct-upgrade" href="#/checkout?plan=${m.plan_id === 'matchday' ? 'monthly' : 'quarter'}">
       <b>${m.plan_id === 'matchday' ? 'Carry on by the month' : 'Go to three months and pay less a month'}</b>
@@ -6708,7 +6728,8 @@ async function viewAccount() {
       const pic = app.querySelector('input[name="pic"]:checked')?.value ?? 'auto';
       const saved = await accountRpc('save_profile', {
         p_name: document.getElementById('display-name').value,
-        p_odds: oddsFormat,
+        // The odds and the clock are saved by their own switches.
+        p_odds: null,
         // A crest with no club to show falls back to the ordinary picture.
         p_avatar: pic === 'crest' && !clubId ? 'auto' : pic,
         p_color: app.querySelector('input[name="colour"]:checked')?.value ?? null,
@@ -6778,7 +6799,7 @@ async function viewAccount() {
       setClock(r.value);
       note('clock-note', 'Saving…');
       try {
-        account.profile = await accountRpc('save_profile', { p_name: account.profile?.display_name ?? user.name ?? '', p_odds: oddsFormat, p_clock: r.value });
+        account.profile = await accountRpc('save_profile', { p_name: null, p_odds: null, p_clock: r.value });
         if (state.account) state.account.profile = account.profile;
         note('clock-note', `Saved. Kick-offs now read like ${clockTime(new Date(2026, 0, 1, 20, 45))}.`);
         state.board = null;
@@ -6794,7 +6815,7 @@ async function viewAccount() {
       setOddsFormat(r.value);
       note('odds-note', 'Saving…');
       try {
-        account.profile = await accountRpc('save_profile', { p_name: account.profile?.display_name ?? user.name ?? '', p_odds: r.value });
+        account.profile = await accountRpc('save_profile', { p_name: null, p_odds: r.value });
         note('odds-note', `Saved. Odds now read like ${showOdds(2.5)}.`);
         state.board = null;
       } catch (err) {
@@ -6853,9 +6874,9 @@ async function viewAccount() {
   const cancel = document.getElementById('cancel');
   // One tap, no "are you sure", no offer to stay. Retention mazes are a dark
   // pattern and in several places an illegal one.
-  if (cancel) cancel.onclick = () => setRenewal(false);
+  if (cancel) cancel.onclick = () => setRenewal(false, cancel);
   const resume = document.getElementById('resume');
-  if (resume) resume.onclick = () => setRenewal(true);
+  if (resume) resume.onclick = () => setRenewal(true, resume);
 }
 
 /** The database's words, said to a person. */
@@ -7507,7 +7528,8 @@ async function schedulePromos() {
     const promo = await import('./js/lib/promo.js');
     const signedIn = !!state.user;
     const member = signedIn ? state.member !== false : false;
-    await promo.runPromos({ route: parseHash().parts[0] || 'home', signedIn, member, anchor: app, promos: running });
+    const returning = signedIn && !!state.account?.returning;
+    await promo.runPromos({ route: parseHash().parts[0] || 'home', signedIn, member, returning, anchor: app, promos: running });
   } catch { /* an offer is never worth an error */ }
 }
 
@@ -8053,7 +8075,7 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
     if (intent?.startsWith('buy')) {
       location.hash = '#/pricing';
       await route();
-      await startCheckout(intent.split(':')[1] || 'monthly');
+      await startCheckout(intent.split(':')[1] || 'monthly', intent.split(':')[2] || null);
       health();
       headerAuth();
       cookieNotice();
