@@ -73,14 +73,14 @@
 .ofr-beam {
   position: absolute;
   top: 22px;
-  left: calc(50% + (var(--n) - 1.5) * 26px);
+  left: calc(50% + (var(--n, 0) - 1.5) * 26px);
   width: 200px;
   height: 120%;
   margin-left: -100px;
   background: linear-gradient(180deg, rgba(255, 246, 222, 0.3), rgba(255, 246, 222, 0.1) 12%, rgba(255, 246, 222, 0.04) 36%, transparent 64%);
   clip-path: polygon(47% 0, 53% 0, 100% 100%, 0 100%);
   transform-origin: 50% 0;
-  transform: rotate(calc((var(--n) - 1.5) * 16deg));
+  transform: rotate(calc((var(--n, 0) - 1.5) * 16deg));
   filter: blur(10px);
   opacity: 0;
 }
