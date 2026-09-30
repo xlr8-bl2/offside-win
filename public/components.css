@@ -2142,27 +2142,119 @@
 
 /* ======================================================== cookie notice */
 
+/*
+ * Says what it is in its first two words, asks in plain English, and puts
+ * yes and no side by side at the same size and weight: refusing takes exactly
+ * as much effort as agreeing, which is what the ICO asks for and what a
+ * reader who has been tricked by a hundred of these deserves. The finer
+ * choice is one tap further, never a maze.
+ *
+ * It used to open with "quick one" in the marker hand, which read as a note
+ * from the site rather than a question about the reader's device; most people
+ * could not have said it was a cookie notice at all.
+ */
 .cookie {
   position: fixed;
   right: var(--space-6);
   bottom: calc(var(--space-6) + env(safe-area-inset-bottom, 0px));
   z-index: var(--z-overlay);
-  width: min(340px, calc(100vw - var(--space-8)));
-  padding: var(--space-5) var(--space-6) var(--space-6);
+  width: min(400px, calc(100vw - var(--space-8)));
+  max-height: calc(100vh - var(--space-12));
+  overflow-y: auto;
+  padding: var(--space-6);
   background: var(--stand);
-  border: 1px solid var(--hairline);
-  border-top: 2px solid var(--floodlight);
+  border: var(--border) solid var(--rule);
   border-radius: var(--radius-lg);
   box-shadow: var(--elev-3);
   /* One entrance, the only motion it has: it rises into place once. */
   animation: cookie-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 @keyframes cookie-in { from { opacity: 0; transform: translateY(12px); } }
-.cookie-kicker { margin: 0 0 var(--space-1); color: var(--floodlight-hi); font-size: var(--text-xl); }
+.cookie-title {
+  margin: 0 0 var(--space-2);
+  font-family: var(--display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  line-height: 1.1;
+  color: var(--chalk);
+}
 .cookie-text { margin: 0; color: var(--chalk-2); font-size: var(--text-sm); line-height: var(--leading-normal); }
-.cookie-text a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
+
+/* Yes and no: one weight, one size, one colour. */
 .cookie-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-5); }
-.cookie-actions .btn { width: 100%; justify-content: center; }
+.cookie-actions .btn {
+  width: 100%;
+  background: var(--chalk);
+  color: var(--pitch);
+}
+.cookie-actions .btn:hover { background: #fff; }
+
+.cookie-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-4);
+  font-size: var(--text-xs);
+}
+.cookie-foot a, .cookie-more {
+  padding: var(--space-1) 0;
+  color: var(--chalk-2);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--rule-firm);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.cookie-foot a:hover, .cookie-more:hover { color: var(--chalk); text-decoration-color: currentColor; }
+.cookie-foot a:focus-visible, .cookie-more:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+
+.cookie-options { margin-top: var(--space-5); padding-top: var(--space-2); border-top: var(--border) solid var(--hairline); }
+.cookie-options[hidden] { display: none; }
+.cookie-save { width: 100%; margin-top: var(--space-4); }
+
+/* The rows of switches, in the notice and on the cookie policy alike. */
+.consent-list { list-style: none; margin: 0; padding: 0; }
+.consent-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-4) 0;
+  border-bottom: var(--border) solid var(--hairline);
+}
+.consent-list li:last-child { border-bottom: 0; }
+.consent-list label, .consent-list li > div { display: grid; gap: 2px; min-width: 0; cursor: pointer; }
+.consent-list li > div { cursor: default; }
+.consent-list b { font-size: var(--text-sm); font-weight: var(--weight-bold); color: var(--chalk); }
+.consent-list span { font-size: var(--text-xs); line-height: 1.45; color: var(--chalk-3); }
+.consent-list .consent-fixed { flex: none; font-weight: var(--weight-medium); color: var(--chalk-2); }
+
+/* An on/off switch: the knob travels, and on is the accent. */
+.switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 40px; height: 24px;
+  margin: 0;
+  border: var(--border) solid var(--rule-firm);
+  border-radius: 12px;
+  background: var(--terrace);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.switch::before {
+  content: '';
+  position: absolute;
+  top: 3px; left: 3px;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--chalk-3);
+  transition: transform var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.switch:checked { background: var(--floodlight); border-color: var(--floodlight); }
+.switch:checked::before { transform: translateX(16px); background: #fff; }
+.switch:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 /*
  * On a phone it stops floating.
@@ -2177,17 +2269,16 @@
   .cookie {
     position: static;
     width: auto;
+    max-height: none;
     margin: 0;
-    padding: var(--space-4) var(--space-5) var(--space-5);
+    padding: var(--space-5) var(--space-5) var(--space-5);
     border: 0;
-    border-bottom: 1px solid var(--hairline);
+    border-bottom: var(--border) solid var(--rule);
     border-radius: 0;
     box-shadow: none;
-    background: linear-gradient(180deg, var(--floodlight-dim), transparent 140%), var(--stand);
     animation: none;
   }
-  .cookie-kicker { font-size: var(--text-md); }
-  .cookie-actions { margin-top: var(--space-4); }
+  .cookie-title { font-size: var(--text-lg); }
 }
 
 /* ===================================================== reduced motion */
@@ -2620,7 +2711,7 @@
   .seg button,
   .board-toggle button,
   select,
-  input { min-height: 44px; }
+  input:not(.switch) { min-height: 44px; }
 }
 
 /* =========================================================== home: side */
