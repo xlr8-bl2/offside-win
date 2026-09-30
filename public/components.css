@@ -2541,6 +2541,13 @@
   .pager-nums { gap: 3px; }
   .pager-num { min-width: 38px; padding-inline: var(--space-2); }
 }
+/* A small phone cannot fit Newer, five numbers and Older on one line: it ran
+   4px off the side at 320px. The numbers take a row of their own, the steps
+   the row under them. */
+@media (max-width: 360px) {
+  .pager { flex-wrap: wrap; row-gap: var(--space-3); }
+  .pager-nums { order: -1; flex-basis: 100%; justify-content: center; }
+}
 
 /* "How it went" was sitting on top of the sentence above it, at a size that
    read as a caption rather than as the heading of the longest section on the
