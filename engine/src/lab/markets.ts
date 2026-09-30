@@ -23,6 +23,7 @@
 import { buildScoreMatrix, priceAsianHandicap, priceBtts, priceDoubleChance, priceDrawNoBet, priceEuropeanHandicap, priceOverUnder, priceResult, type ScoreMatrix } from '../price.ts';
 import { blendRates, impliedRates, matrixFor, type ImpliedTargets } from '../implied.ts';
 import { settleSelection } from '../settle.ts';
+import { isQuarterLine } from '../price.ts';
 import { config } from '../config.ts';
 import { parsePrediction, providerMarkets } from '../provider-model.ts';
 import { MARKET_FAMILY, type MarketCode, type MarketFamily, type Outcome } from '../types.ts';
@@ -299,7 +300,9 @@ export function scoreSources(rows: HistRow[], modelWeight: number) {
 export interface Policy {
   name: string;
   /** Which probability the policy believes. */
-  source: 'book' | 'model' | 'provider' | 'blend' | 'mix' | 'best' | 'stack' | 'sharp' | 'bestsharp' | 'own' | 'learned';
+  source: 'book' | 'model' | 'provider' | 'blend' | 'mix' | 'best' | 'stack' | 'sharp' | 'bestsharp' | 'own' | 'learned' | 'calibrated';
+  /** The per-family correction for the calibrated source (lab/calib.ts). */
+  calibration?: CalMap;
   /** Per-family logistic weights for the stacked source (lab/tune.ts). */
   stack?: Partial<Record<MarketFamily, number[]>>;
   /** Per-family weights for the learned source (lab/learned.ts). */
@@ -399,6 +402,9 @@ export function probOf(policy: Policy, o: Option): number | null {
     // Our own analysis first, alone: the price only decides whether it pays.
     case 'own': return o.own;
     case 'learned': return learnedProb(policy.learned?.[o.family], o);
+    // The sharp-else-consensus price, corrected family by family for the
+    // biases the history shows (lab/calib.ts).
+    case 'calibrated': return applyCalibration(policy.calibration, o);
     // The blend where there is one, and the book's own view elsewhere, with the
     // provider's opinion averaged in where it has one.
     case 'mix': {
@@ -719,4 +725,32 @@ export function walkForward(rows: HistRow[], trainShare = 0.6, minCalls = 40, gr
       test: simulate(p, test, cacheFor(p.modelWeight)),
     })),
   };
+}
+
+
+/* ----------------------------------------------------------- calibration */
+
+/** A per-family curve from the price to how often it landed (lab/calib.ts fits it). */
+export type CalMap = Record<string, { x: number[]; y: number[] }>;
+
+/** The price the correction applies to: the sharp book, else the consensus (the blend for goals). */
+export const calBase = (o: Option): number => (o.family === 'goals' ? (o.blend ?? o.sharp ?? o.book) : (o.sharp ?? o.book));
+
+/** Quarter-line handicaps are left alone: their half results cannot be scored as won or lost. */
+export const calEligible = (o: Option): boolean => !(o.market === 'asian_handicap' && o.line !== null && isQuarterLine(o.line));
+
+/** The corrected probability: the curve, linear between bin centres; the price itself below 50%. */
+export function applyCalibration(cal: CalMap | undefined, o: Option): number {
+  const p = calBase(o);
+  const c = cal?.[o.family];
+  if (!c || p < 0.5 || !calEligible(o)) return p;
+  const { x, y } = c;
+  if (p <= x[0]!) return p + (y[0]! - x[0]!) * ((p - 0.5) / Math.max(1e-6, x[0]! - 0.5));
+  for (let i = 0; i < x.length - 1; i++) {
+    if (p <= x[i + 1]!) {
+      const t = (p - x[i]!) / Math.max(1e-6, x[i + 1]! - x[i]!);
+      return y[i]! + t * (y[i + 1]! - y[i]!);
+    }
+  }
+  return Math.min(0.995, p + (y[y.length - 1]! - x[x.length - 1]!));
 }

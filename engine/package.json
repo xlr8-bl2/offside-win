@@ -17,6 +17,8 @@
     "lab:leans": "tsx src/run.ts lab:leans",
     "lab:losses": "tsx src/run.ts lab:losses",
     "lab:slices": "tsx src/run.ts lab:slices",
+    "lab:live": "tsx src/run.ts lab:live",
+    "lab:calib": "tsx src/run.ts lab:calib",
     "settle": "tsx src/run.ts settle",
     "grant": "tsx src/run.ts grant",
     "plans": "tsx src/run.ts plans",
