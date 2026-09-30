@@ -59,5 +59,26 @@ export async function runSlices(rows: HistRow[]): Promise<void> {
       const r = simulate(p, rs);
       console.log(`  ${p.name.padEnd(38)} ${String(r.n).padStart(4)} calls  ${pct(r.hitRate).padStart(6)} landed  odds ${r.avgOdds.toFixed(2)}  return ${pct(r.roi).padStart(7)}  ${Object.entries(r.byFamily).map(([f, v]) => `${f} ${v.n}:${pct(v.roi)}`).join(' ')}`);
     }
+    // The alternatives, on the older and the newer half of the slice apart,
+    // so a change has to hold in both periods rather than in the pooled total.
+    if (slice === 'friendly' || slice === 'domestic cup') {
+      const sorted = [...rs].sort((a, b) => a.kickoff - b.kickoff);
+      const half = Math.floor(sorted.length / 2);
+      const variants = [
+        production!,
+        { ...production!, name: 'floor 0.82', minProb: 0.82 },
+        { ...production!, name: 'floor 0.85', minProb: 0.85 },
+        { ...production!, name: 'floor 0.88', minProb: 0.88 },
+        { ...production!, name: 'no "either side to win"', excludeBuckets: [...(production!.excludeBuckets ?? []), 'double_chance 12'] },
+        { ...production!, name: 'no draw-sensitive calls (12, draw no bet)', excludeBuckets: [...(production!.excludeBuckets ?? []), 'double_chance 12', 'draw_no_bet home', 'draw_no_bet away'] },
+      ];
+      console.log(`  alternatives, older half | newer half:`);
+      for (const p of variants) {
+        const a = simulate(p, sorted.slice(0, half));
+        const b = simulate(p, sorted.slice(half));
+        const cell = (r: typeof a) => `${String(r.n).padStart(3)} calls ${pct(r.hitRate).padStart(6)} ${pct(r.roi).padStart(7)}`;
+        console.log(`    ${p.name.padEnd(44)} ${cell(a)}  |  ${cell(b)}`);
+      }
+    }
   }
 }
