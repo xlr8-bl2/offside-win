@@ -22,7 +22,7 @@ on:
   # against the live API without putting anything on the production branch
   # first. Narrow it to the schedule once the pipeline has proved itself.
   push:
-    branches: ['claude/offside-win-context-sync-**']
+    branches: [main]
     paths:
       - '.github/workflows/images.yml'
       - 'engine/src/images/**'

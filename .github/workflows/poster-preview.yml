@@ -17,7 +17,7 @@ on:
         required: false
         default: '8'
   push:
-    branches: ['main', 'claude/**']
+    branches: ['main']
     paths:
       - 'engine/src/poster/**'
       - 'engine/scripts/poster-preview.mts'

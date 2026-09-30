@@ -11,7 +11,7 @@ name: deploy
 # removes a manual step that can be forgotten.
 on:
   push:
-    branches: [main, 'claude/**']
+    branches: [main]
     paths: ['worker/**', 'public/**', 'schema.pg.sql', 'engine/src/sql-split.ts', '.github/workflows/deploy.yml']
   schedule:
     - cron: '15 3 * * *'

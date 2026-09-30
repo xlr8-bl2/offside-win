@@ -12,7 +12,7 @@ name: narrate-preview
 # from a working branch.
 on:
   push:
-    branches: ['claude/**']
+    branches: [main]
     paths: ['engine/scripts/narrate-preview.mts', '.github/workflows/narrate-preview.yml']
   workflow_dispatch:
     inputs:
