@@ -292,7 +292,7 @@ const commands: Record<string, () => Promise<unknown>> = {
   // Every settled call beside what the match turned out to be, and the
   // argument behind each loss (lab/losses.ts).
   async 'lab:losses'() {
-    requireEnv({ provider: false });
+    requireEnv();
     const { runLosses } = await import('./lab/losses.ts');
     await runLosses();
   },

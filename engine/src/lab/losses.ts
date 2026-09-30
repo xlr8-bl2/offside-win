@@ -96,6 +96,19 @@ export async function runLosses(): Promise<void> {
     ].join('|'));
   }
 
+  // The fixture table keeps a week, so older calls have lost their team names;
+  // the provider still has the event.
+  const { bsdOrNull } = await import('../bsd.ts');
+  console.log('\nNAMES: pick|fixture|home|away|competition|round|date');
+  for (const r of rows.filter((x) => x.kind === 'CONFIDENT' && x.result === 'LOST' && !x.home)) {
+    const e = await bsdOrNull<Record<string, unknown>>(`/api/v2/events/${r.fixture_id}/`).catch(() => null);
+    if (!e) { console.log(`${r.id}|${r.fixture_id}|?|?|${r.league ?? ''}||`); continue; }
+    r.home = String(e['home_team'] ?? '?');
+    r.away = String(e['away_team'] ?? '?');
+    console.log([r.id, r.fixture_id, r.home, r.away, String(e['league_name'] ?? r.league ?? ''), String(e['round_label'] ?? ''),
+      new Date(Number(r.kickoff) * 1000).toISOString().slice(0, 16)].join('|'));
+  }
+
   // The argument behind each loss.
   console.log('\nLOSSES IN DETAIL');
   for (const r of rows.filter((x) => x.result === 'LOST')) {
