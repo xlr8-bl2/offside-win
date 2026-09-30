@@ -14,7 +14,8 @@
  */
 
 import { select } from '../store.ts';
-import { productionRules, scoreSources, simulate, type HistRow } from './markets.ts';
+import { scoreSources, simulate, type HistRow } from './markets.ts';
+import { PROD } from './tune.ts';
 
 export type Slice = 'league' | 'domestic cup' | 'continental club' | 'international' | 'friendly';
 
@@ -43,8 +44,19 @@ export async function runSlices(rows: HistRow[]): Promise<void> {
     bySlice.set(s, [...(bySlice.get(s) ?? []), r]);
   }
   console.log(`lab:slices: ${rows.length} finished fixtures; ${unnamed.size} competitions without a name counted as league`);
-  const [production] = productionRules();
-  const marketOnly = { ...production!, name: 'production, market only (no blend)', modelWeight: 0 };
+  // The rule the slate runs, drift limit and friendly bar included.
+  const production = PROD;
+  const marketOnly = { ...production, name: 'production, market only (no blend)', modelWeight: 0 };
+
+  // Calls with and without an opening price. Without one the drift limit
+  // cannot run (Houston v Sporting KC, 26 September 2026: called at 1.17,
+  // 1.27 by kick-off, lost 0-2), so if those calls land less, the limit
+  // missing is costing us.
+  console.log('\nThe production rule, by whether the call had an opening price:');
+  for (const p of [production, { ...production, name: 'with an opening price', requireOpen: true }, { ...production, name: 'without one', requireOpen: false }]) {
+    const r = simulate(p, rows);
+    console.log(`  ${p.name.padEnd(38)} ${String(r.n).padStart(4)} calls  ${pct(r.hitRate).padStart(6)} landed  odds ${r.avgOdds.toFixed(2)}  return ${pct(r.roi).padStart(7)}`);
+  }
 
   for (const [slice, rs] of [...bySlice].sort((a, b) => b[1].length - a[1].length)) {
     console.log(`\n== ${slice}: ${rs.length} fixtures`);
@@ -55,7 +67,7 @@ export async function runSlices(rows: HistRow[]): Promise<void> {
       const cell = (k: string) => (goals[k] ? `${k} ${goals[k]!.logLoss.toFixed(4)} (${goals[k]!.n})` : '');
       console.log(`  goals, model weight ${w}: ${['book', 'blend', 'model', 'sharp'].map(cell).filter(Boolean).join('   ')}`);
     }
-    for (const p of [production!, marketOnly]) {
+    for (const p of [production, marketOnly]) {
       const r = simulate(p, rs);
       console.log(`  ${p.name.padEnd(38)} ${String(r.n).padStart(4)} calls  ${pct(r.hitRate).padStart(6)} landed  odds ${r.avgOdds.toFixed(2)}  return ${pct(r.roi).padStart(7)}  ${Object.entries(r.byFamily).map(([f, v]) => `${f} ${v.n}:${pct(v.roi)}`).join(' ')}`);
     }
@@ -64,13 +76,18 @@ export async function runSlices(rows: HistRow[]): Promise<void> {
     if (slice === 'friendly' || slice === 'domestic cup') {
       const sorted = [...rs].sort((a, b) => a.kickoff - b.kickoff);
       const half = Math.floor(sorted.length / 2);
+      // Each bar set both as the default and as the friendly bar, which the
+      // live rule now carries on its own (rank 9), so the rows compare like
+      // with like; "78%" is the rule as it was before.
+      const at = (x: number, name: string) => ({ ...production, name, minProb: x, rankFloor: { ...production.rankFloor, 9: x } });
+      const before = at(0.78, 'production before (78%)');
       const variants = [
-        production!,
-        { ...production!, name: 'floor 0.82', minProb: 0.82 },
-        { ...production!, name: 'floor 0.85', minProb: 0.85 },
-        { ...production!, name: 'floor 0.88', minProb: 0.88 },
-        { ...production!, name: 'no "either side to win"', excludeBuckets: [...(production!.excludeBuckets ?? []), 'double_chance 12'] },
-        { ...production!, name: 'no draw-sensitive calls (12, draw no bet)', excludeBuckets: [...(production!.excludeBuckets ?? []), 'double_chance 12', 'draw_no_bet home', 'draw_no_bet away'] },
+        before,
+        at(0.82, 'floor 0.82'),
+        at(0.85, 'floor 0.85 (production now)'),
+        at(0.88, 'floor 0.88'),
+        { ...before, name: 'no "either side to win"', excludeBuckets: [...(production.excludeBuckets ?? []), 'double_chance 12'] },
+        { ...before, name: 'no draw-sensitive calls (12, draw no bet)', excludeBuckets: [...(production.excludeBuckets ?? []), 'double_chance 12', 'draw_no_bet home', 'draw_no_bet away'] },
       ];
       console.log(`  alternatives, older half | newer half:`);
       for (const p of variants) {
