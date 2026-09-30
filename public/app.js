@@ -5605,14 +5605,41 @@ addEventListener('pageshow', (e) => { if (e.persisted) for (const undo of [...bu
 const goInstead = (hash) => location.replace(`${location.pathname}${location.search}${hash}`);
 
 const INTENT_KEY = 'ow.after-signin';
-const setIntent = (v) => { try { localStorage.setItem(INTENT_KEY, v); } catch { /* private mode */ } };
-const takeIntent = () => {
-  try {
-    const v = localStorage.getItem(INTENT_KEY);
-    localStorage.removeItem(INTENT_KEY);
-    return v;
-  } catch { return null; }
+/*
+ * Where to go once signed in, kept for an hour. It used to be kept until
+ * used, so a sign-in abandoned on Monday sent Thursday's sign-in back to
+ * Monday's match.
+ */
+const setIntent = (v) => { try { localStorage.setItem(INTENT_KEY, JSON.stringify({ v, at: Date.now() })); } catch { /* private mode */ } };
+const readIntent = () => {
+  let raw = null;
+  try { raw = localStorage.getItem(INTENT_KEY); } catch { return null; }
+  if (!raw) return null;
+  let o = null;
+  try { o = JSON.parse(raw); } catch { return raw; /* stored before it carried a time */ }
+  if (!o || typeof o !== 'object' || typeof o.v !== 'string') return null;
+  return Date.now() - Number(o.at) < 3600e3 ? o.v : null;
 };
+const takeIntent = () => {
+  const v = readIntent();
+  try { localStorage.removeItem(INTENT_KEY); } catch { /* private mode */ }
+  return v;
+};
+
+/*
+ * The last page the reader was reading (a match, the board, the slip), kept
+ * for the visit, so signing in and paying can bring them back to it rather
+ * than to the front page or their account. Session storage: it survives the
+ * round trip to Whop's checkout and Google's sign-in, and not a new visit.
+ */
+const READING_KEY = 'ow.reading';
+const READING_ROUTES = new Set(['fixture', 'board', 'slip', 'results', 'league', 'player', 'leagues', 'search', 'home']);
+const setReading = (name) => {
+  if (!READING_ROUTES.has(name)) return;
+  const hash = location.hash || (pathRoute() ? `#${pathRoute()}` : '#/home');
+  try { sessionStorage.setItem(READING_KEY, hash); } catch { /* private mode */ }
+};
+const reading = () => { try { return sessionStorage.getItem(READING_KEY); } catch { return null; } };
 
 /**
  * A sign-in that finished on this page (Google's button), rather than on a
@@ -6285,8 +6312,10 @@ async function viewSignin() {
   // Read without consuming: the intent is spent when the sign-in completes,
   // not when the page renders. Saying it out loud is the difference between
   // "why am I being asked for my email" and "yes, that is what I was doing".
-  let intent = null;
-  try { intent = localStorage.getItem(INTENT_KEY); } catch { /* private mode */ }
+  let intent = readIntent();
+  // Sent here from the header, not by a purchase or the account page: once
+  // signed in, back to the page they were reading, not the front page.
+  if (!intent && reading() && reading() !== '#/home') { intent = reading(); setIntent(intent); }
   const because = intent?.startsWith('buy')
     ? 'Sign in first and your membership will be waiting when you come back.'
     : intent === '#/account'
@@ -6496,6 +6525,13 @@ async function viewAccount() {
   // switches the membership on, so the page says the payment is in and
   // checks again for a short while rather than showing a free account.
   const justPaid = params.get('paid') === '1';
+  // Most people pay from a locked call. Once it is open, the way back to it
+  // is the first thing on the page, not a hunt through the board.
+  const came = justPaid ? reading() : null;
+  const paidBack = !came || came === '#/home' ? null
+    : /^#\/fixture\//.test(came) ? { href: came, label: 'Back to the match you were reading' }
+    : /^#\/slip/.test(came) ? { href: came, label: "Back to today's slip" }
+    : { href: came, label: 'Back to where you were' };
   const open = ACCOUNT_TABS.some(([k]) => k === asked) ? asked : justPaid ? 'membership' : 'profile';
 
   const follows = Array.isArray(account.follows) ? account.follows : [];
@@ -6720,6 +6756,7 @@ async function viewAccount() {
     ${justPaid ? `<p class="paid-note${active ? ' done' : ''}" role="status">${active
       ? 'Payment received. You are in: every call is open.'
       : 'Payment received. Switching your membership on, which usually takes a few seconds.'}</p>
+    ${active && paidBack ? `<p class="member-actions"><a class="btn btn-accent" href="${esc(paidBack.href)}">${esc(paidBack.label)}</a></p>` : ''}
     <p class="paid-confirm">As you asked at checkout, your membership started straight away, and you
       accepted that this ends the 14-day right to cancel for a change of mind. If anything of ours
       fails, you still get it put right or your money back. The <a href="#/legal/terms">terms of use</a>
@@ -7602,6 +7639,7 @@ async function route({ soft = false } = {}) {
 
 function finishRoute(name, soft, keepY, backTo) {
   {
+    if (!soft) setReading(name);
     if (!soft) countView();
     if (!soft) schedulePromos();
     state.soft = false;
@@ -8143,6 +8181,17 @@ document.addEventListener('keydown', (e) => {
     const i = ring.indexOf(document.activeElement);
     const next = ring[(i + (e.shiftKey ? -1 : 1) + ring.length) % ring.length];
     if (next) { e.preventDefault(); next.focus(); }
+  }
+  // A row of tabs is marked up as tabs, which tells a screen reader the arrow
+  // keys move along it. They did nothing. Left, Right, Home and End now move
+  // to the next tab and open it, skipping any that are switched off.
+  const tab = e.target.closest?.('[role="tab"]');
+  if (tab && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+    const row = [...(tab.closest('[role="tablist"]')?.querySelectorAll('[role="tab"]') ?? [])].filter((t) => !t.disabled && t.offsetParent !== null);
+    const i = row.indexOf(tab);
+    const to = e.key === 'Home' ? row[0] : e.key === 'End' ? row[row.length - 1]
+      : row[(i + (e.key === 'ArrowRight' ? 1 : -1) + row.length) % row.length];
+    if (to && to !== tab) { e.preventDefault(); to.focus(); to.click(); }
   }
   // "/" opens search from anywhere but a field being typed in.
   if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.target.closest?.('input, textarea, select, [contenteditable]')) {
