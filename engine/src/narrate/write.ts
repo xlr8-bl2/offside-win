@@ -57,6 +57,8 @@ export interface WriteResult {
    */
   why?: string | null;
   rejections: Rejection[];
+  /** Numbers the drafts used that no fact carried, for the run log. */
+  unbacked?: string[];
   provider: string;
   /**
    * Why the provider threw, when it did.
@@ -157,7 +159,7 @@ export function validate(text: string, req: WriteRequest): Rejection[] {
   if (words < MIN_WORDS) out.push('too-short');
   if (words > MAX_WORDS) out.push('too-long');
 
-  const allowed = req.facts.map((f) => f.text);
+  const allowed = backing(req);
   const violations = findBannedInProse(text, allowed);
   if (violations.length) out.push('banned-term');
 
@@ -166,6 +168,36 @@ export function validate(text: string, req: WriteRequest): Rejection[] {
 
   return out;
 }
+
+/**
+ * What may vouch for a number: the facts, and the names on the match. A
+ * club called Schalke 04 or Hannover 96 carries its number in its name, and
+ * a draft that names it was being thrown away as though it had made a
+ * statistic up.
+ */
+function backing(req: WriteRequest): string[] {
+  return [...req.facts.map((f) => f.text), req.home, req.away, req.competition];
+}
+
+/*
+ * The furniture of football talk: numbers that are part of a phrase every
+ * supporter uses, and that state nothing about this match. "The top four",
+ * "down to ten men", "for 90 minutes", "a six-pointer". The check was reading
+ * each as a claimed statistic, and in the run logs "invented number" was
+ * nearly every draft thrown away. Removed before the numbers are counted.
+ */
+const IDIOMS = new RegExp([
+  String.raw`\btop[- ](?:two|three|four|five|six|seven|eight|ten|half|2|3|4|5|6|8|10)\b`,
+  String.raw`\bbottom[- ](?:two|three|four|five|six|half|2|3|4|5|6)\b`,
+  String.raw`\b(?:ten|nine|10|9)[- ]men\b`,
+  String.raw`\b(?:90|ninety)[- ]minutes?\b`,
+  String.raw`\bsix[- ]pointer\b`,
+  String.raw`\b(?:one|1)[- ](?:on|v)[- ](?:one|1)\b`,
+  String.raw`\b(?:back|front)[- ](?:three|four|five|two|3|4|5|2)\b`,
+  String.raw`\bnumber (?:9|10|nine|ten)\b`,
+  String.raw`\b(?:4|3|5)-(?:3|4|2|5)-(?:3|2|1)(?:-1)?\b`,
+].join('|'), 'gi');
+const withoutIdioms = (text: string) => text.replace(IDIOMS, ' ');
 
 const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
   'eleven', 'twelve'];
@@ -186,23 +218,41 @@ function unifyDashes(s: string): string {
  * 1 from two different sentences.
  */
 export function inventedNumber(text: string, allowed: string[], extra: RegExp = /(?!)/): boolean {
+  return unbackedNumbers(text, allowed, extra).length > 0;
+}
+
+/** The numbers in `text` that nothing in `allowed` vouches for, in order. */
+export function unbackedNumbers(text: string, allowed: string[], extra: RegExp = /(?!)/): string[] {
   const said = new Set<string>();
   for (const tok of unifyDashes(allowed.join(' ')).toLowerCase().match(/[a-z0-9.-]+/g) ?? []) {
     said.add(tok);
     // "3-1" also vouches for nothing else; a lone number vouches for its word.
     const i = NUMBER_WORDS.indexOf(tok);
     if (i >= 0) said.add(String(i));
-    if (/^\d+$/.test(tok) && Number(tok) < NUMBER_WORDS.length) said.add(NUMBER_WORDS[Number(tok)]!);
+    // Not "08": a club's founding year in its name (Sarpsborg 08) says nothing about eight.
+    if (/^(?:0|[1-9]\d*)$/.test(tok) && Number(tok) < NUMBER_WORDS.length) said.add(NUMBER_WORDS[Number(tok)]!);
     // A trailing full stop is punctuation, not a decimal.
     if (tok.endsWith('.')) said.add(tok.replace(/\.+$/, ''));
   }
-  const numbers = unifyDashes(text).toLowerCase()
+  const numbers = unifyDashes(withoutIdioms(text)).toLowerCase()
     .match(/\b\d+(?:[.-]\d+)?\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/g) ?? [];
+  const out: string[] = [];
   for (const tok of numbers) {
     if (said.has(tok) || HARMLESS.test(tok) || extra.test(tok)) continue;
-    return true;
+    out.push(tok);
   }
-  return false;
+  return out;
+}
+
+/**
+ * A draft with one bad sentence is a good draft with one bad sentence. Where
+ * the only fault is a number no fact carries, the sentences carrying one are
+ * taken out; if what is left is still long enough, it stands. That keeps the
+ * writing and removes the claim, which is the whole point of the check.
+ */
+export function withoutUnbacked(text: string, allowed: string[], extra: RegExp = /(?!)/): string {
+  const sentences = text.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) ?? [text];
+  return sentences.filter((s) => unbackedNumbers(s, allowed, extra).length === 0).join('').trim();
 }
 
 const WHY_MIN = 30;
@@ -220,7 +270,7 @@ export function validateWhy(text: string, req: WriteRequest): Rejection[] {
   if (words < WHY_MIN) out.push('too-short');
   if (words > WHY_MAX) out.push('too-long');
   const odds = oddsPhrase(req.odds);
-  const allowed = [...req.facts.map((f) => f.text), req.call, odds ?? ''];
+  const allowed = [...backing(req), req.call, odds ?? ''];
   if (findBannedInProse(text, allowed).length) out.push('banned-term');
   if (inventedNumber(text, allowed)) out.push('invented-number');
   // A bare price is the thing the owner asked to stop.
@@ -237,7 +287,10 @@ export function validateWhy(text: string, req: WriteRequest): Rejection[] {
  */
 export async function write(req: WriteRequest, writer: Writer): Promise<WriteResult> {
   const rejections: Rejection[] = [];
-  const prompt = buildPrompt(req);
+  const unbacked: string[] = [];
+  let prompt = buildPrompt(req);
+  const allowed = backing(req);
+  const whyAllowed = [...allowed, req.call, oddsPhrase(req.odds) ?? ''];
 
   for (let attempt = 0; attempt < 2; attempt++) {
     let draft: string;
@@ -248,23 +301,40 @@ export async function write(req: WriteRequest, writer: Writer): Promise<WriteRes
       return {
         text: null,
         rejections,
+        unbacked,
         provider: writer.name,
         error: err instanceof Error ? err.message : String(err),
       };
     }
 
-    const { preview, why } = splitDraft(draft);
+    let { preview, why } = splitDraft(draft);
+    const seen = unbackedNumbers(preview, allowed);
+    unbacked.push(...seen, ...(why ? unbackedNumbers(why, whyAllowed) : []));
+    // Only a number out of place: take out the sentences that carry one.
+    if (seen.length && validate(preview, req).every((p) => p === 'invented-number')) {
+      preview = withoutUnbacked(preview, allowed);
+    }
+    if (why && unbackedNumbers(why, whyAllowed).length) why = withoutUnbacked(why, whyAllowed);
+
     const problems = validate(preview, req);
     if (problems.length === 0) {
       // The preview can stand without the members' paragraph; a failed WHY
       // costs that paragraph, not the whole write-up.
       const whyOk = why && validateWhy(why, req).length === 0 ? tidy(why) : null;
-      return { text: tidy(preview), why: whyOk, rejections, provider: writer.name };
+      return { text: tidy(preview), why: whyOk, rejections, unbacked, provider: writer.name };
     }
     rejections.push(...problems);
+    // The second attempt is told what went wrong, rather than asked the same
+    // question and given the same answer.
+    const again = [...new Set(seen)];
+    prompt = buildPrompt(req) + (again.length
+      ? `\n\nYour last draft used ${again.map((n) => `"${n}"`).join(', ')}, which ${again.length === 1 ? 'is' : 'are'} not in the facts. Leave ${again.length === 1 ? 'it' : 'them'} out entirely. Every number you write must appear in the facts, word for word.`
+      : problems.includes('too-short') ? '\n\nYour last draft was too short. Write the full length asked for.'
+      : problems.includes('too-long') ? '\n\nYour last draft was too long. Keep to the length asked for.'
+      : '');
   }
 
-  return { text: null, rejections, provider: writer.name };
+  return { text: null, rejections, unbacked, provider: writer.name };
 }
 
 /** Strip the wrapper a model reaches for even when told not to. */

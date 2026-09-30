@@ -285,6 +285,9 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
   let narrateAttempts = 0;
   let narrateWritten = 0;
   const narrateRejections: Record<string, number> = {};
+  // Which numbers the drafts reached for that no fact carried: what the
+  // writer's brief or the idiom list should learn from next.
+  const narrateUnbacked: Record<string, number> = {};
 
   // A bad key, a wrong model name or a spent quota fails every call in exactly
   // the same way, and the limiter paces them four seconds apart -- so without
@@ -632,6 +635,7 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
             await kvSetJSON(key, { text: result.text, why: v.why }, NARRATIVE_TTL);
           } else {
             for (const r of result.rejections) narrateRejections[r] = (narrateRejections[r] ?? 0) + 1;
+            for (const n of result.unbacked ?? []) narrateUnbacked[n] = (narrateUnbacked[n] ?? 0) + 1;
             // A rejected draft is the writer working. A thrown request is the
             // writer not being reachable, and only the second kind repeats.
             if (result.error && spent(budget, perDay, models, perModel)) {
@@ -1201,6 +1205,10 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
     );
   } else if (!rawWriter) {
     console.log('Narratives: no GEMINI_API_KEY, so the template grammar wrote them all.');
+  }
+  if (Object.keys(narrateUnbacked).length) {
+    console.log(`Narratives: numbers the drafts used that no fact carried: ${Object.entries(narrateUnbacked)
+      .sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => `"${k}" ${v}`).join(', ')}.`);
   }
 
   report.requests = bsdStats.requests;
