@@ -262,6 +262,17 @@ const commands: Record<string, () => Promise<unknown>> = {
     await kvSetJSON('lab:tune', { at: Math.floor(Date.now() / 1000), ...report });
   },
 
+  // Leans: for the fixtures the rule passes on, the best read at a lower
+  // floor, graded on their own (lab/tune.ts, runLeans).
+  async 'lab:leans'() {
+    requireEnv({ provider: false });
+    const { loadHistory } = await import('./lab/run.ts');
+    const { runLeans } = await import('./lab/tune.ts');
+    const { kvSetJSON } = await import('./store.ts');
+    const report = runLeans(await loadHistory());
+    await kvSetJSON('lab:leans', { at: Math.floor(Date.now() / 1000), ...report });
+  },
+
   // Every competition's table, scorers, next games and results, now rather
   // than at the next three-hourly pass (leagueinfo.ts).
   async 'leagues:refresh'() {

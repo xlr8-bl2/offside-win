@@ -397,3 +397,90 @@ export function runTune(rows: HistRow[]): Record<string, unknown> {
   }
   return report;
 }
+
+/**
+ * Leans: for the fixtures the production rule passes on, the best read at a
+ * lower floor, graded on their own so they cannot flatter or hide inside the
+ * main record.
+ *
+ * A lean is published labelled as one ("our best read on a close game"), so
+ * the question is not whether it lands as often as a call (it will not) but
+ * whether it holds its own: does it land about as often as its price says,
+ * and does it lose money? Each floor is scored on the same three date periods
+ * as everything else, with and without friendlies.
+ */
+export interface LeanStat { n: number; won: number; hit: number; roi: number; perDay: number; avgOdds: number; byRank: Record<number, { n: number; won: number; pnl: number }> }
+
+export function leanStat(lean: Policy, part: HistRow[], cache: Map<number, Option[]>): LeanStat {
+  let n = 0, won = 0, pnl = 0, odds = 0;
+  const byRank: LeanStat['byRank'] = {};
+  const days = byDay(part);
+  for (const day of days) {
+    const called = new Set(chooseDay(PROD, day, cache).map((p) => p.row.id));
+    const rest = day.filter((r) => !called.has(r.id));
+    for (const pick of chooseDay(lean, rest, cache)) {
+      const g = grade(pick.row, pick.option);
+      if (!g || g.result === 'VOID') continue;
+      n++;
+      pnl += g.pnl;
+      odds += pick.option.odds;
+      const w = g.result === 'WON' || g.result === 'HALF_WON';
+      if (w) won++;
+      const r = (byRank[pick.row.rank] ??= { n: 0, won: 0, pnl: 0 });
+      r.n++; r.pnl += g.pnl; if (w) r.won++;
+    }
+  }
+  return { n, won, hit: n ? won / n : 0, roi: n ? pnl / n : 0, perDay: days.length ? n / days.length : 0, avgOdds: n ? odds / n : 0, byRank };
+}
+
+/** The lean rule at a floor: production's tests, one floor for every league. */
+export function leanPolicy(floor: number, opts: { noFriendlies?: boolean } = {}): Policy {
+  return {
+    ...PROD,
+    name: `lean ${Math.round(floor * 100)}%${opts.noFriendlies ? ', no friendlies' : ''}`,
+    minProb: floor,
+    rankFloor: undefined,
+    ...(opts.noFriendlies ? { excludeRanks: [9] } : {}),
+  };
+}
+
+export function runLeans(rows: HistRow[]): Record<string, unknown> {
+  const sorted = [...rows].sort((a, b) => a.kickoff - b.kickoff);
+  const a = sorted.slice(0, Math.floor(sorted.length * 0.5));
+  const b = sorted.slice(a.length, Math.floor(sorted.length * 0.75));
+  const c = sorted.slice(a.length + b.length);
+  const cache = new Map(sorted.map((r) => [r.id, optionsFor(r, 0.5)]));
+  console.log(`lab:leans: A ${a.length} fixtures, B ${b.length}, C ${c.length} (oldest to newest)`);
+  const show = (label: string, s: LeanStat) =>
+    `  ${label} ${String(s.n).padStart(4)} leans ${s.perDay.toFixed(1).padStart(5)}/day  ${pct(s.hit).padStart(6)} landed  odds ${s.avgOdds.toFixed(2)}  return ${pct(s.roi).padStart(6)}`;
+  for (const [label, part] of [['A', a], ['B', b], ['C', c]] as const) {
+    const r = simulate(PROD, part, cache);
+    console.log(`  production ${label}: ${r.n} calls, ${r.perDay.toFixed(1)}/day, ${pct(r.hitRate)} landed, return ${pct(r.roi)}`);
+  }
+  const out: Array<{ name: string; a: LeanStat; b: LeanStat; c: LeanStat }> = [];
+  for (const noFriendlies of [false, true]) {
+    for (const floor of [0.6, 0.62, 0.65, 0.68, 0.7, 0.72, 0.75]) {
+      const p = leanPolicy(floor, { noFriendlies });
+      const s = { name: p.name, a: leanStat(p, a, cache), b: leanStat(p, b, cache), c: leanStat(p, c, cache) };
+      out.push(s);
+      console.log(`\n  ${p.name}`);
+      console.log(show('A', s.a));
+      console.log(show('B', s.b));
+      console.log(show('C', s.c));
+    }
+  }
+  // The lowest floor that held its own in both A and B on a real number of
+  // leans, judged once on C.
+  const ok = out.filter((s) => s.a.n >= 40 && s.b.n >= 20 && s.a.roi >= 0 && s.b.roi >= 0);
+  const pick = ok.sort((x, y) => (x.b.perDay + x.a.perDay) - (y.b.perDay + y.a.perDay)).pop() ?? null;
+  if (pick) {
+    console.log(`\nChosen on A and B (most leans that did not lose in either): ${pick.name}`);
+    console.log(show('C', pick.c));
+    const ranks = Object.entries(pick.c.byRank).sort((x, y) => Number(x[0]) - Number(y[0]))
+      .map(([r, e]) => `rank ${r}: ${e.n}, ${pct(e.won / e.n)} landed, ${pct(e.pnl / e.n)}`);
+    console.log(`  C by league rank: ${ranks.join('; ')}`);
+  } else {
+    console.log('\nNo lean floor held its own in both A and B.');
+  }
+  return { leans: out, chosen: pick?.name ?? null };
+}
