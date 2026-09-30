@@ -2312,7 +2312,17 @@ async function viewHome() {
   // stadium with a real fixture in it tonight.
   state.heroVenue = [...top, ...fixtures].map((f) => f.venue_id).filter(Boolean);
 
-  const rail = () => fixtures.filter((f) => hasCall(f) && f.id !== state.hero?.fixture_id);
+  // What is on next: our calls, then the biggest of the other matches coming
+  // up, eight in all. It was calls only, which on a quiet day was one row.
+  const rail = () => {
+    const pool = fixtures.filter((f) => f.id !== state.hero?.fixture_id);
+    const on = (f) => ['live', 'upcoming'].includes(matchState(f).kind);
+    const calls = pool.filter((f) => hasCall(f) && on(f));
+    const others = pool.filter((f) => !hasCall(f) && on(f))
+      .sort((a, b) => (a.rank ?? 9) - (b.rank ?? 9) || (a.kickoff ?? 0) - (b.kickoff ?? 0));
+    const next = [...calls, ...others].slice(0, 8);
+    return next.length ? next : pool.filter(hasCall);
+  };
   // The free call's row, flagged by the board itself.
   const freeFx = fixtures.find((f) => f.free_call && f.top_pick) ?? null;
   let heroRow = state.hero?.fixture_id ? fixtures.find((f) => Number(f.id) === Number(state.hero.fixture_id)) ?? null : null;
@@ -2568,8 +2578,16 @@ async function viewBoard(params = new URLSearchParams()) {
     return errorState(err);
     return;
   }
-  // Calls only. See hasCall.
-  const fixtures = (board.fixtures ?? []).filter(hasCall);
+  /*
+   * Every match we read, not only the ones we called.
+   *
+   * The board was calls only, which on a strict day (and on an international
+   * break) meant one row under "To play" on a board that had read a hundred
+   * and sixty matches, and a red "Live 3" in the header that opened onto one
+   * live match or none. Now the calls lead, and every other match follows
+   * under them as a single line that opens its preview, team news and form.
+   */
+  const fixtures = board.fixtures ?? [];
   const leagues = [...new Set(fixtures.map((f) => f.league).filter(Boolean))].sort();
 
   /*
@@ -2661,6 +2679,8 @@ async function viewBoard(params = new URLSearchParams()) {
   const windowWords = () => (state.hours <= 48 ? `next ${state.hours} hours` : `next ${state.hours / 24} days`);
   // Said once, under the bar, when the board moved the reader or a filter is on.
   let moved = null;
+  // Competitions opened in full with "Show all", kept open across repaints.
+  const openGroups = new Set();
 
   const kickoffs = fixtures.map((f) => f.kickoff).filter(Boolean);
   const furthest = kickoffs.length ? Math.max(...kickoffs) : null;
@@ -2729,20 +2749,22 @@ async function viewBoard(params = new URLSearchParams()) {
    * and the tense follows the tab.
    */
   const ledeFor = (inTab) => {
-    // Every row is a call now, so this counts calls and nothing else.
     const n = inTab.length;
-    const calls = n === 1 ? 'One call' : `${n} calls`;
-    const where = state.leagueName ? ` in ${state.leagueName}` : '';
     if (!n) return '';
+    const called = inTab.filter(hasCall);
+    const c = called.length;
+    const where = state.leagueName ? ` in ${state.leagueName}` : '';
+    const games = (w) => `${n === 1 ? 'the one match' : `the ${n} matches`}${where} ${w}`;
+    const calls = c === 0 ? 'No call yet' : c === 1 ? 'One call' : `${c} calls`;
 
-    if (state.when === 'live') return `${calls}${where} on matches being played right now.`;
+    if (state.when === 'live') return `${calls} on ${games('being played')} right now.`;
 
     if (state.when === 'played') {
       // Counted from the record's grade, the same one the results page prints.
       const GRADE = { WON: 'won', HALF_WON: 'won', LOST: 'lost', HALF_LOST: 'lost' };
       let landed = 0;
       let judged = 0;
-      for (const f of inTab) {
+      for (const f of called) {
         const pk = f.top_pick;
         if (!pk) continue;
         const r = GRADE[pk.result] ?? (Array.isArray(f.score)
@@ -2753,13 +2775,13 @@ async function viewBoard(params = new URLSearchParams()) {
         judged++;
         if (r === 'won') landed++;
       }
-      return `${calls}${where} on matches already played.${judged ? ` ${landed} of ${judged} landed.` : ''}`;
+      return `${c ? calls : 'No call'} on ${games('already played')}.${judged ? ` ${landed} of ${judged} landed.` : ''}`;
     }
 
-    const next = inTab.map((f) => f.kickoff).filter(Boolean);
+    const next = called.map((f) => f.kickoff).filter(Boolean);
     const last = next.length ? Math.max(...next) : null;
-    return `${calls}${where} on matches still to play.${
-      last ? ` The last of them kicks off ${/^(Today|Tomorrow)$/.test(dayLabel(last)) ? dayLabel(last).toLowerCase() : `on ${dayLabel(last)}`}.` : ''}`;
+    return `${calls} on ${games('still to play')}.${
+      last ? ` The last call kicks off ${/^(Today|Tomorrow)$/.test(dayLabel(last)) ? dayLabel(last).toLowerCase() : `on ${dayLabel(last)}`}.` : ''}`;
   };
 
   const paint = () => {
@@ -2788,16 +2810,41 @@ async function viewBoard(params = new URLSearchParams()) {
       return rank(a) === 2 ? (b.kickoff ?? 0) - (a.kickoff ?? 0) : (a.kickoff ?? 0) - (b.kickoff ?? 0);
     };
 
-    const groups = new Map();
-    for (const f of shown) {
-      const key = f.league ?? 'Other';
-      if (!groups.has(key)) groups.set(key, { id: f.league_id, list: [] });
-      groups.get(key).list.push(f);
-    }
-    for (const g of groups.values()) g.list.sort(order);
-
-    // And the competitions themselves lead with whoever is on next.
-    const groupsSorted = [...groups.entries()].sort((a, b) => order(a[1].list[0], b[1].list[0]));
+    const groupBy = (list) => {
+      const groups = new Map();
+      for (const f of list) {
+        const key = f.league ?? 'Other';
+        if (!groups.has(key)) groups.set(key, { id: f.league_id, rank: f.rank ?? 9, list: [] });
+        const g = groups.get(key);
+        g.rank = Math.min(g.rank, f.rank ?? 9);
+        g.list.push(f);
+      }
+      for (const g of groups.values()) g.list.sort(order);
+      return [...groups.entries()];
+    };
+    // The calls: the competitions lead with whoever is on next.
+    const called = shown.filter(hasCall);
+    const callGroups = groupBy(called).sort((a, b) => order(a[1].list[0], b[1].list[0]));
+    // The rest: the bigger competitions first, then whoever is on next.
+    const rest = shown.filter((f) => !hasCall(f));
+    const restGroups = groupBy(rest).sort((a, b) => a[1].rank - b[1].rank || order(a[1].list[0], b[1].list[0]));
+    // Calls are shown in full. Every other competition shows its first five,
+    // then a button for the rest, so fifty-six club friendlies do not push
+    // the rest of the board off the bottom of a phone.
+    const FIRST = 5;
+    const block = ([name, g], unit) => {
+      const cut = unit === 'game' && g.list.length > FIRST + 1 && !openGroups.has(name);
+      return `
+            <section class="league-block">
+              <h3 class="league-head">
+                ${g.id ? `<a href="#/league/${encodeURIComponent(g.id)}">${crest(name, 'xs', g.id, 'league')}${esc(name)}</a>`
+                       : `${crest(name, 'xs', g.id, 'league')}${esc(name)}`}
+                <span class="count">${g.list.length} ${g.list.length === 1 ? unit : `${unit}s`}</span>
+              </h3>
+              ${(cut ? g.list.slice(0, FIRST) : g.list).map(rowHTML).join('')}
+              ${cut ? `<button type="button" class="league-more" data-more="${esc(name)}">Show all ${g.list.length} ${esc(name)} games</button>` : ''}
+            </section>`;
+    };
 
     const note = document.getElementById('board-note');
     if (state.leagueName) {
@@ -2812,22 +2859,22 @@ async function viewBoard(params = new URLSearchParams()) {
     document.getElementById('grid').innerHTML =
       !shown.length && fixtures.length
         ? `<div class="empty-state"><b>Nothing ${esc(WHEN_WORDS[state.when])}${state.leagueName ? ` from ${esc(state.leagueName)}` : ''} in the ${esc(windowWords())}</b>
-             <span>${state.leagueName ? 'Other competitions may have calls, or this one may have some in another tab.' : 'The board only carries games we have a call on.'}</span>
+             <span>${state.leagueName ? 'Other competitions may have games, or this one may have some in another tab.' : 'Nothing in this window yet. Games go up as the fixtures are confirmed.'}</span>
              <p class="member-actions co-center">
                ${elsewhere.map((w) => `<button type="button" class="btn btn-primary" data-go-when="${w}">${esc(WHEN.find((x) => x.id === w).label)} (${counts[w]})</button>`).join('')}
                ${state.leagueName ? '<button type="button" class="btn btn-ghost" data-clear-league>Every competition</button>' : ''}
                ${!elsewhere.length && state.hours < 240 ? '<button type="button" class="btn btn-ghost" data-hours="240">Look ten days ahead</button>' : ''}
              </p></div>`
       : shown.length
-        ? groupsSorted.map(([name, g]) => `
-            <section class="league-block">
-              <h3 class="league-head">
-                ${g.id ? `<a href="#/league/${encodeURIComponent(g.id)}">${crest(name, 'xs', g.id, 'league')}${esc(name)}</a>`
-                       : `${crest(name, 'xs', g.id, 'league')}${esc(name)}`}
-                <span class="count">${g.list.length} ${g.list.length === 1 ? 'call' : 'calls'}</span>
-              </h3>
-              ${g.list.map(rowHTML).join('')}
-            </section>`).join('')
+        ? `${callGroups.map((g) => block(g, 'call')).join('')}${
+            !called.length ? `<p class="board-none">No call on any of these${state.when === 'played' ? '' : ' yet'}.${
+              state.when === 'upcoming' ? ' Calls go up through the day as team news lands and prices settle, right up to kick-off.' : ''}</p>` : ''}${
+            rest.length ? `
+            <div class="board-rest">
+              <h2 class="board-sub">${called.length ? 'Every other game we looked at' : 'Every game we looked at'}</h2>
+              <p class="board-sub-note">${state.when === 'played' ? 'We passed on these.' : 'Nothing here was strong enough to back.'} Each one has its preview, team news and form on the match page.</p>
+              ${restGroups.map((g) => block(g, 'game')).join('')}
+            </div>` : ''}`
         : fixtures.length
           ? `<div class="empty-state"><b>No calls here yet</b>
                <span>We only put a match on the board when we have something to say
@@ -2900,6 +2947,8 @@ async function viewBoard(params = new URLSearchParams()) {
     if (w) setWhen(w.dataset.goWhen);
     const h = e.target.closest('[data-hours]');
     if (h) reopen(Number(h.dataset.hours));
+    const more = e.target.closest('[data-more]');
+    if (more) { openGroups.add(more.dataset.more); paint(); }
   });
   syncTabs();
   paint();
