@@ -355,6 +355,10 @@
 
   --z-header: 100;
   --z-overlay: 300;
+  /* Not a design value: the offer bar's measured height, set by promo.js
+     while the bar is up (0 otherwise), so the page can end above it and the
+     floating cookie card can sit on top of it. */
+  --pb-h: 0px;
 }
 
 /* Numerals everywhere. Tabular figures are the single highest ratio of effort

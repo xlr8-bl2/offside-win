@@ -372,6 +372,11 @@
   .matchcentre { background: rgba(10, 10, 12, 0.92); }
 }
 
+/* Its place, kept while its data is still on the way (viewHome): the block
+   is 380 to 410px tall at every width, so the page under it does not move
+   when it arrives. */
+.matchcentre.mc-wait { min-height: 380px; border-color: transparent; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+
 .mc-block { padding: var(--space-5); border-top: var(--border) solid var(--hairline); }
 .mc-block:first-child { border-top: 0; }
 .mc-label {
@@ -2156,7 +2161,7 @@
 .cookie {
   position: fixed;
   right: var(--space-6);
-  bottom: calc(var(--space-6) + env(safe-area-inset-bottom, 0px));
+  bottom: calc(var(--space-6) + var(--pb-h) + env(safe-area-inset-bottom, 0px));
   z-index: var(--z-overlay);
   width: min(400px, calc(100vw - var(--space-8)));
   max-height: calc(100vh - var(--space-12));
