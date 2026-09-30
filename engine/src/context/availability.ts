@@ -350,13 +350,26 @@ function rotationFactor(ctx: FixtureContext): Factor {
   const { lineups } = ctx;
 
   if (lineups.status === 'confirmed') {
+    // Who was picked against who was expected (context/xi.ts). Several
+    // expected starters out of the eleven is a rotated side, which a call
+    // backing it is set aside for; the note says so in the reader's words.
+    const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven'];
+    const said: string[] = [];
+    for (const [side, team] of [['home', ctx.home.team_name], ['away', ctx.away.team_name]] as const) {
+      const ch = lineups.changes?.[side];
+      if (!ch || ch.n < 3) continue;
+      const names = ch.out.slice(0, 3);
+      const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+      said.push(`${team} have made ${WORDS[ch.n] ?? ch.n} changes from the side expected, with ${who} out of the eleven.`);
+    }
     return computed({
       id: 'availability.lineup_confirmed',
       section: '§3.1',
       tier: 1,
-      note: 'The starting elevens are confirmed, so selection is known rather than guessed.',
-      evidence: { lineup_status: 'confirmed' },
-      strength: 0.3,
+      note: said.length ? `The starting elevens are confirmed. ${said.join(' ')}`
+        : 'The starting elevens are confirmed, so selection is known rather than guessed.',
+      evidence: { lineup_status: 'confirmed', changes: lineups.changes ?? null },
+      strength: said.length ? 0.8 : 0.3,
     });
   }
 

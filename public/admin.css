@@ -1,0 +1,315 @@
+/*
+ * The owner's dashboard (#/admin, js/admin.js). Loaded only when the route
+ * opens, so no reader pays for it. Values come from tokens.css; nothing here
+ * defines a token.
+ *
+ * A tool, not a page: dense, left-aligned, figures in the scoreboard face,
+ * state carried by a dot or a word rather than a coloured box. Surfaces step
+ * by the same four per cent as the rest of the site.
+ */
+
+.adm {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: var(--space-10);
+  width: min(var(--maxw), 100% - 2 * var(--space-6));
+  margin: var(--space-9) auto var(--space-12);
+}
+
+/* --------------------------------------------------------------- the rail */
+
+.adm-rail { position: sticky; top: var(--space-9); align-self: start; }
+.adm-mark {
+  margin: 0 0 var(--space-5);
+  font-family: var(--display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  color: var(--chalk);
+}
+.adm-tabs { display: grid; gap: 2px; }
+.adm-tabs a {
+  position: relative;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--chalk-3);
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.adm-tabs a:hover { color: var(--chalk); background: var(--stand); }
+.adm-tabs a[aria-current="page"] { color: var(--chalk); background: var(--terrace); }
+.adm-tabs a[aria-current="page"]::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 8px; bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--floodlight);
+}
+.adm-tabs a:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* ------------------------------------------------------------- the header */
+
+.adm-head { margin: 0 0 var(--space-8); }
+.adm-head h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+  color: var(--chalk);
+}
+.adm-head p { margin: var(--space-2) 0 0; max-width: 60ch; color: var(--chalk-3); font-size: var(--text-sm); line-height: var(--leading-normal); }
+.adm-head-row { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-6); }
+
+/* ------------------------------------------------------------ the figures */
+
+/* Four numbers across the top, divided by hairlines rather than boxed. */
+.adm-figures {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-block: var(--border) solid var(--hairline);
+  margin-bottom: var(--space-8);
+}
+.adm-figures > div {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-6) var(--space-6) var(--space-6) 0;
+  min-width: 0;
+}
+.adm-figures > div + div { padding-left: var(--space-6); border-left: var(--border) solid var(--hairline); }
+.adm-figures b {
+  font-family: var(--display-figures);
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--chalk);
+}
+.adm-figures span { font-size: var(--text-sm); color: var(--chalk-2); }
+.adm-figures small { font-size: var(--text-xs); color: var(--chalk-3); line-height: 1.4; }
+
+/* ------------------------------------------------------------- the blocks */
+
+.adm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-5); }
+.adm-card {
+  min-width: 0;
+  padding: var(--space-7);
+  background: var(--stand);
+  border: var(--border) solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--ring-inset);
+}
+.adm-main > .adm-card + .adm-card { margin-top: var(--space-5); }
+.adm-card h2 {
+  margin: 0 0 var(--space-5);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--chalk-2);
+}
+.adm-big { margin: 0; font-size: var(--text-md); color: var(--chalk-2); }
+.adm-big b { font-family: var(--display-figures); font-size: var(--text-xl); font-weight: var(--weight-bold); color: var(--chalk); margin-right: var(--space-2); }
+.adm-quiet { margin: var(--space-3) 0 0; font-size: var(--text-sm); line-height: var(--leading-normal); color: var(--chalk-3); }
+.adm-link { display: inline-block; margin-top: var(--space-5); font-size: var(--text-sm); color: var(--floodlight-hi); }
+.adm-link:hover { color: var(--chalk); }
+.adm-label { margin: 0 0 var(--space-3); font-size: var(--text-xs); font-weight: var(--weight-bold); color: var(--chalk-2); }
+
+.adm-spark { display: block; width: 100%; height: 64px; }
+.adm-spark rect { fill: var(--floodlight); opacity: 0.85; }
+.adm-spark rect:last-child { fill: var(--floodlight-hi); opacity: 1; }
+
+.adm-engine { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-4); }
+.adm-engine li { display: grid; grid-template-columns: 8px auto 1fr; align-items: baseline; gap: var(--space-3); font-size: var(--text-sm); }
+.adm-engine i { width: 8px; height: 8px; border-radius: 50%; transform: translateY(-1px); }
+.adm-engine i.ok { background: var(--won); }
+.adm-engine i.late { background: var(--sodium); }
+.adm-engine b { color: var(--chalk); font-weight: var(--weight-medium); }
+.adm-engine span { color: var(--chalk-3); }
+
+/* --------------------------------------------------------------- the rows */
+
+.adm-rows { list-style: none; margin: 0; padding: 0; }
+.adm-rows li {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
+  border-top: var(--border) solid var(--hairline);
+  font-size: var(--text-sm);
+}
+.adm-rows li:first-child { border-top: 0; padding-top: 0; }
+.adm-rows b { color: var(--chalk); font-weight: var(--weight-medium); }
+.adm-rows a b:hover { color: var(--floodlight-hi); }
+.adm-rows span { color: var(--chalk-2); min-width: 0; }
+.adm-rows small { color: var(--chalk-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.adm-res.won, .adm-res.half_won { color: var(--won); }
+.adm-res.lost, .adm-res.half_lost { color: var(--lost); }
+
+/* -------------------------------------------------------------- the users */
+
+.adm-search { display: flex; gap: var(--space-3); margin-bottom: var(--space-6); max-width: 520px; }
+/* Not the <select> the site's dropdown keeps hidden (dropdown.js): sized here, it spilled off the page. */
+.adm-search input, .adm-inline input, .adm-f input, .adm-f select:not(.dd-native), .adm-f textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--pitch);
+  color: var(--chalk);
+  border: var(--border) solid var(--rule-firm);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+}
+.adm-search input:focus-visible, .adm-inline input:focus-visible, .adm-f input:focus-visible, .adm-f textarea:focus-visible {
+  outline: none; border-color: var(--floodlight); box-shadow: var(--focus-ring);
+}
+.adm-users { list-style: none; margin: 0; padding: 0; border-top: var(--border) solid var(--hairline); }
+.adm-users a {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  gap: var(--space-5);
+  align-items: center;
+  padding: var(--space-4) var(--space-3);
+  border-bottom: var(--border) solid var(--hairline);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.adm-users a:hover { background: var(--stand); }
+.adm-users a:focus-visible { outline: none; box-shadow: inset var(--focus-ring); }
+.adm-who, .adm-mem, .adm-meta { display: grid; gap: 2px; min-width: 0; }
+.adm-who b { color: var(--chalk); font-size: var(--text-sm); font-weight: var(--weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adm-who small, .adm-mem small, .adm-meta small { color: var(--chalk-3); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adm-meta { text-align: right; }
+.adm-tag { justify-self: start; font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--chalk-3); }
+.adm-tag.paid { color: var(--won); }
+.adm-tag.gift { color: var(--floodlight-hi); }
+
+.adm-back { display: inline-block; margin-bottom: var(--space-5); font-size: var(--text-sm); color: var(--chalk-3); }
+.adm-back::before { content: '\2039'; margin-right: var(--space-2); }
+.adm-back:hover { color: var(--chalk); }
+
+.adm-give { margin-top: var(--space-6); padding-top: var(--space-5); border-top: var(--border) solid var(--hairline); display: grid; gap: var(--space-4); justify-items: start; }
+.adm-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.adm-chip {
+  min-height: 34px;
+  padding: 0 var(--space-4);
+  border: var(--border) solid var(--rule);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--chalk-2);
+  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.adm-chip:hover { border-color: var(--floodlight); color: var(--chalk); background: var(--floodlight-dim); }
+.adm-inline { display: flex; gap: var(--space-3); }
+.adm-inline input { width: 110px; }
+.adm-msg { margin: 0; min-height: 1.2em; font-size: var(--text-sm); color: var(--chalk-2); }
+
+/* -------------------------------------------------------------- the plans */
+
+.adm-plans { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-4); }
+.adm-plans form {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) 130px minmax(0, 1fr) auto auto;
+  align-items: end;
+  gap: var(--space-5);
+  padding: var(--space-6);
+  background: var(--stand);
+  border: var(--border) solid var(--hairline);
+  border-radius: var(--radius);
+}
+.adm-plans .adm-quiet { margin: 0 0 10px; }
+.adm-plans .adm-msg { grid-column: 1 / -1; }
+.adm-f { display: grid; gap: var(--space-2); min-width: 0; }
+.adm-f > span { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--chalk-2); }
+.adm-f textarea { resize: vertical; line-height: var(--leading-normal); }
+.adm-f .dd-btn { width: 100%; justify-content: space-between; min-height: 40px; }
+.adm-toggle { display: inline-flex; align-items: center; gap: var(--space-3); min-height: 40px; font-size: var(--text-sm); color: var(--chalk-2); cursor: pointer; }
+
+/* -------------------------------------------------------------- the offers */
+
+.adm-offers { list-style: none; margin: 0; padding: 0; border-top: var(--border) solid var(--hairline); }
+.adm-offers a {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) auto;
+  gap: var(--space-5);
+  align-items: baseline;
+  padding: var(--space-5) var(--space-3);
+  border-bottom: var(--border) solid var(--hairline);
+}
+.adm-offers a:hover { background: var(--stand); }
+.adm-offers b { color: var(--chalk); font-weight: var(--weight-medium); }
+.adm-offers small { color: var(--chalk-3); font-size: var(--text-xs); }
+.adm-state { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--chalk-3); }
+.adm-state::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: var(--space-2); border-radius: 50%; background: currentColor; }
+.adm-state.live { color: var(--won); }
+.adm-state.soon { color: var(--sodium); }
+
+.adm-form { display: grid; gap: var(--space-6); max-width: 640px; }
+.adm-form [hidden] { display: none !important; }
+.adm-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-5); }
+.adm-seg {
+  display: inline-flex;
+  justify-self: start;
+  margin: 0;
+  padding: 3px;
+  gap: 2px;
+  border: var(--border) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--terrace);
+}
+.adm-seg label { position: relative; cursor: pointer; }
+.adm-seg input { position: absolute; opacity: 0; pointer-events: none; }
+.adm-seg span {
+  display: block;
+  padding: var(--space-3) var(--space-5);
+  border-radius: 5px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--chalk-3);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.adm-seg input:checked + span { background: var(--chalk); color: var(--pitch); }
+.adm-seg input:focus-visible + span { box-shadow: var(--focus-ring); }
+.adm-actions { display: flex; gap: var(--space-3); }
+
+/* ---------------------------------------------------------- the waiting */
+
+.adm-loading { display: flex; gap: 6px; padding: var(--space-10) 0; }
+.adm-loading span { width: 8px; height: 8px; border-radius: 50%; background: var(--chalk-3); animation: adm-dot 1s var(--ease-in-out) infinite; }
+.adm-loading span:nth-child(2) { animation-delay: 0.15s; }
+.adm-loading span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes adm-dot { 50% { opacity: 0.25; transform: translateY(-3px); } }
+.adm-error { color: var(--lost); }
+.adm-refused { width: min(520px, 100% - 2 * var(--space-6)); margin: var(--space-12) auto; }
+.adm-refused h1 { margin: 0 0 var(--space-3); font-family: var(--display); font-size: var(--text-2xl); }
+.adm-refused p { margin: 0 0 var(--space-6); color: var(--chalk-2); }
+
+/* --------------------------------------------------------------- a phone */
+
+@media (max-width: 860px) {
+  .adm { grid-template-columns: minmax(0, 1fr); gap: var(--space-6); margin-top: var(--space-6); }
+  .adm-rail { position: static; }
+  .adm-mark { display: none; }
+  .adm-tabs {
+    display: flex;
+    gap: var(--space-2);
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin: 0 calc(-1 * var(--space-6));
+    padding: 0 var(--space-6);
+  }
+  .adm-tabs::-webkit-scrollbar { display: none; }
+  .adm-tabs a { white-space: nowrap; }
+  .adm-tabs a[aria-current="page"]::before { left: 12px; right: 12px; top: auto; bottom: 0; width: auto; height: 2px; }
+  .adm-figures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .adm-figures > div:nth-child(3) { padding-left: 0; border-left: 0; }
+  .adm-figures > div:nth-child(n + 3) { border-top: var(--border) solid var(--hairline); }
+  .adm-users a { grid-template-columns: minmax(0, 1fr) auto; }
+  .adm-meta { display: none; }
+  .adm-rows li { grid-template-columns: minmax(0, 1fr) auto; }
+  .adm-rows li > span { grid-column: 1 / -1; grid-row: 2; }
+  .adm-plans form { grid-template-columns: minmax(0, 1fr) 120px; }
+  .adm-plans .adm-quiet { grid-column: 1 / -1; margin: 0; }
+  .adm-offers a { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+  .adm-head-row { flex-direction: column; align-items: flex-start; }
+}
