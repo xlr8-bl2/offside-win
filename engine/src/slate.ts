@@ -20,7 +20,7 @@ import { budgeted, keyId, spent, todays, type BudgetState } from './narrate/budg
 import { write, type Writer } from './narrate/write.ts';
 import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
-import { bucketOf, buildCandidates, DayMix, driversFor, floorForRank, isLean, marketLabel, rankConfident, select, setAsideFor, type CalibrationMap } from './select.ts';
+import { bucketOf, buildCandidates, confidentEligible, DayMix, driversFor, floorForRank, isLean, marketLabel, rankConfident, select, setAsideFor, type CalibrationMap } from './select.ts';
 import { consensusMarkets } from './consensus.ts';
 import { readOf } from './read.ts';
 import { snapshotOf } from './odds.ts';
@@ -495,6 +495,9 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
       // The probability calls are chosen on: the consensus (consensus.ts) or,
       // if configured back, the provider's. See config.confident.source.
       const consensus = consensusMarkets(analysis.book, { home: analysis.lambda_home, away: analysis.lambda_away });
+      // Set when this fixture's slip leg is still priced but no longer clears
+      // its bar, so the leg is withdrawn rather than held (see below).
+      let slipLegDropped = false;
       const confidentVerdicts = (() => {
         const useProvider = config.confident.source === 'provider';
         if (useProvider && !prediction) return [];
@@ -510,16 +513,30 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
         // does; taking it down would read as a result quietly removed.
         const calledOff = /postpon|cancel|abandon|suspend|interrupt/i.test(String(event['status'] ?? ''));
         const NOTHING = { market: '', outcome: '', line: null };
-        const pin = calledOff ? (incumbents.get(analysis.fixture_id) ?? NOTHING) : pinned.get(analysis.fixture_id);
+        const floor = floorForRank(leagueRank(analysis.league_id));
+        const matchesPin = (p: { market: string; outcome: string; line: number | null }) => (c: Candidate) =>
+          c.market === p.market && String(c.outcome) === p.outcome && (c.line ?? null) === p.line;
+        const slipLeg = calledOff ? undefined : pinned.get(analysis.fixture_id);
+        // A slip leg holds its call on the board only while the engine still
+        // stands behind it. Belgium v France (28 September 2026) was on the
+        // slip at 85%+ the day before; by kick-off, with France rotated and
+        // Mbappé out, our read was 76% against a Nations League bar of 85%,
+        // and the pin kept it up anyway. It lost. A leg the engine has fallen
+        // off is withdrawn like any other call; the slip still grades it on
+        // the score (slip.ts), because a slip once posted is a bet placed.
+        const pin = calledOff
+          ? (incumbents.get(analysis.fixture_id) ?? NOTHING)
+          : slipLeg && theirCands.some((c) => matchesPin(slipLeg)(c) && confidentEligible(c, floor, calibration))
+            ? slipLeg : undefined;
+        if (slipLeg && !pin && theirCands.some(matchesPin(slipLeg))) slipLegDropped = true;
         const chosen = pin
-          ? theirCands.filter((c) => c.market === pin.market && String(c.outcome) === pin.outcome
-              && (c.line ?? null) === pin.line).slice(0, 1)
+          ? theirCands.filter(matchesPin(pin)).slice(0, 1)
           : (() => {
             // A call backing a side that has been rotated (several expected
             // starters out of the confirmed eleven) is set aside: the price
             // may well have been made before the sheet was out (context/xi.ts).
             const unrotated = theirCands.filter((c) => !backsRotatedSide(c, ctx.lineups.changes));
-            const ranked = rankConfident(unrotated, floorForRank(leagueRank(analysis.league_id)), calibration);
+            const ranked = rankConfident(unrotated, floor, calibration);
             // Matches under way keep whatever they had; the mix is for calls
             // still to be made.
             if (analysis.kickoff <= Math.floor(Date.now() / 1000)) return ranked.slice(0, 1);
@@ -930,9 +947,11 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
         const keep = confidentVerdicts.map((v) => ({
           market: v.candidate.market, outcome: v.candidate.outcome, line: v.candidate.line ?? null,
         }));
-        // A slip's call is never taken down, even if its market has gone quiet.
+        // A slip's call is not taken down because its market has gone quiet;
+        // it is when the engine, still seeing the price, has fallen below its
+        // bar for it (slipLegDropped, above).
         const pin = pinned.get(analysis.fixture_id);
-        if (pin) keep.push(pin as (typeof keep)[number]);
+        if (pin && !slipLegDropped) keep.push(pin as (typeof keep)[number]);
         standing.set(analysis.fixture_id, keep);
       }
       for (const v of started ? [] : allVerdicts) {

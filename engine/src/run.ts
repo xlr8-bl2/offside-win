@@ -289,6 +289,23 @@ const commands: Record<string, () => Promise<unknown>> = {
     await kvSetJSON('lab:model', { at: Math.floor(Date.now() / 1000), ...report });
   },
 
+  // The production rule and the sources, one kind of match at a time:
+  // leagues, cups, continental club football, internationals, friendlies.
+  async 'lab:slices'() {
+    requireEnv({ provider: false });
+    const { loadHistory } = await import('./lab/run.ts');
+    const { runSlices } = await import('./lab/slices.ts');
+    await runSlices(await loadHistory());
+  },
+
+  // Every settled call beside what the match turned out to be, and the
+  // argument behind each loss (lab/losses.ts).
+  async 'lab:losses'() {
+    requireEnv();
+    const { runLosses } = await import('./lab/losses.ts');
+    await runLosses();
+  },
+
   // Leans: for the fixtures the rule passes on, the best read at a lower
   // floor, graded on their own (lab/tune.ts, runLeans).
   async 'lab:leans'() {
