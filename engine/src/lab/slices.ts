@@ -58,6 +58,44 @@ export async function runSlices(rows: HistRow[]): Promise<void> {
     console.log(`  ${p.name.padEnd(38)} ${String(r.n).padStart(4)} calls  ${pct(r.hitRate).padStart(6)} landed  odds ${r.avgOdds.toFixed(2)}  return ${pct(r.roi).padStart(7)}`);
   }
 
+  // The start of a season, and sides new to the division. Wydad Casablanca
+  // 1-3 Widad Temara (26 September 2026) was the opening day of the Botola,
+  // against a promoted side playing its first top-flight game: nothing in
+  // last season's numbers says what that side is worth.
+  const ids = rows.filter((r) => sliceOf(nameOf.get(r.league_id) ?? '') === 'league').map((r) => r.id);
+  const facts = await select<{ id: number; hg: number; ag: number; hnew: boolean; anew: boolean }>(
+    `SELECT m.id,
+            (SELECT count(*) FROM match p WHERE p.league_id = m.league_id AND p.season_id = m.season_id AND p.kickoff < m.kickoff
+               AND (p.home_team_id = m.home_team_id OR p.away_team_id = m.home_team_id))::int AS hg,
+            (SELECT count(*) FROM match p WHERE p.league_id = m.league_id AND p.season_id = m.season_id AND p.kickoff < m.kickoff
+               AND (p.home_team_id = m.away_team_id OR p.away_team_id = m.away_team_id))::int AS ag,
+            NOT EXISTS (SELECT 1 FROM match p WHERE p.league_id = m.league_id AND p.season_id <> m.season_id
+               AND (p.home_team_id = m.home_team_id OR p.away_team_id = m.home_team_id)) AS hnew,
+            NOT EXISTS (SELECT 1 FROM match p WHERE p.league_id = m.league_id AND p.season_id <> m.season_id
+               AND (p.home_team_id = m.away_team_id OR p.away_team_id = m.away_team_id)) AS anew
+       FROM match m WHERE m.id = ANY(?) AND m.season_id IS NOT NULL`,
+    [ids],
+  );
+  const early = new Set(facts.filter((f) => Math.min(Number(f.hg), Number(f.ag)) < 2).map((f) => Number(f.id)));
+  const fresh = new Set(facts.filter((f) => f.hnew || f.anew).map((f) => Number(f.id)));
+  const leagueRows = rows.filter((r) => ids.includes(r.id));
+  console.log(`\nLeague matches: ${leagueRows.length}; ${early.size} with a side in its first two games of the season; ${fresh.size} with a side new to the division (${facts.length} with a season recorded)`);
+  const split = (label: string, rs: HistRow[]) => {
+    const sorted = [...rs].sort((a, b) => a.kickoff - b.kickoff);
+    const half = Math.floor(sorted.length / 2);
+    for (const p of [production, { ...production, name: 'floor 0.82', minProb: 0.82 }, { ...production, name: 'floor 0.85', minProb: 0.85 }]) {
+      const all = simulate(p, rs);
+      const a = simulate(p, sorted.slice(0, half));
+      const b = simulate(p, sorted.slice(half));
+      const cell = (r: typeof a) => `${String(r.n).padStart(3)} calls ${pct(r.hitRate).padStart(6)} ${pct(r.roi).padStart(7)}`;
+      console.log(`  ${label.padEnd(26)} ${p.name.padEnd(12)} ${cell(all)}   halves: ${cell(a)}  |  ${cell(b)}`);
+    }
+  };
+  split('early season', leagueRows.filter((r) => early.has(r.id)));
+  split('rest of the season', leagueRows.filter((r) => !early.has(r.id)));
+  split('a side new to the division', leagueRows.filter((r) => fresh.has(r.id)));
+  split('neither side new', leagueRows.filter((r) => !fresh.has(r.id)));
+
   for (const [slice, rs] of [...bySlice].sort((a, b) => b[1].length - a[1].length)) {
     console.log(`\n== ${slice}: ${rs.length} fixtures`);
     for (const w of [0, 0.5]) {
