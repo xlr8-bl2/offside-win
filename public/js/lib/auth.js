@@ -189,8 +189,8 @@ export async function currentUser({ real = false } = {}) {
  * than throwing so that an auth failure can never stop the board loading — the
  * worst case is a request that looks anonymous, which is exactly what it is.
  */
-export async function authHeaders() {
-  if (viewingAsFree()) return {};
+export async function authHeaders({ real = false } = {}) {
+  if (!real && viewingAsFree()) return {};
   const s = await session();
   return s?.access_token ? { authorization: `Bearer ${s.access_token}` } : {};
 }
