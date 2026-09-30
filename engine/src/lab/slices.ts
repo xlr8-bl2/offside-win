@@ -14,7 +14,7 @@
  */
 
 import { select } from '../store.ts';
-import { scoreSources, simulate, type HistRow } from './markets.ts';
+import { grade, optionsFor, scoreSources, simulate, type HistRow } from './markets.ts';
 import { PROD } from './tune.ts';
 
 export type Slice = 'league' | 'domestic cup' | 'continental club' | 'international' | 'friendly';
@@ -47,6 +47,31 @@ export async function runSlices(rows: HistRow[]): Promise<void> {
   // The rule the slate runs, drift limit and friendly bar included.
   const production = PROD;
   const marketOnly = { ...production, name: 'production, market only (no blend)', modelWeight: 0 };
+
+  // Does a probability mean what it says? For every option the market priced,
+  // by family and by the probability we would publish (the sharp book's, else
+  // the consensus), how often it landed. A line read the wrong way round (a
+  // handicap's sign, say) shows up here as "said 85%, got 15%".
+  console.log('\nCalibration: the probability we would publish against how often it landed (pushes left out)');
+  const bins = [0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0001];
+  const cal = new Map<string, Array<{ n: number; p: number; y: number }>>();
+  for (const r of rows) {
+    for (const o of optionsFor(r, 0)) {
+      const p = o.sharp ?? o.book;
+      if (p < 0.5) continue;
+      const g = grade(r, o);
+      if (!g || (g.result !== 'WON' && g.result !== 'LOST')) continue;
+      const k = o.market === 'asian_handicap' ? `handicap ${o.line !== null && Number.isInteger(o.line * 2) ? (Number.isInteger(o.line) ? 'whole' : 'half') : 'quarter'}` : o.family;
+      const arr = cal.get(k) ?? bins.slice(1).map(() => ({ n: 0, p: 0, y: 0 }));
+      const i = bins.findIndex((b, j) => p >= b && p < bins[j + 1]!);
+      if (i < 0) continue;
+      arr[i]!.n++; arr[i]!.p += p; arr[i]!.y += g.result === 'WON' ? 1 : 0;
+      cal.set(k, arr);
+    }
+  }
+  for (const [k, arr] of [...cal].sort()) {
+    console.log(`  ${k.padEnd(16)} ${arr.map((b, i) => b.n ? `${bins[i]!.toFixed(2)}+: ${pct(b.p / b.n)} said, ${pct(b.y / b.n)} got (${b.n})` : '').filter(Boolean).join('   ')}`);
+  }
 
   // Calls with and without an opening price. Without one the drift limit
   // cannot run (Houston v Sporting KC, 26 September 2026: called at 1.17,
