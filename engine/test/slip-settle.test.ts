@@ -94,3 +94,22 @@ test('a withdrawn leg waits for its score, and a match never played voids it', {
   await slip.settleSlips(K + 10_000);
   assert.equal(await result(), 'WON', 'the postponed leg drops out and the rest stands');
 });
+
+test('regrading takes the finished record over the fixture\'s own copy, and reaches calls whose fixture is gone', { skip: !enabled }, async () => {
+  const settle = await import('../src/settle.ts');
+  await store.exec('DELETE FROM match WHERE id IN (1, 2)');
+  // New England 4-2 Orlando, graded at half-time (1-0) as over 1.5 lost; the fixture row was pruned since.
+  await graded(1, 'over_under_15', 'over', 1.5, 'LOST');
+  await store.exec(`INSERT INTO match (id, league_id, kickoff, home_team_id, away_team_id, home_goals, away_goals, updated_at)
+                    VALUES (1, 18, ?, 10, 11, 4, 2, ?)`, [K, K]);
+  // A second one whose fixture still holds the half-time score it was graded on.
+  await fixture(2, 0, 1); await graded(2, 'over_under_15', 'over', 1.5, 'LOST');
+  await store.exec(`INSERT INTO match (id, league_id, kickoff, home_team_id, away_team_id, home_goals, away_goals, updated_at)
+                    VALUES (2, 18, ?, 12, 13, 1, 2, ?)`, [K, K]);
+  await settle.regradeSettled();
+  const marks = await store.select<{ fixture_id: number; result: string }>('SELECT fixture_id, result FROM pick WHERE fixture_id IN (1, 2) ORDER BY fixture_id');
+  assert.deepEqual(marks.map((m) => m.result), ['WON', 'WON']);
+  const [f] = await store.select<{ home_goals: number; away_goals: number }>('SELECT home_goals, away_goals FROM fixture WHERE id = 2');
+  assert.deepEqual([f!.home_goals, f!.away_goals], [1, 2], 'the fixture shows the final score too');
+  await store.exec('DELETE FROM match WHERE id IN (1, 2)');
+});
