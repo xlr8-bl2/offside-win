@@ -373,6 +373,14 @@ export const config = {
      * toward ours) or `provider` (the data provider's prediction, which the
      * market lab scored least accurate on goals). See lab/markets.ts.
      */
+    //
+    // Correcting the price's biases family by family was tried and rejected
+    // (lab:calib, 3,159 fixtures). Over the whole history favourites at 85%+
+    // landed 90% and short corners less than priced, but a curve fitted on
+    // the older half and checked on the newest quarter took the rule from
+    // +11.0% to -0.8% a call (ahead in 0.4% of bootstrap draws): the biases
+    // do not hold still, and the correction let in marginal handicaps that
+    // lost. The price is used as it is.
     source: (process.env.CONF_SOURCE ?? 'consensus') as 'consensus' | 'provider',
     /**
      * Among the calls on a fixture that clear the floor, which one. `prob`
