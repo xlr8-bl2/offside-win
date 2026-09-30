@@ -1,6 +1,6 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { matchPage, render, seoResponse, sitemap, slipPage, slug, stateOf, todayPage } from '../src/seo.ts';
+import { homePage, leaguesPage, matchPage, render, seoResponse, sitemap, slipPage, slug, stateOf, todayPage } from '../src/seo.ts';
 import { fullTitle, matchTitle } from '../../public/js/lib/titles.js';
 import { findBannedInProse } from '../../engine/src/vocabulary.ts';
 
@@ -175,4 +175,32 @@ test('a card that is not drawn yet falls back to the site picture instead of a b
   const hit = await cardImage(e as any, 5, 'https://offside.win');
   assert.equal(hit.headers.get('x-card'), 'match');
   assert.equal(hit.headers.get('content-type'), 'image/jpeg');
+});
+
+test('the front page is written for a crawler: a heading, the free call and a link to every match', async () => {
+  const free = { ...FIX, id: 7, home: 'Real Madrid', away: 'Barcelona', free_call: true, top_pick: { market: 'match_result', outcome: 'home', line: null, odds: 1.9 } };
+  const e = env({ get_board: { fixtures: [FIX, free] } });
+  const res = await seoResponse(new Request('https://offside.win/'), e as any);
+  const html = await res!.text();
+  assert.match(html, /<h1 class="display">Football predictions for today's biggest games<\/h1>/);
+  assert.match(html, /<title>Offside\.win: football predictions for today(&#39;|')s biggest games<\/title>/, 'the front page keeps its own title');
+  assert.match(html, /<link rel="canonical" href="https:\/\/offside\.win\/">/);
+  assert.match(html, /href="\/match\/212602\/iceland-v-estonia"/);
+  assert.match(html, /Today's free call is <a href="\/match\/7\/real-madrid-v-barcelona">/);
+  const p = await homePage(e as any, 'https://offside.win');
+  assert.deepEqual(findBannedInProse(p.body.replace(/<[^>]+>/g, ' ')), []);
+});
+
+test('the competitions page links every competition playing this fortnight', async () => {
+  const p = await leaguesPage(env({ get_board: { fixtures: [FIX, { ...FIX, id: 5, league: 'La Liga', league_id: 3 }] } }) as any, 'https://offside.win');
+  assert.match(p.body, /href="\/league\/3\/la-liga">La Liga<\/a>, one match/);
+  assert.match(p.body, /href="\/league\/64\/uefa-nations-league">UEFA Nations League<\/a>/);
+});
+
+test('the front page starts the masthead photograph with the HTML when the engine found one', async () => {
+  const e = env({ get_board: { fixtures: [FIX] }, get_hero: { fixture_id: 212602, shot_venue_id: 1771 } });
+  const html = await (await seoResponse(new Request('https://offside.win/'), e as any))!.text();
+  assert.match(html, /<link rel="preload" as="image" href="https:\/\/sports\.bzzoiro\.com\/img\/venue\/1771\/" fetchpriority="high">\n[\s\S]*<\/head>/);
+  const none = await (await seoResponse(new Request('https://offside.win/'), env({ get_board: { fixtures: [FIX] }, get_hero: {} }) as any))!.text();
+  assert.doesNotMatch(none, /rel="preload" as="image"/);
 });

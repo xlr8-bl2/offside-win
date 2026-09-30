@@ -56,5 +56,8 @@
     "renew": "npm -w engine run renew",
     "narrate:preview": "npm -w engine run narrate:preview",
     "images": "npm -w engine run images"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
   }
 }

@@ -143,8 +143,15 @@ const worker = {
       const card = path.match(/^\/og\/(\d{1,12})\.jpg$/);
       if (card) return await cardImage(env, Number(card[1]), url.origin);
       try {
-        const page = await seoResponse(request, env);
-        if (page) return page;
+        // The readable pages are the same for everyone (the app adds the
+        // reader's own view once it runs), so they come from the edge's copy
+        // like the public reads: the front page is served by this Worker now,
+        // and it must not wait on the database for every visitor.
+        const page = SEO_PAGES.test(path) && request.method === 'GET'
+          ? await edgeCached(request, ctx, async () => (await seoResponse(request, env)) ?? new Response(null, { status: 404 }))
+          : await seoResponse(request, env);
+        if (page && page.status !== 404) return page;
+        if (page?.status === 404 && page.body) return page;
       } catch (err) {
         console.error('seo:', err instanceof Error ? err.message : String(err));
       }
@@ -342,5 +349,8 @@ async function hit(request: Request, env: Env): Promise<Response> {
   } catch { /* a lost count is not worth an error */ }
   return done;
 }
+
+/** The pages seo.ts writes; everything else without a file is a 404 from the assets. */
+const SEO_PAGES = /^\/(?:|today|results|slip|leagues|pricing|match\/\d+(?:\/[^/]*)?|league\/\d+(?:\/[^/]*)?)\/?$/;
 
 export default worker;
