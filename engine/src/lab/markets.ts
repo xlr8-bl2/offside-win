@@ -20,7 +20,7 @@
  *   3. How does that compare with the rule in production today?
  */
 
-import { priceAsianHandicap, priceBtts, priceDoubleChance, priceDrawNoBet, priceEuropeanHandicap, priceOverUnder, priceResult, type ScoreMatrix } from '../price.ts';
+import { buildScoreMatrix, priceAsianHandicap, priceBtts, priceDoubleChance, priceDrawNoBet, priceEuropeanHandicap, priceOverUnder, priceResult, type ScoreMatrix } from '../price.ts';
 import { blendRates, impliedRates, matrixFor, type ImpliedTargets } from '../implied.ts';
 import { settleSelection } from '../settle.ts';
 import { config } from '../config.ts';
@@ -63,6 +63,11 @@ export interface HistRow {
    * it is scoring. Null when no referee is recorded.
    */
   ref?: { n: number; reds: number; yellows: number } | null;
+  /**
+   * Our own read of the match from the ratings alone, refitted as of the
+   * week before it (lab/own.ts). Absent until the lab has computed it.
+   */
+  own?: { home: number; away: number; rho: number } | null;
 }
 
 export const keyOf = (market: string, line: number | null) => `${market}::${line === null ? 'x' : Number(line).toFixed(2)}`;
@@ -144,6 +149,8 @@ export interface Option {
   books: number | null;
   /** The probability when the market opened, when recorded. */
   open: number | null;
+  /** Our own analysis's probability, from the ratings alone (lab/own.ts). */
+  own: number | null;
 }
 
 const GOALS_MARKETS = new Set<MarketCode>(['1x2', 'double_chance', 'draw_no_bet', 'btts', 'over_under_05', 'over_under_15', 'over_under_25', 'over_under_35', 'asian_handicap', 'european_handicap']);
@@ -196,8 +203,10 @@ export function optionsFor(row: HistRow, modelWeight: number): Option[] {
   const blendMx = implied
     ? matrixFor(blendRates(implied, row.lambda ? { home: row.lambda[0], away: row.lambda[1] } : null, modelWeight))
     : null;
+  const ownMx = row.own ? buildScoreMatrix(row.own.home, row.own.away, row.own.rho) : null;
   const out: Option[] = [];
   for (const m of row.markets) {
+    const fromOwn = ownMx && GOALS_MARKETS.has(m.market) ? pricesFromMatrix(ownMx, m.market, m.line) : null;
     const fromMx = blendMx && GOALS_MARKETS.has(m.market) ? pricesFromMatrix(blendMx, m.market, m.line) : null;
     const prov = row.provider?.get(keyOf(m.market, m.line)) ?? null;
     for (const [o, q] of Object.entries(m.best)) {
@@ -218,6 +227,7 @@ export function optionsFor(row: HistRow, modelWeight: number): Option[] {
         sharp: typeof m.sharp?.fair?.[o] === 'number' ? m.sharp.fair[o]! : null,
         books: typeof m.books === 'number' ? m.books : null,
         open: typeof m.open?.fair?.[o] === 'number' ? m.open.fair[o]! : null,
+        own: fromOwn?.probs.get(o as Outcome) ?? null,
       });
     }
   }
@@ -289,9 +299,17 @@ export function scoreSources(rows: HistRow[], modelWeight: number) {
 export interface Policy {
   name: string;
   /** Which probability the policy believes. */
-  source: 'book' | 'model' | 'provider' | 'blend' | 'mix' | 'best' | 'stack' | 'sharp' | 'bestsharp';
+  source: 'book' | 'model' | 'provider' | 'blend' | 'mix' | 'best' | 'stack' | 'sharp' | 'bestsharp' | 'own' | 'learned';
   /** Per-family logistic weights for the stacked source (lab/tune.ts). */
   stack?: Partial<Record<MarketFamily, number[]>>;
+  /** Per-family weights for the learned source (lab/learned.ts). */
+  learned?: Partial<Record<MarketFamily, number[]>>;
+  /**
+   * Our own analysis has to agree: its probability may sit at most this far
+   * below the price's. Undefined skips it; an option our analysis has no
+   * view on is left out when it is set.
+   */
+  minOwnGap?: number;
   modelWeight: number;
   minProb: number;
   maxProb: number;
@@ -376,6 +394,9 @@ export function probOf(policy: Policy, o: Option): number | null {
     case 'sharp': return o.sharp ?? o.book;
     // As 'best', with the sharp book standing in for the consensus.
     case 'bestsharp': return o.family === 'goals' ? (o.blend ?? o.sharp ?? o.book) : (o.sharp ?? o.book);
+    // Our own analysis first, alone: the price only decides whether it pays.
+    case 'own': return o.own;
+    case 'learned': return learnedProb(policy.learned?.[o.family], o);
     // The blend where there is one, and the book's own view elsewhere, with the
     // provider's opinion averaged in where it has one.
     case 'mix': {
@@ -396,6 +417,38 @@ export function stackFeatures(o: Option): number[] {
 export function stackProb(w: number[] | undefined, o: Option): number {
   if (!w) return o.book;
   const z = stackFeatures(o).reduce((a, x, i) => a + x * (w[i] ?? 0), 0);
+  return 1 / (1 + Math.exp(-z));
+}
+
+/**
+ * The features of one option for the learned probability, all relative to
+ * the reference price (the sharp book, else the consensus) on the log-odds
+ * scale, so that all-zero weights but the slope reproduce the price:
+ *
+ *   intercept, the price, the money since the open, our own read's
+ *   disagreement, the blend's, the data provider's, the sharp book's with the
+ *   consensus, and how far the best price sits above fair.
+ */
+export const LEARNED_FEATURES = ['intercept', 'price', 'moved', 'own', 'blend', 'provider', 'sharp', 'best'] as const;
+
+export function learnedFeatures(o: Option): number[] {
+  const ref = o.sharp ?? o.book;
+  const r = lg(ref);
+  return [
+    1,
+    r,
+    o.open !== null ? r - lg(o.open) : 0,
+    o.own !== null ? lg(o.own) - r : 0,
+    o.blend !== null ? lg(o.blend) - r : 0,
+    o.provider !== null ? lg(o.provider) - r : 0,
+    o.sharp !== null ? lg(o.sharp) - lg(o.book) : 0,
+    Math.log(o.odds * ref),
+  ];
+}
+
+export function learnedProb(w: number[] | undefined, o: Option): number {
+  if (!w) return o.sharp ?? o.book;
+  const z = learnedFeatures(o).reduce((a, x, i) => a + x * (w[i] ?? 0), 0);
   return 1 / (1 + Math.exp(-z));
 }
 
@@ -423,6 +476,7 @@ export function ranked(policy: Policy, row: HistRow, options?: Option[]): Pick[]
     if (policy.excludeBuckets?.includes(bucketOf(o))) continue;
     if (policy.excludeRanks?.includes(row.rank)) continue;
     if (policy.requireSharp && o.sharp === null) continue;
+    if (policy.minOwnGap !== undefined && (o.own === null || o.own - (o.sharp ?? o.book) < policy.minOwnGap)) continue;
     if (policy.minSharpEv !== undefined && o.sharp !== null && evOf(o.sharp, o) < policy.minSharpEv) continue;
     if (policy.maxRefReds !== undefined && row.ref && row.ref.n >= 15 && row.ref.reds / row.ref.n > policy.maxRefReds
       && ((o.market === 'red_card' && o.outcome === 'no') || (o.market === 'total_red_cards' && o.outcome === 'under'))) continue;

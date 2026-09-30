@@ -273,6 +273,22 @@ const commands: Record<string, () => Promise<unknown>> = {
     await kvSetJSON('lab:tune', { at: Math.floor(Date.now() / 1000), ...report });
   },
 
+  // Can anything beat the price? Our own analysis (the ratings refitted week
+  // by week), the money since the open and the rest, each tested against
+  // production on matches nothing was tuned on (lab/learned.ts).
+  async 'lab:model'() {
+    requireEnv({ provider: false });
+    const { loadHistory } = await import('./lab/run.ts');
+    const { ownReads } = await import('./lab/own.ts');
+    const { runModel } = await import('./lab/learned.ts');
+    const { kvSetJSON } = await import('./store.ts');
+    const rows = await loadHistory();
+    const own = await ownReads(rows);
+    for (const r of rows) r.own = own.get(r.id) ?? null;
+    const report = runModel(rows);
+    await kvSetJSON('lab:model', { at: Math.floor(Date.now() / 1000), ...report });
+  },
+
   // Leans: for the fixtures the rule passes on, the best read at a lower
   // floor, graded on their own (lab/tune.ts, runLeans).
   async 'lab:leans'() {
