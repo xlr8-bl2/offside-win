@@ -298,6 +298,15 @@ const commands: Record<string, () => Promise<unknown>> = {
     await runSlices(await loadHistory());
   },
 
+  // The lab's replay of the production rule against what the live engine
+  // actually published, over the period it has run that rule (lab/live.ts).
+  async 'lab:live'() {
+    requireEnv({ provider: false });
+    const { loadHistory } = await import('./lab/run.ts');
+    const { runLive } = await import('./lab/live.ts');
+    await runLive(await loadHistory());
+  },
+
   // Every settled call beside what the match turned out to be, and the
   // argument behind each loss (lab/losses.ts).
   async 'lab:losses'() {
