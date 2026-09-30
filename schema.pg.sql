@@ -980,6 +980,14 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
            ),
            -- A Whop subscription that will take money again, whichever
            -- membership is shown: the page must always offer to stop it.
+           -- Has this account ever had a membership, by any route. Free
+           -- trials are for new members, and checkout refuses one otherwise
+           -- (hadMembership in worker/src/pay.ts asks the same three things),
+           -- so the site does not offer it.
+           'returning', auth.uid() IS NOT NULL AND (
+             EXISTS (SELECT 1 FROM membership WHERE user_id = auth.uid())
+             OR EXISTS (SELECT 1 FROM payment WHERE user_id = auth.uid())
+             OR (auth.email() IS NOT NULL AND EXISTS (SELECT 1 FROM entitlement WHERE email = lower(auth.email())))),
            'whop', (SELECT json_build_object('renewing', true, 'manage_url', manage_url, 'until', expires_at)
                       FROM entitlement
                      WHERE auth.email() IS NOT NULL AND lower(email) = lower(auth.email()) AND status = 'active'
@@ -2027,7 +2035,10 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
   WHERE p.active = 1
     AND p.starts_at <= floor(extract(epoch FROM now()))::bigint
     AND p.ends_at > floor(extract(epoch FROM now()))::bigint
-    AND (p.plan_id IS NULL OR pl.id IS NOT NULL);
+    AND (p.plan_id IS NULL OR pl.id IS NOT NULL)
+    -- A deal is only a deal while it is below the plan's price: lower the
+    -- plan under it and checkout would refuse it, so it is not advertised.
+    AND (p.kind <> 'deal' OR p.price_minor < pl.amount_minor);
 $fn$;
 GRANT EXECUTE ON FUNCTION get_promos() TO anon, authenticated;
 
@@ -2240,7 +2251,7 @@ REVOKE ALL ON FUNCTION admin_plans() FROM PUBLIC, anon, authenticated;
 
 CREATE OR REPLACE FUNCTION admin_save_plan(p_actor uuid, p_id text, p_name text, p_amount bigint, p_active integer)
 RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
-DECLARE t bigint := floor(extract(epoch FROM now()))::bigint; before_ json;
+DECLARE t bigint := floor(extract(epoch FROM now()))::bigint; before_ json; clash_ record;
 BEGIN
   SELECT json_build_object('name', name, 'amount_minor', amount_minor, 'active', active) INTO before_ FROM plan WHERE id = p_id;
   IF before_ IS NULL THEN RETURN json_build_object('error', 'No such plan.'); END IF;
@@ -2249,6 +2260,17 @@ BEGIN
   END IF;
   IF p_name IS NOT NULL AND (length(trim(p_name)) = 0 OR length(p_name) > 40) THEN
     RETURN json_build_object('error', 'A name of up to 40 characters.');
+  END IF;
+  -- A deal that is running or to come must stay below the plan's price, or it
+  -- silently stops being offered. Say which one is in the way.
+  IF p_amount IS NOT NULL THEN
+    SELECT title, price_minor INTO clash_ FROM promo
+     WHERE plan_id = p_id AND kind = 'deal' AND active = 1 AND ends_at > t AND price_minor >= p_amount
+     ORDER BY starts_at LIMIT 1;
+    IF clash_.title IS NOT NULL THEN
+      RETURN json_build_object('error', format('The deal "%s" sells this plan at £%s. Lower or end it first.',
+        clash_.title, to_char(clash_.price_minor / 100.0, 'FM999990.00')));
+    END IF;
   END IF;
   UPDATE plan SET name = coalesce(nullif(trim(p_name), ''), name),
                   amount_minor = coalesce(p_amount, amount_minor),
@@ -2274,7 +2296,9 @@ CREATE OR REPLACE FUNCTION admin_save_promo(p_actor uuid, p json)
 RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
 DECLARE
   t bigint := floor(extract(epoch FROM now()))::bigint;
-  id_ text := coalesce(nullif(p->>'id', ''), 'p' || to_char(now(), 'YYYYMMDDHH24MISS'));
+  -- A new offer's id carries a random tail, so two made in the same second
+  -- do not land on one row.
+  id_ text := coalesce(nullif(p->>'id', ''), 'p' || to_char(now(), 'YYYYMMDDHH24MISS') || substr(md5(random()::text), 1, 4));
   kind_ text := p->>'kind';
   plan_ text := nullif(p->>'plan_id', '');
   price_ bigint := nullif(p->>'price_minor', '')::bigint;
@@ -2282,8 +2306,15 @@ DECLARE
   starts_ bigint := coalesce(nullif(p->>'starts_at', '')::bigint, t);
   ends_ bigint := nullif(p->>'ends_at', '')::bigint;
   full_ bigint;
+  clash_ record;
 BEGIN
-  IF kind_ NOT IN ('deal', 'trial', 'notice') THEN RETURN json_build_object('error', 'Pick a deal, a trial or a notice.'); END IF;
+  IF kind_ IS NULL OR kind_ NOT IN ('deal', 'trial', 'notice') THEN RETURN json_build_object('error', 'Pick a deal, a trial or a notice.'); END IF;
+  -- Checkout and the Worker only take ids of this shape; anything else would
+  -- save and then never work.
+  IF id_ !~ '^[A-Za-z0-9_-]{1,40}$' THEN RETURN json_build_object('error', 'An id of letters, numbers, dashes and underscores.'); END IF;
+  IF coalesce(nullif(p->>'audience', ''), 'everyone') NOT IN ('everyone', 'signed_out', 'free') THEN
+    RETURN json_build_object('error', 'Pick who sees it: everyone, signed-out visitors or readers without a membership.');
+  END IF;
   IF length(coalesce(trim(p->>'title'), '')) = 0 OR length(p->>'title') > 80 THEN
     RETURN json_build_object('error', 'A headline of up to 80 characters.');
   END IF;
@@ -2292,13 +2323,37 @@ BEGIN
   IF ends_ IS NULL OR ends_ <= starts_ THEN RETURN json_build_object('error', 'It has to end after it starts.'); END IF;
   IF kind_ IN ('deal', 'trial') THEN
     SELECT amount_minor INTO full_ FROM plan WHERE id = plan_ AND active = 1;
-    IF full_ IS NULL THEN RETURN json_build_object('error', 'Pick a plan that is on sale.'); END IF;
+    -- Switching an offer off is always allowed, even once its plan has been
+    -- taken off sale; only a live one needs a plan someone can buy.
+    IF full_ IS NULL AND coalesce(nullif(p->>'active', '')::integer, 1) = 1 THEN
+      RETURN json_build_object('error', 'Pick a plan that is on sale.');
+    END IF;
+    IF full_ IS NULL THEN SELECT amount_minor INTO full_ FROM plan WHERE id = plan_; END IF;
+    IF full_ IS NULL THEN RETURN json_build_object('error', 'Pick a plan.'); END IF;
   END IF;
   IF kind_ = 'deal' AND (price_ IS NULL OR price_ < 100 OR price_ >= full_) THEN
     RETURN json_build_object('error', 'A deal needs a price below the plan''s own, and at least £1.');
   END IF;
   IF kind_ = 'trial' AND (trial_ IS NULL OR plan_ = 'matchday') THEN
     RETURN json_build_object('error', 'A trial needs a number of days and a plan that renews.');
+  END IF;
+  IF kind_ = 'trial' AND (trial_ < 1 OR trial_ > 60) THEN
+    RETURN json_build_object('error', 'A trial of 1 to 60 days.');
+  END IF;
+  -- One offer on a plan at a time. Two would put one in the popup and the
+  -- other at checkout, and a reader who clicked a trial would be charged a
+  -- deal price. Notices carry no price, so any number may run.
+  IF kind_ IN ('deal', 'trial') AND coalesce(nullif(p->>'active', '')::integer, 1) = 1 THEN
+    SELECT o.id, o.title, o.starts_at, o.ends_at INTO clash_ FROM promo o
+     WHERE o.id <> id_ AND o.active = 1 AND o.kind IN ('deal', 'trial') AND o.plan_id = plan_
+       AND o.starts_at < ends_ AND o.ends_at > starts_ AND o.ends_at > t
+     ORDER BY o.starts_at LIMIT 1;
+    IF clash_.id IS NOT NULL THEN
+      RETURN json_build_object('error', format('"%s" already runs on this plan from %s to %s. Switch it off or change the dates first.',
+        clash_.title,
+        to_char(to_timestamp(clash_.starts_at) AT TIME ZONE 'Europe/London', 'DD Mon HH24:MI'),
+        to_char(to_timestamp(clash_.ends_at) AT TIME ZONE 'Europe/London', 'DD Mon HH24:MI')));
+    END IF;
   END IF;
   INSERT INTO promo (id, kind, title, body, cta, plan_id, price_minor, trial_days, audience, starts_at, ends_at, active, created_at, updated_at)
   VALUES (id_, kind_, trim(p->>'title'), nullif(trim(p->>'body'), ''), nullif(trim(p->>'cta'), ''),
