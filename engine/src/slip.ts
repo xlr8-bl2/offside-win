@@ -1,4 +1,6 @@
 import { exec, select } from './store.ts';
+import { settleSelection } from './settle.ts';
+import type { MarketCode, Outcome } from './types.ts';
 
 /**
  * The bet slip: our most confident calls, combined to a total the owner asked for.
@@ -174,6 +176,19 @@ export async function refreshSlip(now = Math.floor(Date.now() / 1000)): Promise<
   return slip;
 }
 
+/** A withdrawn leg's result from the final score; null until there is one, VOID if never played. */
+async function gradeWithdrawn(l: Leg): Promise<string | null> {
+  const [f] = await select<{ home_goals: number | null; away_goals: number | null; status: string | null }>(
+    'SELECT home_goals, away_goals, status FROM fixture WHERE id = ?', [l.fixture_id],
+  );
+  if (!f) return 'VOID';
+  if (/postpon|cancel|abandon|suspend/i.test(String(f.status ?? ''))) return 'VOID';
+  if (f.home_goals === null || f.away_goals === null) return null;
+  const out = settleSelection(l.market as MarketCode, l.outcome as Outcome, l.line, Number(l.odds),
+    { homeGoals: Number(f.home_goals), awayGoals: Number(f.away_goals), homeCorners: null, awayCorners: null, reds: null });
+  return out?.result ?? 'VOID';
+}
+
 /**
  * Grade the slips whose legs have been graded.
  *
@@ -199,7 +214,12 @@ export async function settleSlips(now = Math.floor(Date.now() / 1000)): Promise<
            AND market = ? AND outcome = ? AND ${l.line === null ? 'line IS NULL' : 'line = ?'}`,
         l.line === null ? [l.fixture_id, l.market, l.outcome] : [l.fixture_id, l.market, l.outcome, l.line],
       );
-      const r = !row ? 'VOID' : row.settled_at ? row.result : null;
+      // A leg whose call was withdrawn before kick-off (the engine fell below
+      // its bar for it) is still graded on the score: the slip was posted, and
+      // a slip once posted is a bet someone may have placed. Voiding it would
+      // quietly take a losing leg out of the record. Only a match that was
+      // never played voids a leg.
+      const r = row ? (row.settled_at ? row.result : null) : await gradeWithdrawn(l);
       results.push(r);
       // Kick-off time and state only: the log is public, and a later leg may
       // not have kicked off yet.
