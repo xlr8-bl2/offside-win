@@ -363,6 +363,8 @@ export interface Policy {
    */
   maxDrift?: number;
   minSteam?: number;
+  /** Only options with an opening price recorded (true), or only without (false). */
+  requireOpen?: boolean;
   /**
    * The referee. A "no red card" call (or under on the red card line) is left
    * when the referee has shown more reds a game than this, over fifteen or
@@ -480,6 +482,7 @@ export function ranked(policy: Policy, row: HistRow, options?: Option[]): Pick[]
     if (policy.minSharpEv !== undefined && o.sharp !== null && evOf(o.sharp, o) < policy.minSharpEv) continue;
     if (policy.maxRefReds !== undefined && row.ref && row.ref.n >= 15 && row.ref.reds / row.ref.n > policy.maxRefReds
       && ((o.market === 'red_card' && o.outcome === 'no') || (o.market === 'total_red_cards' && o.outcome === 'under'))) continue;
+    if (policy.requireOpen !== undefined && (o.open !== null) !== policy.requireOpen) continue;
     if (o.open !== null && (policy.maxDrift !== undefined || policy.minSteam !== undefined)) {
       const moved = (o.sharp ?? o.book) - o.open;
       if (policy.maxDrift !== undefined && moved < -policy.maxDrift) continue;
