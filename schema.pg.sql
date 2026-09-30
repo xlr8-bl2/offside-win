@@ -2048,7 +2048,7 @@ RETURNS TABLE (email text, plan_id text, expires_at bigint, free boolean, via te
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   WITH t AS (SELECT floor(extract(epoch FROM now()))::bigint AS now_),
   rows_ AS (
-    SELECT lower(u.email) AS email, m.plan_id, m.expires_at, m.card_brand = 'complimentary' AS free, 'membership' AS via
+    SELECT lower(u.email) AS email, m.plan_id, m.expires_at, coalesce(m.card_brand, '') = 'complimentary' AS free, 'membership' AS via
       FROM membership m JOIN auth.users u ON u.id = m.user_id, t WHERE m.expires_at > t.now_
     UNION ALL
     SELECT lower(e.email), e.plan_id, e.expires_at, false, e.source
@@ -2125,10 +2125,12 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
     LEFT JOIN profile pr ON pr.user_id = u.id
     LEFT JOIN membership m ON m.user_id = u.id
     LEFT JOIN admin_live_members() lm ON lm.email = lower(u.email)
+    CROSS JOIN LATERAL (SELECT '%' || replace(replace(replace(coalesce(p_q, ''), '\', '\\'), '%', '\%'), '_', '\_') || '%' AS pat) q
+    -- A "_" or "%" typed in the search box is a letter, not a wildcard.
     WHERE p_q IS NULL OR p_q = ''
-       OR u.email ILIKE '%' || p_q || '%'
-       OR pr.display_name ILIKE '%' || p_q || '%'
-       OR pr.username ILIKE '%' || p_q || '%'
+       OR u.email ILIKE q.pat
+       OR pr.display_name ILIKE q.pat
+       OR pr.username ILIKE q.pat
     ORDER BY u.created_at DESC
     LIMIT least(greatest(coalesce(p_limit, 50), 1), 200) OFFSET greatest(coalesce(p_offset, 0), 0)
   ) x;
@@ -2147,7 +2149,7 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
     'profile', (SELECT row_to_json(p) FROM (SELECT display_name, username, club_name, created_at FROM profile WHERE user_id = p_user) p),
     'membership', (SELECT row_to_json(m) FROM (SELECT plan_id, expires_at, auto_renew, cancelled_at, dunning_from, card_brand, card_last4, created_at
                                                FROM membership WHERE user_id = p_user) m),
-    'entitlement', (SELECT row_to_json(e) FROM (SELECT e.plan_id, e.expires_at, e.status, e.source, e.manage_url, e.created_at
+    'entitlement', (SELECT row_to_json(e) FROM (SELECT e.plan_id, e.expires_at, e.status, e.source, e.manage_url, e.created_at, e.renew_stopped_at
                                                 FROM entitlement e JOIN auth.users u ON lower(u.email) = lower(e.email)
                                                 WHERE u.id = p_user) e),
     'payments', (SELECT coalesce(json_agg(row_to_json(p) ORDER BY p.created_at DESC), '[]'::json)
@@ -2161,12 +2163,19 @@ REVOKE ALL ON FUNCTION admin_user(uuid) FROM PUBLIC, anon, authenticated;
 
 -- Free time on an account: extends whatever it has, or starts one. Marked
 -- complimentary, so the account page never shows a card for it.
+--
+-- The days start when the account's paid time ends, however it was paid, so
+-- they are never spent running alongside time already bought. An account whose
+-- Whop subscription is still renewing is refused: Whop would charge again in
+-- the middle of the free time, so the days are added in Whop instead.
 CREATE OR REPLACE FUNCTION admin_grant(p_actor uuid, p_user uuid, p_days integer)
 RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
 DECLARE
   t bigint := floor(extract(epoch FROM now()))::bigint;
   plan_ text;
   until_ bigint;
+  paid_to bigint;
+  whop_ record;
 BEGIN
   IF p_days IS NULL OR p_days < 1 OR p_days > 3650 THEN
     RETURN json_build_object('error', 'Give between 1 and 3,650 days.');
@@ -2174,11 +2183,19 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = p_user) THEN
     RETURN json_build_object('error', 'No such account.');
   END IF;
+  SELECT e.plan_id, e.expires_at, e.renew_stopped_at INTO whop_
+    FROM entitlement e JOIN auth.users u ON lower(u.email) = lower(e.email)
+   WHERE u.id = p_user AND e.status = 'active' AND e.expires_at > t;
+  IF whop_.expires_at IS NOT NULL AND whop_.renew_stopped_at IS NULL AND whop_.plan_id <> 'matchday' THEN
+    RETURN json_build_object('error', format('This account pays through Whop, next on %s. Free days here would run alongside time they pay for. Add them to the membership in Whop instead.',
+      to_char(to_timestamp(whop_.expires_at) AT TIME ZONE 'Europe/London', 'DD Mon YYYY')));
+  END IF;
+  paid_to := greatest(t, coalesce(whop_.expires_at, t));
   SELECT id INTO plan_ FROM plan WHERE active = 1 ORDER BY sort DESC LIMIT 1;
   INSERT INTO membership (user_id, plan_id, expires_at, created_at, updated_at, card_brand)
-  VALUES (p_user, coalesce(plan_, 'monthly'), t + p_days * 86400, t, t, 'complimentary')
+  VALUES (p_user, coalesce(plan_, 'monthly'), paid_to + p_days * 86400, t, t, 'complimentary')
   ON CONFLICT (user_id) DO UPDATE SET
-    expires_at = greatest(membership.expires_at, t) + p_days * 86400,
+    expires_at = greatest(membership.expires_at, paid_to) + p_days * 86400,
     cancelled_at = NULL, dunning_from = NULL, attempts = 0,
     card_brand = CASE WHEN membership.expires_at > t THEN membership.card_brand ELSE 'complimentary' END,
     updated_at = t
@@ -2191,20 +2208,21 @@ $fn$;
 REVOKE ALL ON FUNCTION admin_grant(uuid, uuid, integer) FROM PUBLIC, anon, authenticated;
 
 -- End free time now. A paid membership is not ended here: the processor
--- would go on charging for it, so that is done where it was bought.
+-- would go on charging for it, so that is done where it was bought. Free time
+-- alongside a Whop subscription can be ended; the paid time is untouched.
 CREATE OR REPLACE FUNCTION admin_end(p_actor uuid, p_user uuid)
 RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
 DECLARE t bigint := floor(extract(epoch FROM now()))::bigint;
 BEGIN
-  IF EXISTS (SELECT 1 FROM entitlement e JOIN auth.users u ON lower(u.email) = lower(e.email)
-             WHERE u.id = p_user AND e.status = 'active' AND e.expires_at > t) THEN
-    RETURN json_build_object('error', 'This one was paid for through Whop. Cancel it there, or it will go on charging.');
-  END IF;
   IF NOT EXISTS (SELECT 1 FROM membership WHERE user_id = p_user AND expires_at > t) THEN
+    IF EXISTS (SELECT 1 FROM entitlement e JOIN auth.users u ON lower(u.email) = lower(e.email)
+               WHERE u.id = p_user AND e.status = 'active' AND e.expires_at > t) THEN
+      RETURN json_build_object('error', 'This one was paid for through Whop. Cancel it there, or it will go on charging.');
+    END IF;
     RETURN json_build_object('error', 'That account has no membership running.');
   END IF;
   IF EXISTS (SELECT 1 FROM membership WHERE user_id = p_user AND coalesce(card_brand, '') <> 'complimentary') THEN
-    RETURN json_build_object('error', 'This one was paid for. Cancel it in Whop, or it will go on charging.');
+    RETURN json_build_object('error', 'This one was paid for by card. Ending it here would take time they paid for.');
   END IF;
   UPDATE membership SET expires_at = t, auto_renew = 0, updated_at = t WHERE user_id = p_user;
   INSERT INTO admin_log (at, actor, action, target, detail_json) VALUES (t, p_actor, 'end', p_user::text, NULL);
