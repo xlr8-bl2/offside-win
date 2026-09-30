@@ -133,6 +133,39 @@
   </div>
 </header>
 
+<!--
+  The cookie notice, placed before the page draws rather than after. On a
+  phone it is a band above the page, and put in after the first paint it
+  pushed everything down: a layout shift of 0.24 for every first visit, most
+  of the way to "poor" on its own. The words live here once; app.js
+  (cookieNotice) takes this same template when the notice is opened again
+  from the footer, and wires the buttons.
+-->
+<template id="cookie-tpl"><div class="cookie" id="cookie-notice" role="region" aria-labelledby="cookie-title">
+    <h2 class="cookie-title" id="cookie-title">Cookies and storage</h2>
+    <p class="cookie-text">We'd like to save pages on this device so the site opens instantly, and count
+       visits anonymously so we know what gets read. No adverts, and nothing that follows you around the web.</p>
+    <div class="cookie-options" id="cookie-options" hidden>
+      <div data-consent-rows></div>
+      <button class="btn btn-primary btn-sm cookie-save" data-consent-save>Save my choices</button>
+    </div>
+    <div class="cookie-actions">
+      <button class="btn btn-sm" data-consent="declined">Reject all</button>
+      <button class="btn btn-sm" data-consent="accepted">Accept all</button>
+    </div>
+    <div class="cookie-foot">
+      <button type="button" class="cookie-more" aria-expanded="false" aria-controls="cookie-options">Choose what to allow</button>
+      <a href="#/legal/cookies">Cookie policy</a>
+    </div>
+</div></template>
+<script>(function () {
+  // No answer stored and no Global Privacy Control signal: the notice goes in now, before the page is drawn.
+  try { if (localStorage.getItem('ow.consent')) return; } catch (e) { /* private mode: ask */ }
+  if (navigator.globalPrivacyControl) return;
+  var t = document.getElementById('cookie-tpl');
+  if (t) document.body.appendChild(t.content.cloneNode(true));
+})();</script>
+
 <!-- A skeleton of the page, not a word: what shows for the fraction of a
      second before the script has anything, on a first visit only. After that
      the last copy of every page is kept in the browser and paints at once. -->

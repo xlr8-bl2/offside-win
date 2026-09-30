@@ -1289,7 +1289,10 @@ function freeBandHTML(free, hero) {
 }
 
 function heroHTML(hero = null, venueIds = [], detail = null, free = null, row = null) {
-  const queue = hero?.venue_id ? [hero.venue_id, ...venueIds] : [].concat(venueIds).filter(Boolean);
+  // The ground the engine found a photograph for goes first (shot_venue_id,
+  // engine/src/slate.ts), so the page does not walk the list to find one.
+  const queue = hero?.shot_venue_id ? [hero.shot_venue_id, hero.venue_id, ...venueIds].filter(Boolean)
+    : hero?.venue_id ? [hero.venue_id, ...venueIds] : [].concat(venueIds).filter(Boolean);
 
   // A hero answer without a fixture is the day with no headline; the free
   // call, if there is one, still goes on the masthead.
@@ -1349,7 +1352,7 @@ function heroHTML(hero = null, venueIds = [], detail = null, free = null, row = 
           <a class="btn btn-ghost" href="#/board">Today's calls</a>
         </div>
       </div>
-      ${matchCentreHTML(hero, detail)}
+      ${detail ? matchCentreHTML(hero, detail) : '<aside class="matchcentre mc-wait" aria-hidden="true"></aside>'}
     </div>
   </section>`;
 }
@@ -2387,9 +2390,15 @@ async function viewHome() {
     const heroId = state.hero.fixture_id;
     detailReq.then((d) => {
       const inner = app.querySelector('.hero .hero-inner');
-      if (!d || !inner || state.hero?.fixture_id !== heroId || inner.querySelector('.matchcentre')) return;
+      // The space was kept for it (the mc-wait box, its usual height): put in
+      // after the first paint, it pushed everything under the masthead down
+      // by four hundred pixels on a phone, a layout shift of 0.165.
+      const wait = inner?.querySelector('.mc-wait');
+      if (!inner || state.hero?.fixture_id !== heroId || (inner.querySelector('.matchcentre') && !wait)) return;
+      if (!d) { wait?.remove(); return; }
       state.heroDetail = d;
-      inner.insertAdjacentHTML('beforeend', matchCentreHTML(state.hero, d));
+      if (wait) wait.outerHTML = matchCentreHTML(state.hero, d);
+      else inner.insertAdjacentHTML('beforeend', matchCentreHTML(state.hero, d));
       tickCountdowns();
     });
   }
@@ -7345,7 +7354,9 @@ function reserveForNotice() {
   const el = document.getElementById('cookie-notice');
   if (!el) { document.body.style.paddingBottom = ''; return; }
   if (getComputedStyle(el).position !== 'fixed') { document.body.style.paddingBottom = ''; return; }
-  const gap = el.getBoundingClientRect().height + 24;
+  // On top of the offer bar's own room, when there is one.
+  const bar = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--pb-h')) || 0;
+  const gap = el.getBoundingClientRect().height + 24 + bar;
   document.body.style.paddingBottom = `${Math.ceil(gap)}px`;
 }
 
@@ -7379,29 +7390,25 @@ function choiceFrom(root) {
 }
 
 function cookieNotice({ force = false } = {}) {
-  if (readConsent() && !force) return;
-  document.getElementById('cookie-notice')?.remove();
-  const el = document.createElement('div');
-  el.className = 'cookie';
-  el.id = 'cookie-notice';
-  el.setAttribute('role', 'region');
-  el.setAttribute('aria-labelledby', 'cookie-title');
-  el.innerHTML = `
-    <h2 class="cookie-title" id="cookie-title">Cookies and storage</h2>
-    <p class="cookie-text">We'd like to save pages on this device so the site opens instantly, and count
-       visits anonymously so we know what gets read. No adverts, and nothing that follows you around the web.</p>
-    <div class="cookie-options" id="cookie-options" hidden>
-      ${consentRows('cn')}
-      <button class="btn btn-primary btn-sm cookie-save" data-consent-save>Save my choices</button>
-    </div>
-    <div class="cookie-actions">
-      <button class="btn btn-sm" data-consent="declined">Reject all</button>
-      <button class="btn btn-sm" data-consent="accepted">Accept all</button>
-    </div>
-    <div class="cookie-foot">
-      <button type="button" class="cookie-more" aria-expanded="false" aria-controls="cookie-options">Choose what to allow</button>
-      <a href="#/legal/cookies">Cookie policy</a>
-    </div>`;
+  if (readConsent() && !force) { document.getElementById('cookie-notice')?.remove(); return; }
+  /*
+   * The notice itself is a template in index.html, and on a first visit it is
+   * already on the page: an inline script there puts it in before the first
+   * paint, so it never pushes the page down. Here it is only wired up, or put
+   * back when the reader opens it again from the footer.
+   */
+  let el = document.getElementById('cookie-notice');
+  if (force || !el) {
+    el?.remove();
+    const tpl = document.getElementById('cookie-tpl');
+    if (!tpl) return;
+    el = tpl.content.firstElementChild.cloneNode(true);
+    document.body.insertBefore(el, app);
+  }
+  if (el.dataset.wired) { reserveForNotice(); return; }
+  el.dataset.wired = '1';
+  const rows = el.querySelector('[data-consent-rows]');
+  if (rows) rows.outerHTML = consentRows('cn');
   const more = el.querySelector('.cookie-more');
   more.onclick = () => {
     const box = el.querySelector('#cookie-options');
@@ -7415,14 +7422,6 @@ function cookieNotice({ force = false } = {}) {
     if (t?.dataset?.consent) applyConsent(t.dataset.consent);
     else if (t?.hasAttribute?.('data-consent-save')) applyConsent(choiceFrom(el));
   });
-  /*
-   * In the document, above the page, rather than appended to the end of the
-   * body. Where it floats (wide screens) the position in the DOM makes no
-   * difference; where it does not (phones) it has to be in the flow, and it
-   * has to be somewhere a reader will actually see it. Directly under the
-   * header is both.
-   */
-  document.body.insertBefore(el, app);
   reserveForNotice();
   addEventListener('resize', reserveForNotice);
 }
@@ -8236,6 +8235,20 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
  */
 (async () => {
   let signedInJustNow = false;
+  /*
+   * The first page of a visit waits, briefly, for the faces. They are
+   * preloaded and nearly always land with the script, so this usually costs
+   * nothing; when they are late, text drawn in the fallback rewraps when the
+   * real face arrives (the display face is very condensed) and the page under
+   * it moves. The skeleton shows meanwhile, and after half a second the page
+   * draws regardless.
+   */
+  const faces = document.fonts?.load
+    ? Promise.race([
+      Promise.all([document.fonts.load('700 1em "Big Shoulders Display"'), document.fonts.load('400 1em Geist')]),
+      new Promise((ok) => setTimeout(ok, 500)),
+    ]).catch(() => {})
+    : Promise.resolve();
   // Back from Google: say what is happening while the session is started,
   // rather than a blank page for the second it takes.
   if (isGoogleReturn()) {
@@ -8281,6 +8294,7 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
     const intent = takeIntent();
     if (intent?.startsWith('buy')) {
       location.hash = '#/pricing';
+      await faces;
       await route();
       await startCheckout(intent.split(':')[1] || 'monthly', intent.split(':')[2] || null);
       health();
@@ -8290,6 +8304,7 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
     }
     if (intent && intent.startsWith('#/')) location.hash = intent;
   }
+  await faces;
   await route();
   smartQuotes(document.querySelector('footer'));
   crawlable(document.querySelector('header'));

@@ -1164,6 +1164,7 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
   // on — a quiet Tuesday still needs a masthead, it just gets a quieter one.
   const hero = chooseHero(heroCandidates);
   if (hero) {
+    hero.shot_venue_id = await firstVenuePhoto([hero.venue_id, ...heroCandidates.map((c) => c.venue_id)]);
     await kvSetJSON('hero:today', hero);
     console.log(`  hero: ${hero.kicker} — ${hero.headline} (${hero.reason})`);
   } else {
@@ -1261,6 +1262,30 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
  * the prices, our probabilities, the provider's and the result are the lab's
  * whole history, and this used to delete them every week.
  */
+/**
+ * The first of these grounds with a real photograph, in order. The image
+ * service answers a ground it has no picture of with a blank of 70 bytes, so
+ * anything much bigger is a photograph. Checked here, a few requests every
+ * fifteen minutes, rather than by every visitor's phone one request at a time.
+ * Null when none has one or the service cannot be reached: the page then
+ * falls back to trying them itself.
+ */
+export async function firstVenuePhoto(ids: Array<number | null | undefined>, fetcher: typeof fetch = fetch): Promise<number | null> {
+  const seen = new Set<number>();
+  for (const id of ids) {
+    if (!Number.isFinite(id) || seen.has(id as number)) continue;
+    seen.add(id as number);
+    if (seen.size > 14) break;
+    try {
+      const res = await fetcher(new URL(`/img/venue/${id}/`, config.bsd.base), { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) continue;
+      const bytes = (await res.arrayBuffer()).byteLength;
+      if (bytes > 1000) return id as number;
+    } catch { /* unreachable: try the next, or give up quietly */ }
+  }
+  return null;
+}
+
 export async function pruneBoard(): Promise<void> {
   const cutoff = Math.floor(Date.now() / 1000) - 7 * 86400;
   await archiveSnapshots(cutoff);

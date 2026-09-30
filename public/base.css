@@ -130,6 +130,8 @@ html {
 
 body {
   margin: 0;
+  /* Room under the last line for the offer bar, which sits over the foot of the screen. */
+  padding-bottom: var(--pb-h);
   background: var(--pitch);
   color: var(--chalk);
   font-family: var(--body);
