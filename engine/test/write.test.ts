@@ -210,3 +210,44 @@ test('a provider failure falls back rather than throwing', async () => {
   assert.equal(r.text, null);
   assert.deepEqual(r.rejections, ['error']);
 });
+
+/* ------------------------------------------- numbers that are not claims */
+
+test('football talk is not a statistic: top four, ten men, 90 minutes, a six-pointer', () => {
+  const draft = 'KFUM Oslo travel badly, and nobody down there is thinking about the top four. The new manager '
+    + 'has had four games in charge and the away days still look like a side playing with ten men. Sarpsborg '
+    + 'have lost two of their last six, but this is a six-pointer at home and they will fancy it for 90 minutes. '
+    + 'A back four that has been shaky will be tested, not broken.';
+  assert.deepEqual(validate(draft, REQ), []);
+});
+
+test('a number in a club\'s name is not an invented one', () => {
+  // Sarpsborg 08: the 08 was being read as a statistic nobody gave.
+  const draft = 'Sarpsborg 08 have lost two of their last six and they are not flying, but they are at home. '
+    + 'KFUM Oslo travel badly, and a manager four games into the job has not fixed that. Sarpsborg 08 '
+    + 'only need to avoid defeat here, and against a side this poor on the road that is the least of it.';
+  assert.deepEqual(validate(draft, REQ), []);
+});
+
+test('one bad sentence is cut, and the rest stands when it is long enough', async () => {
+  const draft = 'PREVIEW: KFUM Oslo travel badly, and that is the whole story here. They have lost seven away games on the bounce. '
+    + 'The new manager has had four games in charge and nothing on the road has changed yet. Sarpsborg have lost two '
+    + 'of their last six, so nobody is claiming they are flying, and they do not need to be. At home against a side '
+    + 'this poor on its travels, avoiding defeat should be the floor rather than the ceiling for them tonight.';
+  let calls = 0;
+  const r = await write(REQ, stub(() => { calls++; return draft; }));
+  assert.equal(calls, 1, 'no second request for a draft that could be mended');
+  assert.ok(r.text);
+  assert.ok(!/seven/.test(r.text!), 'the invented claim is gone');
+  assert.match(r.text!, /four games in charge/);
+  assert.deepEqual(r.unbacked, ['seven']);
+});
+
+test('the retry is told which numbers to leave out', async () => {
+  const prompts: string[] = [];
+  const short = 'PREVIEW: KFUM Oslo have lost seven of their last eight. That is all.';
+  await write(REQ, { name: 'stub', generate: async (p) => { prompts.push(p); return short; } });
+  assert.equal(prompts.length, 2);
+  assert.ok(!prompts[0]!.includes('Your last draft'));
+  assert.match(prompts[1]!, /Your last draft used "seven", "eight", which are not in the facts/);
+});
