@@ -1,3 +1,4 @@
+import { config } from './config.ts';
 import { exec, select } from './store.ts';
 import { settleSelection } from './settle.ts';
 import type { MarketCode, Outcome } from './types.ts';
@@ -157,11 +158,14 @@ export async function refreshSlip(now = Math.floor(Date.now() / 1000)): Promise<
      FROM pick p JOIN fixture f ON f.id = p.fixture_id
      LEFT JOIN league l ON l.id = f.league_id
      WHERE p.kind = 'CONFIDENT' AND p.settled_at IS NULL
-       AND p.kickoff > ? AND p.kickoff < ?`,
+       AND p.kickoff > ? AND p.kickoff < ?
+       AND p.model_prob >= ?`,
     // The next day only. It was the next two days, so a slip that locked on
     // a Friday evening could have its last leg on Sunday, stay open until
     // then, and stop Saturday's slip being built at all.
-    [now + 15 * 60, now + 24 * 3600],
+    // Never a lean (a marquee game answered under the normal bar, which the
+    // page frames as a read on a tight game): every leg of a slip has to land.
+    [now + 15 * 60, now + 24 * 3600, config.confident.floor],
   );
   const slip = buildSlip(rows.map((r) => ({
     fixture_id: Number(r.fixture_id), kickoff: Number(r.kickoff), home: r.home_team, away: r.away_team,
