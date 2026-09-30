@@ -96,6 +96,40 @@ export async function runSlices(rows: HistRow[]): Promise<void> {
   split('a side new to the division', leagueRows.filter((r) => fresh.has(r.id)));
   split('neither side new', leagueRows.filter((r) => !fresh.has(r.id)));
 
+  // A favourite on a winning run. Brighton 3-0 Arsenal (19 September 2026):
+  // Arsenal had won seven straight, and backers are said to overrate a run.
+  // The run is counted over each side's last five finished matches in any
+  // competition, before kick-off.
+  const runs = await select<{ id: number; hw: number; hn: number; aw: number; an: number }>(
+    `SELECT m.id,
+            (SELECT count(*) FILTER (WHERE (p.home_team_id = m.home_team_id AND p.home_goals > p.away_goals)
+                                        OR (p.away_team_id = m.home_team_id AND p.away_goals > p.home_goals))
+               FROM (SELECT * FROM match p WHERE (p.home_team_id = m.home_team_id OR p.away_team_id = m.home_team_id)
+                       AND p.kickoff < m.kickoff AND p.home_goals IS NOT NULL ORDER BY p.kickoff DESC LIMIT 5) p)::int AS hw,
+            (SELECT count(*) FROM (SELECT 1 FROM match p WHERE (p.home_team_id = m.home_team_id OR p.away_team_id = m.home_team_id)
+                       AND p.kickoff < m.kickoff AND p.home_goals IS NOT NULL ORDER BY p.kickoff DESC LIMIT 5) p)::int AS hn,
+            (SELECT count(*) FILTER (WHERE (p.home_team_id = m.away_team_id AND p.home_goals > p.away_goals)
+                                        OR (p.away_team_id = m.away_team_id AND p.away_goals > p.home_goals))
+               FROM (SELECT * FROM match p WHERE (p.home_team_id = m.away_team_id OR p.away_team_id = m.away_team_id)
+                       AND p.kickoff < m.kickoff AND p.home_goals IS NOT NULL ORDER BY p.kickoff DESC LIMIT 5) p)::int AS aw,
+            (SELECT count(*) FROM (SELECT 1 FROM match p WHERE (p.home_team_id = m.away_team_id OR p.away_team_id = m.away_team_id)
+                       AND p.kickoff < m.kickoff AND p.home_goals IS NOT NULL ORDER BY p.kickoff DESC LIMIT 5) p)::int AS an
+       FROM match m WHERE m.id = ANY(?)`,
+    [rows.map((r) => r.id)],
+  );
+  const runOf = new Map(runs.map((x) => [Number(x.id), x]));
+  const favOnRun = (r: HistRow): boolean | null => {
+    const res = r.markets.find((m) => m.market === '1x2' && m.line === null);
+    const x = runOf.get(r.id);
+    if (!res || !x) return null;
+    const home = (res.book['HOME'] ?? 0) >= (res.book['AWAY'] ?? 0);
+    return home ? Number(x.hn) === 5 && Number(x.hw) === 5 : Number(x.an) === 5 && Number(x.aw) === 5;
+  };
+  const known = rows.filter((r) => favOnRun(r) !== null);
+  console.log(`\nFavourite on a winning run (won its last five), all competitions: ${known.filter((r) => favOnRun(r)).length} of ${known.length} fixtures`);
+  split('favourite won last five', known.filter((r) => favOnRun(r)));
+  split('favourite otherwise', known.filter((r) => !favOnRun(r)));
+
   for (const [slice, rs] of [...bySlice].sort((a, b) => b[1].length - a[1].length)) {
     console.log(`\n== ${slice}: ${rs.length} fixtures`);
     for (const w of [0, 0.5]) {
