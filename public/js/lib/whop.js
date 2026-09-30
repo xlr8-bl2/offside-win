@@ -51,16 +51,27 @@ export async function openCheckout({ checkout, returnUrl, title, onPaid }) {
   document.documentElement.classList.add('pay-open');
 
   let handle = null;
+  const before = document.activeElement;
   const close = () => {
+    if (!sheet.isConnected) return;
     try { handle?.destroy(); } catch { /* already gone */ }
     sheet.remove();
     document.documentElement.classList.remove('pay-open');
     document.removeEventListener('keydown', onKey);
+    removeEventListener('hashchange', close);
+    removeEventListener('popstate', close);
+    // Back to the button that opened it, if it is still on the page.
+    if (before?.isConnected) before.focus({ preventScroll: true });
   };
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   sheet.querySelector('.pay-close').onclick = close;
   sheet.addEventListener('click', (e) => { if (e.target === sheet) close(); });
   document.addEventListener('keydown', onKey);
+  // Back, or any move of page, takes the sheet with the page it was opened on.
+  addEventListener('hashchange', close);
+  addEventListener('popstate', close);
+  // The keyboard starts in the sheet, not on the page dimmed behind it.
+  sheet.querySelector('.pay-close').focus({ preventScroll: true });
 
   try {
     const WhopElements = await loadElements();
