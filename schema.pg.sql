@@ -470,6 +470,10 @@ CREATE TABLE IF NOT EXISTS entitlement (
 -- Where the buyer manages a membership sold through Whop (cancel, change
 -- plan): Whop's own page for it, from the membership's `manage_url`.
 ALTER TABLE entitlement ADD COLUMN IF NOT EXISTS manage_url text;
+-- When the reader stopped a Whop membership renewing from our account page
+-- (the Worker has already told Whop to end it at its period end). Cleared by
+-- the next genuine renewal, which can only come if it was switched back on.
+ALTER TABLE entitlement ADD COLUMN IF NOT EXISTS renew_stopped_at bigint;
 
 -- Every processor reference an entitlement has been granted from, so a grant
 -- is applied once however many times it is replayed. The entitlement row only
@@ -883,6 +887,8 @@ BEGIN
     expires_at = CASE WHEN entitlement.status <> 'active' THEN excluded.expires_at
                       ELSE greatest(entitlement.expires_at, excluded.expires_at) END,
     source_ref = coalesce(excluded.source_ref, entitlement.source_ref),
+    -- A later period means it renewed, so it is renewing again.
+    renew_stopped_at = CASE WHEN excluded.expires_at > entitlement.expires_at THEN NULL ELSE entitlement.renew_stopped_at END,
     status = 'active', updated_at = v_now;
   IF p_ref IS NOT NULL THEN
     INSERT INTO entitlement_grant (ref, email, plan_id, created_at)
@@ -891,6 +897,17 @@ BEGIN
   RETURN json_build_object('applied', true, 'expires_at', v_until);
 END;
 $fn$;
+
+-- The reader stopped their Whop membership renewing from our account page;
+-- the Worker has already told Whop. Service role only.
+CREATE OR REPLACE FUNCTION stop_entitlement_renewal(p_email text)
+RETURNS json LANGUAGE sql VOLATILE SECURITY INVOKER SET search_path = public AS $fn$
+  UPDATE entitlement SET renew_stopped_at = floor(extract(epoch FROM now()))::bigint,
+                         updated_at = floor(extract(epoch FROM now()))::bigint
+   WHERE lower(email) = lower(p_email) AND status = 'active' AND renew_stopped_at IS NULL;
+  SELECT json_build_object('ok', true);
+$fn$;
+REVOKE ALL ON FUNCTION stop_entitlement_renewal(text) FROM PUBLIC, anon, authenticated;
 
 -- End an entitlement: the processor says the membership is no longer valid.
 CREATE OR REPLACE FUNCTION revoke_entitlement(p_email text, p_status text)
@@ -938,28 +955,37 @@ $fn$;
 -- list rather than an error -- the page redirects to sign-in on its own.
 CREATE OR REPLACE FUNCTION get_account()
 RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  WITH live AS (
+    SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4, 'card'::text AS via, NULL::text AS manage_url
+      FROM membership WHERE user_id = auth.uid() AND expires_at > floor(extract(epoch FROM now()))::bigint
+    UNION ALL
+    SELECT plan_id, expires_at,
+           CASE WHEN renew_stopped_at IS NULL AND plan_id <> 'matchday' THEN 1 ELSE 0 END AS auto_renew,
+           renew_stopped_at AS cancelled_at, source AS card_brand, NULL::text AS card_last4, source AS via, manage_url
+      FROM entitlement
+     WHERE auth.email() IS NOT NULL AND lower(email) = lower(auth.email()) AND status = 'active'
+       AND expires_at > floor(extract(epoch FROM now()))::bigint
+  )
   SELECT json_build_object(
            'email', auth.email(),
-           -- The card-based membership, or the email entitlement from a
-           -- processor that runs its own accounts, whichever is live longer.
+           -- Whichever live membership runs longest (a complimentary grant and a
+           -- Whop subscription can both be live); else the lapsed card one, so
+           -- the page can say when it ended.
            'membership', coalesce(
-             (SELECT to_json(m) FROM (
-                SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4, 'card' AS via
-                FROM membership WHERE user_id = auth.uid()
-                  AND expires_at > floor(extract(epoch FROM now()))::bigint
-              ) m),
-             (SELECT to_json(e) FROM (
-                SELECT plan_id, expires_at, 0 AS auto_renew, NULL::bigint AS cancelled_at,
-                       source AS card_brand, NULL::text AS card_last4, source AS via, manage_url
-                FROM entitlement
-                WHERE auth.email() IS NOT NULL AND lower(email) = lower(auth.email()) AND status = 'active'
-                  AND expires_at > floor(extract(epoch FROM now()))::bigint
-              ) e),
+             (SELECT to_json(l) FROM (SELECT * FROM live ORDER BY expires_at DESC LIMIT 1) l),
              (SELECT to_json(m) FROM (
                 SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4, 'card' AS via
                 FROM membership WHERE user_id = auth.uid()
               ) m)
            ),
+           -- A Whop subscription that will take money again, whichever
+           -- membership is shown: the page must always offer to stop it.
+           'whop', (SELECT json_build_object('renewing', true, 'manage_url', manage_url, 'until', expires_at)
+                      FROM entitlement
+                     WHERE auth.email() IS NOT NULL AND lower(email) = lower(auth.email()) AND status = 'active'
+                       AND source = 'whop' AND plan_id <> 'matchday' AND renew_stopped_at IS NULL
+                       AND expires_at > floor(extract(epoch FROM now()))::bigint
+                     LIMIT 1),
            'receipts', coalesce((
              SELECT json_agg(r) FROM (
                SELECT created_at, plan_id, amount_minor, currency, status
@@ -1089,12 +1115,19 @@ $fn$;
 -- (which has already checked the caller's token and runs with the service
 -- key). Payment records stay, without the processor's payload: tax law
 -- requires the records, and the privacy policy says so. SECURITY INVOKER and no grant, so the public key cannot call it.
-CREATE OR REPLACE FUNCTION delete_account_data(p_user uuid)
+-- Deleting an account. The Worker has already stopped any Whop renewal
+-- (worker/src/account.ts), so the entitlement goes with the email on it; the
+-- grant ledger keeps its references (so a sweep cannot grant the same
+-- period again) with the address taken off.
+DROP FUNCTION IF EXISTS delete_account_data(uuid);
+CREATE OR REPLACE FUNCTION delete_account_data(p_user uuid, p_email text DEFAULT NULL)
 RETURNS void LANGUAGE sql VOLATILE SET search_path = public AS $fn$
   DELETE FROM follow WHERE user_id = p_user;
   DELETE FROM profile WHERE user_id = p_user;
   DELETE FROM payment_method WHERE user_id = p_user;
   DELETE FROM membership WHERE user_id = p_user;
+  DELETE FROM entitlement WHERE p_email IS NOT NULL AND lower(email) = lower(p_email);
+  UPDATE entitlement_grant SET email = 'deleted' WHERE p_email IS NOT NULL AND lower(email) = lower(p_email);
   -- The records stay, for tax; the processor's raw payload goes, because it
   -- can carry the email address and the privacy policy promises it will not.
   UPDATE payment SET raw_json = '{"redacted": true}' WHERE user_id = p_user;
@@ -1876,7 +1909,7 @@ GRANT EXECUTE ON FUNCTION record_consent(text, text) TO anon, authenticated;
 
 
 GRANT EXECUTE ON FUNCTION set_follow(text, bigint, text, boolean) TO anon, authenticated;
-REVOKE ALL ON FUNCTION delete_account_data(uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION delete_account_data(uuid, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint) TO anon;
 GRANT EXECUTE ON FUNCTION board_card(fixture, boolean) TO anon;
 GRANT EXECUTE ON FUNCTION fold(text) TO anon;

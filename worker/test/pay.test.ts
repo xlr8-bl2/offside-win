@@ -687,3 +687,56 @@ test('the card form charges a deal at the deal price', async () => {
   assert.ok(pay, 'charged');
   assert.equal((pay!.body as any).plan.renewal_price, 4.99);
 });
+
+/* ---- Whop subscriptions: stopping and deleting ---- */
+
+const WHOP_SUB = { ...ENV, PAY_PROVIDER: 'whop', WHOP_WEBHOOK_SECRET: 'ws_x', WHOP_API_KEY: 'whop-key', WHOP_COMPANY_ID: 'biz_1' };
+const whopRoute = (opts: { renewing: boolean; cancelStatus?: number }) => (url: string) => {
+  if (url.includes('/auth/v1/user')) return new Response(JSON.stringify({ id: '11111111-1111-1111-1111-111111111111', email: 'fan@example.com' }), { status: 200 });
+  if (url.includes('/rpc/get_account')) return new Response(JSON.stringify({ whop: opts.renewing ? { renewing: true, manage_url: 'https://whop.com/hub/m' } : null }), { status: 200 });
+  if (url.includes('api.whop.com/api/v1/memberships?')) return new Response(JSON.stringify({ data: [{ id: 'mem_1', status: 'active', metadata: { user_id: '11111111-1111-1111-1111-111111111111' } }] }), { status: 200 });
+  if (url.includes('api.whop.com') && url.includes('mem_1')) return new Response('{}', { status: opts.cancelStatus ?? 200 });
+  if (url.includes('/rpc/')) return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  if (url.includes('/auth/v1/admin/users/')) return new Response(null, { status: 200 });
+  return new Response('{}', { status: 200 });
+};
+
+test('stopping a Whop subscription tells Whop, then marks it; our own flag alone would leave it charging', async () => {
+  route = whopRoute({ renewing: true });
+  const res = await renewal(post('/api/pay/renewal', { auto_renew: false }), WHOP_SUB, 'jwt');
+  assert.equal(res.status, 200);
+  assert.ok(sent.some((s) => s.url.includes('api.whop.com') && s.url.includes('mem_1') && s.method !== 'GET'), 'Whop was told to stop it');
+  assert.ok(sent.some((s) => s.url.includes('/rpc/stop_entitlement_renewal')), 'and it is marked as not renewing');
+  assert.ok(!sent.some((s) => s.url.endsWith('/rest/v1/membership') && s.method === 'PATCH'), 'not the card path');
+});
+
+test('if Whop cannot be told, nothing is marked and the member is told it still renews', async () => {
+  route = whopRoute({ renewing: true, cancelStatus: 500 });
+  const res = await renewal(post('/api/pay/renewal', { auto_renew: false }), WHOP_SUB, 'jwt');
+  assert.equal(res.status, 503);
+  assert.ok(!sent.some((s) => s.url.includes('/rpc/stop_entitlement_renewal')));
+});
+
+test('turning a Whop subscription back on points to Whop rather than pretending', async () => {
+  route = whopRoute({ renewing: true });
+  const res = await renewal(post('/api/pay/renewal', { auto_renew: true }), WHOP_SUB, 'jwt');
+  assert.equal(res.status, 409);
+  assert.equal((await res.json() as any).manage_url, 'https://whop.com/hub/m');
+});
+
+test('deleting an account stops Whop billing first, and deletes nothing if it cannot', async () => {
+  const { deleteAccount } = await import('../src/account.ts');
+  route = whopRoute({ renewing: true, cancelStatus: 500 });
+  const refused = await deleteAccount(post('/api/account/delete', {}), WHOP_SUB, 'jwt');
+  assert.equal(refused.status, 503);
+  assert.ok(!sent.some((s) => s.url.includes('/rpc/delete_account_data')), 'nothing deleted');
+
+  sent = [];
+  route = whopRoute({ renewing: true });
+  const ok = await deleteAccount(post('/api/account/delete', {}), WHOP_SUB, 'jwt');
+  assert.equal(ok.status, 204);
+  const cancelAt = sent.findIndex((s) => s.url.includes('api.whop.com') && s.url.includes('mem_1') && s.method !== 'GET');
+  const delAt = sent.findIndex((s) => s.url.includes('/rpc/delete_account_data'));
+  assert.ok(cancelAt >= 0 && delAt > cancelAt, 'Whop is stopped before anything is removed');
+  assert.equal(sent[delAt]!.body.p_email, 'fan@example.com', 'the entitlement goes with the account');
+});

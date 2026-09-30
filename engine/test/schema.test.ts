@@ -121,7 +121,7 @@ test('migrate() sends whole statements, function bodies included', () => {
 // even a mistaken grant would run them as anon, which has no write privilege on
 // either table -- but "it would fail anyway" is not a reason to hand out the
 // call, so the absence of a grant is asserted instead.
-const PRIVATE_FUNCTIONS = new Set(['record_payment', 'revoke_membership', 'record_entitlement', 'revoke_entitlement', 'delete_account_data']);
+const PRIVATE_FUNCTIONS = new Set(['record_payment', 'revoke_membership', 'record_entitlement', 'revoke_entitlement', 'delete_account_data', 'stop_entitlement_renewal']);
 
 // The Worker's read path. The serving functions over the paid tables run as
 // their owner, because those tables grant the public roles nothing -- so each
