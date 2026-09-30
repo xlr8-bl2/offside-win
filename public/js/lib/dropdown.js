@@ -292,3 +292,5 @@ document.addEventListener('pointerdown', (e) => {
   if (openOne && !openOne.panel.contains(e.target) && !openOne.button.contains(e.target) && e.target !== openOne.scrim) close();
 }, true);
 addEventListener('hashchange', () => close());
+// Back from a match's own address (/match/…) fires only popstate.
+addEventListener('popstate', () => close());
