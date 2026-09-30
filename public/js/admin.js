@@ -379,7 +379,9 @@ function offerEditor(main, p, planRows) {
     kind: 'deal', audience: 'everyone', starts_at: now, ends_at: now + 3 * 86400,
     plan_id: planRows.find((x) => x.active && x.id !== 'matchday')?.id ?? '', ...p,
   };
-  const onSale = planRows.filter((x) => x.active);
+  // The plans on sale, plus this offer's own if it has since been taken off
+  // sale, so opening it to switch it off does not quietly move it to another.
+  const onSale = planRows.filter((x) => x.active || x.id === p.plan_id);
   main.innerHTML = `
     <a class="adm-back" href="#/admin/offers">All offers</a>
     <header class="adm-head"><h1>${p.id ? 'Edit offer' : 'New offer'}</h1></header>
@@ -391,7 +393,7 @@ function offerEditor(main, p, planRows) {
       <label class="adm-f"><span>Text</span><textarea name="body" maxlength="280" rows="3" placeholder="What they get, in a sentence.">${esc(v.body ?? '')}</textarea></label>
       <label class="adm-f"><span>Button</span><input name="cta" maxlength="30" value="${esc(v.cta ?? '')}" placeholder="Get the deal"></label>
       <div class="adm-two" data-for="deal trial">
-        <label class="adm-f"><span>Plan</span><select name="plan_id">${onSale.map((x) => `<option value="${esc(x.id)}"${x.id === v.plan_id ? ' selected' : ''}>${esc(x.name)}, ${money(x.amount_minor, x.currency)}</option>`).join('')}</select></label>
+        <label class="adm-f"><span>Plan</span><select name="plan_id">${onSale.map((x) => `<option value="${esc(x.id)}"${x.id === v.plan_id ? ' selected' : ''}>${esc(x.name)}, ${money(x.amount_minor, x.currency)}${x.active ? '' : ', off sale'}</option>`).join('')}</select></label>
         <label class="adm-f" data-for="deal"><span>Deal price (£)</span><input name="price" type="number" min="1" step="0.01" inputmode="decimal" value="${v.price_minor ? (v.price_minor / 100).toFixed(2) : ''}"></label>
         <label class="adm-f" data-for="trial"><span>Days free</span><input name="trial_days" type="number" min="1" max="60" inputmode="numeric" value="${esc(v.trial_days ?? 7)}"></label>
       </div>

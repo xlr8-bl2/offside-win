@@ -120,3 +120,22 @@ test('the offers running now are a public read', async () => {
   assert.match(dbCalls()[0]!.url, /\/rest\/v1\/rpc\/get_promos$/);
   assert.equal(dbCalls()[0]!.headers['authorization'], 'Bearer anon');
 });
+
+test('an offer with a price that is not whole pence is refused before the database', async () => {
+  const res = await call('/api/admin/promo', {
+    method: 'POST',
+    body: JSON.stringify({ kind: 'deal', title: 'Derby', plan_id: 'monthly', price_minor: '4.99', ends_at: 2_000_000_000 }),
+  });
+  assert.equal(res.status, 400);
+  assert.equal(dbCalls().length, 0);
+});
+
+test('an offer\'s numbers reach the database as numbers', async () => {
+  const res = await call('/api/admin/promo', {
+    method: 'POST',
+    body: JSON.stringify({ kind: 'trial', title: 'Try it', plan_id: 'monthly', trial_days: '7', ends_at: 2_000_000_000, active: true }),
+  });
+  assert.equal(res.status, 200);
+  const sent = JSON.parse(dbCalls()[0]!.body!);
+  assert.deepEqual(sent.p, { kind: 'trial', title: 'Try it', plan_id: 'monthly', trial_days: 7, ends_at: 2_000_000_000, active: 1 });
+});

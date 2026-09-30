@@ -5576,7 +5576,7 @@ async function afterSignIn() {
   if (intent?.startsWith('buy')) {
     history.replaceState(null, '', `${location.pathname}#/pricing`);
     await route();
-    await startCheckout(intent.split(':')[1] || 'monthly');
+    await startCheckout(intent.split(':')[1] || 'monthly', intent.split(':')[2] || null);
     headerAuth();
     return;
   }
@@ -5585,19 +5585,21 @@ async function afterSignIn() {
   headerAuth();
 }
 
-async function startCheckout(plan = 'monthly') {
+async function startCheckout(plan = 'monthly', promoId = null) {
   /*
    * Signed in first, always. The membership is attached to the account that
    * asked for it (its id travels with the payment), so whatever email the
    * buyer gives the card form, it lands on the right account. A reader who is
    * signed out is sent to sign in and comes straight back to this plan.
    */
+  // The offer the reader clicked, if any, goes with them through sign-in.
+  const promoQ = promoId ? `&promo=${encodeURIComponent(promoId)}` : '';
   if (!(await currentUser())) {
-    setIntent(`buy:${plan}`);
+    setIntent(`buy:${plan}${promoId ? `:${promoId}` : ''}`);
     location.hash = '#/signin';
     return;
   }
-  location.hash = `#/checkout?plan=${encodeURIComponent(plan)}`;
+  location.hash = `#/checkout?plan=${encodeURIComponent(plan)}${promoQ}`;
 }
 
 /**
@@ -5719,7 +5721,7 @@ async function viewPricing() {
   // A deal or a free trial on a plan, when one is running and this reader
   // may have it (js/lib/promo.js). Checkout finds the same one by the plan.
   const promo = Array.isArray(running) && running.length && !mine ? await import('./js/lib/promo.js').catch(() => null) : null;
-  const offerOn = (id) => (promo ? running.find((o) => o.plan_id === id && o.kind !== 'notice' && promo.eligible(o, { signedIn: !!user, member: false })) ?? null : null);
+  const offerOn = (id) => (promo ? running.find((o) => o.plan_id === id && o.kind !== 'notice' && promo.eligible(o, { signedIn: !!user, member: false, returning: !!account?.returning })) ?? null : null);
   if (promo && order0(plans).some((id) => offerOn(id))) promo.ensureStyles();
   // The free call is its own fixture, chosen by the slate: not the headline
   // match. Pointing this line at the headline sent readers to a locked call
@@ -5806,7 +5808,7 @@ async function viewPricing() {
             ? `<a class="btn btn-ghost btn-lg" href="#/account?tab=membership">Your plan</a>`
             : b.covered
               ? `<button class="btn btn-ghost btn-lg" type="button" disabled>${esc(b.label)}</button>`
-              : `<button class="btn ${b.quiet ? 'btn-ghost' : lead || !mine ? 'btn-accent' : 'btn-primary'} btn-lg" data-buy="${esc(id)}">${esc(o ? (o.cta || (o.kind === 'trial' ? 'Start the free days' : 'Get the deal')) : b.label)}</button>`}
+              : `<button class="btn ${b.quiet ? 'btn-ghost' : lead || !mine ? 'btn-accent' : 'btn-primary'} btn-lg" data-buy="${esc(id)}"${o ? ` data-promo="${esc(o.id)}"` : ''}>${esc(o ? (o.cta || (o.kind === 'trial' ? 'Start the free days' : 'Get the deal')) : b.label)}</button>`}
         </section>`;
       }).join('')}
     </div>
@@ -5857,7 +5859,7 @@ async function viewPricing() {
   </div>`;
 
   for (const b of app.querySelectorAll('[data-buy]')) {
-    b.onclick = () => startCheckout(b.dataset.buy);
+    b.onclick = () => startCheckout(b.dataset.buy, b.dataset.promo || null);
   }
   for (const c of app.querySelectorAll('.plan-clock')) promo?.mountClock(c, Number(c.dataset.ends), { compact: true, onEnd: () => route({ soft: true }) });
 }
@@ -5949,13 +5951,14 @@ function checkoutBlock(m, planId) {
  */
 async function viewCheckout(params) {
   const planId = /^[a-z0-9_-]{1,40}$/.test(params.get('plan') ?? '') ? params.get('plan') : 'monthly';
+  const promoId = /^[a-z0-9_-]{1,40}$/i.test(params.get('promo') ?? '') ? params.get('promo') : null;
   // A soft refresh (the header catching up on the account) must not wipe
   // half-typed card details by drawing the page again.
   if (state.soft && app.querySelector(`.checkout[data-plan="${planId}"]`)) return;
   placeholder(skeletonHTML());
 
   const user = await currentUser();
-  if (!user) { setIntent(`buy:${planId}`); goInstead('#/signin'); return; }
+  if (!user) { setIntent(`buy:${planId}${promoId ? `:${promoId}` : ''}`); goInstead('#/signin'); return; }
   const [plans, account, cfg] = await Promise.all([
     getJSON('/api/plans').catch(() => []),
     getJSON('/api/account', { fresh: true }).catch(() => null),
@@ -5988,7 +5991,7 @@ async function viewCheckout(params) {
   // A deal or a free trial running on this plan (js/lib/promo.js). Only its
   // id goes with the payment; the Worker checks it and sets the price.
   const promo = moving || block ? null : await import('./js/lib/promo.js').catch(() => null);
-  const offer = promo ? await promo.offerForPlan(planId, { signedIn: true, member: !!m }).catch(() => null) : null;
+  const offer = promo ? await promo.offerForPlan(planId, { signedIn: true, member: !!m, returning: !!account?.returning }, promoId).catch(() => null) : null;
   const trial = offer?.kind === 'trial' ? offer : null;
   const deal = offer?.kind === 'deal' ? offer : null;
   const amount = deal ? deal.price_minor : Number(plan.amount_minor);
@@ -7524,7 +7527,8 @@ async function schedulePromos() {
     const promo = await import('./js/lib/promo.js');
     const signedIn = !!state.user;
     const member = signedIn ? state.member !== false : false;
-    await promo.runPromos({ route: parseHash().parts[0] || 'home', signedIn, member, anchor: app, promos: running });
+    const returning = signedIn && !!state.account?.returning;
+    await promo.runPromos({ route: parseHash().parts[0] || 'home', signedIn, member, returning, anchor: app, promos: running });
   } catch { /* an offer is never worth an error */ }
 }
 
@@ -8070,7 +8074,7 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
     if (intent?.startsWith('buy')) {
       location.hash = '#/pricing';
       await route();
-      await startCheckout(intent.split(':')[1] || 'monthly');
+      await startCheckout(intent.split(':')[1] || 'monthly', intent.split(':')[2] || null);
       health();
       headerAuth();
       cookieNotice();
