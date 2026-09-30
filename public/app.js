@@ -5631,6 +5631,13 @@ async function openEmbeddedCheckout(plan, consent, promo) {
   location.href = out.link;
 }
 
+/** Where the payment happens when Whop's fields are not on our page. */
+function checkoutWhere(trial, moving) {
+  if (trial) return 'Whop\'s secure checkout opens over this page. It takes your card and charges nothing today.';
+  if (moving) return 'Whop\'s secure checkout opens over this page to keep your card for that date.';
+  return 'Whop\'s secure checkout opens over this page to take the payment.';
+}
+
 /** What the card form's heading says, per plan. */
 const PLAN_LINE = {
   matchday: 'Matchday pass: seven days, one payment',
@@ -5977,6 +5984,10 @@ async function viewCheckout(params) {
   const amount = deal ? deal.price_minor : Number(plan.amount_minor);
   const price = money(amount, plan.currency);
   if (offer) promo.ensureStyles();
+  // Whop's card fields go on this page only for a straight payment; a switch,
+  // a free trial or no account id all go through Whop's own checkout, so the
+  // fields' space is never drawn just to be taken away again.
+  const embedding = !moving && !block && !trial && !!cfg?.whopAccount;
 
   app.innerHTML = `
   <div class="wrap section checkout" data-plan="${esc(planId)}">
@@ -5999,18 +6010,6 @@ async function viewCheckout(params) {
         <p class="co-offer">Ends in <span class="co-clock" data-ends="${esc(deal.ends_at)}"></span></p>` : `
         <p class="co-price"><b>${esc(price)}</b> <span>${esc(terms.per)}</span></p>
         <p class="co-terms"><b>${esc(terms.runs)}</b> ${esc(terms.after)}</p>`}`}
-        <ul class="ticks co-ticks">
-          <li><b>Every open call</b> the moment it goes up</li>
-          <li><b>The bet slip's legs</b>, before the first one kicks off</li>
-          <li><b>Why this call</b> on every match</li>
-          <li>The board's filters by league and by day</li>
-        </ul>
-        <p class="co-small co-moves">Calls can change until kick-off, as we look at every match again every
-          fifteen minutes, and close when the match starts.</p>
-        <p class="co-who">It goes on the account you are signed in with:
-          <b>${esc(user.email ?? '')}</b></p>
-        <p class="co-small">If something of ours fails, you get it put right or your money back.
-          <a href="#/legal/refunds">How refunds work</a>.</p>
       </section>
 
       <section class="co-pay" aria-labelledby="co-pay-title">
@@ -6030,15 +6029,34 @@ async function viewCheckout(params) {
             <span>Start my ${esc(name.toLowerCase())} straight away. I understand that once it starts I lose my
               14-day right to cancel.</span></label>
         </fieldset>
-        <div class="co-fields">
+        ${embedding ? `
+        <div class="co-fields" aria-busy="true">
           <div id="co-email"></div>
-          <div id="co-payment"><p class="pay-wait">Loading the secure card form…</p></div>
+          <div id="co-payment"></div>
           <div id="co-branding"></div>
-        </div>
-        <button class="btn btn-accent btn-lg co-button" id="co-pay" type="button" disabled>${trial ? `Start the ${esc(trial.trial_days)} free days` : `Pay ${esc(price)}`}</button>
+          <div class="co-skel" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+        </div>` : `
+        <p class="co-info">${checkoutWhere(trial, moving)}</p>`}
+        <button class="btn btn-accent btn-lg co-button" id="co-pay" type="button" disabled>${trial ? `Start the ${esc(trial.trial_days)} free days` : moving ? 'Switch, nothing to pay today' : embedding ? `Pay ${esc(price)}` : 'Continue to payment'}</button>
+        <p class="co-need" aria-live="polite">Tick both boxes above to go on.</p>
         <p class="co-error" role="alert" hidden></p>
         <p class="co-note">${trial ? `By starting you agree to ${esc(money(plan.amount_minor, plan.currency))} ${esc(terms.per)} after the ${esc(trial.trial_days)} free days, until you cancel. ` : renews ? `By ${moving ? 'switching' : 'paying'} you agree to ${esc(price)} ${esc(terms.per)}${moving ? ` from ${esc(shortDate(moving.expires_at))}` : ''} until you cancel. ` : ''}Card details go
           straight to Whop, who take the payment. They never reach offside.win.</p>`}
+      </section>
+
+      <section class="co-details" aria-label="What a membership includes">
+        <ul class="ticks co-ticks">
+          <li><b>Every open call</b> the moment it goes up</li>
+          <li><b>The bet slip's legs</b>, before the first one kicks off</li>
+          <li><b>Why this call</b> on every match</li>
+          <li>The board's filters by league and by day</li>
+        </ul>
+        <p class="co-small co-moves">Calls can change until kick-off, as we look at every match again every
+          fifteen minutes, and close when the match starts.</p>
+        <p class="co-who">It goes on the account you are signed in with:
+          <b>${esc(user.email ?? '')}</b></p>
+        <p class="co-small">If something of ours fails, you get it put right or your money back.
+          <a href="#/legal/refunds">How refunds work</a>.</p>
       </section>
     </div>
   </div>`;
@@ -6047,10 +6065,12 @@ async function viewCheckout(params) {
 
   const button = app.querySelector('#co-pay');
   const errorLine = app.querySelector('.co-error');
+  const needLine = app.querySelector('.co-need');
   const say = (text) => { errorLine.textContent = text; errorLine.hidden = !text; };
   let complete = false;
   let working = null;
-  let embedded = false;
+  let embedded = !embedding;
+  let loaded = false;
   /*
    * Both boxes, every time. The second is the express request and the
    * acknowledgement the Consumer Contracts Regulations 2013 (reg. 37) ask for
@@ -6062,16 +6082,39 @@ async function viewCheckout(params) {
   const agreed = () => boxes.every((b) => b.checked);
   const consent = () => ({ adult: boxes[0].checked, waive: boxes[1].checked, terms: TERMS_VERSION });
   const ready = () => agreed() && (embedded || complete);
-  const idle = () => { working?.(); working = null; button.disabled = !ready(); };
-  for (const b of boxes) b.onchange = () => { if (!working) button.disabled = !ready(); };
+  /*
+   * The button and the line under it, from one place. A disabled button that
+   * says nothing about why is the commonest "it's broken" on a checkout, so
+   * the line always names the one thing still missing.
+   */
+  const need = () => {
+    const [adult, waive] = boxes.map((b) => b.checked);
+    if (!adult && !waive) return 'Tick both boxes above to go on.';
+    if (!adult) return 'Tick the box to say you are 18 or over.';
+    if (!waive) return `Tick the box to start the ${name.toLowerCase()} straight away.`;
+    if (embedded || complete) return '';
+    return loaded ? 'Now fill in your card details.' : 'The card form is loading.';
+  };
+  const sync = () => {
+    if (working) return;
+    button.disabled = !ready();
+    needLine.textContent = need();
+  };
+  const idle = () => { working?.(); working = null; sync(); };
+  for (const b of boxes) b.onchange = sync;
 
   // Whop's own checkout, when ours cannot take this payment: the same two
   // boxes first, then a button that opens it.
-  const fallback = async (why) => {
-    if (why) say(why);
+  const fallback = (note) => {
     embedded = true;
-    app.querySelector('.co-fields')?.remove();
-    button.textContent = 'Continue to payment';
+    const fields = app.querySelector('.co-fields');
+    if (fields) {
+      const info = document.createElement('p');
+      info.className = 'co-info';
+      info.textContent = note;
+      fields.replaceWith(info);
+    }
+    if (!moving && !trial) button.textContent = 'Continue to payment';
     button.onclick = async () => {
       if (working || !agreed()) return;
       say('');
@@ -6082,20 +6125,29 @@ async function viewCheckout(params) {
     idle();
   };
 
-  if (moving) {
-    await fallback();
-    button.textContent = 'Switch, nothing to pay today';
-    return;
-  }
-  // Free days are started in Whop's checkout, which takes the card and charges nothing today.
-  if (trial) {
-    await fallback();
-    button.textContent = `Start the ${trial.trial_days} free days`;
-    return;
-  }
-  if (!cfg?.whopAccount) { await fallback(); return; }
+  if (!embedding) { fallback(); return; }
+
+  // Whop's frames paint a moment after they are mounted. The placeholder holds
+  // their place until the card frame has loaded, so nothing jumps.
+  const fields = app.querySelector('.co-fields');
+  const shown = () => {
+    if (loaded) return;
+    loaded = true;
+    fields.classList.add('is-loaded');
+    fields.removeAttribute('aria-busy');
+    sync();
+  };
+  const watch = new MutationObserver(() => {
+    const frame = fields.querySelector('#co-payment iframe');
+    if (!frame) return;
+    watch.disconnect();
+    frame.addEventListener('load', () => setTimeout(shown, 200), { once: true });
+    setTimeout(shown, 4000);
+  });
+  watch.observe(fields, { childList: true, subtree: true });
+
   try {
-    state.payHandle = await mountPayment({
+    const handle = await mountPayment({
       accountId: cfg.whopAccount,
       currency: plan.currency,
       amount,
@@ -6103,12 +6155,16 @@ async function viewCheckout(params) {
       email: user.email,
       returnUrl: `${location.origin}/#/account?paid=1`,
       into: { email: '#co-email', payment: '#co-payment', branding: '#co-branding' },
-      onComplete: (ok) => { complete = ok; if (!working) button.disabled = !ready(); },
+      onComplete: (ok) => { complete = ok; sync(); },
     });
-    const wait = app.querySelector('#co-payment .pay-wait');
-    if (wait) wait.remove();
+    // The reader went somewhere else while Whop's script was on its way.
+    if (!button.isConnected) { handle.destroy(); return; }
+    state.payHandle = handle;
+    setTimeout(shown, 6000);
   } catch {
-    await fallback('The card form would not load here, so Whop\'s checkout has opened instead.');
+    watch.disconnect();
+    if (!button.isConnected) return;
+    fallback('The card form did not load on this page, so the payment is taken in Whop\'s secure checkout instead. It opens over this page.');
     return;
   }
 
@@ -6134,7 +6190,12 @@ async function viewCheckout(params) {
       if (out.status === 'pending' || out.status === 'processing') { paid(); return; }
       throw new Error('The payment did not go through. Nothing has been charged. Try again.');
     } catch (err) {
-      if (err?.data?.fallback) { await fallback(); return; }
+      if (err?.data?.fallback) {
+        working?.(); working = null;
+        state.payHandle?.destroy(); state.payHandle = null;
+        fallback('This payment is taken in Whop\'s secure checkout instead. Nothing has been charged. It opens over this page.');
+        return;
+      }
       say(err?.message ?? 'The payment did not go through. Nothing has been charged. Try again.');
       idle();
     }
