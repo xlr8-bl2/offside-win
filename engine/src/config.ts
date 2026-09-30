@@ -266,6 +266,15 @@ export const config = {
    */
   /** consensus.ts: how far the goals markets move from the market's rates toward our model's. */
   consensus: {
+    /**
+     * How far the goals markets move from the price's scoring rates toward
+     * our model's. lab:model (our ratings refitted week by week over 3,158
+     * fixtures): on its own our read is less accurate than the price on
+     * every family, and where the two disagree the price is the one that
+     * lands. None, a quarter and half all publish within noise of each other
+     * (a bootstrap over days puts them within a point of return either way),
+     * so the weight is left where it is rather than moved on noise.
+     */
     modelWeight: num('CONSENSUS_MODEL_WEIGHT', 0.5),
   },
 
@@ -407,6 +416,14 @@ export const config = {
      *
      * for about one call in twenty-five fewer. Null skips it. A call with no
      * opening price recorded is judged without it.
+     *
+     * Tightening it to zero (lab:model, 3,158 fixtures) lands about three
+     * points more on B and C, and less on A. Checked period by period, the
+     * drifted side is not a steady signal (options it drifted from by a point
+     * or more landed 2.2 under their price in A, 0.1 over in B, 1.3 over in C),
+     * so the gain is which matches fell where, and the limit stays at one
+     * point. Only the other side is steady: backed by a point or more landed
+     * 1 to 2.3 over its price in every period.
      */
     maxDrift: process.env.CONF_MAX_DRIFT ? Number(process.env.CONF_MAX_DRIFT) : (0.01 as number | null),
     /** Quarter handicap lines (-1.75, 0.25) are a split stake nobody can explain in a sentence. */
