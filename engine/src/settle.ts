@@ -5,6 +5,7 @@ import { isQuarterLine } from './price.ts';
 import { writeMissingReports } from './report.ts';
 import { exec, insertMany, kvSetJSON, select } from './store.ts';
 import { MARKET_FAMILY } from './types.ts';
+import { config } from './config.ts';
 import type { MarketCode, MarketFamily, Outcome } from './types.ts';
 
 /**
@@ -209,6 +210,22 @@ export async function backfillScores(): Promise<void> {
 }
 
 /**
+ * Whether the provider's status says the match is over.
+ *
+ * It was `/finish|ft|ended|after/`, and "halftime" contains "ft". On 19
+ * September 2026 a run of late kick-offs in MLS and the USL were graded
+ * against their half-time scores: New England 4-2 Orlando went down as "over
+ * 1.5 goals, missed" at 1-0, DC United 1-2 Charlotte the same at 0-1. Four
+ * published calls marked lost had won, and one marked won had lost. So the
+ * statuses that mean the end are named, and anything else waits.
+ */
+export function isFinishedStatus(status: string): boolean {
+  const s = status.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (/half|progress|live|1st|2nd|break|interrupt|delay|suspend|postpon|not_?started|scheduled/.test(s)) return false;
+  return /^(finished|ended|ft|full_?time|aet|ap|pen|after_(extra_?time|et|penalties|pen|ot|overtime)|finished_(aet|ap|pen|after_[a-z_]+))$/.test(s);
+}
+
+/**
  * Re-grade settled picks whose mark no longer matches the score.
  *
  * A pick is graded once, against whatever score was available three hours
@@ -228,7 +245,19 @@ export async function backfillScores(): Promise<void> {
  * every settlement, it is idempotent, and it moves the headline against us as
  * often as not -- which is the point.
  */
-export async function regradeSettled(limit = 500): Promise<number> {
+export async function regradeSettled(limit = 5000): Promise<number> {
+  // The fixture's copy of the score was written by settlement itself, so it
+  // agrees with a wrong grade by construction, and the fixture row is gone a
+  // week later. The match table is the finished-only record the nightly
+  // history job writes, so it wins where both have one, and the fixture's
+  // copy is brought into line with it.
+  if (config.dbBackend === 'postgres') await exec(
+    `UPDATE fixture SET home_goals = m.home_goals, away_goals = m.away_goals
+       FROM match m
+      WHERE m.id = fixture.id AND m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL
+        AND (fixture.home_goals IS DISTINCT FROM m.home_goals OR fixture.away_goals IS DISTINCT FROM m.away_goals)`,
+    [],
+  );
   const rows = await select<{
     id: number;
     market: MarketCode;
@@ -244,11 +273,15 @@ export async function regradeSettled(limit = 500): Promise<number> {
   }>(
     `SELECT p.id, p.market, p.outcome, p.line, p.odds, p.result,
             p.opening_odds, p.closing_odds, p.evidence_json,
-            f.home_goals, f.away_goals
-     FROM pick p JOIN fixture f ON f.id = p.fixture_id
+            CASE WHEN m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL THEN m.home_goals ELSE f.home_goals END AS home_goals,
+            CASE WHEN m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL THEN m.away_goals ELSE f.away_goals END AS away_goals
+     FROM pick p
+     LEFT JOIN match m ON m.id = p.fixture_id
+     LEFT JOIN fixture f ON f.id = p.fixture_id
      WHERE p.settled_at IS NOT NULL
        AND p.result IS NOT NULL
-       AND f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
+       AND ((m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL)
+            OR (f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL))
      ORDER BY p.kickoff DESC LIMIT ?`,
     [limit],
   );
@@ -429,7 +462,7 @@ export async function runSettle(): Promise<SettleReport> {
         voided.add(id);
         continue;
       }
-      if (hg === undefined || ag === undefined || !/finish|ft|ended|after/.test(status)) {
+      if (hg === undefined || ag === undefined || !isFinishedStatus(status)) {
         report.unresolved++;
         // Ids and the provider's status only: safe in a public log.
         unresolvedLog.push(`${id}:${status || 'no status'}`);
