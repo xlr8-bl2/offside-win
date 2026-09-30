@@ -28,10 +28,11 @@ import { cardImage, seoResponse, sitemap } from './seo.ts';
 import { bearer, jsonHeaders } from './http.ts';
 import { charge, checkout, confirm, payStatus, sweepWhop, renewal, webhook, type PayEnv } from './pay.ts';
 import { deleteAccount } from './account.ts';
+import { admin, type AdminEnv } from './admin.ts';
 import { fixtureChanges, liveList, liveMatch, type LiveEnv } from './live.ts';
 import { EDGE_PATHS, edgeCached } from './edge.ts';
 
-interface Env extends PayEnv, LiveEnv {
+interface Env extends PayEnv, LiveEnv, AdminEnv {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   GOOGLE_CLIENT_ID?: string;
@@ -167,6 +168,10 @@ const worker = {
       // vouches for it, and the service key does the removing. account.ts.
       if (path === '/api/account/delete') return await deleteAccount(request, env, jwt);
 
+      // The owner's dashboard. Its own gate: GoTrue, then the owner's email,
+      // then the service key. admin.ts.
+      if (path.startsWith('/api/admin/')) return await admin(request, env, jwt, path);
+
       // The write side. Kept together and kept POST-only: a payment route that
       // answers a GET is a payment route that can be triggered by a link.
       if (path.startsWith('/api/pay/') || path === '/api/account') {
@@ -226,6 +231,8 @@ const worker = {
       // slip are members-only, and get_slip decides that from the token.
       if (path === '/api/slip') return await passthrough(env, 'get_slip', {}, jwt);
       if (path === '/api/plans') return await passthrough(env, 'get_plans', {});
+      // The offers running now (a deal, a free trial, a notice). promo.js.
+      if (path === '/api/promos') return await passthrough(env, 'get_promos', {});
       return fail('not found', 404);
     } catch (err) {
       return fail(err instanceof Error ? err.message : 'internal error', 500);

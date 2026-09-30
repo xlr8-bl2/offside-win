@@ -51,6 +51,10 @@ PAY_PROVIDER = "whop"
 # id, not a secret. Empty until set: the checkout falls back to each plan's
 # own Whop link, and with none of those, says memberships are not open yet.
 WHOP_COMPANY_ID = "biz_u3qYuQLDjOpDZH"
+# The owner's dashboard (#/admin, worker/src/admin.ts): the SHA-256 of the
+# lower-cased email that may open it, comma-separated for more than one.
+# Only the hash is here; the address is not.
+ADMIN_EMAIL_SHA256 = "5a2087bbcb792ea743dd4e445fcef43ccb4818f37f5199981e3ec93d9ea26916"
 
 # Every ten minutes the Worker asks Whop for paid memberships and switches on
 # any the webhook missed (sweepWhop in src/pay.ts). The webhook is fast; this

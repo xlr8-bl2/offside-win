@@ -1931,3 +1931,368 @@ RETURNS void LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = public AS 
   ON CONFLICT (day, page) DO UPDATE SET n = page_view.n + 1;
 $fn$;
 GRANT EXECUTE ON FUNCTION record_view(text) TO anon, authenticated;
+
+-- ------------------------------------------------------------------ admin
+--
+-- The owner's dashboard (#/admin). Every function here is private: no grant
+-- to anon or authenticated, and the default EXECUTE that Postgres hands to
+-- PUBLIC is revoked, so the public key cannot call one however it asks. The
+-- Worker calls them holding the service key, and only after GoTrue has said
+-- whose token it is and that account's email is the owner's
+-- (worker/src/admin.ts). The acting account is passed in so every write
+-- lands in admin_log beside what it did.
+--
+-- SECURITY DEFINER because they read auth.users and the payment tables,
+-- which grant the public roles nothing.
+
+CREATE TABLE IF NOT EXISTS admin_log (
+  id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  at          bigint NOT NULL,
+  actor       uuid NOT NULL,
+  action      text NOT NULL,
+  target      text,
+  detail_json text
+);
+CREATE INDEX IF NOT EXISTS admin_log_at ON admin_log (at DESC);
+ALTER TABLE admin_log ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON admin_log FROM anon, authenticated;
+
+-- Offers the site shows: a deal (a plan at a lower price until a deadline), a
+-- free trial (days before the first charge, new members only), or a notice (a
+-- line across the site). Private, because a scheduled offer is not public
+-- until it starts; the live ones are served by get_promos().
+CREATE TABLE IF NOT EXISTS promo (
+  id          text PRIMARY KEY,
+  kind        text NOT NULL CHECK (kind IN ('deal', 'trial', 'notice')),
+  title       text NOT NULL,
+  body        text,
+  cta         text,
+  plan_id     text,
+  price_minor bigint CHECK (price_minor IS NULL OR price_minor > 0),
+  trial_days  integer CHECK (trial_days IS NULL OR trial_days BETWEEN 1 AND 60),
+  audience    text NOT NULL DEFAULT 'everyone' CHECK (audience IN ('everyone', 'signed_out', 'free')),
+  starts_at   bigint NOT NULL,
+  ends_at     bigint NOT NULL,
+  active      integer NOT NULL DEFAULT 1,
+  created_at  bigint NOT NULL,
+  updated_at  bigint NOT NULL
+);
+ALTER TABLE promo ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON promo FROM anon, authenticated;
+
+-- The offers running now, with the plan each one is for.
+CREATE OR REPLACE FUNCTION get_promos()
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  SELECT coalesce(json_agg(json_build_object(
+           'id', p.id, 'kind', p.kind, 'title', p.title, 'body', p.body, 'cta', p.cta,
+           'plan_id', p.plan_id, 'price_minor', p.price_minor, 'trial_days', p.trial_days,
+           'audience', p.audience, 'ends_at', p.ends_at,
+           'plan', CASE WHEN pl.id IS NULL THEN NULL ELSE json_build_object(
+             'id', pl.id, 'name', pl.name, 'days', pl.days, 'amount_minor', pl.amount_minor, 'currency', pl.currency) END
+         ) ORDER BY p.starts_at DESC), '[]'::json)
+  FROM promo p LEFT JOIN plan pl ON pl.id = p.plan_id AND pl.active = 1
+  WHERE p.active = 1
+    AND p.starts_at <= floor(extract(epoch FROM now()))::bigint
+    AND p.ends_at > floor(extract(epoch FROM now()))::bigint
+    AND (p.plan_id IS NULL OR pl.id IS NOT NULL);
+$fn$;
+GRANT EXECUTE ON FUNCTION get_promos() TO anon, authenticated;
+
+-- Every account with membership now, however it came: one row an account.
+CREATE OR REPLACE FUNCTION admin_live_members()
+RETURNS TABLE (email text, plan_id text, expires_at bigint, free boolean, via text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  WITH t AS (SELECT floor(extract(epoch FROM now()))::bigint AS now_),
+  rows_ AS (
+    SELECT lower(u.email) AS email, m.plan_id, m.expires_at, m.card_brand = 'complimentary' AS free, 'membership' AS via
+      FROM membership m JOIN auth.users u ON u.id = m.user_id, t WHERE m.expires_at > t.now_
+    UNION ALL
+    SELECT lower(e.email), e.plan_id, e.expires_at, false, e.source
+      FROM entitlement e, t WHERE e.status = 'active' AND e.expires_at > t.now_
+  )
+  SELECT DISTINCT ON (email) email, plan_id, expires_at, free, via FROM rows_ ORDER BY email, free, expires_at DESC;
+$fn$;
+REVOKE ALL ON FUNCTION admin_live_members() FROM PUBLIC, anon, authenticated;
+
+-- The front page of the dashboard: members, money, visits, calls, and
+-- whether the engine and the writer are keeping up.
+CREATE OR REPLACE FUNCTION admin_overview()
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  WITH now_ AS (SELECT floor(extract(epoch FROM now()))::bigint AS t,
+                       (now() AT TIME ZONE 'Europe/London')::date AS d)
+  SELECT json_build_object(
+    'at', (SELECT t FROM now_),
+    'accounts', json_build_object(
+      'total', (SELECT count(*) FROM auth.users),
+      'day',   (SELECT count(*) FROM auth.users WHERE created_at > now() - interval '1 day'),
+      'week',  (SELECT count(*) FROM auth.users WHERE created_at > now() - interval '7 days'),
+      'month', (SELECT count(*) FROM auth.users WHERE created_at > now() - interval '30 days')),
+    -- Members come two ways: a membership row (free time given here, and the
+    -- card processor before Whop) and a Whop entitlement, keyed on the email.
+    'members', (SELECT json_build_object(
+        'active', count(*),
+        'paying', count(*) FILTER (WHERE NOT free),
+        'free', count(*) FILTER (WHERE free),
+        'by_plan', (SELECT coalesce(json_object_agg(plan_id, n), '{}'::json)
+                      FROM (SELECT plan_id, count(*) AS n FROM admin_live_members() GROUP BY plan_id) x))
+      FROM admin_live_members()),
+    'money', json_build_object(
+      'currency', coalesce((SELECT currency FROM plan WHERE active = 1 ORDER BY sort LIMIT 1), 'GBP'),
+      'week',  (SELECT coalesce(sum(amount_minor), 0) FROM payment, now_ WHERE status IN ('paid', 'succeeded', 'completed') AND created_at > now_.t - 7 * 86400),
+      'month', (SELECT coalesce(sum(amount_minor), 0) FROM payment, now_ WHERE status IN ('paid', 'succeeded', 'completed') AND created_at > now_.t - 30 * 86400),
+      'all',   (SELECT coalesce(sum(amount_minor), 0) FROM payment WHERE status IN ('paid', 'succeeded', 'completed')),
+      'payments', (SELECT count(*) FROM payment WHERE status IN ('paid', 'succeeded', 'completed'))),
+    'visits', json_build_object(
+      'today', (SELECT coalesce(sum(n), 0) FROM page_view, now_ WHERE day = now_.d),
+      'week',  (SELECT coalesce(sum(n), 0) FROM page_view, now_ WHERE day > now_.d - 7),
+      'days',  (SELECT coalesce(json_agg(json_build_object('day', day, 'n', n) ORDER BY day), '[]'::json)
+                  FROM (SELECT day, sum(n) AS n FROM page_view, now_ WHERE day > now_.d - 14 GROUP BY day) x),
+      'pages', (SELECT coalesce(json_object_agg(page, n), '{}'::json)
+                  FROM (SELECT page, sum(n) AS n FROM page_view, now_ WHERE day > now_.d - 7 GROUP BY page) x)),
+    'calls', json_build_object(
+      'open', (SELECT count(*) FROM pick WHERE kind = 'CONFIDENT' AND settled_at IS NULL),
+      'month', (SELECT json_build_object('n', count(*),
+                        'won', count(*) FILTER (WHERE result IN ('WON', 'HALF_WON')),
+                        'lost', count(*) FILTER (WHERE result IN ('LOST', 'HALF_LOST')),
+                        'pnl', coalesce(sum(pnl), 0))
+                  FROM pick, now_ WHERE kind = 'CONFIDENT' AND settled_at IS NOT NULL AND result <> 'VOID'
+                   AND kickoff > now_.t - 30 * 86400)),
+    'engine', json_build_object(
+      'health', get_health(),
+      'slate', (SELECT try_json(v) FROM kv WHERE k = 'slate:last_run'),
+      'settle', (SELECT try_json(v) FROM kv WHERE k = 'settle:last_run'),
+      'writer', (SELECT try_json(v) FROM kv WHERE k = 'gemini:budget'))
+  );
+$fn$;
+REVOKE ALL ON FUNCTION admin_overview() FROM PUBLIC, anon, authenticated;
+
+-- Accounts, newest first, or those whose email or name matches.
+CREATE OR REPLACE FUNCTION admin_users(p_q text DEFAULT NULL, p_limit integer DEFAULT 50, p_offset integer DEFAULT 0)
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  SELECT coalesce(json_agg(row_to_json(x)), '[]'::json) FROM (
+    SELECT u.id, u.email, floor(extract(epoch FROM u.created_at))::bigint AS created_at,
+           floor(extract(epoch FROM u.last_sign_in_at))::bigint AS last_sign_in_at,
+           pr.display_name, pr.username,
+           coalesce(lm.plan_id, m.plan_id) AS plan_id, coalesce(lm.expires_at, m.expires_at) AS expires_at,
+           lm.free, lm.via, m.auto_renew,
+           (SELECT coalesce(sum(amount_minor), 0) FROM payment p
+             WHERE p.user_id = u.id AND p.status IN ('paid', 'succeeded', 'completed')) AS paid_minor
+    FROM auth.users u
+    LEFT JOIN profile pr ON pr.user_id = u.id
+    LEFT JOIN membership m ON m.user_id = u.id
+    LEFT JOIN admin_live_members() lm ON lm.email = lower(u.email)
+    WHERE p_q IS NULL OR p_q = ''
+       OR u.email ILIKE '%' || p_q || '%'
+       OR pr.display_name ILIKE '%' || p_q || '%'
+       OR pr.username ILIKE '%' || p_q || '%'
+    ORDER BY u.created_at DESC
+    LIMIT least(greatest(coalesce(p_limit, 50), 1), 200) OFFSET greatest(coalesce(p_offset, 0), 0)
+  ) x;
+$fn$;
+REVOKE ALL ON FUNCTION admin_users(text, integer, integer) FROM PUBLIC, anon, authenticated;
+
+-- One account in full: who, the membership, every payment, what they follow.
+CREATE OR REPLACE FUNCTION admin_user(p_user uuid)
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  SELECT json_build_object(
+    'user', (SELECT json_build_object('id', u.id, 'email', u.email,
+               'created_at', floor(extract(epoch FROM u.created_at))::bigint,
+               'last_sign_in_at', floor(extract(epoch FROM u.last_sign_in_at))::bigint,
+               'provider', u.raw_app_meta_data->>'provider')
+             FROM auth.users u WHERE u.id = p_user),
+    'profile', (SELECT row_to_json(p) FROM (SELECT display_name, username, club_name, created_at FROM profile WHERE user_id = p_user) p),
+    'membership', (SELECT row_to_json(m) FROM (SELECT plan_id, expires_at, auto_renew, cancelled_at, dunning_from, card_brand, card_last4, created_at
+                                               FROM membership WHERE user_id = p_user) m),
+    'entitlement', (SELECT row_to_json(e) FROM (SELECT e.plan_id, e.expires_at, e.status, e.source, e.manage_url, e.created_at
+                                                FROM entitlement e JOIN auth.users u ON lower(u.email) = lower(e.email)
+                                                WHERE u.id = p_user) e),
+    'payments', (SELECT coalesce(json_agg(row_to_json(p) ORDER BY p.created_at DESC), '[]'::json)
+                 FROM (SELECT provider, plan_id, amount_minor, currency, status, created_at FROM payment WHERE user_id = p_user) p),
+    'follows', (SELECT count(*) FROM follow WHERE user_id = p_user),
+    'log', (SELECT coalesce(json_agg(row_to_json(l) ORDER BY l.at DESC), '[]'::json)
+            FROM (SELECT at, action, detail_json FROM admin_log WHERE target = p_user::text ORDER BY at DESC LIMIT 20) l)
+  );
+$fn$;
+REVOKE ALL ON FUNCTION admin_user(uuid) FROM PUBLIC, anon, authenticated;
+
+-- Free time on an account: extends whatever it has, or starts one. Marked
+-- complimentary, so the account page never shows a card for it.
+CREATE OR REPLACE FUNCTION admin_grant(p_actor uuid, p_user uuid, p_days integer)
+RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE
+  t bigint := floor(extract(epoch FROM now()))::bigint;
+  plan_ text;
+  until_ bigint;
+BEGIN
+  IF p_days IS NULL OR p_days < 1 OR p_days > 3650 THEN
+    RETURN json_build_object('error', 'Give between 1 and 3,650 days.');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = p_user) THEN
+    RETURN json_build_object('error', 'No such account.');
+  END IF;
+  SELECT id INTO plan_ FROM plan WHERE active = 1 ORDER BY sort DESC LIMIT 1;
+  INSERT INTO membership (user_id, plan_id, expires_at, created_at, updated_at, card_brand)
+  VALUES (p_user, coalesce(plan_, 'monthly'), t + p_days * 86400, t, t, 'complimentary')
+  ON CONFLICT (user_id) DO UPDATE SET
+    expires_at = greatest(membership.expires_at, t) + p_days * 86400,
+    cancelled_at = NULL, dunning_from = NULL, attempts = 0,
+    card_brand = CASE WHEN membership.expires_at > t THEN membership.card_brand ELSE 'complimentary' END,
+    updated_at = t
+  RETURNING expires_at INTO until_;
+  INSERT INTO admin_log (at, actor, action, target, detail_json)
+  VALUES (t, p_actor, 'grant', p_user::text, json_build_object('days', p_days, 'until', until_)::text);
+  RETURN json_build_object('ok', true, 'expires_at', until_);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION admin_grant(uuid, uuid, integer) FROM PUBLIC, anon, authenticated;
+
+-- End free time now. A paid membership is not ended here: the processor
+-- would go on charging for it, so that is done where it was bought.
+CREATE OR REPLACE FUNCTION admin_end(p_actor uuid, p_user uuid)
+RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE t bigint := floor(extract(epoch FROM now()))::bigint;
+BEGIN
+  IF EXISTS (SELECT 1 FROM entitlement e JOIN auth.users u ON lower(u.email) = lower(e.email)
+             WHERE u.id = p_user AND e.status = 'active' AND e.expires_at > t) THEN
+    RETURN json_build_object('error', 'This one was paid for through Whop. Cancel it there, or it will go on charging.');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM membership WHERE user_id = p_user AND expires_at > t) THEN
+    RETURN json_build_object('error', 'That account has no membership running.');
+  END IF;
+  IF EXISTS (SELECT 1 FROM membership WHERE user_id = p_user AND coalesce(card_brand, '') <> 'complimentary') THEN
+    RETURN json_build_object('error', 'This one was paid for. Cancel it in Whop, or it will go on charging.');
+  END IF;
+  UPDATE membership SET expires_at = t, auto_renew = 0, updated_at = t WHERE user_id = p_user;
+  INSERT INTO admin_log (at, actor, action, target, detail_json) VALUES (t, p_actor, 'end', p_user::text, NULL);
+  RETURN json_build_object('ok', true);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION admin_end(uuid, uuid) FROM PUBLIC, anon, authenticated;
+
+-- Calls, open and recent, with how the last thirty days went.
+CREATE OR REPLACE FUNCTION admin_picks()
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  SELECT json_build_object(
+    'open', (SELECT coalesce(json_agg(row_to_json(p) ORDER BY p.kickoff), '[]'::json) FROM (
+       SELECT pk.id, pk.fixture_id, coalesce(f.kickoff, pk.kickoff) AS kickoff, pk.market, pk.outcome, pk.line,
+              pk.odds, pk.bookmaker, pk.model_prob, f.home_team, f.away_team, f.league_id
+       FROM pick pk LEFT JOIN fixture f ON f.id = pk.fixture_id
+       WHERE pk.kind = 'CONFIDENT' AND pk.settled_at IS NULL) p),
+    'recent', (SELECT coalesce(json_agg(row_to_json(p) ORDER BY p.kickoff DESC), '[]'::json) FROM (
+       SELECT pk.id, pk.fixture_id, coalesce(f.kickoff, pk.kickoff) AS kickoff, pk.market, pk.outcome, pk.line,
+              pk.odds, pk.bookmaker, pk.result, pk.pnl, f.home_team, f.away_team, f.home_goals, f.away_goals
+       FROM pick pk LEFT JOIN fixture f ON f.id = pk.fixture_id
+       WHERE pk.kind = 'CONFIDENT' AND pk.settled_at IS NOT NULL
+       ORDER BY pk.settled_at DESC LIMIT 60) p),
+    'days', (SELECT coalesce(json_agg(row_to_json(d) ORDER BY d.day DESC), '[]'::json) FROM (
+       SELECT to_char(to_timestamp(kickoff) AT TIME ZONE 'Europe/London', 'YYYY-MM-DD') AS day,
+              count(*) AS n,
+              count(*) FILTER (WHERE result IN ('WON', 'HALF_WON')) AS won,
+              round(coalesce(sum(pnl), 0)::numeric, 2) AS pnl
+       FROM pick WHERE kind = 'CONFIDENT' AND settled_at IS NOT NULL AND result <> 'VOID'
+         AND kickoff > floor(extract(epoch FROM now()))::bigint - 30 * 86400
+       GROUP BY 1) d)
+  );
+$fn$;
+REVOKE ALL ON FUNCTION admin_picks() FROM PUBLIC, anon, authenticated;
+
+-- Every plan, on sale or not, and a change to one. The price here is the
+-- price: checkout builds the processor's plan from this row.
+CREATE OR REPLACE FUNCTION admin_plans()
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  SELECT coalesce(json_agg(row_to_json(p) ORDER BY p.sort), '[]'::json)
+  FROM (SELECT id, name, days, amount_minor, currency, active, sort, checkout_url, updated_at FROM plan) p;
+$fn$;
+REVOKE ALL ON FUNCTION admin_plans() FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION admin_save_plan(p_actor uuid, p_id text, p_name text, p_amount bigint, p_active integer)
+RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE t bigint := floor(extract(epoch FROM now()))::bigint; before_ json;
+BEGIN
+  SELECT json_build_object('name', name, 'amount_minor', amount_minor, 'active', active) INTO before_ FROM plan WHERE id = p_id;
+  IF before_ IS NULL THEN RETURN json_build_object('error', 'No such plan.'); END IF;
+  IF p_amount IS NOT NULL AND (p_amount < 100 OR p_amount > 100000) THEN
+    RETURN json_build_object('error', 'A price between £1 and £1,000.');
+  END IF;
+  IF p_name IS NOT NULL AND (length(trim(p_name)) = 0 OR length(p_name) > 40) THEN
+    RETURN json_build_object('error', 'A name of up to 40 characters.');
+  END IF;
+  UPDATE plan SET name = coalesce(nullif(trim(p_name), ''), name),
+                  amount_minor = coalesce(p_amount, amount_minor),
+                  active = coalesce(p_active, active),
+                  updated_at = t
+   WHERE id = p_id;
+  INSERT INTO admin_log (at, actor, action, target, detail_json)
+  VALUES (t, p_actor, 'plan', p_id, json_build_object('before', before_, 'name', p_name, 'amount_minor', p_amount, 'active', p_active)::text);
+  RETURN json_build_object('ok', true);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION admin_save_plan(uuid, text, text, bigint, integer) FROM PUBLIC, anon, authenticated;
+
+-- Every offer, live, scheduled or over, and a change to one.
+CREATE OR REPLACE FUNCTION admin_promos()
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  SELECT coalesce(json_agg(row_to_json(p) ORDER BY p.starts_at DESC), '[]'::json)
+  FROM (SELECT * FROM promo ORDER BY starts_at DESC LIMIT 100) p;
+$fn$;
+REVOKE ALL ON FUNCTION admin_promos() FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION admin_save_promo(p_actor uuid, p json)
+RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE
+  t bigint := floor(extract(epoch FROM now()))::bigint;
+  id_ text := coalesce(nullif(p->>'id', ''), 'p' || to_char(now(), 'YYYYMMDDHH24MISS'));
+  kind_ text := p->>'kind';
+  plan_ text := nullif(p->>'plan_id', '');
+  price_ bigint := nullif(p->>'price_minor', '')::bigint;
+  trial_ integer := nullif(p->>'trial_days', '')::integer;
+  starts_ bigint := coalesce(nullif(p->>'starts_at', '')::bigint, t);
+  ends_ bigint := nullif(p->>'ends_at', '')::bigint;
+  full_ bigint;
+BEGIN
+  IF kind_ NOT IN ('deal', 'trial', 'notice') THEN RETURN json_build_object('error', 'Pick a deal, a trial or a notice.'); END IF;
+  IF length(coalesce(trim(p->>'title'), '')) = 0 OR length(p->>'title') > 80 THEN
+    RETURN json_build_object('error', 'A headline of up to 80 characters.');
+  END IF;
+  IF length(coalesce(p->>'body', '')) > 280 THEN RETURN json_build_object('error', 'Keep the text under 280 characters.'); END IF;
+  IF length(coalesce(p->>'cta', '')) > 30 THEN RETURN json_build_object('error', 'Keep the button under 30 characters.'); END IF;
+  IF ends_ IS NULL OR ends_ <= starts_ THEN RETURN json_build_object('error', 'It has to end after it starts.'); END IF;
+  IF kind_ IN ('deal', 'trial') THEN
+    SELECT amount_minor INTO full_ FROM plan WHERE id = plan_ AND active = 1;
+    IF full_ IS NULL THEN RETURN json_build_object('error', 'Pick a plan that is on sale.'); END IF;
+  END IF;
+  IF kind_ = 'deal' AND (price_ IS NULL OR price_ < 100 OR price_ >= full_) THEN
+    RETURN json_build_object('error', 'A deal needs a price below the plan''s own, and at least £1.');
+  END IF;
+  IF kind_ = 'trial' AND (trial_ IS NULL OR plan_ = 'matchday') THEN
+    RETURN json_build_object('error', 'A trial needs a number of days and a plan that renews.');
+  END IF;
+  INSERT INTO promo (id, kind, title, body, cta, plan_id, price_minor, trial_days, audience, starts_at, ends_at, active, created_at, updated_at)
+  VALUES (id_, kind_, trim(p->>'title'), nullif(trim(p->>'body'), ''), nullif(trim(p->>'cta'), ''),
+          CASE WHEN kind_ = 'notice' THEN NULL ELSE plan_ END,
+          CASE WHEN kind_ = 'deal' THEN price_ END,
+          CASE WHEN kind_ = 'trial' THEN trial_ END,
+          coalesce(nullif(p->>'audience', ''), 'everyone'), starts_, ends_,
+          coalesce(nullif(p->>'active', '')::integer, 1), t, t)
+  ON CONFLICT (id) DO UPDATE SET
+    kind = excluded.kind, title = excluded.title, body = excluded.body, cta = excluded.cta,
+    plan_id = excluded.plan_id, price_minor = excluded.price_minor, trial_days = excluded.trial_days,
+    audience = excluded.audience, starts_at = excluded.starts_at, ends_at = excluded.ends_at,
+    active = excluded.active, updated_at = t;
+  INSERT INTO admin_log (at, actor, action, target, detail_json) VALUES (t, p_actor, 'promo', id_, p::text);
+  RETURN json_build_object('ok', true, 'id', id_);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION admin_save_promo(uuid, json) FROM PUBLIC, anon, authenticated;
+
+-- What was changed from the dashboard, newest first.
+CREATE OR REPLACE FUNCTION admin_log_list(p_limit integer DEFAULT 50)
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  SELECT coalesce(json_agg(row_to_json(l) ORDER BY l.at DESC), '[]'::json)
+  FROM (SELECT l.at, l.action, l.target, l.detail_json, u.email AS target_email
+        FROM admin_log l LEFT JOIN auth.users u ON u.id::text = l.target
+        ORDER BY l.at DESC LIMIT least(greatest(coalesce(p_limit, 50), 1), 200)) l;
+$fn$;
+REVOKE ALL ON FUNCTION admin_log_list(integer) FROM PUBLIC, anon, authenticated;
+
+NOTIFY pgrst, 'reload schema';

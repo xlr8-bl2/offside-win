@@ -21,7 +21,7 @@ test('postgres schema declares tables', () => {
 //
 // Listing a table here is a decision, and the test below turns it into one that
 // cannot be undone by accident.
-const PRIVATE = new Set(['payment', 'payment_method', 'page_view', 'profile', 'follow', 'entitlement_grant', 'purchase_consent', 'market_snapshot']);
+const PRIVATE = new Set(['payment', 'payment_method', 'page_view', 'profile', 'follow', 'entitlement_grant', 'purchase_consent', 'market_snapshot', 'admin_log', 'promo']);
 
 // Tables with paid content in them, readable only through a serving function.
 const SERVED = new Set(['fixture', 'pick', 'kv', 'slip', 'entitlement']);
@@ -128,8 +128,21 @@ const PRIVATE_FUNCTIONS = new Set(['record_payment', 'revoke_membership', 'recor
 // one IS the wall, and every one that returns calls must apply it. Anything
 // else runs as the caller: SECURITY DEFINER on a function that does not
 // filter is the one way a read-only surface becomes a data leak.
-const DEFINER = new Set(['get_board', 'get_fixture', 'get_picks', 'get_model', 'get_hero', 'get_health', 'get_slip', 'get_plans', 'get_account', 'has_membership', 'free_fixture_id', 'get_league', 'record_view', 'get_player', 'save_profile', 'set_follow', 'search_games', 'record_consent']);
+const DEFINER = new Set(['get_promos', 'get_board', 'get_fixture', 'get_picks', 'get_model', 'get_hero', 'get_health', 'get_slip', 'get_plans', 'get_account', 'has_membership', 'free_fixture_id', 'get_league', 'record_view', 'get_player', 'save_profile', 'set_follow', 'search_games', 'record_consent']);
 const WALLED = new Set(['get_board', 'get_fixture', 'get_picks', 'get_slip', 'search_games']);
+// The owner's dashboard. Every admin_ function reads auth.users or the
+// payment tables, so it runs as its owner, and none of them may be callable
+// with the public key: Postgres grants EXECUTE to PUBLIC on every new
+// function, so the absence of a GRANT is not enough and the REVOKE is
+// asserted too.
+for (const fn of [...sql.matchAll(/CREATE OR REPLACE FUNCTION (admin_\w+)\(/g)].map((m) => m[1]!)) {
+  PRIVATE_FUNCTIONS.add(fn);
+  DEFINER.add(fn);
+  test(`${fn} has the default PUBLIC execute revoked`, () => {
+    assert.match(sql, new RegExp(`REVOKE ALL ON FUNCTION ${fn}\\([^)]*\\) FROM PUBLIC, anon, authenticated`), `${fn}: callable by anyone by default`);
+  });
+}
+
 for (const fn of [...sql.matchAll(/CREATE OR REPLACE FUNCTION (\w+)\(/g)].map((m) => m[1]!)) {
   test(`${fn} ${DEFINER.has(fn) ? 'runs as owner behind the wall' : 'runs as the caller'}${PRIVATE_FUNCTIONS.has(fn) ? ' and is not callable by anon' : ' and is callable by anon'}`, () => {
     const body = sql.slice(sql.indexOf(`CREATE OR REPLACE FUNCTION ${fn}(`));
