@@ -5606,8 +5606,8 @@ async function startCheckout(plan = 'monthly') {
  * The fallback for our checkout page: used while the API key cannot take a
  * payment itself, or if the card fields will not load.
  */
-async function openEmbeddedCheckout(plan, consent) {
-  const out = await postJSON('/api/pay/checkout', { plan, consent });
+async function openEmbeddedCheckout(plan, consent, promo) {
+  const out = await postJSON('/api/pay/checkout', { plan, consent, ...(promo ? { promo } : {}) });
   if (out.checkout) {
     try {
       await openCheckout({
@@ -5682,12 +5682,16 @@ function freeLineHTML(free) {
  * settled record is public and negative, so selling coverage and explanation is
  * the only honest pitch and it is the one that survives an ad review.
  */
+/** The plans in the order the pricing page shows them. */
+const order0 = (plans) => ['matchday', 'monthly', 'quarter'].filter((id) => (plans ?? []).some((p) => p.id === id));
+
 async function viewPricing() {
   placeholder(skeletonHTML());
-  const [user, plans, hero] = await Promise.all([
+  const [user, plans, hero, running] = await Promise.all([
     currentUser(),
     getJSON('/api/plans').catch(() => []),
     getJSON('/api/hero').catch(() => null),
+    getJSON('/api/promos').catch(() => []),
   ]);
   // A member arriving here is shown what they have, not sold it again.
   let account = null;
@@ -5696,6 +5700,11 @@ async function viewPricing() {
     if (account) state.account = account;
   }
   const mine = liveMembership(account);
+  // A deal or a free trial on a plan, when one is running and this reader
+  // may have it (js/lib/promo.js). Checkout finds the same one by the plan.
+  const promo = Array.isArray(running) && running.length && !mine ? await import('./js/lib/promo.js').catch(() => null) : null;
+  const offerOn = (id) => (promo ? running.find((o) => o.plan_id === id && o.kind !== 'notice' && promo.eligible(o, { signedIn: !!user, member: false })) ?? null : null);
+  if (promo && order0(plans).some((id) => offerOn(id))) promo.ensureStyles();
   // The free call is its own fixture, chosen by the slate: not the headline
   // match. Pointing this line at the headline sent readers to a locked call
   // under a label that said it was free.
@@ -5763,13 +5772,17 @@ async function viewPricing() {
         const p = byId[id];
         const c = COPY[id];
         const b = buttonFor(id, p);
-        const lead = mine ? mine.plan_id === id : id === 'monthly';
+        const o = offerOn(id);
+        const lead = mine ? mine.plan_id === id : o ? true : id === 'monthly' && !order.some((x) => offerOn(x));
         return `
-        <section class="plan${lead ? ' plan-main' : ''}${b.mine ? ' plan-mine' : ''}">
-          ${b.mine ? `<span class="plan-tagline is-mine">Yours to ${esc(shortDate(mine.expires_at))}</span>` : !mine && c.tag ? `<span class="plan-tagline">${esc(c.tag)}</span>` : ''}
+        <section class="plan${lead ? ' plan-main' : ''}${b.mine ? ' plan-mine' : ''}${o ? ' plan-offer' : ''}">
+          ${b.mine ? `<span class="plan-tagline is-mine">Yours to ${esc(shortDate(mine.expires_at))}</span>` : o ? `<span class="plan-tagline is-offer">${esc(o.title)}</span>` : !mine && c.tag ? `<span class="plan-tagline">${esc(c.tag)}</span>` : ''}
           <h2>${esc(p.name)}</h2>
-          <p class="plan-price"><b>${esc(money(p.amount_minor, p.currency))}</b>
-            <span>${esc(per(p))}</span></p>
+          ${o?.kind === 'deal' ? `<p class="plan-price"><s>${esc(money(p.amount_minor, p.currency))}</s> <b>${esc(money(o.price_minor, p.currency))}</b>
+            <span>${esc(per(p))}</span></p>` : o?.kind === 'trial' ? `<p class="plan-price"><b>${esc(o.trial_days)} days free</b>
+            <span>then ${esc(money(p.amount_minor, p.currency))} ${esc(per(p))}</span></p>` : `<p class="plan-price"><b>${esc(money(p.amount_minor, p.currency))}</b>
+            <span>${esc(per(p))}</span></p>`}
+          ${o ? `<p class="plan-ends">Ends in <span class="plan-clock" data-ends="${esc(o.ends_at)}"></span></p>` : ''}
           ${perMonth(p) ? `<p class="plan-per">${esc(perMonth(p))}</p>` : ''}
           <p class="plan-blurb">${esc(c.blurb)}</p>
           ${b.note ? `<p class="plan-switch">${esc(b.note)}</p>` : ''}
@@ -5777,7 +5790,7 @@ async function viewPricing() {
             ? `<a class="btn btn-ghost btn-lg" href="#/account?tab=membership">Your plan</a>`
             : b.covered
               ? `<button class="btn btn-ghost btn-lg" type="button" disabled>${esc(b.label)}</button>`
-              : `<button class="btn ${b.quiet ? 'btn-ghost' : lead || !mine ? 'btn-accent' : 'btn-primary'} btn-lg" data-buy="${esc(id)}">${esc(b.label)}</button>`}
+              : `<button class="btn ${b.quiet ? 'btn-ghost' : lead || !mine ? 'btn-accent' : 'btn-primary'} btn-lg" data-buy="${esc(id)}">${esc(o ? (o.cta || (o.kind === 'trial' ? 'Start the free days' : 'Get the deal')) : b.label)}</button>`}
         </section>`;
       }).join('')}
     </div>
@@ -5830,6 +5843,7 @@ async function viewPricing() {
   for (const b of app.querySelectorAll('[data-buy]')) {
     b.onclick = () => startCheckout(b.dataset.buy);
   }
+  for (const c of app.querySelectorAll('.plan-clock')) promo?.mountClock(c, Number(c.dataset.ends), { compact: true, onEnd: () => route({ soft: true }) });
 }
 
 /* ----------------------------------------------------------------- checkout */
@@ -5950,11 +5964,19 @@ async function viewCheckout(params) {
   const m = liveMembership(account);
   const block = checkoutBlock(m, planId);
   const terms = PLAN_TERMS[planId] ?? { per: '', runs: '', after: '' };
-  const price = money(plan.amount_minor, plan.currency);
   const name = PLAN_NAME[planId] ?? plan.name;
   const renews = planId !== 'matchday';
   // A member moving plans: nothing today, the new price from their paid-to date.
   const moving = m && !block ? m : null;
+  // A deal or a free trial running on this plan (js/lib/promo.js). Only its
+  // id goes with the payment; the Worker checks it and sets the price.
+  const promo = moving || block ? null : await import('./js/lib/promo.js').catch(() => null);
+  const offer = promo ? await promo.offerForPlan(planId, { signedIn: true, member: !!m }).catch(() => null) : null;
+  const trial = offer?.kind === 'trial' ? offer : null;
+  const deal = offer?.kind === 'deal' ? offer : null;
+  const amount = deal ? deal.price_minor : Number(plan.amount_minor);
+  const price = money(amount, plan.currency);
+  if (offer) promo.ensureStyles();
 
   app.innerHTML = `
   <div class="wrap section checkout" data-plan="${esc(planId)}">
@@ -5968,8 +5990,15 @@ async function viewCheckout(params) {
           Your ${esc((PLAN_NAME[moving.plan_id] ?? 'membership').toLowerCase())} is paid up to that date, so the ${esc(name.toLowerCase())}
           starts now and its first payment waits until then. The ${esc((PLAN_NAME[moving.plan_id] ?? 'membership').toLowerCase())} stops renewing.
           You keep every day you have paid for and pay for none twice.</p>` : `
+        ${trial ? `
+        <p class="co-price"><b>${esc(trial.trial_days)} days free</b> <span>then ${esc(money(plan.amount_minor, plan.currency))} ${esc(terms.per)}</span></p>
+        <p class="co-terms"><b>${esc(trial.title)}.</b> ${esc(promo.terms(trial))}</p>
+        <p class="co-offer">Ends in <span class="co-clock" data-ends="${esc(trial.ends_at)}"></span></p>` : deal ? `
+        <p class="co-price"><s>${esc(money(plan.amount_minor, plan.currency))}</s> <b>${esc(price)}</b> <span>${esc(terms.per)}</span></p>
+        <p class="co-terms"><b>${esc(deal.title)}.</b> ${esc(promo.terms(deal))}</p>
+        <p class="co-offer">Ends in <span class="co-clock" data-ends="${esc(deal.ends_at)}"></span></p>` : `
         <p class="co-price"><b>${esc(price)}</b> <span>${esc(terms.per)}</span></p>
-        <p class="co-terms"><b>${esc(terms.runs)}</b> ${esc(terms.after)}</p>`}
+        <p class="co-terms"><b>${esc(terms.runs)}</b> ${esc(terms.after)}</p>`}`}
         <ul class="ticks co-ticks">
           <li><b>Every open call</b> the moment it goes up</li>
           <li><b>The bet slip's legs</b>, before the first one kicks off</li>
@@ -6006,14 +6035,15 @@ async function viewCheckout(params) {
           <div id="co-payment"><p class="pay-wait">Loading the secure card form…</p></div>
           <div id="co-branding"></div>
         </div>
-        <button class="btn btn-accent btn-lg co-button" id="co-pay" type="button" disabled>Pay ${esc(price)}</button>
+        <button class="btn btn-accent btn-lg co-button" id="co-pay" type="button" disabled>${trial ? `Start the ${esc(trial.trial_days)} free days` : `Pay ${esc(price)}`}</button>
         <p class="co-error" role="alert" hidden></p>
-        <p class="co-note">${renews ? `By ${moving ? 'switching' : 'paying'} you agree to ${esc(price)} ${esc(terms.per)}${moving ? ` from ${esc(shortDate(moving.expires_at))}` : ''} until you cancel. ` : ''}Card details go
+        <p class="co-note">${trial ? `By starting you agree to ${esc(money(plan.amount_minor, plan.currency))} ${esc(terms.per)} after the ${esc(trial.trial_days)} free days, until you cancel. ` : renews ? `By ${moving ? 'switching' : 'paying'} you agree to ${esc(price)} ${esc(terms.per)}${moving ? ` from ${esc(shortDate(moving.expires_at))}` : ''} until you cancel. ` : ''}Card details go
           straight to Whop, who take the payment. They never reach offside.win.</p>`}
       </section>
     </div>
   </div>`;
   if (block) return;
+  for (const c of app.querySelectorAll('.co-clock')) promo.mountClock(c, Number(c.dataset.ends), { compact: true, onEnd: () => route({ soft: false }) });
 
   const button = app.querySelector('#co-pay');
   const errorLine = app.querySelector('.co-error');
@@ -6046,7 +6076,7 @@ async function viewCheckout(params) {
       if (working || !agreed()) return;
       say('');
       working = busy(button, 'Opening the checkout…');
-      try { await openEmbeddedCheckout(planId, consent()); } catch (err) { say(err.message); }
+      try { await openEmbeddedCheckout(planId, consent(), offer?.id); } catch (err) { say(err.message); }
       idle();
     };
     idle();
@@ -6057,12 +6087,18 @@ async function viewCheckout(params) {
     button.textContent = 'Switch, nothing to pay today';
     return;
   }
+  // Free days are started in Whop's checkout, which takes the card and charges nothing today.
+  if (trial) {
+    await fallback();
+    button.textContent = `Start the ${trial.trial_days} free days`;
+    return;
+  }
   if (!cfg?.whopAccount) { await fallback(); return; }
   try {
     state.payHandle = await mountPayment({
       accountId: cfg.whopAccount,
       currency: plan.currency,
-      amount: Number(plan.amount_minor),
+      amount,
       renews,
       email: user.email,
       returnUrl: `${location.origin}/#/account?paid=1`,
@@ -6085,7 +6121,7 @@ async function viewCheckout(params) {
     try {
       const token = await state.payHandle.token();
       if (!token) throw new Error('The card details did not come through. Nothing has been charged. Try again.');
-      const out = await postJSON('/api/pay/charge', { plan: planId, confirmation_token: token, consent: consent() });
+      const out = await postJSON('/api/pay/charge', { plan: planId, confirmation_token: token, consent: consent(), ...(offer ? { promo: offer.id } : {}) });
       if (out.status === 'paid') { paid(); return; }
       if (out.client_secret) {
         // The bank wants a word first (3D Secure): Whop runs that step.
@@ -7356,6 +7392,7 @@ async function route({ soft = false } = {}) {
     errorState(err);
   } finally {
     if (!soft) countView();
+    if (!soft) schedulePromos();
     state.soft = false;
     liveTick();
     playFlashes();
@@ -7390,6 +7427,27 @@ async function route({ soft = false } = {}) {
       app.classList.add('page-in');
     }
   }
+}
+
+/*
+ * Offers set up in the dashboard: the bar across the top and, once a visit,
+ * the popup (js/lib/promo.js). The module and its styles load only when an
+ * offer is running, so on an ordinary day this costs one small cached read.
+ *
+ * Whether the reader is a member decides whether a deal is shown at all, and
+ * for a signed-in reader that is not known until the account arrives; until
+ * then they are treated as a member, so nobody who has paid is sold to while
+ * the page is still finding out. headerAuth() calls this again once it knows.
+ */
+async function schedulePromos() {
+  try {
+    const running = await getJSON('/api/promos').catch(() => []);
+    if (!Array.isArray(running) || !running.length) { document.getElementById('promo-bar')?.remove(); return; }
+    const promo = await import('./js/lib/promo.js');
+    const signedIn = !!state.user;
+    const member = signedIn ? state.member !== false : false;
+    await promo.runPromos({ route: parseHash().parts[0] || 'home', signedIn, member, anchor: app, promos: running });
+  } catch { /* an offer is never worth an error */ }
 }
 
 /*
@@ -7438,6 +7496,8 @@ async function render(name, parts, params) {
     if (name === 'trace') return viewTrace();
     if (name === 'signin') return await viewSignin();
     if (name === 'account') return await viewAccount();
+    // The owner's dashboard, loaded only when opened. js/admin.js.
+    if (name === 'admin') return await (await import('./js/admin.js')).viewAdmin(app, parts, params);
     if (name === 'legal' && parts[1]) return viewLegal(parts[1]);
     if (name === 'home') return await viewHome();
     /*
@@ -7518,6 +7578,7 @@ function accountMenuHTML() {
       <a href="#/account?tab=membership" role="menuitem">${m ? 'Membership and payments' : 'Membership'}</a>
       <a href="#/account?tab=settings" role="menuitem">Settings</a>
       ${m ? '' : '<a class="am-cta" href="#/pricing" role="menuitem">See the plans</a>'}
+      ${state.isAdmin ? '<a class="am-admin" href="#/admin" role="menuitem">Admin dashboard</a>' : ''}
     </nav>
     <button class="am-out" type="button" id="am-out" role="menuitem">Sign out</button>`;
 }
@@ -7538,6 +7599,15 @@ function toggleAccountMenu(e) {
     });
   }
   if (!menu.hidden) { closeAccountMenu(); return; }
+  // The owner sees a way into the dashboard. Asked once, the first time the
+  // menu opens; for anyone else the answer is no and nothing shows.
+  if (state.isAdmin === undefined) {
+    state.isAdmin = false;
+    import('./js/admin.js').then((m) => m.isAdmin()).then((yes) => {
+      state.isAdmin = yes;
+      if (yes && !menu.hidden) menu.innerHTML = accountMenuHTML();
+    }).catch(() => {});
+  }
   menu.innerHTML = accountMenuHTML();
   menu.hidden = false;
   link.setAttribute('aria-expanded', 'true');
@@ -7666,6 +7736,8 @@ async function headerAuth() {
   }
   const navSignin = document.getElementById('nav-signin');
   if (navSignin) navSignin.hidden = Boolean(user);
+  // Now that membership is known, the offers can be decided properly.
+  schedulePromos();
 }
 
 /**

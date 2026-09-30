@@ -234,6 +234,71 @@ async function stopRenewals(env: PayEnv, user: { id: string; email: string | nul
 
 export const SWITCH_CLOSED = 'Switching plans is not open yet. Nothing has been charged and your plan is as it was.';
 
+/**
+ * An offer the buyer is using (a deal or a free trial, set up in the
+ * dashboard), checked here rather than believed.
+ *
+ * The page sends only the offer's id. Whether it is running, which plan it is
+ * for, its price and its free days all come from get_promos(), which serves
+ * only offers that are switched on and inside their dates, so an ended offer
+ * or a made-up id is refused with nothing charged. A trial is for new members
+ * only: an account that has ever had a membership or paid for one is told so.
+ *
+ * Null when no offer was asked for.
+ */
+export type Offer = { id: string; priceMinor?: number; trialDays?: number };
+export async function offerFor(
+  env: PayEnv,
+  promoId: unknown,
+  plan: { id: string; amount_minor: number | string },
+  user: { id: string; email: string | null },
+): Promise<Offer | { error: string } | null> {
+  if (promoId === undefined || promoId === null || promoId === '') return null;
+  if (typeof promoId !== 'string' || !/^[a-z0-9_-]{1,40}$/i.test(promoId)) return { error: 'That offer is not running. Nothing has been charged.' };
+  const res = await fetch(new URL('/rest/v1/rpc/get_promos', env.SUPABASE_URL), {
+    method: 'POST',
+    headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_ANON_KEY}`, 'content-type': 'application/json', accept: 'application/json' },
+    body: '{}',
+  });
+  const live = res.ok ? await res.json() as Array<Record<string, unknown>> : [];
+  const p = Array.isArray(live) ? live.find((x) => x['id'] === promoId) : undefined;
+  if (!p) return { error: 'That offer has ended. Nothing has been charged.' };
+  if (p['plan_id'] !== plan.id) return { error: 'That offer is for a different plan. Nothing has been charged.' };
+  if (p['kind'] === 'deal') {
+    const price = Number(p['price_minor']);
+    if (!(Number.isInteger(price) && price >= 100 && price < Number(plan.amount_minor))) return { error: 'That offer is not running. Nothing has been charged.' };
+    return { id: promoId, priceMinor: price };
+  }
+  if (p['kind'] === 'trial') {
+    const days = Number(p['trial_days']);
+    if (plan.id === 'matchday' || !(Number.isInteger(days) && days >= 1 && days <= 60)) return { error: 'That offer is not running. Nothing has been charged.' };
+    if (await hadMembership(env, user)) return { error: 'Free trials are for new members. Nothing has been charged, and the plan is still yours at its usual price.' };
+    return { id: promoId, trialDays: days };
+  }
+  return null;
+}
+
+/** Whether an account has ever had a membership, by any route. */
+async function hadMembership(env: PayEnv, user: { id: string; email: string | null }): Promise<boolean> {
+  // Without the service key the answer cannot be checked, so the trial is refused rather than given twice.
+  if (!env.SUPABASE_SERVICE_KEY) return true;
+  const as = { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, accept: 'application/json' };
+  const id = encodeURIComponent(user.id);
+  const email = (user.email ?? '').toLowerCase().replace(/[%_*,()]/g, '');
+  const asks = [
+    `/rest/v1/membership?user_id=eq.${id}&select=user_id&limit=1`,
+    `/rest/v1/payment?user_id=eq.${id}&select=id&limit=1`,
+    ...(email ? [`/rest/v1/entitlement?email=ilike.${encodeURIComponent(email)}&select=email&limit=1`] : []),
+  ];
+  const answers = await Promise.all(asks.map(async (path) => {
+    const r = await fetch(new URL(path, env.SUPABASE_URL), { headers: as });
+    if (!r.ok) return true;
+    const rows = await r.json() as unknown[];
+    return Array.isArray(rows) && rows.length > 0;
+  }));
+  return answers.some(Boolean);
+}
+
 export async function checkout(request: Request, env: PayEnv, jwt: string | null): Promise<Response> {
   // There is a real window where the code is deployed and the merchant account
   // is not. Saying so plainly beats a 500 that reads like the site is broken.
@@ -246,9 +311,11 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
 
   let planId = 'monthly';
   let consent: Consent | null = null;
+  let promoId: unknown = null;
   try {
-    const body = await request.json() as { plan?: unknown };
+    const body = await request.json() as { plan?: unknown; promo?: unknown };
     if (typeof body?.plan === 'string' && body.plan) planId = body.plan;
+    promoId = body?.promo ?? null;
     consent = readConsent(body);
   } catch { /* an empty body means the default plan, and no consent */ }
   if (!consent) return json({ error: NO_CONSENT }, 400);
@@ -268,6 +335,10 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
     const verdict = switchTerms(await liveMembershipOf(env, jwt!), { id: String(plan.id), renews });
     if (!verdict.ok) return json({ error: verdict.error }, 409);
     const sw = verdict.terms;
+    // An offer is for someone buying, not someone moving plans: a member
+    // switching is never shown one, so one asked for here is set aside.
+    const offer = sw ? null : await offerFor(env, promoId, { id: String(plan.id), amount_minor: plan.amount_minor }, user);
+    if (offer && 'error' in offer) return json({ error: offer.error }, 409);
     // Stop the old plan first. Only then is the new one offered.
     if (sw && !(await stopRenewals(env, user))) return json({ error: SWITCH_CLOSED }, 503);
     // The card form on our own page: a checkout configuration made here, with
@@ -281,7 +352,7 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
           plan: {
             id: String(plan.id),
             name: String(plan.name ?? plan.id),
-            amountMinor: Number(plan.amount_minor),
+            amountMinor: offer?.priceMinor ?? Number(plan.amount_minor),
             currency: String(plan.currency),
             days: Number(plan.days),
             // A matchday pass is a week and stops; the others renew until cancelled.
@@ -289,18 +360,21 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
           },
           user: { id: user.id, email: user.email },
           returnUrl: `${site}/#/account?paid=1`,
-          trialDays: sw?.trialDays,
+          trialDays: sw?.trialDays ?? offer?.trialDays,
+          promo: offer?.id,
         });
         return json({ checkout: made.id, link: made.link, returnUrl: `${site}/#/account?paid=1`, switch: sw });
       } catch (err) {
         console.error('whop checkout:', err instanceof Error ? err.message : String(err));
-        if (!plan.checkout_url) return json({ error: 'The payment page could not be opened. Nothing has been charged. Try again in a minute.' }, 502);
+        // The plan's own link charges the full price, so an offer never falls back to it.
+        if (!plan.checkout_url || offer) return json({ error: 'The payment page could not be opened. Nothing has been charged. Try again in a minute.' }, 502);
       }
     }
     // No API key yet: the plan's own Whop checkout link, with the email on it
     // so the webhook can find the account. It charges the full price at once,
     // so it is never used for a switch.
     if (sw) return json({ error: SWITCH_CLOSED }, 503);
+    if (offer) return json({ error: 'The offer could not be applied here. Nothing has been charged. Try again in a minute.' }, 503);
     if (typeof plan.checkout_url !== 'string' || !plan.checkout_url) {
       return json({ error: 'That plan has no checkout yet.' }, 503);
     }
@@ -785,7 +859,7 @@ export async function charge(request: Request, env: PayEnv, jwt: string | null):
   const user = await identify(env, jwt);
   if (!user) return json({ error: 'Sign in first.' }, 401);
 
-  let body: { plan?: unknown; confirmation_token?: unknown; consent?: unknown } = {};
+  let body: { plan?: unknown; confirmation_token?: unknown; consent?: unknown; promo?: unknown } = {};
   try { body = await request.json() as typeof body; } catch { /* checked below */ }
   const consent = readConsent(body);
   if (!consent) return json({ error: NO_CONSENT }, 400);
@@ -808,14 +882,20 @@ export async function charge(request: Request, env: PayEnv, jwt: string | null):
     if (!verdict.ok) return json({ error: verdict.error }, 409);
     return json({ error: 'Switching opens Whop\'s checkout. Nothing has been charged.', fallback: true }, 409);
   }
+  const offer = await offerFor(env, body.promo, { id: String(plan.id), amount_minor: plan.amount_minor }, user);
+  if (offer && 'error' in offer) return json({ error: offer.error }, 409);
+  // A free trial takes nothing today, so it is never a card charge here: the
+  // page opens the checkout, which starts the free days.
+  if (offer?.trialDays) return json({ error: 'A free trial starts in Whop\'s checkout. Nothing has been charged.', fallback: true }, 409);
   await recordConsent(env, jwt!, String(plan.id), consent);
 
   const site = env.SITE_URL ?? new URL(request.url).origin;
   try {
     const paid = await createWhopPayment(env.WHOP_API_KEY, {
       companyId: env.WHOP_COMPANY_ID,
+      promo: offer?.id,
       plan: {
-        id: String(plan.id), name: String(plan.name ?? plan.id), amountMinor: Number(plan.amount_minor),
+        id: String(plan.id), name: String(plan.name ?? plan.id), amountMinor: offer?.priceMinor ?? Number(plan.amount_minor),
         currency: String(plan.currency), days: Number(plan.days), renews: String(plan.id) !== 'matchday',
       },
       user: { id: user.id, email: user.email },

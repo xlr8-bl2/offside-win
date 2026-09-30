@@ -599,3 +599,91 @@ test('a member cannot be charged the full price on the card form while switching
   assert.equal((await res.json() as any).fallback, true);
   assert.ok(!find('/payments'), 'no card charge was attempted');
 });
+
+/* ------------------------------------------------------ dashboard offers */
+
+const OFFERS = [
+  { id: 'derby', kind: 'deal', plan_id: 'monthly', price_minor: 499, trial_days: null },
+  { id: 'try7', kind: 'trial', plan_id: 'monthly', price_minor: null, trial_days: 7 },
+];
+const OFFER_ROUTE = (had: { membership?: boolean; payment?: boolean; entitlement?: boolean } = {}) => (url: string) => {
+  if (url.includes('/auth/v1/user')) return new Response(JSON.stringify({ id: 'user-1', email: 'a@b.c' }), { status: 200 });
+  if (url.includes('/rest/v1/plan')) return new Response(JSON.stringify([{ id: 'monthly', name: 'Monthly', amount_minor: 900, currency: 'GBP', days: 30, checkout_url: 'https://whop.com/checkout/plan_m' }]), { status: 200 });
+  if (url.includes('/rpc/get_promos')) return new Response(JSON.stringify(OFFERS), { status: 200 });
+  if (url.includes('/rest/v1/membership?')) return new Response(JSON.stringify(had.membership ? [{ user_id: 'user-1' }] : []), { status: 200 });
+  if (url.includes('/rest/v1/payment?')) return new Response(JSON.stringify(had.payment ? [{ id: 1 }] : []), { status: 200 });
+  if (url.includes('/rest/v1/entitlement?')) return new Response(JSON.stringify(had.entitlement ? [{ email: 'a@b.c' }] : []), { status: 200 });
+  if (url.includes('/checkout_configurations')) return new Response(JSON.stringify({ id: 'ch_9', purchase_url: '/checkout/ch_9/' }), { status: 200 });
+  if (url.includes('/payments')) return new Response(JSON.stringify({ id: 'pay_1', status: 'paid' }), { status: 200 });
+  return new Response('{}', { status: 200 });
+};
+
+test('a running deal is charged at its price, checked on this side', async () => {
+  route = OFFER_ROUTE();
+  const res = await checkout(post('/api/pay/checkout', { consent: OK, plan: 'monthly', promo: 'derby' }), WHOP, 'jwt');
+  assert.equal(res.status, 200);
+  const body = find('/checkout_configurations')!.body as any;
+  assert.equal(body.plan.renewal_price, 4.99);
+  assert.equal(body.metadata.promo, 'derby');
+  assert.equal(body.metadata.switch, undefined, 'an offer is not a switch');
+});
+
+test('an ended or invented offer is refused and nothing reaches the processor', async () => {
+  route = OFFER_ROUTE();
+  for (const promo of ['gone', 'x y', 42]) {
+    sent = [];
+    const res = await checkout(post('/api/pay/checkout', { consent: OK, plan: 'monthly', promo }), WHOP, 'jwt');
+    assert.equal(res.status, 409);
+    assert.match((await res.json() as any).error, /Nothing has been charged/);
+    assert.ok(!find('/checkout_configurations'));
+  }
+});
+
+test('an offer for another plan does not discount this one', async () => {
+  route = OFFER_ROUTE();
+  const r = OFFER_ROUTE();
+  route = (url) => (url.includes('/rest/v1/plan')
+    ? new Response(JSON.stringify([{ id: 'quarter', name: '3 months', amount_minor: 2100, currency: 'GBP', days: 90 }]), { status: 200 })
+    : r(url));
+  const res = await checkout(post('/api/pay/checkout', { consent: OK, plan: 'quarter', promo: 'derby' }), WHOP, 'jwt');
+  assert.equal(res.status, 409);
+  assert.ok(!find('/checkout_configurations'));
+});
+
+test('a free trial for a new member: the free days go to Whop and nothing is taken today', async () => {
+  route = OFFER_ROUTE();
+  const res = await checkout(post('/api/pay/checkout', { consent: OK, plan: 'monthly', promo: 'try7' }), WHOP, 'jwt');
+  assert.equal(res.status, 200);
+  const plan = (find('/checkout_configurations')!.body as any).plan;
+  assert.equal(plan.trial_period_days, 7);
+  assert.equal(plan.renewal_price, 9, 'the usual price after the free days');
+  // The history is asked with the service key, which is the only way to see it.
+  assert.equal(find('/rest/v1/membership?')!.headers.authorization, 'Bearer service-key-bypasses-rls');
+});
+
+test('a free trial is refused to anyone who has had a membership, however they had it', async () => {
+  for (const had of [{ membership: true }, { payment: true }, { entitlement: true }]) {
+    sent = [];
+    route = OFFER_ROUTE(had);
+    const res = await checkout(post('/api/pay/checkout', { consent: OK, plan: 'monthly', promo: 'try7' }), WHOP, 'jwt');
+    assert.equal(res.status, 409);
+    assert.match((await res.json() as any).error, /new members/);
+    assert.ok(!find('/checkout_configurations'));
+  }
+});
+
+test('the card form never charges a free trial: it hands over to the checkout', async () => {
+  route = OFFER_ROUTE();
+  const res = await charge(post('/api/pay/charge', { consent: OK, plan: 'monthly', promo: 'try7', confirmation_token: 'ctok_abcdef' }), WHOP, 'jwt');
+  assert.equal(res.status, 409);
+  assert.equal((await res.json() as any).fallback, true);
+  assert.ok(!find('/payments'), 'no card charge');
+});
+
+test('the card form charges a deal at the deal price', async () => {
+  route = OFFER_ROUTE();
+  await charge(post('/api/pay/charge', { consent: OK, plan: 'monthly', promo: 'derby', confirmation_token: 'ctok_abcdef' }), WHOP, 'jwt');
+  const pay = find('/payments');
+  assert.ok(pay, 'charged');
+  assert.equal((pay!.body as any).plan.renewal_price, 4.99);
+});

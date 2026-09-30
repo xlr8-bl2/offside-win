@@ -4107,6 +4107,29 @@ html.pay-open { overflow: hidden; }
 .member-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-5); }
 .plan-mine { border-color: var(--won); }
 .plan-tagline.is-mine { background: var(--won); }
+/* A running offer (js/lib/promo.js): its name in the tag, the old price
+   struck through, and the time left. The accent, because it is the thing to
+   press on this page while it runs. */
+.plan-tagline.is-offer { background: var(--floodlight); color: #fff; }
+.plan-price s, .co-price s {
+  align-self: baseline;
+  font-family: var(--display-figures);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  color: var(--chalk-3);
+  text-decoration-color: var(--chalk-2);
+  text-decoration-thickness: 2px;
+}
+.co-price s { font-size: var(--text-xl); }
+.plan-ends, .co-offer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--chalk-3);
+}
 .co-small a { color: var(--chalk-2); text-decoration: underline; text-underline-offset: 2px; }
 
 /* Back from Google: one line and a wheel while the session starts. */

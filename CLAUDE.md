@@ -32,6 +32,11 @@ the `trace` command (`engine/src/trace.ts`, the `trace` option in `pg.yml`).
 They turn a leaked pick's hidden code back into the account that copied it.
 `mail:setup` (`engine/src/mailsetup.ts`) is setup, not dev tooling, and stays too:
 it re-checks Brevo's DNS records and sends a test email.
+The admin dashboard (`#/admin`, `public/js/admin.js`, `worker/src/admin.ts`, the
+`admin_*` functions and `promo` table in `schema.pg.sql`) is the owner's tool and
+stays at launch. Its "give free time" replaces the `grant` command for everyday
+use. Only the account whose email hashes to `ADMIN_EMAIL_SHA256`
+(`worker/wrangler.toml`) can use it.
 
 ## Standing rules
 
