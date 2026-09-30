@@ -138,6 +138,31 @@ const scenarios = {
     await ctx.close();
   },
 
+  /** Signing in from a match page comes back to the match, not the front page. */
+  async signinreturn() {
+    const { ctx, page } = await fresh(1440);
+    await page.goto(`${BASE}/#/fixture/${FX[1]}`, { waitUntil: 'load' });
+    await settle(page, 3000);
+    await page.evaluate(() => { location.hash = '#/signin'; });
+    await settle(page, 2000);
+    const intent = await page.evaluate(() => { try { return JSON.parse(localStorage.getItem('ow.after-signin') ?? 'null')?.v ?? null; } catch { return null; } });
+    report('signinreturn: signing in from a match returns to it', intent === `#/fixture/${FX[1]}`, `after sign-in: ${intent}`);
+    await ctx.close();
+  },
+
+  /** A row of tabs answers the arrow keys, as its markup promises. */
+  async tabkeys() {
+    const { ctx, page } = await fresh(1440);
+    await page.goto(`${BASE}/#/board`, { waitUntil: 'load' });
+    await settle(page, 3000);
+    await page.locator('button[data-when][aria-selected="true"]').focus();
+    await page.keyboard.press('End');
+    await page.waitForTimeout(800);
+    const now = await page.evaluate(() => ({ focus: document.activeElement?.dataset?.when, selected: document.querySelector('button[data-when][aria-selected="true"]')?.dataset.when, hash: location.hash }));
+    report('tabkeys: End moves to the last tab and opens it', now.focus === 'played' && now.selected === 'played', JSON.stringify(now));
+    await ctx.close();
+  },
+
   /** A new page starts at the top, and the keyboard's place moves with it. */
   async top() {
     const { ctx, page } = await fresh(390);
