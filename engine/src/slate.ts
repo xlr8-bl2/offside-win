@@ -1,3 +1,4 @@
+import { backsRotatedSide } from './context/xi.ts';
 import { chanceInWords, openSlipLegs, refreshSlip } from './slip.ts';
 import { bsdList, bsdOrNull, num, str, stats as bsdStats, toEpoch } from './bsd.ts';
 import { config } from './config.ts';
@@ -514,7 +515,11 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
           ? theirCands.filter((c) => c.market === pin.market && String(c.outcome) === pin.outcome
               && (c.line ?? null) === pin.line).slice(0, 1)
           : (() => {
-            const ranked = rankConfident(theirCands, floorForRank(leagueRank(analysis.league_id)), calibration);
+            // A call backing a side that has been rotated (several expected
+            // starters out of the confirmed eleven) is set aside: the price
+            // may well have been made before the sheet was out (context/xi.ts).
+            const unrotated = theirCands.filter((c) => !backsRotatedSide(c, ctx.lineups.changes));
+            const ranked = rankConfident(unrotated, floorForRank(leagueRank(analysis.league_id)), calibration);
             // Matches under way keep whatever they had; the mix is for calls
             // still to be made.
             if (analysis.kickoff <= Math.floor(Date.now() / 1000)) return ranked.slice(0, 1);
