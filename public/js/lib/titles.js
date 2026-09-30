@@ -46,6 +46,7 @@ export function slipTitle(slip) {
 }
 
 export const TITLES = {
+  admin: 'Admin',
   results: 'Our record: every call and how it went',
   leagues: 'Leagues and competitions we cover',
   pricing: 'Membership: every call, from £3.49 for the weekend',

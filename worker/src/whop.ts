@@ -206,6 +206,8 @@ export interface WhopCheckoutInput {
    * day is paid for twice and none is lost.
    */
   trialDays?: number;
+  /** The dashboard offer this purchase used, if any: kept in Whop's metadata. */
+  promo?: string;
 }
 
 /**
@@ -244,7 +246,8 @@ export function inlinePlan(input: WhopCheckoutInput): Record<string, unknown> {
 
 const whopMetadata = (input: WhopCheckoutInput) =>
   ({ user_id: input.user.id, plan: input.plan.id, ...(input.user.email ? { email: input.user.email } : {}),
-     ...(input.trialDays ? { switch: '1' } : {}) });
+     ...(input.trialDays && !input.promo ? { switch: '1' } : {}),
+     ...(input.promo ? { promo: input.promo } : {}) });
 
 /**
  * Stop a membership renewing: it keeps running to the end of what was paid

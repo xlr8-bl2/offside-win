@@ -770,7 +770,7 @@ export const LEGAL = {
   },
   cookies: {
     title: 'Cookies and Storage Notice',
-    version: '2.0',
+    version: '2.1',
     body: `
       <p>This Notice describes the information stored on your device when you use offside.win, as
          required by regulation 6 of the Privacy and Electronic Communications (EC Directive)
@@ -787,6 +787,7 @@ export const LEGAL = {
           <tr><td><code>sb-…-auth-token</code></td><td>Maintains your signed-in session. Stored only when you sign in.</td><td>Until you sign out</td></tr>
           <tr><td><code>ow.after-signin</code></td><td>Records the action in progress when you were asked to sign in, such as a purchase, so that you are returned to it.</td><td>Deleted once used</td></tr>
           <tr><td><code>offside.country</code></td><td>The country selected for bookmaker prices, where you have changed it.</td><td>Until changed</td></tr>
+          <tr><td><code>ow.promo</code></td><td>Which offers you have already been shown or have closed, so that the same one is not shown to you again.</td><td>Until the site’s data is cleared</td></tr>
         </tbody>
       </table></div>
 
