@@ -289,6 +289,14 @@ const commands: Record<string, () => Promise<unknown>> = {
     await kvSetJSON('lab:model', { at: Math.floor(Date.now() / 1000), ...report });
   },
 
+  // Every settled call beside what the match turned out to be, and the
+  // argument behind each loss (lab/losses.ts).
+  async 'lab:losses'() {
+    requireEnv({ provider: false });
+    const { runLosses } = await import('./lab/losses.ts');
+    await runLosses();
+  },
+
   // Leans: for the fixtures the rule passes on, the best read at a lower
   // floor, graded on their own (lab/tune.ts, runLeans).
   async 'lab:leans'() {
