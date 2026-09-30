@@ -7479,6 +7479,24 @@ let softQueued = false;
  */
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 const scrollMemory = new Map();
+/*
+ * Which page the reader is on, as the address bar has it now. Scroll places
+ * are kept under this. They were kept under the hash the page opened with,
+ * which went wrong two ways: a filter or tab rewrites the address in place,
+ * so Back came to an address with nothing remembered and opened at the top;
+ * and a match page's address is /match/… with no hash, so every match page
+ * shared the front page's place.
+ */
+const addressKey = () => `${location.pathname}${location.search}${location.hash || (location.pathname === '/' ? '#/home' : '')}`;
+// Every in-place rewrite of the address (a filter, a tab, a match's real
+// address) moves the reader's place with it.
+{
+  const replace = history.replaceState.bind(history);
+  history.replaceState = (data, unused, url) => {
+    replace(data, unused, url);
+    if (state.here) state.here = addressKey();
+  };
+}
 let navByLink = false;
 // A finger on a sign-in link is a head start on Google's button.
 document.addEventListener('pointerdown', (e) => {
@@ -7532,6 +7550,8 @@ function jumpTo(y) {
 }
 
 async function route({ soft = false } = {}) {
+  // The page being left, before anything below rewrites the address.
+  const leaving = state.here;
   // Arrived on a real address and moved on inside the app: the address bar
   // follows the route, not the page the visit started on.
   if (location.pathname !== '/' && location.hash.startsWith('#/')) {
@@ -7539,7 +7559,7 @@ async function route({ soft = false } = {}) {
   }
   const { parts, params } = parseHash();
   const name = parts[0] || 'home';
-  const here = location.hash || '#/home';
+  const here = addressKey();
   if (soft && hardPending !== null) { softQueued = true; return; }
   const keepY = window.scrollY;
   const ticket = ++navTicket;
@@ -7549,7 +7569,7 @@ async function route({ soft = false } = {}) {
     // Set after the first render, so the first route of a session -- the
     // deep link itself -- does not count as somewhere to go back to.
     state.cameFromInApp = routed++ > 0;
-    if (state.here) scrollMemory.set(state.here, keepY);
+    if (leaving) scrollMemory.set(leaving, keepY);
     state.here = here;
   }
   const backTo = !soft && !navByLink ? scrollMemory.get(here) : undefined;
