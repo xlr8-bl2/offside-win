@@ -4,8 +4,14 @@ compatibility_date = "2026-09-01"
 workers_dev = true
 
 # The page and its assets. Served directly; the Worker only runs for /api/*.
+# dist/ is public/ as deployed: minified and versioned by
+# scripts/build-public.mjs, which deploy.yml runs first.
 [assets]
-directory = "../public"
+directory = "../dist"
+# The front page is written by the Worker (seo.ts, homePage) so a search
+# engine reads today's matches rather than an empty shell; if that fails the
+# Worker hands back index.html from here as before.
+run_worker_first = ["/"]
 binding = "ASSETS"
 
 # Where the read path points. Both values are substituted by .github/workflows/

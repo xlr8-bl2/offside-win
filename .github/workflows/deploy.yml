@@ -104,6 +104,12 @@ jobs:
               && echo "$name pushed" || echo "WARNING: could not push $name"
           done
 
+      # The copy of public/ that is served: minified, every script and
+      # stylesheet at an address carrying its version, cached for a year
+      # (scripts/build-public.mjs). public/ itself stays as written.
+      - name: Build the site
+        run: node scripts/build-public.mjs
+
       - name: Deploy worker
         working-directory: worker
         env:

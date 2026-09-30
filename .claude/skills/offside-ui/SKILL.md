@@ -196,5 +196,16 @@ string.
 blue-black palette as raw `rgba(6,7,10,…)` in a dozen places, and it set every
 heading at weight 800 in uppercase. Nothing references it.
 
-No framework and no build step. That constraint has served this project well —
-the whole front end is three CSS files and some ES modules served as-is.
+No framework, and nothing to build while working. That constraint has served
+this project well — the whole front end is three CSS files and some ES modules,
+edited and reloaded as they are.
+
+What is deployed is one step on from that: `scripts/build-public.mjs` (run by
+deploy.yml) copies `public/` to `dist/`, minifies each file on its own (no
+bundling), and gives every script and stylesheet an address carrying its
+content hash, so they can be cached for a year. Two consequences when writing
+code: a relative import must be a plain string literal (`'./js/lib/x.js'`), or
+the build cannot version it and the module loads twice; and a stylesheet a
+script loads must be named as a string literal (`'/promo.css'`) for the same
+reason. The build fails loudly on an import cycle or an import outside
+`public/`.
