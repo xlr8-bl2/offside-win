@@ -259,6 +259,40 @@ export function runModel(rows: HistRow[]): Record<string, unknown> {
     console.log(`      C markets: ${mk.map(([k, v]) => `${k} ${v.n}`).join(', ')}`);
     finalists.push({ family: fam, policy: { ...w.pC, learned: undefined }, weights: w.pC.learned ?? null, b: w.rb, c: rc, bootstrap: bs });
   }
+  // 5. Production's own blend. For goals it moves the price halfway toward
+  // our model's scoring rates (where the board kept them). If our own read
+  // loses to the price, that half may be costing calls. Named variants, not
+  // a search, each judged on every period and against production on B and C
+  // together, which none of them was tuned on.
+  console.log('\n5. How much of our own model production should mix into the goals markets:');
+  const cacheW = new Map<number, Map<number, Option[]>>([[0.5, cache]]);
+  const cacheOf = (w: number) => {
+    let x = cacheW.get(w);
+    if (!x) { x = new Map(sorted.map((r) => [r.id, optionsFor(r, w)])); cacheW.set(w, x); }
+    return x;
+  };
+  const bc = [...b, ...c];
+  const prodBC = days(PROD, bc, cache);
+  const blendRows: unknown[] = [];
+  for (const [name, p] of [
+    ['none: the sharp price alone', { ...PROD, source: 'sharp', modelWeight: 0 }],
+    ['a quarter', { ...PROD, source: 'bestsharp', modelWeight: 0.25 }],
+    ['half (production)', PROD],
+    ['production, and only where the money has come for it', { ...PROD, minSteam: 0 }],
+    ['none, and only where the money has come for it', { ...PROD, source: 'sharp', modelWeight: 0, minSteam: 0 }],
+  ] as Array<[string, Policy]>) {
+    const cc = cacheOf(p.modelWeight);
+    const ra = simulate(p, a, cc), rb = simulate(p, b, cc), rc = simulate(p, c, cc);
+    const bs = bootstrap(days(p, bc, cc), prodBC);
+    console.log(`  ${name}`);
+    console.log(line('A', ra));
+    console.log(line('B', rb));
+    console.log(line('C', rc));
+    if (p !== PROD) console.log(`      against production on B and C: return ahead in ${pct(bs.roiAhead)} of resamples, landing rate ahead in ${pct(bs.hitAhead)}; return difference ${pct(bs.lo)} to ${pct(bs.hi)} (90%)`);
+    blendRows.push({ name, a: ra, b: rb, c: rc, bootstrap: bs });
+  }
+  report['blend'] = blendRows;
+
   report['production'] = { b: prodB, c: prodC };
   report['finalists'] = finalists;
   return report;
