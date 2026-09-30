@@ -270,6 +270,25 @@ export function buildBookMarkets(quotes: Quote[]): BookMarket[] {
       }
     }
 
+    // No book kept every opening price, so there is no opening view to test
+    // the money against, and the drift limit (select.ts) was quietly skipped:
+    // Germany v Greece carried "Greece shortened 18% since the open" in its
+    // own notes and still published Germany or a draw. What each outcome's
+    // most trusted book opened at is known, so the opening view is rebuilt
+    // from that: the market now, less how far those books have moved.
+    if (!open && wanted.every((o) => (movement.get(o)?.opening ?? 0) > 1 && (movement.get(o)?.current ?? 0) > 1)) {
+      const norm = (xs: number[]) => { const t = xs.reduce((a, b) => a + b, 0); return xs.map((x) => x / t); };
+      const was = norm(wanted.map((o) => 1 / movement.get(o)!.opening));
+      const is = norm(wanted.map((o) => 1 / movement.get(o)!.current));
+      const now = sharp?.fair ?? fair;
+      if (wanted.every((o) => now.has(o))) {
+        open = {
+          fair: new Map(wanted.map((o, i) => [o, Math.min(0.999, Math.max(0.001, now.get(o)! - (is[i]! - was[i]!)))])),
+          book: 'movement',
+        };
+      }
+    }
+
     out.push({
       market: g.market,
       line: g.line,
