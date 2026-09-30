@@ -2134,14 +2134,17 @@ async function viewSearch(params = new URLSearchParams()) {
              enterkeyhint="search" maxlength="60" placeholder="Arsenal, Serie A, Boca…" aria-label="Team or competition"
              value="${esc(initial)}">
     </form>
-    <div class="search-out" id="search-out" aria-live="polite"></div>
+    <p class="visually-hidden" id="search-status" role="status"></p>
+    <div class="search-out" id="search-out"></div>
   </div>`;
 
   const input = document.getElementById('search-q');
   const out = document.getElementById('search-out');
-  // Straight into the box with a keyboard and a mouse; on a phone the keyboard
-  // waits for a tap rather than covering the page on arrival.
-  if (!initial && matchMedia('(pointer: fine)').matches) input.focus({ preventScroll: true });
+  // What a screen reader hears after each search: one line, not the whole
+  // list read out again on every keystroke, which is what making the list
+  // itself the live region did.
+  const status = document.getElementById('search-status');
+  const say = (text) => { if (status.textContent !== text) status.textContent = text; };
   let seq = 0;
   let timer = null;
 
@@ -2167,6 +2170,7 @@ async function viewSearch(params = new URLSearchParams()) {
     const total = analysed.length + later.length;
 
     if (!total && !leagues.length) {
+      say(`Nothing for ${q} in the next two weeks.`);
       out.innerHTML = `
         <div class="search-empty">
           <p class="search-empty-head">Nothing for “${esc(q)}” in the next two weeks.</p>
@@ -2182,6 +2186,7 @@ async function viewSearch(params = new URLSearchParams()) {
     if (later.length) bits.push(`${later.length} still to be analysed`);
     if (played.length) bits.push(`${played.length} played in the last few days`);
     const summary = bits.length ? `${bits.slice(0, -1).join(', ')}${bits.length > 1 ? ' and ' : ''}${bits[bits.length - 1]}.` : '';
+    say(summary || `${leagues.length} ${leagues.length === 1 ? 'competition' : 'competitions'} found.`);
 
     const shownUp = only ? upcoming.filter(searchHasCall) : upcoming;
     const shownPlayed = only ? played.filter(searchHasCall) : played;
@@ -2218,7 +2223,7 @@ async function viewSearch(params = new URLSearchParams()) {
   const run = async (q) => {
     const mine = ++seq;
     remember(q);
-    if (q.trim().length < 2) { out.innerHTML = intro(); return; }
+    if (q.trim().length < 2) { say(''); out.innerHTML = intro(); return; }
     out.classList.add('busy');
     try {
       const data = await getJSON(`/api/search?q=${encodeURIComponent(q.trim())}`);
@@ -2226,6 +2231,7 @@ async function viewSearch(params = new URLSearchParams()) {
       paint(data);
     } catch {
       if (mine !== seq) return;
+      say('Search is not answering just now.');
       out.innerHTML = '<p class="sr-none">Search is not answering just now. Try again in a moment.</p>';
     } finally {
       if (mine === seq) out.classList.remove('busy');
