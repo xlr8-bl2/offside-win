@@ -21,6 +21,7 @@ import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
 import { bucketOf, buildCandidates, DayMix, driversFor, floorForRank, isLean, marketLabel, rankConfident, select, setAsideFor, type CalibrationMap } from './select.ts';
 import { consensusMarkets } from './consensus.ts';
+import { readOf } from './read.ts';
 import { snapshotOf } from './odds.ts';
 import { dbStats, exec as dbExec, insertMany, kvGetJSON, kvSetJSON, pickConflictTarget, select as dbSelect } from './store.ts';
 import type { CalibrationRow } from './select.ts';
@@ -732,6 +733,15 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
         odds_1x2: Object.fromEntries(
           (analysis.book.find((b) => b.market === '1x2')?.fair ?? new Map()).entries(),
         ),
+        // Our read, on a match with no call: what we think happens, in words,
+        // from the bookmakers' own view. Free, no price, never in the record
+        // (read.ts).
+        read: publishedVerdicts.length ? null : readOf({
+          home: analysis.home_team,
+          away: analysis.away_team,
+          result: Object.fromEntries((analysis.book.find((b) => b.market === '1x2')?.fair ?? new Map()).entries()),
+          over25: analysis.book.find((b) => b.market === 'over_under_25')?.fair.get('over') ?? null,
+        }),
         // The board card's headline, and the only kind of call that reaches a
         // reader. Settled results said the other two buckets lose money while
         // this one is about level, so they keep being computed — they are how

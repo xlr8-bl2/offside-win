@@ -4715,3 +4715,14 @@ html.dd-locked, html.dd-locked body { overflow: hidden; }
 }
 .league-more:hover { background: var(--terrace); color: var(--chalk); }
 .league-more:focus-visible { outline: none; box-shadow: inset var(--focus-ring); }
+
+/* Our read, on a match with no call: words, no price (js/lib/read.js). */
+.row-read { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; min-width: 0; }
+.row-read small { font-size: var(--text-2xs); font-weight: var(--weight-medium); color: var(--chalk-3); }
+.row-read b { font-size: var(--text-sm); font-weight: var(--weight-bold); color: var(--chalk-2); line-height: 1.25; }
+.read-line { margin-top: var(--space-4); padding: var(--space-4) var(--space-5); border: var(--border) solid var(--hairline); border-radius: var(--radius-lg); background: var(--stand); }
+.read-line small { display: block; font-size: var(--text-xs); color: var(--chalk-3); }
+.read-line b { display: block; margin-top: 2px; font-size: var(--text-lg); color: var(--chalk); }
+.read-line p { margin: var(--space-2) 0 0; font-size: var(--text-sm); color: var(--chalk-3); }
+.row-read { max-width: 10.5rem; }
+.row-read b { text-wrap: balance; }

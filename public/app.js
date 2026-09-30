@@ -2068,7 +2068,10 @@ function rowHTML(f) {
         : f.locked ? `<span class="row-locked-mark">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>
                         Members</span>`
-        : `<span class="row-pass">No pick</span>`}
+        // No call: our read instead, in words, with no price (engine/src/read.ts).
+        : f.read?.text
+          ? `<span class="row-read"><small>Our read</small><b>${esc(f.read.text)}</b></span>`
+          : '<span class="row-pass">No pick</span>'}
     </div>
   </a>`;
 }
@@ -2872,7 +2875,7 @@ async function viewBoard(params = new URLSearchParams()) {
             rest.length ? `
             <div class="board-rest">
               <h2 class="board-sub">${called.length ? 'Every other game we looked at' : 'Every game we looked at'}</h2>
-              <p class="board-sub-note">${state.when === 'played' ? 'We passed on these.' : 'Nothing here was strong enough to back.'} Each one has its preview, team news and form on the match page.</p>
+              <p class="board-sub-note">${state.when === 'played' ? 'We passed on these.' : 'Nothing here was strong enough to back, so each carries our read instead: what we think happens, free, with no price, because we would not bet it.'} The preview, team news and form are on each match's page.</p>
               ${restGroups.map((g) => block(g, 'game')).join('')}
             </div>` : ''}`
         : fixtures.length
@@ -4349,7 +4352,9 @@ async function viewFixture(id, params = new URLSearchParams()) {
             // Older pass notes were written for us ("the 58.1 needed against a
             // 109.1% margin"); the gate withholds those and the plain line
             // stands in.
-            : `<p class="narrative">${esc(cleanProse(f.pass) ?? 'Nothing here is worth a call. The bookmakers have it about right.')}</p>`}
+            : `<p class="narrative">${esc(cleanProse(f.pass) ?? 'Nothing here is worth a call. The bookmakers have it about right.')}</p>${
+              !played && f.read?.text ? `<div class="read-line"><small>Our read</small><b>${esc(f.read.text)}</b>
+                  <p>What we think happens. It is a read, not a call: we would not bet it, so it has no price and it is not in our record.</p></div>` : ''}`}
         </div>
         ${reads.length ? `<div class="panel">
           <p class="panel-head">${verdicts.length ? (played ? 'What made us call it' : 'What made the call') : 'What stood out'}</p>

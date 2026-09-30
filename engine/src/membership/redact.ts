@@ -147,7 +147,9 @@ export function freeBoard(board: Obj): Obj {
   // A locked card never carries a pass note: it contradicts the lock, and the
   // note names the nearest market and its odds.
   return scrub({
-    ...omit(board, ['top_pick', 'confident', 'odds_1x2', ...(calls ? ['pass'] : [])]),
+    // A read is only written where there is no call, and is never shown
+    // beside a lock: it would read as a hint at what is behind it.
+    ...omit(board, ['top_pick', 'confident', 'odds_1x2', ...(calls ? ['pass', 'read'] : [])]),
     ...lockState(calls),
   }) as Obj;
 }
@@ -181,7 +183,7 @@ export function freeBundle(bundle: Obj): Obj {
 
   const calls = Array.isArray(bundle['verdicts']) ? bundle['verdicts'].length : 0;
   const rest = omit(bundle, ['top_pick', 'confident', 'odds_1x2', 'markets', 'candidates', 'verdicts',
-    ...(calls ? ['pass', 'pass_reason'] : [])]);
+    ...(calls ? ['pass', 'pass_reason', 'read'] : [])]);
 
   return scrub({
     ...rest,
