@@ -111,7 +111,7 @@ const memo = new Map();
 const cacheKey = (scope, path) => `ow.c1:${scope}:${path}`;
 function cacheRead(key) {
   if (memo.has(key)) return memo.get(key);
-  if (!consented()) return null;
+  if (!canSave()) return null;
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
@@ -124,7 +124,7 @@ function cacheWrite(key, text) {
   const hit = { at: Date.now(), text };
   memo.set(key, hit);
   // On the device only with the reader's yes; in memory for this visit either way.
-  if (!consented()) return;
+  if (!canSave()) return;
   try { localStorage.setItem(key, JSON.stringify(hit)); }
   catch {
     // Full. Drop every stored copy and try once more; a cache is disposable.
@@ -6994,20 +6994,19 @@ function viewLegal(which) {
    * change it where they are reading that.
    */
   const choice = which === 'cookies' ? (() => {
-    const now = readConsent();
-    const gpc = !!navigator.globalPrivacyControl;
-    const said = now === 'accepted' ? 'You said yes.' : now === 'declined'
-      ? (gpc && !(() => { try { return localStorage.getItem(CONSENT_KEY); } catch { return null; } })()
-          ? 'Your browser sends the Global Privacy Control signal, so this is set to no.'
-          : 'You said no.')
-      : 'You have not answered yet.';
+    const c = readChoice();
+    const gpc = !!navigator.globalPrivacyControl
+      && !(() => { try { return localStorage.getItem(CONSENT_KEY); } catch { return null; } })();
+    const said = !c ? 'You have not answered yet, so both are off.'
+      : gpc ? 'Your browser sends the Global Privacy Control signal, so both are off.'
+      : `Saved pages are ${c.save ? 'on' : 'off'} and visit counts are ${c.count ? 'on' : 'off'}.`;
     return `
     <section class="panel consent-panel" aria-labelledby="consent-h">
       <p class="panel-head" id="consent-h">Your choice</p>
-      <p>${esc(said)} Saved pages and visit counting are ${now === 'accepted' ? 'on' : 'off'}.</p>
+      <p>${esc(said)}</p>
+      ${consentRows('cp')}
       <div class="cta-row">
-        <button class="btn ${now === 'accepted' ? 'btn-ghost' : 'btn-primary'}" data-consent-set="accepted"${now === 'accepted' ? ' disabled' : ''}>Turn them on</button>
-        <button class="btn ${now === 'accepted' ? 'btn-primary' : 'btn-ghost'}" data-consent-set="declined"${now === 'declined' ? ' disabled' : ''}>Turn them off</button>
+        <button class="btn btn-primary" data-consent-save>Save my choices</button>
       </div>
     </section>`;
   })() : '';
@@ -7016,7 +7015,8 @@ function viewLegal(which) {
     ${legalHTML(which)}
     ${choice}
   </div>`;
-  for (const b of app.querySelectorAll('[data-consent-set]')) b.onclick = () => applyConsent(b.dataset.consentSet);
+  const save = app.querySelector('.consent-panel [data-consent-save]');
+  if (save) save.onclick = () => applyConsent(choiceFrom(app.querySelector('.consent-panel')));
   // Contents links scroll rather than change the address, which the router
   // would read as a page of its own.
   for (const a of app.querySelectorAll('[data-jump]')) {
@@ -7054,22 +7054,41 @@ function readConsent() {
   } catch { /* private mode: no stored answer */ }
   return navigator.globalPrivacyControl ? 'declined' : null;
 }
-const consented = () => readConsent() === 'accepted';
+/**
+ * What the reader allowed, one switch per use: saved pages and visit counts.
+ * Stored as 'accepted' (both), 'declined' (neither) or 'custom:' and the ones
+ * allowed, so an answer given before the choice was split still reads right.
+ * Null until they answer: nothing is on by default.
+ */
+function readChoice() {
+  const v = readConsent();
+  if (!v) return null;
+  if (v === 'accepted') return { save: true, count: true };
+  if (v.startsWith('custom:')) {
+    const on = new Set(v.slice(7).split(','));
+    return { save: on.has('save'), count: on.has('count') };
+  }
+  return { save: false, count: false };
+}
+const canSave = () => !!readChoice()?.save;
+const canCount = () => !!readChoice()?.count;
+const choiceValue = ({ save, count }) => (save && count ? 'accepted' : !save && !count ? 'declined'
+  : `custom:${[save && 'save', count && 'count'].filter(Boolean).join(',')}`);
 
 function applyConsent(value) {
   try { localStorage.setItem(CONSENT_KEY, value); } catch { /* private mode: ask again next visit */ }
   document.getElementById('cookie-notice')?.remove();
   document.body.style.paddingBottom = '';
-  if (value === 'accepted') countView();
-  // A no removes what a yes stored.
-  else cacheClear({ keepMemory: true });
+  if (canCount()) countView();
+  // A no to saved pages removes what a yes stored.
+  if (!canSave()) cacheClear({ keepMemory: true });
   // The cookie policy shows the current choice; redraw it if it is open.
   if (parseHash().parts[0] === 'legal') route({ soft: true });
 }
 
 /** One anonymous page view, if and only if the reader said yes. */
 function countView() {
-  if (!consented()) return;
+  if (!canCount()) return;
   const page = parseHash().parts[0] || 'home';
   const body = JSON.stringify({ p: page });
   try {
@@ -7102,6 +7121,35 @@ function reserveForNotice() {
   document.body.style.paddingBottom = `${Math.ceil(gap)}px`;
 }
 
+/**
+ * The switches, one per use of the reader's device, as the notice and the
+ * cookie policy both show them. Off unless the reader has said yes: nothing
+ * arrives pre-ticked.
+ */
+function consentRows(prefix) {
+  const c = readChoice() ?? { save: false, count: false };
+  const row = (key, title, what) => `
+    <li>
+      <label for="${prefix}-${key}"><b>${title}</b><span>${what}</span></label>
+      <input type="checkbox" role="switch" class="switch" id="${prefix}-${key}" data-consent-key="${key}"${c[key] ? ' checked' : ''}>
+    </li>`;
+  return `
+  <ul class="consent-list">
+    <li>
+      <div><b>Needed to run the site</b><span>Keeps you signed in and remembers this choice.</span></div>
+      <span class="consent-fixed">Always on</span>
+    </li>
+    ${row('save', 'Saved pages', 'A copy of each page on this device, so the site opens instantly next time.')}
+    ${row('count', 'Visit counts', 'An anonymous count of which pages get read. Nothing is stored on your device.')}
+  </ul>`;
+}
+
+/** The switches under `root`, as a stored answer. */
+function choiceFrom(root) {
+  const on = (k) => !!root.querySelector(`[data-consent-key="${k}"]`)?.checked;
+  return choiceValue({ save: on('save'), count: on('count') });
+}
+
 function cookieNotice({ force = false } = {}) {
   if (readConsent() && !force) return;
   document.getElementById('cookie-notice')?.remove();
@@ -7109,18 +7157,35 @@ function cookieNotice({ force = false } = {}) {
   el.className = 'cookie';
   el.id = 'cookie-notice';
   el.setAttribute('role', 'region');
-  el.setAttribute('aria-label', 'Cookie choice');
+  el.setAttribute('aria-labelledby', 'cookie-title');
   el.innerHTML = `
-    <p class="cookie-kicker hand" aria-hidden="true">quick one</p>
-    <p class="cookie-text">Can we count visits, anonymously, and keep pages on this device so they
-       open instantly? No adverts, no tracking. <a href="#/legal/cookies">What we store</a></p>
+    <h2 class="cookie-title" id="cookie-title">Cookies and storage</h2>
+    <p class="cookie-text">We'd like to save pages on this device so the site opens instantly, and count
+       visits anonymously so we know what gets read. No adverts, and nothing that follows you around the web.</p>
+    <div class="cookie-options" id="cookie-options" hidden>
+      ${consentRows('cn')}
+      <button class="btn btn-primary btn-sm cookie-save" data-consent-save>Save my choices</button>
+    </div>
     <div class="cookie-actions">
-      <button class="btn btn-ghost btn-sm" data-consent="declined">No thanks</button>
-      <button class="btn btn-primary btn-sm" data-consent="accepted">Yes, go on</button>
+      <button class="btn btn-sm" data-consent="declined">Reject all</button>
+      <button class="btn btn-sm" data-consent="accepted">Accept all</button>
+    </div>
+    <div class="cookie-foot">
+      <button type="button" class="cookie-more" aria-expanded="false" aria-controls="cookie-options">Choose what to allow</button>
+      <a href="#/legal/cookies">Cookie policy</a>
     </div>`;
+  const more = el.querySelector('.cookie-more');
+  more.onclick = () => {
+    const box = el.querySelector('#cookie-options');
+    box.hidden = !box.hidden;
+    more.setAttribute('aria-expanded', String(!box.hidden));
+    more.textContent = box.hidden ? 'Choose what to allow' : 'Hide the choices';
+    reserveForNotice();
+  };
   el.addEventListener('click', (e) => {
-    const v = e.target?.dataset?.consent;
-    if (v) applyConsent(v);
+    const t = e.target;
+    if (t?.dataset?.consent) applyConsent(t.dataset.consent);
+    else if (t?.hasAttribute?.('data-consent-save')) applyConsent(choiceFrom(el));
   });
   /*
    * In the document, above the page, rather than appended to the end of the
