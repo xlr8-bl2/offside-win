@@ -204,11 +204,23 @@ async function liveMembershipOf(env: PayEnv, jwt: string): Promise<{ plan_id: st
   return { plan_id: m.plan_id, expires_at: Number(m.expires_at), via: m.via ?? null };
 }
 
+/** The reader's account, read with their own token: the live membership and any Whop subscription still renewing. */
+async function accountOf(env: PayEnv, jwt: string): Promise<{ whop: { manage_url?: string | null } | null } | null> {
+  const res = await fetch(new URL('/rest/v1/rpc/get_account', env.SUPABASE_URL), {
+    method: 'POST',
+    headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${jwt}`, 'content-type': 'application/json' },
+    body: '{}',
+  });
+  if (!res.ok) return null;
+  const a = await res.json() as { whop?: { manage_url?: string | null } | null };
+  return { whop: a?.whop ?? null };
+}
+
 /**
  * Stop every renewing Whop membership of this reader at the end of its paid
  * time. True when there is none left that would take money again.
  */
-async function stopRenewals(env: PayEnv, user: { id: string; email: string | null }): Promise<boolean> {
+export async function stopRenewals(env: PayEnv, user: { id: string; email: string | null }): Promise<boolean> {
   if (!env.WHOP_API_KEY) return false;
   let list: Rec[];
   try { list = await listWhopMemberships(env, 400, 5); } catch { return false; }
@@ -284,11 +296,13 @@ async function hadMembership(env: PayEnv, user: { id: string; email: string | nu
   if (!env.SUPABASE_SERVICE_KEY) return true;
   const as = { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, accept: 'application/json' };
   const id = encodeURIComponent(user.id);
-  const email = (user.email ?? '').toLowerCase().replace(/[%_*,()]/g, '');
+  // Entitlement emails are stored lowercased, so an exact match is right; an
+  // ilike pattern with the wildcards stripped out never matched john_doe@.
+  const email = (user.email ?? '').toLowerCase();
   const asks = [
     `/rest/v1/membership?user_id=eq.${id}&select=user_id&limit=1`,
     `/rest/v1/payment?user_id=eq.${id}&select=id&limit=1`,
-    ...(email ? [`/rest/v1/entitlement?email=ilike.${encodeURIComponent(email)}&select=email&limit=1`] : []),
+    ...(email ? [`/rest/v1/entitlement?email=eq.${encodeURIComponent(email)}&select=email&limit=1`] : []),
   ];
   const answers = await Promise.all(asks.map(async (path) => {
     const r = await fetch(new URL(path, env.SUPABASE_URL), { headers: as });
@@ -414,6 +428,26 @@ export async function renewal(request: Request, env: PayEnv, jwt: string | null)
     const body = await request.json() as { auto_renew?: unknown };
     on = body?.auto_renew === true;
   } catch { /* default off, which is the safe direction */ }
+
+  // A Whop subscription is billed by Whop, so stopping it here means telling
+  // Whop. Setting our own flag alone left the member charged each month after
+  // they pressed "Stop renewing". One tap, as the account page promises; Whop
+  // ends it at the end of the paid period, and the days paid for stay.
+  if (provider(env) === 'whop') {
+    const acct = await accountOf(env, jwt);
+    if (acct?.whop) {
+      if (on) {
+        return json({ error: 'That membership renews through Whop. Turn it back on from Whop\'s page.', manage_url: acct.whop.manage_url ?? null }, 409);
+      }
+      const user = await identify(env, jwt);
+      if (!user) return json({ error: 'Sign in first.' }, 401);
+      if (!(await stopRenewals(env, user))) {
+        return json({ error: 'Whop could not be reached, so it is still set to renew. Nothing has changed. Try again in a minute.' }, 503);
+      }
+      if (user.email) await rpcAsService(env, 'stop_entitlement_renewal', { p_email: user.email }).catch(() => null);
+      return json({ auto_renew: false });
+    }
+  }
 
   const now = Math.floor(Date.now() / 1000);
   const res = await fetch(new URL('/rest/v1/membership', env.SUPABASE_URL), {
@@ -815,7 +849,10 @@ export async function sweepWhop(env: PayEnv): Promise<{ checked: number; granted
   const fail = (err: unknown) => { tally.errors++; tally.error ??= (err instanceof Error ? err.message : String(err)).slice(0, 300); };
   if (provider(env) !== 'whop' || !env.WHOP_API_KEY || !env.SUPABASE_SERVICE_KEY) return tally;
   let list: Rec[] = [];
-  try { list = await listWhopMemberships(env, 40, 5); } catch (err) { fail(err); }
+  // Every membership that can still be renewing, not only recent ones: a
+  // monthly subscription's second and later renewals were outside a 40-day
+  // window, so a lost webhook cost a paying member their access.
+  try { list = await listWhopMemberships(env, 400, 10); } catch (err) { fail(err); }
   for (const m of list) {
     tally.checked++;
     try {

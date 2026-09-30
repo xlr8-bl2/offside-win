@@ -5647,12 +5647,21 @@ const PLAN_LINE = {
 };
 
 /** Turn renewal on or off. Takes effect immediately, both ways. */
-async function setRenewal(on) {
+async function setRenewal(on, button) {
+  // One request per tap: the button waits for the answer, and a failure is
+  // said beside it rather than in a browser alert.
+  if (button) button.disabled = true;
+  button?.parentElement?.querySelector('.acct-note')?.remove();
   try {
     await postJSON('/api/pay/renewal', { auto_renew: on });
     await viewAccount();
   } catch (err) {
-    alert(err.message);
+    if (button) {
+      button.disabled = false;
+      button.insertAdjacentHTML('afterend', `<span class="acct-note bad" role="status">${esc(err.message)}</span>`);
+    } else {
+      alert(err.message);
+    }
   }
 }
 
@@ -5867,7 +5876,8 @@ function liveMembership(account) {
 /** Does it take money again by itself? A matchday pass never does. */
 function renewsItself(m) {
   if (!m || m.plan_id === 'matchday' || m.card_brand === 'complimentary') return false;
-  return m.via === 'whop' || Number(m.auto_renew) === 1;
+  // A Whop membership carries whether it still renews (stopped from here or not).
+  return Number(m.auto_renew) === 1;
 }
 
 /** Whop's page for this membership, when it is one of Whop's. */
@@ -6550,7 +6560,11 @@ async function viewAccount() {
               // this membership. A matchday pass is one payment and stops.
               ? (m.plan_id === 'matchday'
                   ? `<span>One payment. It stops by itself.</span>`
-                  : `<span>Renews through Whop until you cancel</span><a class="btn btn-ghost btn-sm" href="${esc(m.manage_url && /^https:\/\/(www\.)?whop\.com\//.test(m.manage_url) ? m.manage_url : 'https://whop.com/')}" target="_blank" rel="noopener noreferrer">Manage or cancel</a>`)
+                  // One tap, like any other membership: the Worker tells Whop
+                  // to end it at the end of the paid period.
+                  : Number(m.auto_renew)
+                    ? `<span>Renews through Whop until you stop it</span><button class="btn btn-quiet btn-sm" id="cancel">Stop renewing</button>`
+                    : `<span>Does not renew. Yours until ${esc(when(m.expires_at))}.</span>${whopManageUrl(m) ? `<a class="btn btn-ghost btn-sm" href="${esc(whopManageUrl(m))}" target="_blank" rel="noopener noreferrer">Renew on Whop</a>` : ''}`)
               : m.card_brand === 'complimentary'
                 ? `<span>Complimentary</span>`
                 : m.auto_renew
@@ -6559,6 +6573,9 @@ async function viewAccount() {
           : `<a class="btn btn-accent" href="#/pricing">See the plans</a>`}
       </div>
     </section>
+    ${active && m.via !== 'whop' && account.whop?.renewing ? `
+    <p class="acct-line">You also have a membership through Whop that renews on ${esc(when(account.whop.until))}.
+      <button class="btn btn-quiet btn-sm" id="cancel">Stop it renewing</button></p>` : ''}
     ${active && m.plan_id !== 'quarter' && m.card_brand !== 'complimentary' ? `
     <a class="acct-upgrade" href="#/checkout?plan=${m.plan_id === 'matchday' ? 'monthly' : 'quarter'}">
       <b>${m.plan_id === 'matchday' ? 'Carry on by the month' : 'Go to three months and pay less a month'}</b>
@@ -6853,9 +6870,9 @@ async function viewAccount() {
   const cancel = document.getElementById('cancel');
   // One tap, no "are you sure", no offer to stay. Retention mazes are a dark
   // pattern and in several places an illegal one.
-  if (cancel) cancel.onclick = () => setRenewal(false);
+  if (cancel) cancel.onclick = () => setRenewal(false, cancel);
   const resume = document.getElementById('resume');
-  if (resume) resume.onclick = () => setRenewal(true);
+  if (resume) resume.onclick = () => setRenewal(true, resume);
 }
 
 /** The database's words, said to a person. */
