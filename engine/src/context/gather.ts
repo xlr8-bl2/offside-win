@@ -4,6 +4,7 @@ import { buildBookMarkets, fetchQuotes } from '../odds.ts';
 import { loadLeagueModel, loadRefereeRate } from '../ratings/fit.ts';
 import { kvGetJSON, kvSetJSON, select } from '../store.ts';
 import { profilesFor } from './players.ts';
+import { trackXi } from './xi.ts';
 import type { MatchRow } from '../types.ts';
 import type {
   FixtureContext, LineupInfo, LineupPlayer, ManagerInfo, ManagerTenure,
@@ -455,6 +456,8 @@ export async function gatherFixture(
 
   const leagueRow = await select<{ name: string }>('SELECT name FROM league WHERE id = ?', [leagueId]);
   const lineups = parseLineups(lineupsRaw);
+  // The predicted eleven kept, and the confirmed one compared with it (xi.ts).
+  lineups.changes = await trackXi(fixtureId, lineups).catch(() => null);
 
   // Who the missing players are and who carries the threat. Not for a match
   // long since played, where nothing is left to say about who is fit.

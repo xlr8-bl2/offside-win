@@ -44,6 +44,11 @@ export interface LineupInfo {
     id: number; name: string; team_id: number | null; reason: string | null;
     side: 'home' | 'away' | null;
   }>;
+  /**
+   * Once the sheets are confirmed: who was expected to start and did not, per
+   * side, against the last predicted eleven (context/xi.ts). Absent before.
+   */
+  changes?: import('./xi.ts').XiChanges | null;
 }
 
 /** Where a team sits, and what that position is worth to them. */

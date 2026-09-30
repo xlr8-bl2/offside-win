@@ -111,7 +111,7 @@ const memo = new Map();
 const cacheKey = (scope, path) => `ow.c1:${scope}:${path}`;
 function cacheRead(key) {
   if (memo.has(key)) return memo.get(key);
-  if (!consented()) return null;
+  if (!canSave()) return null;
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
@@ -124,7 +124,7 @@ function cacheWrite(key, text) {
   const hit = { at: Date.now(), text };
   memo.set(key, hit);
   // On the device only with the reader's yes; in memory for this visit either way.
-  if (!consented()) return;
+  if (!canSave()) return;
   try { localStorage.setItem(key, JSON.stringify(hit)); }
   catch {
     // Full. Drop every stored copy and try once more; a cache is disposable.
@@ -5606,8 +5606,8 @@ async function startCheckout(plan = 'monthly') {
  * The fallback for our checkout page: used while the API key cannot take a
  * payment itself, or if the card fields will not load.
  */
-async function openEmbeddedCheckout(plan, consent) {
-  const out = await postJSON('/api/pay/checkout', { plan, consent });
+async function openEmbeddedCheckout(plan, consent, promo) {
+  const out = await postJSON('/api/pay/checkout', { plan, consent, ...(promo ? { promo } : {}) });
   if (out.checkout) {
     try {
       await openCheckout({
@@ -5629,6 +5629,13 @@ async function openEmbeddedCheckout(plan, consent) {
   }
   if (!out.link) throw new Error('The payment page could not be opened.');
   location.href = out.link;
+}
+
+/** Where the payment happens when Whop's fields are not on our page. */
+function checkoutWhere(trial, moving) {
+  if (trial) return 'Whop\'s secure checkout opens over this page. It takes your card and charges nothing today.';
+  if (moving) return 'Whop\'s secure checkout opens over this page to keep your card for that date.';
+  return 'Whop\'s secure checkout opens over this page to take the payment.';
 }
 
 /** What the card form's heading says, per plan. */
@@ -5682,12 +5689,16 @@ function freeLineHTML(free) {
  * settled record is public and negative, so selling coverage and explanation is
  * the only honest pitch and it is the one that survives an ad review.
  */
+/** The plans in the order the pricing page shows them. */
+const order0 = (plans) => ['matchday', 'monthly', 'quarter'].filter((id) => (plans ?? []).some((p) => p.id === id));
+
 async function viewPricing() {
   placeholder(skeletonHTML());
-  const [user, plans, hero] = await Promise.all([
+  const [user, plans, hero, running] = await Promise.all([
     currentUser(),
     getJSON('/api/plans').catch(() => []),
     getJSON('/api/hero').catch(() => null),
+    getJSON('/api/promos').catch(() => []),
   ]);
   // A member arriving here is shown what they have, not sold it again.
   let account = null;
@@ -5696,6 +5707,11 @@ async function viewPricing() {
     if (account) state.account = account;
   }
   const mine = liveMembership(account);
+  // A deal or a free trial on a plan, when one is running and this reader
+  // may have it (js/lib/promo.js). Checkout finds the same one by the plan.
+  const promo = Array.isArray(running) && running.length && !mine ? await import('./js/lib/promo.js').catch(() => null) : null;
+  const offerOn = (id) => (promo ? running.find((o) => o.plan_id === id && o.kind !== 'notice' && promo.eligible(o, { signedIn: !!user, member: false })) ?? null : null);
+  if (promo && order0(plans).some((id) => offerOn(id))) promo.ensureStyles();
   // The free call is its own fixture, chosen by the slate: not the headline
   // match. Pointing this line at the headline sent readers to a locked call
   // under a label that said it was free.
@@ -5763,13 +5779,17 @@ async function viewPricing() {
         const p = byId[id];
         const c = COPY[id];
         const b = buttonFor(id, p);
-        const lead = mine ? mine.plan_id === id : id === 'monthly';
+        const o = offerOn(id);
+        const lead = mine ? mine.plan_id === id : o ? true : id === 'monthly' && !order.some((x) => offerOn(x));
         return `
-        <section class="plan${lead ? ' plan-main' : ''}${b.mine ? ' plan-mine' : ''}">
-          ${b.mine ? `<span class="plan-tagline is-mine">Yours to ${esc(shortDate(mine.expires_at))}</span>` : !mine && c.tag ? `<span class="plan-tagline">${esc(c.tag)}</span>` : ''}
+        <section class="plan${lead ? ' plan-main' : ''}${b.mine ? ' plan-mine' : ''}${o ? ' plan-offer' : ''}">
+          ${b.mine ? `<span class="plan-tagline is-mine">Yours to ${esc(shortDate(mine.expires_at))}</span>` : o ? `<span class="plan-tagline is-offer">${esc(o.title)}</span>` : !mine && c.tag ? `<span class="plan-tagline">${esc(c.tag)}</span>` : ''}
           <h2>${esc(p.name)}</h2>
-          <p class="plan-price"><b>${esc(money(p.amount_minor, p.currency))}</b>
-            <span>${esc(per(p))}</span></p>
+          ${o?.kind === 'deal' ? `<p class="plan-price"><s>${esc(money(p.amount_minor, p.currency))}</s> <b>${esc(money(o.price_minor, p.currency))}</b>
+            <span>${esc(per(p))}</span></p>` : o?.kind === 'trial' ? `<p class="plan-price"><b>${esc(o.trial_days)} days free</b>
+            <span>then ${esc(money(p.amount_minor, p.currency))} ${esc(per(p))}</span></p>` : `<p class="plan-price"><b>${esc(money(p.amount_minor, p.currency))}</b>
+            <span>${esc(per(p))}</span></p>`}
+          ${o ? `<p class="plan-ends">Ends in <span class="plan-clock" data-ends="${esc(o.ends_at)}"></span></p>` : ''}
           ${perMonth(p) ? `<p class="plan-per">${esc(perMonth(p))}</p>` : ''}
           <p class="plan-blurb">${esc(c.blurb)}</p>
           ${b.note ? `<p class="plan-switch">${esc(b.note)}</p>` : ''}
@@ -5777,7 +5797,7 @@ async function viewPricing() {
             ? `<a class="btn btn-ghost btn-lg" href="#/account?tab=membership">Your plan</a>`
             : b.covered
               ? `<button class="btn btn-ghost btn-lg" type="button" disabled>${esc(b.label)}</button>`
-              : `<button class="btn ${b.quiet ? 'btn-ghost' : lead || !mine ? 'btn-accent' : 'btn-primary'} btn-lg" data-buy="${esc(id)}">${esc(b.label)}</button>`}
+              : `<button class="btn ${b.quiet ? 'btn-ghost' : lead || !mine ? 'btn-accent' : 'btn-primary'} btn-lg" data-buy="${esc(id)}">${esc(o ? (o.cta || (o.kind === 'trial' ? 'Start the free days' : 'Get the deal')) : b.label)}</button>`}
         </section>`;
       }).join('')}
     </div>
@@ -5830,6 +5850,7 @@ async function viewPricing() {
   for (const b of app.querySelectorAll('[data-buy]')) {
     b.onclick = () => startCheckout(b.dataset.buy);
   }
+  for (const c of app.querySelectorAll('.plan-clock')) promo?.mountClock(c, Number(c.dataset.ends), { compact: true, onEnd: () => route({ soft: true }) });
 }
 
 /* ----------------------------------------------------------------- checkout */
@@ -5950,11 +5971,23 @@ async function viewCheckout(params) {
   const m = liveMembership(account);
   const block = checkoutBlock(m, planId);
   const terms = PLAN_TERMS[planId] ?? { per: '', runs: '', after: '' };
-  const price = money(plan.amount_minor, plan.currency);
   const name = PLAN_NAME[planId] ?? plan.name;
   const renews = planId !== 'matchday';
   // A member moving plans: nothing today, the new price from their paid-to date.
   const moving = m && !block ? m : null;
+  // A deal or a free trial running on this plan (js/lib/promo.js). Only its
+  // id goes with the payment; the Worker checks it and sets the price.
+  const promo = moving || block ? null : await import('./js/lib/promo.js').catch(() => null);
+  const offer = promo ? await promo.offerForPlan(planId, { signedIn: true, member: !!m }).catch(() => null) : null;
+  const trial = offer?.kind === 'trial' ? offer : null;
+  const deal = offer?.kind === 'deal' ? offer : null;
+  const amount = deal ? deal.price_minor : Number(plan.amount_minor);
+  const price = money(amount, plan.currency);
+  if (offer) promo.ensureStyles();
+  // Whop's card fields go on this page only for a straight payment; a switch,
+  // a free trial or no account id all go through Whop's own checkout, so the
+  // fields' space is never drawn just to be taken away again.
+  const embedding = !moving && !block && !trial && !!cfg?.whopAccount;
 
   app.innerHTML = `
   <div class="wrap section checkout" data-plan="${esc(planId)}">
@@ -5968,20 +6001,15 @@ async function viewCheckout(params) {
           Your ${esc((PLAN_NAME[moving.plan_id] ?? 'membership').toLowerCase())} is paid up to that date, so the ${esc(name.toLowerCase())}
           starts now and its first payment waits until then. The ${esc((PLAN_NAME[moving.plan_id] ?? 'membership').toLowerCase())} stops renewing.
           You keep every day you have paid for and pay for none twice.</p>` : `
+        ${trial ? `
+        <p class="co-price"><b>${esc(trial.trial_days)} days free</b> <span>then ${esc(money(plan.amount_minor, plan.currency))} ${esc(terms.per)}</span></p>
+        <p class="co-terms"><b>${esc(trial.title)}.</b> ${esc(promo.terms(trial))}</p>
+        <p class="co-offer">Ends in <span class="co-clock" data-ends="${esc(trial.ends_at)}"></span></p>` : deal ? `
+        <p class="co-price"><s>${esc(money(plan.amount_minor, plan.currency))}</s> <b>${esc(price)}</b> <span>${esc(terms.per)}</span></p>
+        <p class="co-terms"><b>${esc(deal.title)}.</b> ${esc(promo.terms(deal))}</p>
+        <p class="co-offer">Ends in <span class="co-clock" data-ends="${esc(deal.ends_at)}"></span></p>` : `
         <p class="co-price"><b>${esc(price)}</b> <span>${esc(terms.per)}</span></p>
-        <p class="co-terms"><b>${esc(terms.runs)}</b> ${esc(terms.after)}</p>`}
-        <ul class="ticks co-ticks">
-          <li><b>Every open call</b> the moment it goes up</li>
-          <li><b>The bet slip's legs</b>, before the first one kicks off</li>
-          <li><b>Why this call</b> on every match</li>
-          <li>The board's filters by league and by day</li>
-        </ul>
-        <p class="co-small co-moves">Calls can change until kick-off, as we look at every match again every
-          fifteen minutes, and close when the match starts.</p>
-        <p class="co-who">It goes on the account you are signed in with:
-          <b>${esc(user.email ?? '')}</b></p>
-        <p class="co-small">If something of ours fails, you get it put right or your money back.
-          <a href="#/legal/refunds">How refunds work</a>.</p>
+        <p class="co-terms"><b>${esc(terms.runs)}</b> ${esc(terms.after)}</p>`}`}
       </section>
 
       <section class="co-pay" aria-labelledby="co-pay-title">
@@ -6001,26 +6029,48 @@ async function viewCheckout(params) {
             <span>Start my ${esc(name.toLowerCase())} straight away. I understand that once it starts I lose my
               14-day right to cancel.</span></label>
         </fieldset>
-        <div class="co-fields">
+        ${embedding ? `
+        <div class="co-fields" aria-busy="true">
           <div id="co-email"></div>
-          <div id="co-payment"><p class="pay-wait">Loading the secure card form…</p></div>
+          <div id="co-payment"></div>
           <div id="co-branding"></div>
-        </div>
-        <button class="btn btn-accent btn-lg co-button" id="co-pay" type="button" disabled>Pay ${esc(price)}</button>
+          <div class="co-skel" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+        </div>` : `
+        <p class="co-info">${checkoutWhere(trial, moving)}</p>`}
+        <button class="btn btn-accent btn-lg co-button" id="co-pay" type="button" disabled>${trial ? `Start the ${esc(trial.trial_days)} free days` : moving ? 'Switch, nothing to pay today' : embedding ? `Pay ${esc(price)}` : 'Continue to payment'}</button>
+        <p class="co-need" aria-live="polite">Tick both boxes above to go on.</p>
         <p class="co-error" role="alert" hidden></p>
-        <p class="co-note">${renews ? `By ${moving ? 'switching' : 'paying'} you agree to ${esc(price)} ${esc(terms.per)}${moving ? ` from ${esc(shortDate(moving.expires_at))}` : ''} until you cancel. ` : ''}Card details go
+        <p class="co-note">${trial ? `By starting you agree to ${esc(money(plan.amount_minor, plan.currency))} ${esc(terms.per)} after the ${esc(trial.trial_days)} free days, until you cancel. ` : renews ? `By ${moving ? 'switching' : 'paying'} you agree to ${esc(price)} ${esc(terms.per)}${moving ? ` from ${esc(shortDate(moving.expires_at))}` : ''} until you cancel. ` : ''}Card details go
           straight to Whop, who take the payment. They never reach offside.win.</p>`}
+      </section>
+
+      <section class="co-details" aria-label="What a membership includes">
+        <ul class="ticks co-ticks">
+          <li><b>Every open call</b> the moment it goes up</li>
+          <li><b>The bet slip's legs</b>, before the first one kicks off</li>
+          <li><b>Why this call</b> on every match</li>
+          <li>The board's filters by league and by day</li>
+        </ul>
+        <p class="co-small co-moves">Calls can change until kick-off, as we look at every match again every
+          fifteen minutes, and close when the match starts.</p>
+        <p class="co-who">It goes on the account you are signed in with:
+          <b>${esc(user.email ?? '')}</b></p>
+        <p class="co-small">If something of ours fails, you get it put right or your money back.
+          <a href="#/legal/refunds">How refunds work</a>.</p>
       </section>
     </div>
   </div>`;
   if (block) return;
+  for (const c of app.querySelectorAll('.co-clock')) promo.mountClock(c, Number(c.dataset.ends), { compact: true, onEnd: () => route({ soft: false }) });
 
   const button = app.querySelector('#co-pay');
   const errorLine = app.querySelector('.co-error');
+  const needLine = app.querySelector('.co-need');
   const say = (text) => { errorLine.textContent = text; errorLine.hidden = !text; };
   let complete = false;
   let working = null;
-  let embedded = false;
+  let embedded = !embedding;
+  let loaded = false;
   /*
    * Both boxes, every time. The second is the express request and the
    * acknowledgement the Consumer Contracts Regulations 2013 (reg. 37) ask for
@@ -6032,47 +6082,89 @@ async function viewCheckout(params) {
   const agreed = () => boxes.every((b) => b.checked);
   const consent = () => ({ adult: boxes[0].checked, waive: boxes[1].checked, terms: TERMS_VERSION });
   const ready = () => agreed() && (embedded || complete);
-  const idle = () => { working?.(); working = null; button.disabled = !ready(); };
-  for (const b of boxes) b.onchange = () => { if (!working) button.disabled = !ready(); };
+  /*
+   * The button and the line under it, from one place. A disabled button that
+   * says nothing about why is the commonest "it's broken" on a checkout, so
+   * the line always names the one thing still missing.
+   */
+  const need = () => {
+    const [adult, waive] = boxes.map((b) => b.checked);
+    if (!adult && !waive) return 'Tick both boxes above to go on.';
+    if (!adult) return 'Tick the box to say you are 18 or over.';
+    if (!waive) return `Tick the box to start the ${name.toLowerCase()} straight away.`;
+    if (embedded || complete) return '';
+    return loaded ? 'Now fill in your card details.' : 'The card form is loading.';
+  };
+  const sync = () => {
+    if (working) return;
+    button.disabled = !ready();
+    needLine.textContent = need();
+  };
+  const idle = () => { working?.(); working = null; sync(); };
+  for (const b of boxes) b.onchange = sync;
 
   // Whop's own checkout, when ours cannot take this payment: the same two
   // boxes first, then a button that opens it.
-  const fallback = async (why) => {
-    if (why) say(why);
+  const fallback = (note) => {
     embedded = true;
-    app.querySelector('.co-fields')?.remove();
-    button.textContent = 'Continue to payment';
+    const fields = app.querySelector('.co-fields');
+    if (fields) {
+      const info = document.createElement('p');
+      info.className = 'co-info';
+      info.textContent = note;
+      fields.replaceWith(info);
+    }
+    if (!moving && !trial) button.textContent = 'Continue to payment';
     button.onclick = async () => {
       if (working || !agreed()) return;
       say('');
       working = busy(button, 'Opening the checkout…');
-      try { await openEmbeddedCheckout(planId, consent()); } catch (err) { say(err.message); }
+      try { await openEmbeddedCheckout(planId, consent(), offer?.id); } catch (err) { say(err.message); }
       idle();
     };
     idle();
   };
 
-  if (moving) {
-    await fallback();
-    button.textContent = 'Switch, nothing to pay today';
-    return;
-  }
-  if (!cfg?.whopAccount) { await fallback(); return; }
+  if (!embedding) { fallback(); return; }
+
+  // Whop's frames paint a moment after they are mounted. The placeholder holds
+  // their place until the card frame has loaded, so nothing jumps.
+  const fields = app.querySelector('.co-fields');
+  const shown = () => {
+    if (loaded) return;
+    loaded = true;
+    fields.classList.add('is-loaded');
+    fields.removeAttribute('aria-busy');
+    sync();
+  };
+  const watch = new MutationObserver(() => {
+    const frame = fields.querySelector('#co-payment iframe');
+    if (!frame) return;
+    watch.disconnect();
+    frame.addEventListener('load', () => setTimeout(shown, 200), { once: true });
+    setTimeout(shown, 4000);
+  });
+  watch.observe(fields, { childList: true, subtree: true });
+
   try {
-    state.payHandle = await mountPayment({
+    const handle = await mountPayment({
       accountId: cfg.whopAccount,
       currency: plan.currency,
-      amount: Number(plan.amount_minor),
+      amount,
       renews,
       email: user.email,
       returnUrl: `${location.origin}/#/account?paid=1`,
       into: { email: '#co-email', payment: '#co-payment', branding: '#co-branding' },
-      onComplete: (ok) => { complete = ok; if (!working) button.disabled = !ready(); },
+      onComplete: (ok) => { complete = ok; sync(); },
     });
-    const wait = app.querySelector('#co-payment .pay-wait');
-    if (wait) wait.remove();
+    // The reader went somewhere else while Whop's script was on its way.
+    if (!button.isConnected) { handle.destroy(); return; }
+    state.payHandle = handle;
+    setTimeout(shown, 6000);
   } catch {
-    await fallback('The card form would not load here, so Whop\'s checkout has opened instead.');
+    watch.disconnect();
+    if (!button.isConnected) return;
+    fallback('The card form did not load on this page, so the payment is taken in Whop\'s secure checkout instead. It opens over this page.');
     return;
   }
 
@@ -6085,7 +6177,7 @@ async function viewCheckout(params) {
     try {
       const token = await state.payHandle.token();
       if (!token) throw new Error('The card details did not come through. Nothing has been charged. Try again.');
-      const out = await postJSON('/api/pay/charge', { plan: planId, confirmation_token: token, consent: consent() });
+      const out = await postJSON('/api/pay/charge', { plan: planId, confirmation_token: token, consent: consent(), ...(offer ? { promo: offer.id } : {}) });
       if (out.status === 'paid') { paid(); return; }
       if (out.client_secret) {
         // The bank wants a word first (3D Secure): Whop runs that step.
@@ -6098,7 +6190,12 @@ async function viewCheckout(params) {
       if (out.status === 'pending' || out.status === 'processing') { paid(); return; }
       throw new Error('The payment did not go through. Nothing has been charged. Try again.');
     } catch (err) {
-      if (err?.data?.fallback) { await fallback(); return; }
+      if (err?.data?.fallback) {
+        working?.(); working = null;
+        state.payHandle?.destroy(); state.payHandle = null;
+        fallback('This payment is taken in Whop\'s secure checkout instead. Nothing has been charged. It opens over this page.');
+        return;
+      }
       say(err?.message ?? 'The payment did not go through. Nothing has been charged. Try again.');
       idle();
     }
@@ -6994,20 +7091,19 @@ function viewLegal(which) {
    * change it where they are reading that.
    */
   const choice = which === 'cookies' ? (() => {
-    const now = readConsent();
-    const gpc = !!navigator.globalPrivacyControl;
-    const said = now === 'accepted' ? 'You said yes.' : now === 'declined'
-      ? (gpc && !(() => { try { return localStorage.getItem(CONSENT_KEY); } catch { return null; } })()
-          ? 'Your browser sends the Global Privacy Control signal, so this is set to no.'
-          : 'You said no.')
-      : 'You have not answered yet.';
+    const c = readChoice();
+    const gpc = !!navigator.globalPrivacyControl
+      && !(() => { try { return localStorage.getItem(CONSENT_KEY); } catch { return null; } })();
+    const said = !c ? 'You have not answered yet, so both are off.'
+      : gpc ? 'Your browser sends the Global Privacy Control signal, so both are off.'
+      : `Saved pages are ${c.save ? 'on' : 'off'} and visit counts are ${c.count ? 'on' : 'off'}.`;
     return `
     <section class="panel consent-panel" aria-labelledby="consent-h">
       <p class="panel-head" id="consent-h">Your choice</p>
-      <p>${esc(said)} Saved pages and visit counting are ${now === 'accepted' ? 'on' : 'off'}.</p>
+      <p>${esc(said)}</p>
+      ${consentRows('cp')}
       <div class="cta-row">
-        <button class="btn ${now === 'accepted' ? 'btn-ghost' : 'btn-primary'}" data-consent-set="accepted"${now === 'accepted' ? ' disabled' : ''}>Turn them on</button>
-        <button class="btn ${now === 'accepted' ? 'btn-primary' : 'btn-ghost'}" data-consent-set="declined"${now === 'declined' ? ' disabled' : ''}>Turn them off</button>
+        <button class="btn btn-primary" data-consent-save>Save my choices</button>
       </div>
     </section>`;
   })() : '';
@@ -7016,7 +7112,8 @@ function viewLegal(which) {
     ${legalHTML(which)}
     ${choice}
   </div>`;
-  for (const b of app.querySelectorAll('[data-consent-set]')) b.onclick = () => applyConsent(b.dataset.consentSet);
+  const save = app.querySelector('.consent-panel [data-consent-save]');
+  if (save) save.onclick = () => applyConsent(choiceFrom(app.querySelector('.consent-panel')));
   // Contents links scroll rather than change the address, which the router
   // would read as a page of its own.
   for (const a of app.querySelectorAll('[data-jump]')) {
@@ -7054,22 +7151,41 @@ function readConsent() {
   } catch { /* private mode: no stored answer */ }
   return navigator.globalPrivacyControl ? 'declined' : null;
 }
-const consented = () => readConsent() === 'accepted';
+/**
+ * What the reader allowed, one switch per use: saved pages and visit counts.
+ * Stored as 'accepted' (both), 'declined' (neither) or 'custom:' and the ones
+ * allowed, so an answer given before the choice was split still reads right.
+ * Null until they answer: nothing is on by default.
+ */
+function readChoice() {
+  const v = readConsent();
+  if (!v) return null;
+  if (v === 'accepted') return { save: true, count: true };
+  if (v.startsWith('custom:')) {
+    const on = new Set(v.slice(7).split(','));
+    return { save: on.has('save'), count: on.has('count') };
+  }
+  return { save: false, count: false };
+}
+const canSave = () => !!readChoice()?.save;
+const canCount = () => !!readChoice()?.count;
+const choiceValue = ({ save, count }) => (save && count ? 'accepted' : !save && !count ? 'declined'
+  : `custom:${[save && 'save', count && 'count'].filter(Boolean).join(',')}`);
 
 function applyConsent(value) {
   try { localStorage.setItem(CONSENT_KEY, value); } catch { /* private mode: ask again next visit */ }
   document.getElementById('cookie-notice')?.remove();
   document.body.style.paddingBottom = '';
-  if (value === 'accepted') countView();
-  // A no removes what a yes stored.
-  else cacheClear({ keepMemory: true });
+  if (canCount()) countView();
+  // A no to saved pages removes what a yes stored.
+  if (!canSave()) cacheClear({ keepMemory: true });
   // The cookie policy shows the current choice; redraw it if it is open.
   if (parseHash().parts[0] === 'legal') route({ soft: true });
 }
 
 /** One anonymous page view, if and only if the reader said yes. */
 function countView() {
-  if (!consented()) return;
+  if (!canCount()) return;
   const page = parseHash().parts[0] || 'home';
   const body = JSON.stringify({ p: page });
   try {
@@ -7102,6 +7218,35 @@ function reserveForNotice() {
   document.body.style.paddingBottom = `${Math.ceil(gap)}px`;
 }
 
+/**
+ * The switches, one per use of the reader's device, as the notice and the
+ * cookie policy both show them. Off unless the reader has said yes: nothing
+ * arrives pre-ticked.
+ */
+function consentRows(prefix) {
+  const c = readChoice() ?? { save: false, count: false };
+  const row = (key, title, what) => `
+    <li>
+      <label for="${prefix}-${key}"><b>${title}</b><span>${what}</span></label>
+      <input type="checkbox" role="switch" class="switch" id="${prefix}-${key}" data-consent-key="${key}"${c[key] ? ' checked' : ''}>
+    </li>`;
+  return `
+  <ul class="consent-list">
+    <li>
+      <div><b>Needed to run the site</b><span>Keeps you signed in and remembers this choice.</span></div>
+      <span class="consent-fixed">Always on</span>
+    </li>
+    ${row('save', 'Saved pages', 'A copy of each page on this device, so the site opens instantly next time.')}
+    ${row('count', 'Visit counts', 'An anonymous count of which pages get read. Nothing is stored on your device.')}
+  </ul>`;
+}
+
+/** The switches under `root`, as a stored answer. */
+function choiceFrom(root) {
+  const on = (k) => !!root.querySelector(`[data-consent-key="${k}"]`)?.checked;
+  return choiceValue({ save: on('save'), count: on('count') });
+}
+
 function cookieNotice({ force = false } = {}) {
   if (readConsent() && !force) return;
   document.getElementById('cookie-notice')?.remove();
@@ -7109,18 +7254,35 @@ function cookieNotice({ force = false } = {}) {
   el.className = 'cookie';
   el.id = 'cookie-notice';
   el.setAttribute('role', 'region');
-  el.setAttribute('aria-label', 'Cookie choice');
+  el.setAttribute('aria-labelledby', 'cookie-title');
   el.innerHTML = `
-    <p class="cookie-kicker hand" aria-hidden="true">quick one</p>
-    <p class="cookie-text">Can we count visits, anonymously, and keep pages on this device so they
-       open instantly? No adverts, no tracking. <a href="#/legal/cookies">What we store</a></p>
+    <h2 class="cookie-title" id="cookie-title">Cookies and storage</h2>
+    <p class="cookie-text">We'd like to save pages on this device so the site opens instantly, and count
+       visits anonymously so we know what gets read. No adverts, and nothing that follows you around the web.</p>
+    <div class="cookie-options" id="cookie-options" hidden>
+      ${consentRows('cn')}
+      <button class="btn btn-primary btn-sm cookie-save" data-consent-save>Save my choices</button>
+    </div>
     <div class="cookie-actions">
-      <button class="btn btn-ghost btn-sm" data-consent="declined">No thanks</button>
-      <button class="btn btn-primary btn-sm" data-consent="accepted">Yes, go on</button>
+      <button class="btn btn-sm" data-consent="declined">Reject all</button>
+      <button class="btn btn-sm" data-consent="accepted">Accept all</button>
+    </div>
+    <div class="cookie-foot">
+      <button type="button" class="cookie-more" aria-expanded="false" aria-controls="cookie-options">Choose what to allow</button>
+      <a href="#/legal/cookies">Cookie policy</a>
     </div>`;
+  const more = el.querySelector('.cookie-more');
+  more.onclick = () => {
+    const box = el.querySelector('#cookie-options');
+    box.hidden = !box.hidden;
+    more.setAttribute('aria-expanded', String(!box.hidden));
+    more.textContent = box.hidden ? 'Choose what to allow' : 'Hide the choices';
+    reserveForNotice();
+  };
   el.addEventListener('click', (e) => {
-    const v = e.target?.dataset?.consent;
-    if (v) applyConsent(v);
+    const t = e.target;
+    if (t?.dataset?.consent) applyConsent(t.dataset.consent);
+    else if (t?.hasAttribute?.('data-consent-save')) applyConsent(choiceFrom(el));
   });
   /*
    * In the document, above the page, rather than appended to the end of the
@@ -7291,6 +7453,7 @@ async function route({ soft = false } = {}) {
     errorState(err);
   } finally {
     if (!soft) countView();
+    if (!soft) schedulePromos();
     state.soft = false;
     liveTick();
     playFlashes();
@@ -7325,6 +7488,27 @@ async function route({ soft = false } = {}) {
       app.classList.add('page-in');
     }
   }
+}
+
+/*
+ * Offers set up in the dashboard: the bar across the top and, once a visit,
+ * the popup (js/lib/promo.js). The module and its styles load only when an
+ * offer is running, so on an ordinary day this costs one small cached read.
+ *
+ * Whether the reader is a member decides whether a deal is shown at all, and
+ * for a signed-in reader that is not known until the account arrives; until
+ * then they are treated as a member, so nobody who has paid is sold to while
+ * the page is still finding out. headerAuth() calls this again once it knows.
+ */
+async function schedulePromos() {
+  try {
+    const running = await getJSON('/api/promos').catch(() => []);
+    if (!Array.isArray(running) || !running.length) { document.getElementById('promo-bar')?.remove(); return; }
+    const promo = await import('./js/lib/promo.js');
+    const signedIn = !!state.user;
+    const member = signedIn ? state.member !== false : false;
+    await promo.runPromos({ route: parseHash().parts[0] || 'home', signedIn, member, anchor: app, promos: running });
+  } catch { /* an offer is never worth an error */ }
 }
 
 /*
@@ -7373,6 +7557,8 @@ async function render(name, parts, params) {
     if (name === 'trace') return viewTrace();
     if (name === 'signin') return await viewSignin();
     if (name === 'account') return await viewAccount();
+    // The owner's dashboard, loaded only when opened. js/admin.js.
+    if (name === 'admin') return await (await import('./js/admin.js')).viewAdmin(app, parts, params);
     if (name === 'legal' && parts[1]) return viewLegal(parts[1]);
     if (name === 'home') return await viewHome();
     /*
@@ -7453,6 +7639,7 @@ function accountMenuHTML() {
       <a href="#/account?tab=membership" role="menuitem">${m ? 'Membership and payments' : 'Membership'}</a>
       <a href="#/account?tab=settings" role="menuitem">Settings</a>
       ${m ? '' : '<a class="am-cta" href="#/pricing" role="menuitem">See the plans</a>'}
+      ${state.isAdmin ? '<a class="am-admin" href="#/admin" role="menuitem">Admin dashboard</a>' : ''}
     </nav>
     <button class="am-out" type="button" id="am-out" role="menuitem">Sign out</button>`;
 }
@@ -7473,6 +7660,15 @@ function toggleAccountMenu(e) {
     });
   }
   if (!menu.hidden) { closeAccountMenu(); return; }
+  // The owner sees a way into the dashboard. Asked once, the first time the
+  // menu opens; for anyone else the answer is no and nothing shows.
+  if (state.isAdmin === undefined) {
+    state.isAdmin = false;
+    import('./js/admin.js').then((m) => m.isAdmin()).then((yes) => {
+      state.isAdmin = yes;
+      if (yes && !menu.hidden) menu.innerHTML = accountMenuHTML();
+    }).catch(() => {});
+  }
   menu.innerHTML = accountMenuHTML();
   menu.hidden = false;
   link.setAttribute('aria-expanded', 'true');
@@ -7601,6 +7797,8 @@ async function headerAuth() {
   }
   const navSignin = document.getElementById('nav-signin');
   if (navSignin) navSignin.hidden = Boolean(user);
+  // Now that membership is known, the offers can be decided properly.
+  schedulePromos();
 }
 
 /**

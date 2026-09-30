@@ -30,7 +30,7 @@ const sigmoid = (z: number) => 1 / (1 + Math.exp(-z));
 export type StackWeights = Partial<Record<MarketFamily, number[]>>;
 
 /** Newton's method for logistic regression, with a little ridge so it cannot run off. */
-function fitLogistic(X: number[][], y: number[], ridge = 1): number[] {
+export function fitLogistic(X: number[][], y: number[], ridge = 1): number[] {
   const k = X[0]!.length;
   // Start at "believe the consensus": intercept 0, slope 1.
   const w: number[] = Array.from({ length: k }, (_, i) => (i === 1 ? 1 : 0));
@@ -78,7 +78,7 @@ function solve(A: number[][], b: number[]): number[] {
 }
 
 /** Every option that resolved cleanly (no push possible), with what happened. */
-function labelled(rows: HistRow[], cache: Map<number, Option[]>): Array<{ o: Option; y: number }> {
+export function labelled(rows: HistRow[], cache: Map<number, Option[]>): Array<{ o: Option; y: number }> {
   const out: Array<{ o: Option; y: number }> = [];
   for (const row of rows) {
     for (const o of cache.get(row.id) ?? []) {
@@ -163,7 +163,7 @@ export function tuneGrid(stack: StackWeights): TunedPolicy[] {
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
 /** Rows grouped by day, as simulate groups them. */
-function byDay(rows: HistRow[]): HistRow[][] {
+export function byDay(rows: HistRow[]): HistRow[][] {
   const m = new Map<number, HistRow[]>();
   for (const r of rows) {
     const d = Math.floor((r.kickoff + 3600) / 86400);
@@ -177,7 +177,7 @@ function line(label: string, r: SimResult): string {
 }
 
 /** The rule the slate runs (config.confident). */
-const PROD: Policy = { name: 'production', source: 'bestsharp', modelWeight: 0.5, minProb: 0.78, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5, minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true, minSharpEv: 0, excludeBuckets: ['total_corners under'], rankFloor: { 1: 0.7, 2: 0.7, 3: 0.85 }, maxDrift: 0.01 };
+export const PROD: Policy = { name: 'production', source: 'bestsharp', modelWeight: 0.5, minProb: 0.78, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5, minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true, minSharpEv: 0, excludeBuckets: ['total_corners under'], rankFloor: { 1: 0.7, 2: 0.7, 3: 0.85 }, maxDrift: 0.01 };
 /** The rule before the sharp book. */
 const CONSENSUS72: Policy = { name: 'consensus 72', source: 'best', modelWeight: 0.5, minProb: 0.72, maxProb: 0.97, minOdds: 1.13, maxOdds: 3.5, minEv: -0.01, maxGap: 1.12, rankBy: 'prob', diversity: 0.3, noQuarters: true };
 /** The rule before this search. */
