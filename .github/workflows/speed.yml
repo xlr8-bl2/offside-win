@@ -1,0 +1,64 @@
+# Lighthouse against the live site, from GitHub's network rather than a
+# sandbox that cannot reach it with a real browser. Run it from the phone
+# (Actions, speed, Run workflow) before and after a change that could move
+# the numbers; the log prints the scores, the Core Web Vitals and what caused
+# any layout shift, page by page.
+name: speed
+
+on:
+  # Once when this file changes, so the measurement can be read before the
+  # workflow reaches the default branch (only then can it be run by hand).
+  push:
+    paths: ['.github/workflows/speed.yml']
+  workflow_dispatch:
+    inputs:
+      paths:
+        description: Pages to measure, space separated
+        default: "/ /today /results /match/212627/finland-v-belarus /leagues /pricing"
+      form:
+        description: mobile or desktop
+        default: mobile
+
+permissions:
+  contents: read
+
+jobs:
+  lighthouse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Measure
+        env:
+          PATHS: ${{ inputs.paths || '/ /today /results /match/212627/finland-v-belarus /leagues /pricing' }}
+          FORM: ${{ inputs.form || 'mobile' }}
+        run: |
+          npm i -g lighthouse@12 >/dev/null 2>&1
+          for p in $PATHS; do
+            url="https://offside.win$p"
+            flags="--quiet --chrome-flags=--headless=new --only-categories=performance,seo,accessibility,best-practices --output=json --output-path=lh.json"
+            if [ "$FORM" = "desktop" ]; then flags="$flags --preset=desktop"; fi
+            # Each page three times, the median reported: one run is noise.
+            for i in 1 2 3; do lighthouse "$url" $flags >/dev/null 2>&1 && cp lh.json "run$i.json"; done
+            node -e '
+              const fs = require("fs");
+              const runs = [1, 2, 3].map((i) => { try { return JSON.parse(fs.readFileSync(`run${i}.json`)); } catch { return null; } }).filter(Boolean);
+              if (!runs.length) { console.log(process.argv[1], "no result"); process.exit(0); }
+              const med = (f) => { const v = runs.map(f).filter((x) => x != null).sort((a, b) => a - b); return v[Math.floor(v.length / 2)]; };
+              const a = (r, k) => r.audits[k]?.numericValue;
+              const s = (k) => Math.round(med((r) => r.categories[k].score) * 100);
+              console.log(`\n${process.argv[1]}  performance ${s("performance")}  seo ${s("seo")}  accessibility ${s("accessibility")}  best-practices ${s("best-practices")}`);
+              console.log(`  FCP ${(med((r) => a(r, "first-contentful-paint")) / 1000).toFixed(2)}s  LCP ${(med((r) => a(r, "largest-contentful-paint")) / 1000).toFixed(2)}s  TBT ${Math.round(med((r) => a(r, "total-blocking-time")))}ms  CLS ${med((r) => a(r, "cumulative-layout-shift")).toFixed(3)}  TTFB ${Math.round(med((r) => a(r, "server-response-time")))}ms  bytes ${Math.round(med((r) => a(r, "total-byte-weight")) / 1024)}KiB`);
+              const r = runs[0];
+              const lcp = r.audits["largest-contentful-paint-element"]?.details?.items?.[0]?.items?.[0]?.node?.selector;
+              if (lcp) console.log(`  LCP element: ${lcp}`);
+              for (const x of (r.audits["layout-shifts"]?.details?.items ?? []).slice(0, 5)) console.log(`  shift ${x.score?.toFixed?.(3) ?? ""} ${x.node?.selector ?? ""}`);
+              for (const k of ["render-blocking-resources", "unused-javascript", "unminified-javascript", "unminified-css", "uses-long-cache-ttl"]) {
+                const d = r.audits[k]; if (d && d.score !== null && d.score < 0.9) console.log(`  ${k}: ${d.displayValue ?? ""}`);
+              }
+              for (const k of Object.keys(r.audits)) { const d = r.audits[k]; if (r.categories.seo.auditRefs.some((x) => x.id === k) && d.score === 0) console.log(`  seo fails: ${k} ${d.title}`); }
+            ' "$p"
+            rm -f run*.json lh.json
+          done
