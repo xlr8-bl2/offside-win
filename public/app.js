@@ -7565,10 +7565,7 @@ async function route({ soft = false } = {}) {
   for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.route === (name === 'checkout' ? 'pricing' : name));
   // Whop's card fields belong to the checkout page; leaving it takes them down.
   if (!soft && state.payHandle) { state.payHandle.destroy(); state.payHandle = null; }
-  if (!soft) {
-    document.getElementById('nav').classList.remove('open');
-    document.getElementById('burger').setAttribute('aria-expanded', 'false');
-  }
+  if (!soft) setMenu(false);
   try {
     await render(name, parts, params);
   } catch (err) {
@@ -7830,6 +7827,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 addEventListener('hashchange', closeAccountMenu);
+addEventListener('popstate', closeAccountMenu);
 
 async function headerAuth() {
   const link = document.getElementById('account-link');
@@ -8100,6 +8098,7 @@ async function health() {
 function setMenu(open) {
   document.getElementById('nav').classList.toggle('open', open);
   document.getElementById('burger').setAttribute('aria-expanded', String(open));
+  document.documentElement.classList.toggle('menu-lock', open);
 }
 document.getElementById('burger').onclick = () => setMenu(!document.getElementById('nav').classList.contains('open'));
 // The page behind the open menu is dimmed; a tap on it closes the menu rather
@@ -8112,9 +8111,18 @@ document.addEventListener('click', (e) => {
   setMenu(false);
 }, true);
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && document.getElementById('nav').classList.contains('open')) {
+  const navOpen = document.getElementById('nav').classList.contains('open');
+  if (e.key === 'Escape' && navOpen) {
     setMenu(false);
     document.getElementById('burger').focus();
+  }
+  // The open menu keeps the keyboard: Tab goes round its button and its
+  // links, not on into the dimmed page behind, where a tap would only close it.
+  if (e.key === 'Tab' && navOpen && getComputedStyle(document.getElementById('burger')).display !== 'none') {
+    const ring = [document.getElementById('burger'), ...document.querySelectorAll('#nav a')].filter((el) => el.offsetParent !== null);
+    const i = ring.indexOf(document.activeElement);
+    const next = ring[(i + (e.shiftKey ? -1 : 1) + ring.length) % ring.length];
+    if (next) { e.preventDefault(); next.focus(); }
   }
   // "/" opens search from anywhere but a field being typed in.
   if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.target.closest?.('input, textarea, select, [contenteditable]')) {

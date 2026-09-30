@@ -634,6 +634,9 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   }
   .nav:not(.open) { display: none; }
   .nav.open { animation: menu-in var(--dur-fast) var(--ease-out); }
+  /* The dimmed page holds still while the menu is open (setMenu in app.js):
+     a swipe on it used to scroll the page away underneath the sheet. */
+  html.menu-lock { overflow: hidden; }
   .nav a {
     flex-direction: column;
     align-items: flex-start;

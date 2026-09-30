@@ -143,8 +143,55 @@ const scenarios = {
     await page.waitForTimeout(300);
     await page.locator('#nav a').filter({ hasText: /results/i }).first().click();
     await settle(page, 2500);
-    const after = await page.evaluate(() => ({ open: document.getElementById('nav').classList.contains('open'), overflow: getComputedStyle(document.body).overflow, hash: location.hash }));
-    report('overlays: following a menu link closes the menu and frees the page', !after.open && after.overflow !== 'hidden', JSON.stringify(after));
+    const after = await page.evaluate(() => ({ open: document.getElementById('nav').classList.contains('open'), overflow: getComputedStyle(document.documentElement).overflow, lock: document.documentElement.classList.contains('menu-lock'), hash: location.hash }));
+    report('overlays: following a menu link closes the menu and frees the page', !after.open && !after.lock && after.overflow !== 'hidden', JSON.stringify(after));
+    await ctx.close();
+  },
+
+  /** The offer popup waits while the reader is typing, and goes when they move page. */
+  async popup() {
+    if (!promoIds.length) { report('popup: no offer is running, nothing to check', true); return; }
+    const { ctx, page } = await fresh(390);
+    // This one wants the popup, so the offers are not marked as seen.
+    await page.addInitScript(() => { try { localStorage.setItem('ow.promo', JSON.stringify({ seen: [], closed: [] })); } catch {} });
+    await page.goto(`${BASE}/#/search`, { waitUntil: 'load' });
+    await settle(page, 1500);
+    await page.locator('#search-q').focus();
+    await page.keyboard.type('arse', { delay: 120 });
+    await page.waitForTimeout(8000);
+    const whileTyping = await page.evaluate(() => ({ popup: !!document.querySelector('.ofr-root'), focus: document.activeElement?.id }));
+    report('popup: never opens over a field being typed in', !whileTyping.popup && whileTyping.focus === 'search-q', JSON.stringify(whileTyping));
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.waitForTimeout(6000);
+    const later = await page.evaluate(() => !!document.querySelector('.ofr-root'));
+    report('popup: opens once the reader stops', later, `open ${later}`);
+    await page.goBack();
+    await settle(page, 1500);
+    const gone = await page.evaluate(() => ({ popup: !!document.querySelector('.ofr-root'), lock: document.documentElement.classList.contains('ofr-lock') }));
+    report('popup: Back takes it down and frees the page', !gone.popup && !gone.lock, JSON.stringify(gone));
+    await ctx.close();
+  },
+
+  /** The phone menu holds the page still behind it and keeps the keyboard inside. */
+  async menulock() {
+    const { ctx, page } = await fresh(390);
+    await page.goto(`${BASE}/#/board`, { waitUntil: 'load' });
+    await settle(page, 3000);
+    await page.click('#burger');
+    await page.waitForTimeout(400);
+    const y0 = (await where(page)).y;
+    await page.mouse.move(200, 600);
+    await page.mouse.wheel(0, 900);
+    await page.waitForTimeout(500);
+    const y1 = (await where(page)).y;
+    report('menulock: the page behind the open menu does not scroll', Math.abs(y1 - y0) < 5, `from ${y0} to ${y1}`);
+    const escaped = [];
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.press('Tab');
+      const inside = await page.evaluate(() => !!document.activeElement?.closest?.('#nav, #burger'));
+      if (!inside) { escaped.push(await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 60))); break; }
+    }
+    report('menulock: Tab stays in the open menu', escaped.length === 0, escaped[0] ?? '');
     await ctx.close();
   },
 
