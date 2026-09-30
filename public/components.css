@@ -4699,3 +4699,19 @@ html.dd-locked, html.dd-locked body { overflow: hidden; }
 .acct-upgrade b { font-weight: var(--weight-bold); }
 .acct-upgrade span { font-size: var(--text-sm); color: var(--chalk-2); }
 .acct-upgrade:hover { border-color: var(--floodlight); }
+
+/* The board under the calls: every other match read, one line each. */
+.board-none { margin: 0 0 var(--space-5); padding: var(--space-4) var(--space-5); border: var(--border) dashed var(--rule); border-radius: var(--radius-lg); font-size: var(--text-sm); color: var(--chalk-2); }
+.board-rest { margin-top: var(--space-8); }
+.board-rest:first-child { margin-top: 0; }
+.board-sub { margin: 0; font-family: var(--body); font-size: var(--text-lg); font-weight: var(--weight-bold); color: var(--chalk); }
+.board-sub-note { margin: var(--space-1) 0 var(--space-4); font-size: var(--text-sm); color: var(--chalk-3); }
+.league-more {
+  display: block; width: 100%;
+  padding: var(--space-3) var(--space-5);
+  border-top: var(--border) solid var(--hairline);
+  font-size: var(--text-sm); font-weight: var(--weight-medium);
+  color: var(--floodlight-hi); text-align: left;
+}
+.league-more:hover { background: var(--terrace); color: var(--chalk); }
+.league-more:focus-visible { outline: none; box-shadow: inset var(--focus-ring); }
