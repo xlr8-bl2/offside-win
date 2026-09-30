@@ -354,8 +354,13 @@ const STALE_AFTER = 72 * 3600;
 
 export async function runSettle(): Promise<SettleReport> {
   const now = Math.floor(Date.now() / 1000);
-  // Give a match time to finish and the provider time to publish final stats.
-  const cutoff = now - 3 * 3600;
+  // Late enough that a match can have finished: 110 minutes covers a half,
+  // the break, a half and stoppage. It was three hours, so a call sat
+  // ungraded on the results page for an hour or more after full time. Nothing
+  // is graded early by this: a match the provider has not marked finished
+  // stays unresolved (below) and is looked at again on the next pass, and a
+  // market that needs the final stats waits for them and is regraded.
+  const cutoff = now - 110 * 60;
 
   const pending = await select<{
     id: number;

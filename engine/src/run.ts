@@ -216,6 +216,17 @@ const commands: Record<string, () => Promise<unknown>> = {
         console.error(`slate:loop: pass ${pass} failed:`, err instanceof Error ? err.message : err);
         if (failures >= 3) throw err;
       }
+      // And grade what has finished, every pass. The settle workflow is
+      // scheduled hourly and GitHub ran it every four or five hours, so a
+      // match could be over for half a day before its call reached the
+      // results. Here it is graded within a pass of full time. A failure is
+      // logged and does not stop the board.
+      try {
+        const s = await runSettle();
+        if (s.settled) console.log(`slate:loop: graded ${s.settled} call${s.settled === 1 ? '' : 's'}`);
+      } catch (err) {
+        console.error('slate:loop: settle failed:', err instanceof Error ? err.message : err);
+      }
       console.log(`slate:loop: pass ${pass} took ${((Date.now() - t0) / 60_000).toFixed(1)} min`);
       const next = t0 + every;
       if (next > lastStart) break;
