@@ -15,3 +15,10 @@ test('competitions sort into leagues, cups, continental club football, internati
   assert.equal(sliceOf('World Cup Qualification UEFA'), 'international');
   assert.equal(sliceOf('International Friendly Games'), 'friendly');
 });
+
+test('friendlies are judged at the international bar, not the default one', async () => {
+  const { floorForRank } = await import('../src/select.ts');
+  assert.equal(floorForRank(9), 0.85);
+  assert.equal(floorForRank(3), 0.85);
+  assert.equal(floorForRank(5), 0.78);
+});

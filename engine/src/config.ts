@@ -348,7 +348,25 @@ export const config = {
      * 80/82/82% landed at +2.5/+5.2/+7.3% to 81/83/82% at +3.4/+6.0/+7.8%
      * (lab:tune, 3,077 fixtures).
      */
-    rankFloors: { 3: num('CONF_RANK3_FLOOR', 0.85) } as Record<number, number>,
+    rankFloors: {
+      3: num('CONF_RANK3_FLOOR', 0.85),
+      /*
+       * Friendlies (rank 9) at the same 85%. Australia 1-1 Brazil and India
+       * 1-1 Panama (25 September 2026) were both "either side to win" at
+       * 1.15-1.20, and both went to a side that had flown across the world
+       * for a game that counted for nothing. By kind of match (lab:slices,
+       * 3,158 fixtures) friendlies were the one slice the rule lost in: 37
+       * calls, 70% landed against prices that said 82%, goals calls worst.
+       * Taking out the draw-sensitive calls did not help; the bar did:
+       *
+       *                  older half              newer half
+       *   78% (before)   31 calls  71%  -10.4%    6 calls  67%  +10.4%
+       *   85% (this)      9 calls  89%   +2.0%    5 calls  80%  +12.4%
+       *
+       * Small samples both, and the live record agrees (7 calls, 71%).
+       */
+      9: num('CONF_FRIENDLY_FLOOR', 0.85),
+    } as Record<number, number>,
     /**
      * Where a call's probability comes from: `consensus` (consensus.ts: the
      * bookmakers' de-vigged view, with goals priced off market rates blended
