@@ -85,17 +85,38 @@ function remember(field, id) {
   try { localStorage.setItem(KEY, JSON.stringify(m)); } catch { /* private mode: shown again next visit */ }
 }
 
-/** Who an offer is for. A member cannot use a deal or a trial; a notice is for everyone it names. */
-export function eligible(p, { signedIn, member }) {
-  if (p.kind !== 'notice' && member) return false;
+/**
+ * Whether a reader could use an offer at all. A member cannot use a deal or a
+ * trial, and a free trial is for new members only: checkout refuses it to an
+ * account that has had a membership before (`returning`), so it is never
+ * dangled in front of one.
+ */
+export function usable(p, { member, returning }) {
+  if (p.kind === 'notice') return true;
+  if (member) return false;
+  if (p.kind === 'trial' && returning) return false;
+  return true;
+}
+
+/** Who an offer is shown to: those who could use it, narrowed by its audience. */
+export function eligible(p, { signedIn, member, returning = false }) {
+  if (!usable(p, { member, returning })) return false;
   if (p.audience === 'signed_out' && signedIn) return false;
   if (p.audience === 'free' && member) return false;
   return true;
 }
 
-/** The deal on a plan, if one is running and this reader may have it. */
-export async function offerForPlan(planId, who) {
+/**
+ * The offer checkout applies. The one the reader clicked (`promoId`, carried
+ * through sign-in) when it is still running on this plan and they can use it:
+ * its audience decided who was shown it, and a reader who was shown it
+ * signed out has signed in to take it. Otherwise whatever this reader would
+ * be shown on the plan.
+ */
+export async function offerForPlan(planId, who, promoId = null) {
   const all = await livePromos();
+  const picked = promoId ? all.find((p) => p.id === promoId && p.plan_id === planId && p.kind !== 'notice') : null;
+  if (picked && usable(picked, who)) return picked;
   return all.find((p) => p.plan_id === planId && p.kind !== 'notice' && eligible(p, who)) ?? null;
 }
 
@@ -389,11 +410,11 @@ let armed = false;
  * Called after every route. Puts up the bar for the running offer and, once a
  * visit, arms the popup for a deal or trial this reader has not been shown.
  */
-export async function runPromos({ route, signedIn, member, anchor, promos }) {
+export async function runPromos({ route, signedIn, member, returning = false, anchor, promos }) {
   if (Array.isArray(promos)) cache = promos;
   const all = await livePromos();
   const mem = memory();
-  const mine = all.filter((p) => eligible(p, { signedIn, member }));
+  const mine = all.filter((p) => eligible(p, { signedIn, member, returning }));
   const bar = mine.find((p) => !(mem.closed ?? []).includes(p.id));
   const shown = document.getElementById('promo-bar');
   if (NO_BAR.has(route) || !bar) shown?.remove();

@@ -147,11 +147,18 @@ export async function admin(request: Request, env: AdminEnv, jwt: string | null,
     const b = await body(request);
     // Only the fields the function reads, as strings or numbers; it checks each.
     const keys = ['id', 'kind', 'title', 'body', 'cta', 'plan_id', 'price_minor', 'trial_days', 'audience', 'starts_at', 'ends_at', 'active'];
+    // Whole numbers only: the function casts these, and "9.99" would reach it
+    // as a database error rather than a sentence.
+    const whole = new Set(['price_minor', 'trial_days', 'starts_at', 'ends_at']);
     const p: Record<string, string | number | null> = {};
     for (const k of keys) {
       const v = b[k];
       if (v === undefined || v === null || v === '') continue;
-      if (typeof v === 'string') p[k] = v.slice(0, 400);
+      if (whole.has(k)) {
+        const n = int(v);
+        if (n === null) return refuse('Prices in pence and days as whole numbers, dates as times.', 400);
+        p[k] = n;
+      } else if (typeof v === 'string') p[k] = v.slice(0, 400);
       else if (typeof v === 'number' && Number.isFinite(v)) p[k] = v;
       else if (typeof v === 'boolean') p[k] = v ? 1 : 0;
     }

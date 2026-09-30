@@ -171,6 +171,17 @@ test('a membership already past the grace window is left to lapse', { skip: !ena
 
 /* The scheduling rule on its own, which needs no database. */
 
+test('a plan taken off sale keeps renewing for those already on it', { skip: !enabled }, async () => {
+  await member(1);
+  await store.exec('UPDATE plan SET active = 0 WHERE id = ?', ['monthly']);
+  try {
+    const r = await renew.renewDue(ok(), NOW);
+    assert.equal(r.renewed, 1, 'off sale stops new purchases, it does not end memberships');
+  } finally {
+    await store.exec('UPDATE plan SET active = 1 WHERE id = ?', ['monthly']);
+  }
+});
+
 test('the dunning schedule is 0, +2, +5 and then stop', async () => {
   const { dueToday } = await import('../src/membership/renew.ts');
   const row = (attempts: number, since: number) =>

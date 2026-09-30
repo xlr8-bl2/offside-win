@@ -45,7 +45,9 @@ function ago(t) {
 async function api(path, body) {
   const res = await fetch(`/api/admin/${path}`, {
     method: body ? 'POST' : 'GET',
-    headers: { ...(await authHeaders()), ...(body ? { 'content-type': 'application/json' } : {}) },
+    // The owner's real session, always: previewing the site as a free reader
+    // must not lock the owner out of their own dashboard.
+    headers: { ...(await authHeaders({ real: true })), ...(body ? { 'content-type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
     cache: 'no-store',
   });
@@ -219,9 +221,15 @@ async function oneUser(main, id) {
   if (!d?.user) { main.innerHTML = '<p class="adm-error">No such account.</p>'; return; }
   const m = d.membership, e = d.entitlement;
   const now = Date.now() / 1000;
-  const live = e && e.status === 'active' && e.expires_at > now ? { ...e, how: 'Paid through Whop' }
-    : m && m.expires_at > now ? { ...m, how: m.card_brand === 'complimentary' ? 'Free time given here' : 'Paid by card' } : null;
-  const free = live && live.how === 'Free time given here';
+  // An account can have both: a Whop subscription and free time given here.
+  // Each is its own line, so the free time can be ended without touching what
+  // they pay for, and "renews" is said of the one that does.
+  const whop = e && e.status === 'active' && e.expires_at > now
+    ? { ...e, how: 'Paid through Whop', renews: e.plan_id !== 'matchday' && !e.renew_stopped_at } : null;
+  const own = m && m.expires_at > now
+    ? { ...m, how: m.card_brand === 'complimentary' ? 'Free time given here' : 'Paid by card', renews: !!m.auto_renew } : null;
+  const lines = [whop, own].filter(Boolean);
+  const free = own?.how === 'Free time given here';
   main.innerHTML = `
     <a class="adm-back" href="#/admin/users">All users</a>
     <header class="adm-head">
@@ -231,7 +239,7 @@ async function oneUser(main, id) {
     <div class="adm-grid">
       <section class="adm-card">
         <h2>Membership</h2>
-        ${live ? `<p class="adm-big"><b>${esc(planName(live.plan_id))}</b> to ${esc(day(live.expires_at))}</p><p class="adm-quiet">${esc(live.how)}${m?.auto_renew ? ', renews by itself' : ''}.</p>`
+        ${lines.length ? lines.map((l) => `<p class="adm-big"><b>${esc(planName(l.plan_id))}</b> to ${esc(day(l.expires_at))}</p><p class="adm-quiet">${esc(l.how)}${l.renews ? ', renews by itself' : ''}.</p>`).join('')
           : '<p class="adm-big"><b>Free account</b></p><p class="adm-quiet">No membership running.</p>'}
         <div class="adm-give">
           <p class="adm-label">Give free time</p>
@@ -243,7 +251,7 @@ async function oneUser(main, id) {
             <button class="btn btn-ghost btn-sm" type="submit">Give</button>
           </form>
           ${free ? '<button class="btn btn-danger btn-sm" id="adm-end">End the free time now</button>' : ''}
-          ${live && !free ? `<p class="adm-quiet">${live.how === 'Paid through Whop' ? 'Paid memberships are cancelled in Whop, so they stop charging.' : ''}</p>` : ''}
+          ${whop ? `<p class="adm-quiet">${whop.renews ? 'Whop charges this account again when its time is up, so free days are added in Whop, not here. ' : 'Free days given here start when the Whop time ends. '}Paid memberships are cancelled in Whop, so they stop charging.</p>` : ''}
           <p class="adm-msg" id="adm-msg" role="status"></p>
         </div>
       </section>
@@ -311,7 +319,7 @@ async function calls(main) {
 async function plans(main) {
   const rows = await api('plans');
   main.innerHTML = `
-    <header class="adm-head"><h1>Plans</h1><p>The price here is what checkout charges. A change applies to new purchases; members keep what they paid until they renew.</p></header>
+    <header class="adm-head"><h1>Plans</h1><p>The price here is what checkout charges. A change applies to new purchases: members already paying through Whop keep their price. Taking a plan off sale stops new purchases and ends nobody's membership.</p></header>
     <ul class="adm-plans">
       ${rows.map((p) => `
         <li>
@@ -379,7 +387,9 @@ function offerEditor(main, p, planRows) {
     kind: 'deal', audience: 'everyone', starts_at: now, ends_at: now + 3 * 86400,
     plan_id: planRows.find((x) => x.active && x.id !== 'matchday')?.id ?? '', ...p,
   };
-  const onSale = planRows.filter((x) => x.active);
+  // The plans on sale, plus this offer's own if it has since been taken off
+  // sale, so opening it to switch it off does not quietly move it to another.
+  const onSale = planRows.filter((x) => x.active || x.id === p.plan_id);
   main.innerHTML = `
     <a class="adm-back" href="#/admin/offers">All offers</a>
     <header class="adm-head"><h1>${p.id ? 'Edit offer' : 'New offer'}</h1></header>
@@ -391,7 +401,7 @@ function offerEditor(main, p, planRows) {
       <label class="adm-f"><span>Text</span><textarea name="body" maxlength="280" rows="3" placeholder="What they get, in a sentence.">${esc(v.body ?? '')}</textarea></label>
       <label class="adm-f"><span>Button</span><input name="cta" maxlength="30" value="${esc(v.cta ?? '')}" placeholder="Get the deal"></label>
       <div class="adm-two" data-for="deal trial">
-        <label class="adm-f"><span>Plan</span><select name="plan_id">${onSale.map((x) => `<option value="${esc(x.id)}"${x.id === v.plan_id ? ' selected' : ''}>${esc(x.name)}, ${money(x.amount_minor, x.currency)}</option>`).join('')}</select></label>
+        <label class="adm-f"><span>Plan</span><select name="plan_id">${onSale.map((x) => `<option value="${esc(x.id)}"${x.id === v.plan_id ? ' selected' : ''}>${esc(x.name)}, ${money(x.amount_minor, x.currency)}${x.active ? '' : ', off sale'}</option>`).join('')}</select></label>
         <label class="adm-f" data-for="deal"><span>Deal price (£)</span><input name="price" type="number" min="1" step="0.01" inputmode="decimal" value="${v.price_minor ? (v.price_minor / 100).toFixed(2) : ''}"></label>
         <label class="adm-f" data-for="trial"><span>Days free</span><input name="trial_days" type="number" min="1" max="60" inputmode="numeric" value="${esc(v.trial_days ?? 7)}"></label>
       </div>

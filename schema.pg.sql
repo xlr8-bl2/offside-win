@@ -470,12 +470,28 @@ CREATE TABLE IF NOT EXISTS entitlement (
 -- Where the buyer manages a membership sold through Whop (cancel, change
 -- plan): Whop's own page for it, from the membership's `manage_url`.
 ALTER TABLE entitlement ADD COLUMN IF NOT EXISTS manage_url text;
+-- When the reader stopped a Whop membership renewing from our account page
+-- (the Worker has already told Whop to end it at its period end). Cleared by
+-- the next genuine renewal, which can only come if it was switched back on.
+ALTER TABLE entitlement ADD COLUMN IF NOT EXISTS renew_stopped_at bigint;
 
 -- Every processor reference an entitlement has been granted from, so a grant
 -- is applied once however many times it is replayed. The entitlement row only
 -- remembers its latest reference: a reader who bought a matchday pass and then
 -- went monthly has two, and with only the latest remembered the sweep kept
 -- re-applying the other one, flipping the plan back and forth.
+-- A deleted account that had a membership, remembered only as a one-way
+-- fingerprint of its email, so a free trial is once per person rather than
+-- once per account: without it, deleting and signing up again with the same
+-- address was a fresh trial every time. Kept six years (pruneBoard purges
+-- older rows), and named in the privacy policy's retention table.
+CREATE TABLE IF NOT EXISTS former_member (
+  email_sha256 text PRIMARY KEY,
+  at           bigint NOT NULL
+);
+ALTER TABLE former_member ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON former_member FROM anon, authenticated;
+
 CREATE TABLE IF NOT EXISTS entitlement_grant (
   ref        text PRIMARY KEY,
   email      text NOT NULL,
@@ -730,10 +746,11 @@ $fn$;
 -- fallback for a database the new slate has not written yet.
 CREATE OR REPLACE FUNCTION free_fixture_id()
 RETURNS bigint LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
-  SELECT coalesce(
-    (SELECT (try_json(v)->>'fixture_id')::bigint FROM kv WHERE k = 'free:today'),
-    (SELECT (try_json(v)->>'fixture_id')::bigint FROM kv WHERE k = 'hero:today')
-  );
+  -- Only the call engine/src/free.ts chose. It writes null on a day with no
+  -- call to give, and the headline fixture used to stand in then: its call,
+  -- often days away, went out free under "Today's free call", and a headline
+  -- with no call at all was marked as the free one.
+  SELECT (try_json(v)->>'fixture_id')::bigint FROM kv WHERE k = 'free:today';
 $fn$;
 
 -- ------------------------------------------------------------ the writes
@@ -883,6 +900,8 @@ BEGIN
     expires_at = CASE WHEN entitlement.status <> 'active' THEN excluded.expires_at
                       ELSE greatest(entitlement.expires_at, excluded.expires_at) END,
     source_ref = coalesce(excluded.source_ref, entitlement.source_ref),
+    -- A later period means it renewed, so it is renewing again.
+    renew_stopped_at = CASE WHEN excluded.expires_at > entitlement.expires_at THEN NULL ELSE entitlement.renew_stopped_at END,
     status = 'active', updated_at = v_now;
   IF p_ref IS NOT NULL THEN
     INSERT INTO entitlement_grant (ref, email, plan_id, created_at)
@@ -891,6 +910,17 @@ BEGIN
   RETURN json_build_object('applied', true, 'expires_at', v_until);
 END;
 $fn$;
+
+-- The reader stopped their Whop membership renewing from our account page;
+-- the Worker has already told Whop. Service role only.
+CREATE OR REPLACE FUNCTION stop_entitlement_renewal(p_email text)
+RETURNS json LANGUAGE sql VOLATILE SECURITY INVOKER SET search_path = public AS $fn$
+  UPDATE entitlement SET renew_stopped_at = floor(extract(epoch FROM now()))::bigint,
+                         updated_at = floor(extract(epoch FROM now()))::bigint
+   WHERE lower(email) = lower(p_email) AND status = 'active' AND renew_stopped_at IS NULL;
+  SELECT json_build_object('ok', true);
+$fn$;
+REVOKE ALL ON FUNCTION stop_entitlement_renewal(text) FROM PUBLIC, anon, authenticated;
 
 -- End an entitlement: the processor says the membership is no longer valid.
 CREATE OR REPLACE FUNCTION revoke_entitlement(p_email text, p_status text)
@@ -938,28 +968,47 @@ $fn$;
 -- list rather than an error -- the page redirects to sign-in on its own.
 CREATE OR REPLACE FUNCTION get_account()
 RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  WITH live AS (
+    SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4, 'card'::text AS via, NULL::text AS manage_url
+      FROM membership WHERE user_id = auth.uid() AND expires_at > floor(extract(epoch FROM now()))::bigint
+    UNION ALL
+    SELECT plan_id, expires_at,
+           CASE WHEN renew_stopped_at IS NULL AND plan_id <> 'matchday' THEN 1 ELSE 0 END AS auto_renew,
+           renew_stopped_at AS cancelled_at, source AS card_brand, NULL::text AS card_last4, source AS via, manage_url
+      FROM entitlement
+     WHERE auth.email() IS NOT NULL AND lower(email) = lower(auth.email()) AND status = 'active'
+       AND expires_at > floor(extract(epoch FROM now()))::bigint
+  )
   SELECT json_build_object(
            'email', auth.email(),
-           -- The card-based membership, or the email entitlement from a
-           -- processor that runs its own accounts, whichever is live longer.
+           -- Whichever live membership runs longest (a complimentary grant and a
+           -- Whop subscription can both be live); else the lapsed card one, so
+           -- the page can say when it ended.
            'membership', coalesce(
-             (SELECT to_json(m) FROM (
-                SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4, 'card' AS via
-                FROM membership WHERE user_id = auth.uid()
-                  AND expires_at > floor(extract(epoch FROM now()))::bigint
-              ) m),
-             (SELECT to_json(e) FROM (
-                SELECT plan_id, expires_at, 0 AS auto_renew, NULL::bigint AS cancelled_at,
-                       source AS card_brand, NULL::text AS card_last4, source AS via, manage_url
-                FROM entitlement
-                WHERE auth.email() IS NOT NULL AND lower(email) = lower(auth.email()) AND status = 'active'
-                  AND expires_at > floor(extract(epoch FROM now()))::bigint
-              ) e),
+             (SELECT to_json(l) FROM (SELECT * FROM live ORDER BY expires_at DESC LIMIT 1) l),
              (SELECT to_json(m) FROM (
                 SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4, 'card' AS via
                 FROM membership WHERE user_id = auth.uid()
               ) m)
            ),
+           -- A Whop subscription that will take money again, whichever
+           -- membership is shown: the page must always offer to stop it.
+           -- Has this account, or a deleted one with the same email, ever
+           -- had a membership. Free trials are for new members, and checkout
+           -- refuses one otherwise (hadMembership in worker/src/pay.ts asks
+           -- the same four things), so the site does not offer it.
+           'returning', auth.uid() IS NOT NULL AND (
+             EXISTS (SELECT 1 FROM membership WHERE user_id = auth.uid())
+             OR EXISTS (SELECT 1 FROM payment WHERE user_id = auth.uid())
+             OR (auth.email() IS NOT NULL AND EXISTS (SELECT 1 FROM entitlement WHERE email = lower(auth.email())))
+             OR (auth.email() IS NOT NULL AND EXISTS (SELECT 1 FROM former_member
+                   WHERE email_sha256 = encode(sha256(convert_to(lower(btrim(auth.email())), 'UTF8')), 'hex')))),
+           'whop', (SELECT json_build_object('renewing', true, 'manage_url', manage_url, 'until', expires_at)
+                      FROM entitlement
+                     WHERE auth.email() IS NOT NULL AND lower(email) = lower(auth.email()) AND status = 'active'
+                       AND source = 'whop' AND plan_id <> 'matchday' AND renew_stopped_at IS NULL
+                       AND expires_at > floor(extract(epoch FROM now()))::bigint
+                     LIMIT 1),
            'receipts', coalesce((
              SELECT json_agg(r) FROM (
                SELECT created_at, plan_id, amount_minor, currency, status
@@ -985,9 +1034,11 @@ $fn$;
 -- gets a clear error rather than a second function.
 DROP FUNCTION IF EXISTS save_profile(text, text);
 DROP FUNCTION IF EXISTS save_profile(text, text, text, text, bigint, text, text);
--- Save the account's profile. Every argument after the name is optional and
--- NULL means "leave it as it is", so the odds switch can save the odds without
--- knowing about the picture. A club of 0 clears the club.
+-- Save the account's profile. Every argument, the name included, is optional
+-- and NULL means "leave it as it is", so the odds switch can save the odds
+-- without knowing the name: a page open since before the name was changed
+-- elsewhere must not write the old one back. '' clears the name. A club of 0
+-- clears the club.
 CREATE OR REPLACE FUNCTION save_profile(
   p_name text, p_odds text,
   p_avatar text DEFAULT NULL, p_color text DEFAULT NULL,
@@ -1036,8 +1087,8 @@ BEGIN
           nullif(p_club_id, 0), CASE WHEN coalesce(p_club_id, 0) = 0 THEN NULL ELSE club_clean END,
           coalesce(p_clock, '24'), nullif(handle, ''), now_s, now_s)
   ON CONFLICT (user_id) DO UPDATE SET
-    display_name = excluded.display_name,
-    odds_format  = excluded.odds_format,
+    display_name = CASE WHEN p_name IS NULL THEN profile.display_name ELSE excluded.display_name END,
+    odds_format  = coalesce(p_odds, profile.odds_format),
     avatar_style = coalesce(p_avatar, profile.avatar_style),
     avatar_color = coalesce(p_color, profile.avatar_color),
     club_id      = CASE WHEN p_club_id IS NULL THEN profile.club_id ELSE nullif(p_club_id, 0) END,
@@ -1089,12 +1140,26 @@ $fn$;
 -- (which has already checked the caller's token and runs with the service
 -- key). Payment records stay, without the processor's payload: tax law
 -- requires the records, and the privacy policy says so. SECURITY INVOKER and no grant, so the public key cannot call it.
-CREATE OR REPLACE FUNCTION delete_account_data(p_user uuid)
+-- Deleting an account. The Worker has already stopped any Whop renewal
+-- (worker/src/account.ts), so the entitlement goes with the email on it; the
+-- grant ledger keeps its references (so a sweep cannot grant the same
+-- period again) with the address taken off.
+DROP FUNCTION IF EXISTS delete_account_data(uuid);
+CREATE OR REPLACE FUNCTION delete_account_data(p_user uuid, p_email text DEFAULT NULL)
 RETURNS void LANGUAGE sql VOLATILE SET search_path = public AS $fn$
+  INSERT INTO former_member (email_sha256, at)
+  SELECT encode(sha256(convert_to(lower(btrim(p_email)), 'UTF8')), 'hex'), floor(extract(epoch FROM now()))::bigint
+   WHERE p_email IS NOT NULL AND p_email <> '' AND (
+         EXISTS (SELECT 1 FROM membership WHERE user_id = p_user)
+      OR EXISTS (SELECT 1 FROM payment WHERE user_id = p_user)
+      OR EXISTS (SELECT 1 FROM entitlement WHERE lower(email) = lower(p_email)))
+  ON CONFLICT (email_sha256) DO UPDATE SET at = excluded.at;
   DELETE FROM follow WHERE user_id = p_user;
   DELETE FROM profile WHERE user_id = p_user;
   DELETE FROM payment_method WHERE user_id = p_user;
   DELETE FROM membership WHERE user_id = p_user;
+  DELETE FROM entitlement WHERE p_email IS NOT NULL AND lower(email) = lower(p_email);
+  UPDATE entitlement_grant SET email = 'deleted' WHERE p_email IS NOT NULL AND lower(email) = lower(p_email);
   -- The records stay, for tax; the processor's raw payload goes, because it
   -- can carry the email address and the privacy policy promises it will not.
   UPDATE payment SET raw_json = '{"redacted": true}' WHERE user_id = p_user;
@@ -1876,7 +1941,7 @@ GRANT EXECUTE ON FUNCTION record_consent(text, text) TO anon, authenticated;
 
 
 GRANT EXECUTE ON FUNCTION set_follow(text, bigint, text, boolean) TO anon, authenticated;
-REVOKE ALL ON FUNCTION delete_account_data(uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION delete_account_data(uuid, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint) TO anon;
 GRANT EXECUTE ON FUNCTION board_card(fixture, boolean) TO anon;
 GRANT EXECUTE ON FUNCTION fold(text) TO anon;
@@ -1994,7 +2059,10 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
   WHERE p.active = 1
     AND p.starts_at <= floor(extract(epoch FROM now()))::bigint
     AND p.ends_at > floor(extract(epoch FROM now()))::bigint
-    AND (p.plan_id IS NULL OR pl.id IS NOT NULL);
+    AND (p.plan_id IS NULL OR pl.id IS NOT NULL)
+    -- A deal is only a deal while it is below the plan's price: lower the
+    -- plan under it and checkout would refuse it, so it is not advertised.
+    AND (p.kind <> 'deal' OR p.price_minor < pl.amount_minor);
 $fn$;
 GRANT EXECUTE ON FUNCTION get_promos() TO anon, authenticated;
 
@@ -2004,7 +2072,7 @@ RETURNS TABLE (email text, plan_id text, expires_at bigint, free boolean, via te
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   WITH t AS (SELECT floor(extract(epoch FROM now()))::bigint AS now_),
   rows_ AS (
-    SELECT lower(u.email) AS email, m.plan_id, m.expires_at, m.card_brand = 'complimentary' AS free, 'membership' AS via
+    SELECT lower(u.email) AS email, m.plan_id, m.expires_at, coalesce(m.card_brand, '') = 'complimentary' AS free, 'membership' AS via
       FROM membership m JOIN auth.users u ON u.id = m.user_id, t WHERE m.expires_at > t.now_
     UNION ALL
     SELECT lower(e.email), e.plan_id, e.expires_at, false, e.source
@@ -2081,10 +2149,12 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
     LEFT JOIN profile pr ON pr.user_id = u.id
     LEFT JOIN membership m ON m.user_id = u.id
     LEFT JOIN admin_live_members() lm ON lm.email = lower(u.email)
+    CROSS JOIN LATERAL (SELECT '%' || replace(replace(replace(coalesce(p_q, ''), '\', '\\'), '%', '\%'), '_', '\_') || '%' AS pat) q
+    -- A "_" or "%" typed in the search box is a letter, not a wildcard.
     WHERE p_q IS NULL OR p_q = ''
-       OR u.email ILIKE '%' || p_q || '%'
-       OR pr.display_name ILIKE '%' || p_q || '%'
-       OR pr.username ILIKE '%' || p_q || '%'
+       OR u.email ILIKE q.pat
+       OR pr.display_name ILIKE q.pat
+       OR pr.username ILIKE q.pat
     ORDER BY u.created_at DESC
     LIMIT least(greatest(coalesce(p_limit, 50), 1), 200) OFFSET greatest(coalesce(p_offset, 0), 0)
   ) x;
@@ -2103,7 +2173,7 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
     'profile', (SELECT row_to_json(p) FROM (SELECT display_name, username, club_name, created_at FROM profile WHERE user_id = p_user) p),
     'membership', (SELECT row_to_json(m) FROM (SELECT plan_id, expires_at, auto_renew, cancelled_at, dunning_from, card_brand, card_last4, created_at
                                                FROM membership WHERE user_id = p_user) m),
-    'entitlement', (SELECT row_to_json(e) FROM (SELECT e.plan_id, e.expires_at, e.status, e.source, e.manage_url, e.created_at
+    'entitlement', (SELECT row_to_json(e) FROM (SELECT e.plan_id, e.expires_at, e.status, e.source, e.manage_url, e.created_at, e.renew_stopped_at
                                                 FROM entitlement e JOIN auth.users u ON lower(u.email) = lower(e.email)
                                                 WHERE u.id = p_user) e),
     'payments', (SELECT coalesce(json_agg(row_to_json(p) ORDER BY p.created_at DESC), '[]'::json)
@@ -2117,12 +2187,19 @@ REVOKE ALL ON FUNCTION admin_user(uuid) FROM PUBLIC, anon, authenticated;
 
 -- Free time on an account: extends whatever it has, or starts one. Marked
 -- complimentary, so the account page never shows a card for it.
+--
+-- The days start when the account's paid time ends, however it was paid, so
+-- they are never spent running alongside time already bought. An account whose
+-- Whop subscription is still renewing is refused: Whop would charge again in
+-- the middle of the free time, so the days are added in Whop instead.
 CREATE OR REPLACE FUNCTION admin_grant(p_actor uuid, p_user uuid, p_days integer)
 RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
 DECLARE
   t bigint := floor(extract(epoch FROM now()))::bigint;
   plan_ text;
   until_ bigint;
+  paid_to bigint;
+  whop_ record;
 BEGIN
   IF p_days IS NULL OR p_days < 1 OR p_days > 3650 THEN
     RETURN json_build_object('error', 'Give between 1 and 3,650 days.');
@@ -2130,11 +2207,19 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = p_user) THEN
     RETURN json_build_object('error', 'No such account.');
   END IF;
+  SELECT e.plan_id, e.expires_at, e.renew_stopped_at INTO whop_
+    FROM entitlement e JOIN auth.users u ON lower(u.email) = lower(e.email)
+   WHERE u.id = p_user AND e.status = 'active' AND e.expires_at > t;
+  IF whop_.expires_at IS NOT NULL AND whop_.renew_stopped_at IS NULL AND whop_.plan_id <> 'matchday' THEN
+    RETURN json_build_object('error', format('This account pays through Whop, next on %s. Free days here would run alongside time they pay for. Add them to the membership in Whop instead.',
+      to_char(to_timestamp(whop_.expires_at) AT TIME ZONE 'Europe/London', 'DD Mon YYYY')));
+  END IF;
+  paid_to := greatest(t, coalesce(whop_.expires_at, t));
   SELECT id INTO plan_ FROM plan WHERE active = 1 ORDER BY sort DESC LIMIT 1;
   INSERT INTO membership (user_id, plan_id, expires_at, created_at, updated_at, card_brand)
-  VALUES (p_user, coalesce(plan_, 'monthly'), t + p_days * 86400, t, t, 'complimentary')
+  VALUES (p_user, coalesce(plan_, 'monthly'), paid_to + p_days * 86400, t, t, 'complimentary')
   ON CONFLICT (user_id) DO UPDATE SET
-    expires_at = greatest(membership.expires_at, t) + p_days * 86400,
+    expires_at = greatest(membership.expires_at, paid_to) + p_days * 86400,
     cancelled_at = NULL, dunning_from = NULL, attempts = 0,
     card_brand = CASE WHEN membership.expires_at > t THEN membership.card_brand ELSE 'complimentary' END,
     updated_at = t
@@ -2147,20 +2232,21 @@ $fn$;
 REVOKE ALL ON FUNCTION admin_grant(uuid, uuid, integer) FROM PUBLIC, anon, authenticated;
 
 -- End free time now. A paid membership is not ended here: the processor
--- would go on charging for it, so that is done where it was bought.
+-- would go on charging for it, so that is done where it was bought. Free time
+-- alongside a Whop subscription can be ended; the paid time is untouched.
 CREATE OR REPLACE FUNCTION admin_end(p_actor uuid, p_user uuid)
 RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
 DECLARE t bigint := floor(extract(epoch FROM now()))::bigint;
 BEGIN
-  IF EXISTS (SELECT 1 FROM entitlement e JOIN auth.users u ON lower(u.email) = lower(e.email)
-             WHERE u.id = p_user AND e.status = 'active' AND e.expires_at > t) THEN
-    RETURN json_build_object('error', 'This one was paid for through Whop. Cancel it there, or it will go on charging.');
-  END IF;
   IF NOT EXISTS (SELECT 1 FROM membership WHERE user_id = p_user AND expires_at > t) THEN
+    IF EXISTS (SELECT 1 FROM entitlement e JOIN auth.users u ON lower(u.email) = lower(e.email)
+               WHERE u.id = p_user AND e.status = 'active' AND e.expires_at > t) THEN
+      RETURN json_build_object('error', 'This one was paid for through Whop. Cancel it there, or it will go on charging.');
+    END IF;
     RETURN json_build_object('error', 'That account has no membership running.');
   END IF;
   IF EXISTS (SELECT 1 FROM membership WHERE user_id = p_user AND coalesce(card_brand, '') <> 'complimentary') THEN
-    RETURN json_build_object('error', 'This one was paid for. Cancel it in Whop, or it will go on charging.');
+    RETURN json_build_object('error', 'This one was paid for by card. Ending it here would take time they paid for.');
   END IF;
   UPDATE membership SET expires_at = t, auto_renew = 0, updated_at = t WHERE user_id = p_user;
   INSERT INTO admin_log (at, actor, action, target, detail_json) VALUES (t, p_actor, 'end', p_user::text, NULL);
@@ -2207,7 +2293,7 @@ REVOKE ALL ON FUNCTION admin_plans() FROM PUBLIC, anon, authenticated;
 
 CREATE OR REPLACE FUNCTION admin_save_plan(p_actor uuid, p_id text, p_name text, p_amount bigint, p_active integer)
 RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
-DECLARE t bigint := floor(extract(epoch FROM now()))::bigint; before_ json;
+DECLARE t bigint := floor(extract(epoch FROM now()))::bigint; before_ json; clash_ record;
 BEGIN
   SELECT json_build_object('name', name, 'amount_minor', amount_minor, 'active', active) INTO before_ FROM plan WHERE id = p_id;
   IF before_ IS NULL THEN RETURN json_build_object('error', 'No such plan.'); END IF;
@@ -2216,6 +2302,17 @@ BEGIN
   END IF;
   IF p_name IS NOT NULL AND (length(trim(p_name)) = 0 OR length(p_name) > 40) THEN
     RETURN json_build_object('error', 'A name of up to 40 characters.');
+  END IF;
+  -- A deal that is running or to come must stay below the plan's price, or it
+  -- silently stops being offered. Say which one is in the way.
+  IF p_amount IS NOT NULL THEN
+    SELECT title, price_minor INTO clash_ FROM promo
+     WHERE plan_id = p_id AND kind = 'deal' AND active = 1 AND ends_at > t AND price_minor >= p_amount
+     ORDER BY starts_at LIMIT 1;
+    IF clash_.title IS NOT NULL THEN
+      RETURN json_build_object('error', format('The deal "%s" sells this plan at £%s. Lower or end it first.',
+        clash_.title, to_char(clash_.price_minor / 100.0, 'FM999990.00')));
+    END IF;
   END IF;
   UPDATE plan SET name = coalesce(nullif(trim(p_name), ''), name),
                   amount_minor = coalesce(p_amount, amount_minor),
@@ -2241,7 +2338,9 @@ CREATE OR REPLACE FUNCTION admin_save_promo(p_actor uuid, p json)
 RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
 DECLARE
   t bigint := floor(extract(epoch FROM now()))::bigint;
-  id_ text := coalesce(nullif(p->>'id', ''), 'p' || to_char(now(), 'YYYYMMDDHH24MISS'));
+  -- A new offer's id carries a random tail, so two made in the same second
+  -- do not land on one row.
+  id_ text := coalesce(nullif(p->>'id', ''), 'p' || to_char(now(), 'YYYYMMDDHH24MISS') || substr(md5(random()::text), 1, 4));
   kind_ text := p->>'kind';
   plan_ text := nullif(p->>'plan_id', '');
   price_ bigint := nullif(p->>'price_minor', '')::bigint;
@@ -2249,8 +2348,15 @@ DECLARE
   starts_ bigint := coalesce(nullif(p->>'starts_at', '')::bigint, t);
   ends_ bigint := nullif(p->>'ends_at', '')::bigint;
   full_ bigint;
+  clash_ record;
 BEGIN
-  IF kind_ NOT IN ('deal', 'trial', 'notice') THEN RETURN json_build_object('error', 'Pick a deal, a trial or a notice.'); END IF;
+  IF kind_ IS NULL OR kind_ NOT IN ('deal', 'trial', 'notice') THEN RETURN json_build_object('error', 'Pick a deal, a trial or a notice.'); END IF;
+  -- Checkout and the Worker only take ids of this shape; anything else would
+  -- save and then never work.
+  IF id_ !~ '^[A-Za-z0-9_-]{1,40}$' THEN RETURN json_build_object('error', 'An id of letters, numbers, dashes and underscores.'); END IF;
+  IF coalesce(nullif(p->>'audience', ''), 'everyone') NOT IN ('everyone', 'signed_out', 'free') THEN
+    RETURN json_build_object('error', 'Pick who sees it: everyone, signed-out visitors or readers without a membership.');
+  END IF;
   IF length(coalesce(trim(p->>'title'), '')) = 0 OR length(p->>'title') > 80 THEN
     RETURN json_build_object('error', 'A headline of up to 80 characters.');
   END IF;
@@ -2259,13 +2365,37 @@ BEGIN
   IF ends_ IS NULL OR ends_ <= starts_ THEN RETURN json_build_object('error', 'It has to end after it starts.'); END IF;
   IF kind_ IN ('deal', 'trial') THEN
     SELECT amount_minor INTO full_ FROM plan WHERE id = plan_ AND active = 1;
-    IF full_ IS NULL THEN RETURN json_build_object('error', 'Pick a plan that is on sale.'); END IF;
+    -- Switching an offer off is always allowed, even once its plan has been
+    -- taken off sale; only a live one needs a plan someone can buy.
+    IF full_ IS NULL AND coalesce(nullif(p->>'active', '')::integer, 1) = 1 THEN
+      RETURN json_build_object('error', 'Pick a plan that is on sale.');
+    END IF;
+    IF full_ IS NULL THEN SELECT amount_minor INTO full_ FROM plan WHERE id = plan_; END IF;
+    IF full_ IS NULL THEN RETURN json_build_object('error', 'Pick a plan.'); END IF;
   END IF;
   IF kind_ = 'deal' AND (price_ IS NULL OR price_ < 100 OR price_ >= full_) THEN
     RETURN json_build_object('error', 'A deal needs a price below the plan''s own, and at least £1.');
   END IF;
   IF kind_ = 'trial' AND (trial_ IS NULL OR plan_ = 'matchday') THEN
     RETURN json_build_object('error', 'A trial needs a number of days and a plan that renews.');
+  END IF;
+  IF kind_ = 'trial' AND (trial_ < 1 OR trial_ > 60) THEN
+    RETURN json_build_object('error', 'A trial of 1 to 60 days.');
+  END IF;
+  -- One offer on a plan at a time. Two would put one in the popup and the
+  -- other at checkout, and a reader who clicked a trial would be charged a
+  -- deal price. Notices carry no price, so any number may run.
+  IF kind_ IN ('deal', 'trial') AND coalesce(nullif(p->>'active', '')::integer, 1) = 1 THEN
+    SELECT o.id, o.title, o.starts_at, o.ends_at INTO clash_ FROM promo o
+     WHERE o.id <> id_ AND o.active = 1 AND o.kind IN ('deal', 'trial') AND o.plan_id = plan_
+       AND o.starts_at < ends_ AND o.ends_at > starts_ AND o.ends_at > t
+     ORDER BY o.starts_at LIMIT 1;
+    IF clash_.id IS NOT NULL THEN
+      RETURN json_build_object('error', format('"%s" already runs on this plan from %s to %s. Switch it off or change the dates first.',
+        clash_.title,
+        to_char(to_timestamp(clash_.starts_at) AT TIME ZONE 'Europe/London', 'DD Mon HH24:MI'),
+        to_char(to_timestamp(clash_.ends_at) AT TIME ZONE 'Europe/London', 'DD Mon HH24:MI')));
+    END IF;
   END IF;
   INSERT INTO promo (id, kind, title, body, cta, plan_id, price_minor, trial_days, audience, starts_at, ends_at, active, created_at, updated_at)
   VALUES (id_, kind_, trim(p->>'title'), nullif(trim(p->>'body'), ''), nullif(trim(p->>'cta'), ''),
