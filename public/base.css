@@ -161,6 +161,11 @@ summary:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
+/* A page's heading takes focus when the page changes (route() in app.js) so
+   the keyboard and a screen reader start there. It is a place to read from,
+   not a control, so it carries no ring. */
+h1[tabindex="-1"]:focus,
+h1[tabindex="-1"]:focus-visible { outline: none; box-shadow: none; }
 /*
  * The focus ring wants a radius to sit against, but only on things that have
  * none of their own. Setting it on every `a:focus-visible` rounded the board
@@ -629,6 +634,9 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   }
   .nav:not(.open) { display: none; }
   .nav.open { animation: menu-in var(--dur-fast) var(--ease-out); }
+  /* The dimmed page holds still while the menu is open (setMenu in app.js):
+     a swipe on it used to scroll the page away underneath the sheet. */
+  html.menu-lock { overflow: hidden; }
   .nav a {
     flex-direction: column;
     align-items: flex-start;

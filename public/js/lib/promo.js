@@ -402,6 +402,25 @@ export function showBar(p, { anchor }) {
 
 /* ------------------------------------------------------------ the running */
 
+/** Whether the reader is in the middle of something a popup would interrupt. */
+function busy() {
+  const menu = document.getElementById('acct-menu');
+  return document.hidden
+    || document.getElementById('nav')?.classList.contains('open')
+    || (menu && !menu.hidden)
+    || !!document.activeElement?.closest?.('input, textarea, select, [contenteditable]')
+    || document.documentElement.classList.contains('dd-locked')
+    || !!document.querySelector('[aria-haspopup][aria-expanded="true"]')
+    || !!document.querySelector('[aria-modal="true"]');
+}
+
+// Moving page takes the popup down with the page it was opened on: Back from
+// under it used to leave it standing over the next page.
+if (typeof window !== 'undefined') {
+  window.addEventListener('hashchange', () => open?.close(true));
+  window.addEventListener('popstate', () => open?.close(true));
+}
+
 const NO_POPUP = new Set(['pricing', 'checkout', 'signin', 'account', 'admin', 'legal', 'trace', 'dev']);
 const NO_BAR = new Set(['checkout', 'admin']);
 let armed = false;
@@ -427,6 +446,11 @@ export async function runPromos({ route, signedIn, member, returning = false, an
   let fired = false;
   const fire = () => {
     if (fired) return;
+    // Never over something the reader is in the middle of: an open menu, a
+    // field being typed in (the popup took the focus out of the search box
+    // mid-word), another dialog, or a tab they are not looking at. It waits
+    // and tries again rather than giving up the visit's one showing.
+    if (busy()) { setTimeout(fire, 4000); return; }
     fired = true;
     removeEventListener('scroll', onScroll);
     const here = (location.hash.slice(2).split(/[/?]/)[0]) || 'home';

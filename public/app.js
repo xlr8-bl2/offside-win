@@ -798,9 +798,14 @@ function pageTitle(name) {
   } else if (name === 'league') {
     const h = app.querySelector('h1')?.textContent.replace(/\s+/g, ' ').trim();
     t = h ? leagueTitle(h) : null;
-  } else if (name === 'player') {
-    t = app.querySelector('h1')?.textContent.replace(/\s+/g, ' ').trim() || null;
+  } else if (name === 'player' || name === 'legal') {
+    // The privacy policy, the terms and the cookie policy were all "Legal" in
+    // the tab and the history list.
+    t = app.querySelector('h1')?.textContent.replace(/\s+/g, ' ').trim() || t;
   }
+  // A page with no title of its own (an address we do not have, a page that
+  // could not load) is named by its heading, not given the front page's.
+  if (!t && name !== 'home') t = app.querySelector('h1')?.textContent.replace(/\s+/g, ' ').trim() || null;
   document.title = name === 'home' ? fullTitle(null) : fullTitle(t);
 }
 
@@ -1696,15 +1701,18 @@ function balanceRecord() {
 
 /** The slip, and every settled slip before it. */
 async function viewSlip() {
+  // Which navigation this page belongs to: a newer one makes it stand down (see route).
+  const nav = navTicket;
   placeholder(skeletonHTML());
   let data;
   let board = null;
   // The board rides along so each leg can show how its match stands.
   try { [data, board] = await Promise.all([getJSON('/api/slip'), loadBoard().catch(() => null)]); }
-  catch (err) { return errorState(err); }
+  catch (err) { return errorState(err, nav); }
   state.slipNow = data?.current ?? null;
   const tone = (r) => (r === 'WON' ? 'won' : r === 'LOST' ? 'lost' : 'back');
   const recent = data?.recent ?? [];
+  if (nav !== navTicket) return;
   app.innerHTML = `
   <div class="wrap section narrow">
     <div class="page-head">
@@ -2126,14 +2134,17 @@ async function viewSearch(params = new URLSearchParams()) {
              enterkeyhint="search" maxlength="60" placeholder="Arsenal, Serie A, Boca…" aria-label="Team or competition"
              value="${esc(initial)}">
     </form>
-    <div class="search-out" id="search-out" aria-live="polite"></div>
+    <p class="visually-hidden" id="search-status" role="status"></p>
+    <div class="search-out" id="search-out"></div>
   </div>`;
 
   const input = document.getElementById('search-q');
   const out = document.getElementById('search-out');
-  // Straight into the box with a keyboard and a mouse; on a phone the keyboard
-  // waits for a tap rather than covering the page on arrival.
-  if (!initial && matchMedia('(pointer: fine)').matches) input.focus({ preventScroll: true });
+  // What a screen reader hears after each search: one line, not the whole
+  // list read out again on every keystroke, which is what making the list
+  // itself the live region did.
+  const status = document.getElementById('search-status');
+  const say = (text) => { if (status.textContent !== text) status.textContent = text; };
   let seq = 0;
   let timer = null;
 
@@ -2159,6 +2170,7 @@ async function viewSearch(params = new URLSearchParams()) {
     const total = analysed.length + later.length;
 
     if (!total && !leagues.length) {
+      say(`Nothing for ${q} in the next two weeks.`);
       out.innerHTML = `
         <div class="search-empty">
           <p class="search-empty-head">Nothing for “${esc(q)}” in the next two weeks.</p>
@@ -2174,6 +2186,7 @@ async function viewSearch(params = new URLSearchParams()) {
     if (later.length) bits.push(`${later.length} still to be analysed`);
     if (played.length) bits.push(`${played.length} played in the last few days`);
     const summary = bits.length ? `${bits.slice(0, -1).join(', ')}${bits.length > 1 ? ' and ' : ''}${bits[bits.length - 1]}.` : '';
+    say(summary || `${leagues.length} ${leagues.length === 1 ? 'competition' : 'competitions'} found.`);
 
     const shownUp = only ? upcoming.filter(searchHasCall) : upcoming;
     const shownPlayed = only ? played.filter(searchHasCall) : played;
@@ -2210,7 +2223,7 @@ async function viewSearch(params = new URLSearchParams()) {
   const run = async (q) => {
     const mine = ++seq;
     remember(q);
-    if (q.trim().length < 2) { out.innerHTML = intro(); return; }
+    if (q.trim().length < 2) { say(''); out.innerHTML = intro(); return; }
     out.classList.add('busy');
     try {
       const data = await getJSON(`/api/search?q=${encodeURIComponent(q.trim())}`);
@@ -2218,6 +2231,7 @@ async function viewSearch(params = new URLSearchParams()) {
       paint(data);
     } catch {
       if (mine !== seq) return;
+      say('Search is not answering just now.');
       out.innerHTML = '<p class="sr-none">Search is not answering just now. Try again in a moment.</p>';
     } finally {
       if (mine === seq) out.classList.remove('busy');
@@ -2275,6 +2289,8 @@ function spread(fixtures, limit) {
 }
 
 async function viewHome() {
+  // Which navigation this page belongs to: a newer one makes it stand down (see route).
+  const nav = navTicket;
   placeholder(heroHTML(state.hero, state.heroVenue) + skeletonHTML('rows'));
   // Everything the page needs, asked for at once. They used to go in three
   // rounds -- board and masthead, then the masthead's bundle, then the record
@@ -2295,7 +2311,7 @@ async function viewHome() {
     // Already here (a cached read, usually): draw with it. Otherwise without.
     state.heroDetail = await Promise.race([detailReq, new Promise((r) => setTimeout(() => r(null), 60))]);
   } catch (err) {
-    return errorState(err);
+    return errorState(err, nav);
     return;
   }
   const fixtures = board.fixtures ?? [];
@@ -2337,6 +2353,7 @@ async function viewHome() {
     state.heroDetail = null;
     heroRow = null;
   }
+  if (nav !== navTicket) return;
   app.innerHTML =
     `<div data-live="ticker">${tickerHTML(fixtures, recent)}</div>` +
     heroHTML(state.hero, state.heroVenue, state.heroDetail, freeFx, heroRow) +
@@ -2558,6 +2575,8 @@ function backHTML(label) {
 // ------------------------------------------------------------------ board
 
 async function viewBoard(params = new URLSearchParams()) {
+  // Which navigation this page belongs to: a newer one makes it stand down (see route).
+  const nav = navTicket;
   // The filters live in the URL, so a filtered board survives a reload and can
   // be sent to someone. They used to live only in `state`, which meant the one
   // thing a reader would want to share -- "the La Liga card for the next two
@@ -2578,7 +2597,7 @@ async function viewBoard(params = new URLSearchParams()) {
   </div>`);
   let board;
   try { board = await loadBoard(); } catch (err) {
-    return errorState(err);
+    return errorState(err, nav);
     return;
   }
   /*
@@ -2689,6 +2708,7 @@ async function viewBoard(params = new URLSearchParams()) {
   const furthest = kickoffs.length ? Math.max(...kickoffs) : null;
   const capped = furthest !== null && furthest < Date.now() / 1000 + (state.hours - 6) * 3600;
 
+  if (nav !== navTicket) return;
   app.innerHTML = `
   <div class="wrap section dense">
     <div class="section-head">
@@ -4188,6 +4208,8 @@ function changeNoteHTML(f, st) {
 }
 
 async function viewFixture(id, params = new URLSearchParams()) {
+  // Which navigation this page belongs to: a newer one makes it stand down (see route).
+  const nav = navTicket;
   placeholder(skeletonHTML());
   let f;
   try { f = await getJSON(`/api/fixture/${id}`); state.titleFor = f?.home && f?.away ? f : null; } catch {
@@ -4197,6 +4219,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
      * nothing else, which tells a reader what our database thinks rather than
      * what to do next. Both of those are true and only one is useful.
      */
+    if (nav !== navTicket) return;
     app.innerHTML = `
     <div class="wrap section">
       <div class="page-head">
@@ -4425,6 +4448,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
     ? ` has-colors" style="--home-c:${homeC ?? 'transparent'};--away-c:${awayC ?? 'transparent'}`
     : '';
 
+  if (nav !== navTicket) return;
   app.innerHTML = `
   <section class="hero fx-top${wash}" data-shot="${f.venue_id ? 'yes' : 'none'}" data-fx="${esc(f.id)}">
     <div class="hero-media">${venueShot(f.venue_id, '', true)}</div>
@@ -4532,6 +4556,8 @@ function bar(label, v) {
 // ---------------------------------------------------------------- results
 
 async function viewResults() {
+  // Which navigation this page belongs to: a newer one makes it stand down (see route).
+  const nav = navTicket;
   placeholder(skeletonHTML());
   /*
    * Two requests, because one cannot answer both halves of this page.
@@ -4549,7 +4575,7 @@ async function viewResults() {
       getJSON('/api/picks?limit=20&settled=false').catch(() => ({ picks: [] })),
     ]);
   } catch (err) {
-    return errorState(err);
+    return errorState(err, nav);
     return;
   }
 
@@ -4638,6 +4664,7 @@ async function viewResults() {
    */
   const stat = (v, tone = '') => `<b class="fig${tone ? ` ${tone}` : ''}">${esc(v)}</b>`;
 
+  if (nav !== navTicket) return;
   app.innerHTML = `
   <div class="wrap section">
     <div class="page-head">
@@ -5073,6 +5100,8 @@ function recapCardHTML(x) {
  * the rest follow under their own heading rather than being mixed in.
  */
 async function viewLeagues() {
+  // Which navigation this page belongs to: a newer one makes it stand down (see route).
+  const nav = navTicket;
   placeholder(`<div class="wrap section dense">
     <div class="rows">${'<div class="skeleton skeleton-row"></div>'.repeat(8)}</div>
   </div>`);
@@ -5104,6 +5133,7 @@ async function viewLeagues() {
       <span class="lg-calls${e.picks ? ' on' : ''}">${e.picks ? `${e.picks} ${e.picks === 1 ? 'call' : 'calls'}` : '—'}</span>
     </a>`;
 
+  if (nav !== navTicket) return;
   app.innerHTML = `
   <div class="wrap section dense">
     <div class="page-head">
@@ -5138,11 +5168,16 @@ async function viewLeagues() {
  * do on a fixture page: the open one is in the address.
  */
 async function viewLeague(id, params = new URLSearchParams()) {
+  // Which navigation this page belongs to: a newer one makes it stand down (see route).
+  const nav = navTicket;
   placeholder(skeletonHTML('rows'));
   let d;
-  try { d = await getJSON(`/api/league/${encodeURIComponent(id)}`); } catch (err) { return errorState(err); }
+  try { d = await getJSON(`/api/league/${encodeURIComponent(id)}`); } catch (err) { return errorState(err, nav); }
   const lg = d?.league;
-  if (!lg?.id) return notFound('league');
+  if (!lg?.id) return notFound('league', { nav, what: {
+    title: 'Not a competition we cover',
+    sub: 'The link may be old, or the competition may have left our list. The ones we cover are all on one page.',
+    href: '#/leagues', label: 'See the leagues' } });
 
   const fixtures = Array.isArray(d.fixtures) ? d.fixtures : [];
   // Same rule as loadBoard: on a played match the record decides the call.
@@ -5301,6 +5336,7 @@ async function viewLeague(id, params = new URLSearchParams()) {
     live ? `${live} on now` : null,
   ].filter(Boolean).join('. ');
 
+  if (nav !== navTicket) return;
   app.innerHTML = `
   <div class="wrap section dense">
     <div class="page-head league-title">
@@ -5358,11 +5394,31 @@ async function viewLeague(id, params = new URLSearchParams()) {
  * "Haaland has been dangerous" lands on the proof.
  */
 async function viewPlayer(id, params = new URLSearchParams()) {
+  // Which navigation this page belongs to: a newer one makes it stand down (see route).
+  const nav = navTicket;
   placeholder(skeletonHTML());
   const league = Number(params.get('league')) || null;
   let d;
   try { d = await getJSON(`/api/player/${encodeURIComponent(id)}${league ? `?league=${league}` : ''}`); }
-  catch (err) { return errorState(err); }
+  catch (err) { return errorState(err, nav); }
+  // Nothing at all on this id: say so and offer a way on, rather than a page
+  // headed "Player" with nothing under it and no link out.
+  if (!d?.name && !d?.matches?.length && !d?.competitions?.length && !d?.next?.length) {
+    if (nav !== navTicket) return;
+    app.innerHTML = `
+    <div class="wrap section">
+      <div class="page-head">
+        <h1 class="display xl">${esc(params.get('n') || 'No such player')}</h1>
+        <p class="page-sub">We have nothing on this player yet. Their page fills in from the scoring charts and the
+          reports of matches we cover, so it appears once they have played in one.</p>
+      </div>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#/search">Find a game</a>
+        <a class="btn btn-ghost" href="#/leagues">The leagues</a>
+      </div>
+    </div>`;
+    return;
+  }
   const name = d?.name || params.get('n') || 'Player';
   const lead = d?.lead_league ?? null;
   const comp = (d?.competitions ?? []).find((c) => Number(c.league_id) === Number(lead?.id)) ?? d?.competitions?.[0] ?? null;
@@ -5448,6 +5504,7 @@ async function viewPlayer(id, params = new URLSearchParams()) {
   ].filter(Boolean);
   const empty = !cells.length && !chart.length && !matches.length && !next.length;
 
+  if (nav !== navTicket) return;
   app.innerHTML = `
   <div class="wrap section dense">
     <div class="page-head player-head">
@@ -5554,14 +5611,41 @@ addEventListener('pageshow', (e) => { if (e.persisted) for (const undo of [...bu
 const goInstead = (hash) => location.replace(`${location.pathname}${location.search}${hash}`);
 
 const INTENT_KEY = 'ow.after-signin';
-const setIntent = (v) => { try { localStorage.setItem(INTENT_KEY, v); } catch { /* private mode */ } };
-const takeIntent = () => {
-  try {
-    const v = localStorage.getItem(INTENT_KEY);
-    localStorage.removeItem(INTENT_KEY);
-    return v;
-  } catch { return null; }
+/*
+ * Where to go once signed in, kept for an hour. It used to be kept until
+ * used, so a sign-in abandoned on Monday sent Thursday's sign-in back to
+ * Monday's match.
+ */
+const setIntent = (v) => { try { localStorage.setItem(INTENT_KEY, JSON.stringify({ v, at: Date.now() })); } catch { /* private mode */ } };
+const readIntent = () => {
+  let raw = null;
+  try { raw = localStorage.getItem(INTENT_KEY); } catch { return null; }
+  if (!raw) return null;
+  let o = null;
+  try { o = JSON.parse(raw); } catch { return raw; /* stored before it carried a time */ }
+  if (!o || typeof o !== 'object' || typeof o.v !== 'string') return null;
+  return Date.now() - Number(o.at) < 3600e3 ? o.v : null;
 };
+const takeIntent = () => {
+  const v = readIntent();
+  try { localStorage.removeItem(INTENT_KEY); } catch { /* private mode */ }
+  return v;
+};
+
+/*
+ * The last page the reader was reading (a match, the board, the slip), kept
+ * for the visit, so signing in and paying can bring them back to it rather
+ * than to the front page or their account. Session storage: it survives the
+ * round trip to Whop's checkout and Google's sign-in, and not a new visit.
+ */
+const READING_KEY = 'ow.reading';
+const READING_ROUTES = new Set(['fixture', 'board', 'slip', 'results', 'league', 'player', 'leagues', 'search', 'home']);
+const setReading = (name) => {
+  if (!READING_ROUTES.has(name)) return;
+  const hash = location.hash || (pathRoute() ? `#${pathRoute()}` : '#/home');
+  try { sessionStorage.setItem(READING_KEY, hash); } catch { /* private mode */ }
+};
+const reading = () => { try { return sessionStorage.getItem(READING_KEY); } catch { return null; } };
 
 /**
  * A sign-in that finished on this page (Google's button), rather than on a
@@ -5704,6 +5788,8 @@ function freeLineHTML(free) {
 const order0 = (plans) => ['matchday', 'monthly', 'quarter'].filter((id) => (plans ?? []).some((p) => p.id === id));
 
 async function viewPricing() {
+  // Which navigation this page belongs to: a newer one makes it stand down (see route).
+  const nav = navTicket;
   placeholder(skeletonHTML());
   const [user, plans, hero, running] = await Promise.all([
     currentUser(),
@@ -5765,6 +5851,7 @@ async function viewPricing() {
       note: `Nothing to pay today. ${money(p.amount_minor, p.currency)} from ${shortDate(mine.expires_at)}, when what you have paid for runs out.` };
   };
 
+  if (nav !== navTicket) return;
   app.innerHTML = `
   <div class="wrap section">
     ${mine ? `
@@ -5950,6 +6037,8 @@ function checkoutBlock(m, planId) {
  * sheet, so a buyer is never left with a dead button.
  */
 async function viewCheckout(params) {
+  // Which navigation this page belongs to: a newer one makes it stand down (see route).
+  const nav = navTicket;
   const planId = /^[a-z0-9_-]{1,40}$/.test(params.get('plan') ?? '') ? params.get('plan') : 'monthly';
   const promoId = /^[a-z0-9_-]{1,40}$/i.test(params.get('promo') ?? '') ? params.get('promo') : null;
   // A soft refresh (the header catching up on the account) must not wipe
@@ -5971,6 +6060,7 @@ async function viewCheckout(params) {
       All plans</a>`;
 
   if (!plan) {
+    if (nav !== navTicket) return;
     app.innerHTML = `
     <div class="wrap section narrow">
       ${back}
@@ -6002,6 +6092,7 @@ async function viewCheckout(params) {
   // fields' space is never drawn just to be taken away again.
   const embedding = !moving && !block && !trial && !!cfg?.whopAccount;
 
+  if (nav !== navTicket) return;
   app.innerHTML = `
   <div class="wrap section checkout" data-plan="${esc(planId)}">
     ${back}
@@ -6217,6 +6308,8 @@ async function viewCheckout(params) {
 
 /** Sign in. One email box and one button, because that is the whole of it. */
 async function viewSignin() {
+  // Which navigation this page belongs to: a newer one makes it stand down (see route).
+  const nav = navTicket;
   if (await currentUser()) { goInstead('#/account'); return; }
 
   const problem = state.authError;
@@ -6225,14 +6318,17 @@ async function viewSignin() {
   // Read without consuming: the intent is spent when the sign-in completes,
   // not when the page renders. Saying it out loud is the difference between
   // "why am I being asked for my email" and "yes, that is what I was doing".
-  let intent = null;
-  try { intent = localStorage.getItem(INTENT_KEY); } catch { /* private mode */ }
+  let intent = readIntent();
+  // Sent here from the header, not by a purchase or the account page: once
+  // signed in, back to the page they were reading, not the front page.
+  if (!intent && reading() && reading() !== '#/home') { intent = reading(); setIntent(intent); }
   const because = intent?.startsWith('buy')
     ? 'Sign in first and your membership will be waiting when you come back.'
     : intent === '#/account'
       ? 'Your account is behind this.'
       : 'Your calls follow you, your slip is yours, and there is nothing to remember.';
 
+  if (nav !== navTicket) return;
   app.innerHTML = `
   <div class="wrap section narrow">
     <div class="turnstile">
@@ -6408,6 +6504,8 @@ function accountName(user, profile) {
 }
 
 async function viewAccount() {
+  // Which navigation this page belongs to: a newer one makes it stand down (see route).
+  const nav = navTicket;
   const user = await currentUser();
   if (!user) { setIntent('#/account'); goInstead('#/signin'); return; }
 
@@ -6433,6 +6531,13 @@ async function viewAccount() {
   // switches the membership on, so the page says the payment is in and
   // checks again for a short while rather than showing a free account.
   const justPaid = params.get('paid') === '1';
+  // Most people pay from a locked call. Once it is open, the way back to it
+  // is the first thing on the page, not a hunt through the board.
+  const came = justPaid ? reading() : null;
+  const paidBack = !came || came === '#/home' ? null
+    : /^#\/fixture\//.test(came) ? { href: came, label: 'Back to the match you were reading' }
+    : /^#\/slip/.test(came) ? { href: came, label: "Back to today's slip" }
+    : { href: came, label: 'Back to where you were' };
   const open = ACCOUNT_TABS.some(([k]) => k === asked) ? asked : justPaid ? 'membership' : 'profile';
 
   const follows = Array.isArray(account.follows) ? account.follows : [];
@@ -6642,6 +6747,7 @@ async function viewAccount() {
 
   const panes = { profile: profileHTML, following: followingHTML, membership: membershipHTML, settings: settingsHTML };
 
+  if (nav !== navTicket) return;
   app.innerHTML = `
   <div class="wrap section narrow account">
     <div class="acct-head">
@@ -6656,6 +6762,7 @@ async function viewAccount() {
     ${justPaid ? `<p class="paid-note${active ? ' done' : ''}" role="status">${active
       ? 'Payment received. You are in: every call is open.'
       : 'Payment received. Switching your membership on, which usually takes a few seconds.'}</p>
+    ${active && paidBack ? `<p class="member-actions"><a class="btn btn-accent" href="${esc(paidBack.href)}">${esc(paidBack.label)}</a></p>` : ''}
     <p class="paid-confirm">As you asked at checkout, your membership started straight away, and you
       accepted that this ends the 14-day right to cancel for a change of mind. If anything of ours
       fails, you still get it put right or your money back. The <a href="#/legal/terms">terms of use</a>
@@ -7045,6 +7152,8 @@ function viewTrace() {
 }
 
 async function viewDev() {
+  // Which navigation this page belongs to: a newer one makes it stand down (see route).
+  const nav = navTicket;
   const me = await currentUser({ real: true });
   let account = null;
   if (me) {
@@ -7059,6 +7168,7 @@ async function viewDev() {
   const m = account?.membership;
   const active = m && m.expires_at * 1000 > Date.now();
   const free = viewingAsFree();
+  if (nav !== navTicket) return;
   app.innerHTML = `
   <div class="wrap section narrow">
     <div class="page-head">
@@ -7329,7 +7439,9 @@ function cookieNotice({ force = false } = {}) {
  *
  * So it distinguishes the two, and the button is the point of the whole thing.
  */
-function errorState(err) {
+function errorState(err, nav) {
+  // A page that failed after a newer one was asked for keeps quiet about it.
+  if (nav !== undefined && nav !== navTicket) return;
   const raw = String(err?.message ?? '');
   const offline = /failed to fetch|networkerror|load failed/i.test(raw) || navigator.onLine === false;
   app.innerHTML = `
@@ -7348,9 +7460,24 @@ function errorState(err) {
   document.getElementById('retry').onclick = () => route();
 }
 
-/** An address that is not one of ours. Say so, and offer the two ways out. */
-function notFound(name) {
-  app.innerHTML = `
+/**
+ * An address that is not one of ours. Say so, and offer the two ways out.
+ * `what` names a page that exists but not for this id (a competition we do
+ * not cover), so it does not claim the whole address is wrong.
+ */
+function notFound(name, { nav, what } = {}) {
+  if (nav !== undefined && nav !== navTicket) return;
+  app.innerHTML = what ? `
+  <div class="wrap section">
+    <div class="page-head">
+      <h1 class="display xl">${esc(what.title)}</h1>
+      <p class="page-sub">${esc(what.sub)}</p>
+    </div>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="${esc(what.href)}">${esc(what.label)}</a>
+      <a class="btn btn-ghost" href="#/board">Today's board</a>
+    </div>
+  </div>` : `
   <div class="wrap section">
     <div class="page-head">
       <h1 class="display xl">No such page</h1>
@@ -7369,6 +7496,20 @@ function notFound(name) {
 let routed = 0;
 
 /*
+ * Which navigation is current. A view awaits its data and then draws; tap a
+ * match and then Results before the match has loaded, and the match used to
+ * arrive second and draw over Results, under an address that said Results.
+ * Every route takes a ticket, each view notes the one it was started with,
+ * and a view whose ticket is no longer the latest draws nothing.
+ */
+let navTicket = 0;
+// A real navigation still loading, and whether a soft redraw (the header
+// catching up on the account) asked to run meanwhile. The redraw waits and
+// runs once after it, rather than cancelling it and losing its scroll.
+let hardPending = null;
+let softQueued = false;
+
+/*
  * Where the page sits when it opens.
  *
  * The browser's own scroll restoration was on, and on a single-page site it
@@ -7381,6 +7522,24 @@ let routed = 0;
  */
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 const scrollMemory = new Map();
+/*
+ * Which page the reader is on, as the address bar has it now. Scroll places
+ * are kept under this. They were kept under the hash the page opened with,
+ * which went wrong two ways: a filter or tab rewrites the address in place,
+ * so Back came to an address with nothing remembered and opened at the top;
+ * and a match page's address is /match/… with no hash, so every match page
+ * shared the front page's place.
+ */
+const addressKey = () => `${location.pathname}${location.search}${location.hash || (location.pathname === '/' ? '#/home' : '')}`;
+// Every in-place rewrite of the address (a filter, a tab, a match's real
+// address) moves the reader's place with it.
+{
+  const replace = history.replaceState.bind(history);
+  history.replaceState = (data, unused, url) => {
+    replace(data, unused, url);
+    if (state.here) state.here = addressKey();
+  };
+}
 let navByLink = false;
 // A finger on a sign-in link is a head start on Google's button.
 document.addEventListener('pointerdown', (e) => {
@@ -7434,6 +7593,8 @@ function jumpTo(y) {
 }
 
 async function route({ soft = false } = {}) {
+  // The page being left, before anything below rewrites the address.
+  const leaving = state.here;
   // Arrived on a real address and moved on inside the app: the address bar
   // follows the route, not the page the visit started on.
   if (location.pathname !== '/' && location.hash.startsWith('#/')) {
@@ -7441,14 +7602,17 @@ async function route({ soft = false } = {}) {
   }
   const { parts, params } = parseHash();
   const name = parts[0] || 'home';
-  const here = location.hash || '#/home';
+  const here = addressKey();
+  if (soft && hardPending !== null) { softQueued = true; return; }
   const keepY = window.scrollY;
+  const ticket = ++navTicket;
+  if (!soft) hardPending = ticket;
   state.soft = soft;
   if (!soft) {
     // Set after the first render, so the first route of a session -- the
     // deep link itself -- does not count as somewhere to go back to.
     state.cameFromInApp = routed++ > 0;
-    if (state.here) scrollMemory.set(state.here, keepY);
+    if (leaving) scrollMemory.set(leaving, keepY);
     state.here = here;
   }
   const backTo = !soft && !navByLink ? scrollMemory.get(here) : undefined;
@@ -7464,15 +7628,24 @@ async function route({ soft = false } = {}) {
   for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.route === (name === 'checkout' ? 'pricing' : name));
   // Whop's card fields belong to the checkout page; leaving it takes them down.
   if (!soft && state.payHandle) { state.payHandle.destroy(); state.payHandle = null; }
-  if (!soft) {
-    document.getElementById('nav').classList.remove('open');
-    document.getElementById('burger').setAttribute('aria-expanded', 'false');
-  }
+  if (!soft) setMenu(false);
   try {
     await render(name, parts, params);
   } catch (err) {
-    errorState(err);
+    if (ticket === navTicket) errorState(err);
   } finally {
+    // Superseded while it loaded: the newer route does all of this for its own page.
+    if (ticket === navTicket) finishRoute(name, soft, keepY, backTo);
+    if (hardPending === ticket) {
+      hardPending = null;
+      if (softQueued) { softQueued = false; route({ soft: true }); }
+    }
+  }
+}
+
+function finishRoute(name, soft, keepY, backTo) {
+  {
+    if (!soft) setReading(name);
     if (!soft) countView();
     if (!soft) schedulePromos();
     state.soft = false;
@@ -7507,6 +7680,18 @@ async function route({ soft = false } = {}) {
       app.classList.remove('page-in');
       void app.offsetWidth;
       app.classList.add('page-in');
+    }
+    // The link that was followed went with the old page, which leaves the
+    // keyboard at the top of the document and a screen reader silent about
+    // where it now is. Its place goes to the new page's heading instead,
+    // unless the page put it somewhere on purpose (the search box). Not on
+    // the first page of a visit, where the skip link comes first.
+    if (!soft && state.cameFromInApp && (!document.activeElement || document.activeElement === document.body)) {
+      const h = app.querySelector('h1');
+      if (h) {
+        if (!h.hasAttribute('tabindex')) h.setAttribute('tabindex', '-1');
+        h.focus({ preventScroll: true });
+      }
     }
   }
 }
@@ -7706,6 +7891,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 addEventListener('hashchange', closeAccountMenu);
+addEventListener('popstate', closeAccountMenu);
 
 async function headerAuth() {
   const link = document.getElementById('account-link');
@@ -7976,6 +8162,7 @@ async function health() {
 function setMenu(open) {
   document.getElementById('nav').classList.toggle('open', open);
   document.getElementById('burger').setAttribute('aria-expanded', String(open));
+  document.documentElement.classList.toggle('menu-lock', open);
 }
 document.getElementById('burger').onclick = () => setMenu(!document.getElementById('nav').classList.contains('open'));
 // The page behind the open menu is dimmed; a tap on it closes the menu rather
@@ -7988,9 +8175,29 @@ document.addEventListener('click', (e) => {
   setMenu(false);
 }, true);
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && document.getElementById('nav').classList.contains('open')) {
+  const navOpen = document.getElementById('nav').classList.contains('open');
+  if (e.key === 'Escape' && navOpen) {
     setMenu(false);
     document.getElementById('burger').focus();
+  }
+  // The open menu keeps the keyboard: Tab goes round its button and its
+  // links, not on into the dimmed page behind, where a tap would only close it.
+  if (e.key === 'Tab' && navOpen && getComputedStyle(document.getElementById('burger')).display !== 'none') {
+    const ring = [document.getElementById('burger'), ...document.querySelectorAll('#nav a')].filter((el) => el.offsetParent !== null);
+    const i = ring.indexOf(document.activeElement);
+    const next = ring[(i + (e.shiftKey ? -1 : 1) + ring.length) % ring.length];
+    if (next) { e.preventDefault(); next.focus(); }
+  }
+  // A row of tabs is marked up as tabs, which tells a screen reader the arrow
+  // keys move along it. They did nothing. Left, Right, Home and End now move
+  // to the next tab and open it, skipping any that are switched off.
+  const tab = e.target.closest?.('[role="tab"]');
+  if (tab && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+    const row = [...(tab.closest('[role="tablist"]')?.querySelectorAll('[role="tab"]') ?? [])].filter((t) => !t.disabled && t.offsetParent !== null);
+    const i = row.indexOf(tab);
+    const to = e.key === 'Home' ? row[0] : e.key === 'End' ? row[row.length - 1]
+      : row[(i + (e.key === 'ArrowRight' ? 1 : -1) + row.length) % row.length];
+    if (to && to !== tab) { e.preventDefault(); to.focus(); to.click(); }
   }
   // "/" opens search from anywhere but a field being typed in.
   if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.target.closest?.('input, textarea, select, [contenteditable]')) {
