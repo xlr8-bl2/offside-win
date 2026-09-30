@@ -4034,18 +4034,30 @@ html.pay-open { overflow: hidden; }
 
 /*
  * Our own checkout: what you are buying on the left, Whop's card fields and
- * our pay button on the right; stacked on a phone, summary first, so the
- * price and what renews are read before the card goes in.
+ * our pay button on the right. On a phone the price and its terms come
+ * first, then straight to paying, and what a membership includes last: the
+ * reader has already chosen the plan on the pricing page, and a long list
+ * between the price and the card form reads as a page with no button.
  */
 .checkout .back { margin-bottom: var(--space-5); text-decoration: none; }
 .co-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "summary" "pay" "details";
   gap: var(--space-7);
   align-items: start;
 }
+.co-summary { grid-area: summary; }
+.co-pay { grid-area: pay; }
+.co-details { grid-area: details; }
 @media (min-width: 900px) {
-  .co-grid { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--space-9); }
+  .co-grid {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas: "summary pay" "details pay";
+    column-gap: var(--space-9);
+    row-gap: 0;
+  }
   .co-pay { position: sticky; top: calc(var(--header-h, 64px) + var(--space-5)); }
 }
 .co-summary h1 { margin: 0; }
@@ -4088,9 +4100,54 @@ html.pay-open { overflow: hidden; }
   font-size: var(--text-lg);
   letter-spacing: var(--tracking-xl);
 }
-.co-fields { display: grid; gap: var(--space-4); min-height: 280px; }
-.co-fields .pay-wait { margin: var(--space-7) 0; }
+/*
+ * Whop's three frames, with their place held. The placeholder has the shape
+ * of what is coming (email, card number, then expiry and code side by side)
+ * and sits over the frames while they paint, then fades; the box keeps
+ * roughly their height throughout, so the button below does not jump.
+ */
+.co-fields { position: relative; display: grid; gap: var(--space-4); min-height: 300px; }
+.co-fields > div[id] { transition: opacity var(--dur-slow) var(--ease-out); }
+.co-fields:not(.is-loaded) > div[id] { opacity: 0; }
+.co-skel {
+  position: absolute;
+  inset: 0 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  pointer-events: none;
+  transition: opacity var(--dur-slow) var(--ease-out), visibility 0s linear var(--dur-slow);
+}
+.co-skel i {
+  grid-column: 1 / -1;
+  height: 48px;
+  border-radius: 10px;
+  background:
+    linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--chalk) 7%, transparent) 50%, transparent 70%) 0 0 / 250% 100%,
+    var(--terrace);
+  animation: co-shimmer 1.4s linear infinite;
+}
+.co-skel i:nth-child(1) { height: 44px; }
+.co-skel i:nth-child(3), .co-skel i:nth-child(4) { grid-column: auto; }
+.co-fields.is-loaded .co-skel { opacity: 0; visibility: hidden; }
+@keyframes co-shimmer { from { background-position: 125% 0, 0 0; } to { background-position: -125% 0, 0 0; } }
+@media (prefers-reduced-motion: reduce) { .co-skel i { animation: none; } }
+
 .co-button { width: 100%; justify-content: center; margin-top: var(--space-5); font-variant-numeric: tabular-nums; }
+/* What is still missing before the button works. Quiet, and empty once nothing is. */
+.co-need { margin: var(--space-3) 0 0; min-height: 1.5em; font-size: var(--text-sm); color: var(--chalk-3); text-align: center; }
+.co-need:empty { visibility: hidden; }
+/* Where the payment happens when it is not on this page: information, not a fault. */
+.co-info {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: 2px solid var(--floodlight);
+  background: var(--terrace);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--chalk-2);
+}
 .co-error {
   margin: var(--space-4) 0 0;
   padding: var(--space-3) var(--space-4);
@@ -4403,7 +4460,9 @@ html.pay-open { overflow: hidden; }
   line-height: var(--leading-normal);
   cursor: pointer;
 }
-.co-check input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--floodlight); }
+/* The whole label is the tap target, so the box keeps its own size on a phone
+   (the 44px tap rule would stretch it and drop it below its first line). */
+.co-check input { width: 18px; height: 18px; min-height: 0; margin: 2px 0 0; accent-color: var(--floodlight); }
 .co-check a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }
 .paid-confirm { max-width: var(--maxw-read); margin: 0 0 var(--space-6); color: var(--chalk-3); font-size: var(--text-sm); line-height: var(--leading-normal); }
 .paid-confirm a { color: var(--chalk-2); text-decoration: underline; text-underline-offset: 2px; }
