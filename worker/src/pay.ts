@@ -15,6 +15,7 @@
 import { membershipMail, sendMail } from './mail.ts';
 import { createCheckoutLink, parseWebhook, type CoinflowConfig } from './coinflow.ts';
 import { verifyWebhook } from './webhook.ts';
+import { sha256Hex } from './admin.ts';
 import { WhopError, cancelWhopAtPeriodEnd, createWhopCheckout, createWhopPayment, parseWhop, verifyWhop, whopAccountId, whopPeriodEnd } from './whop.ts';
 
 export interface PayEnv {
@@ -299,10 +300,14 @@ async function hadMembership(env: PayEnv, user: { id: string; email: string | nu
   // Entitlement emails are stored lowercased, so an exact match is right; an
   // ilike pattern with the wildcards stripped out never matched john_doe@.
   const email = (user.email ?? '').toLowerCase();
+  // A deleted account with the same email is remembered as a fingerprint,
+  // so deleting and signing up again is not a second trial.
+  const print = email ? await sha256Hex(email.trim()) : null;
   const asks = [
     `/rest/v1/membership?user_id=eq.${id}&select=user_id&limit=1`,
     `/rest/v1/payment?user_id=eq.${id}&select=id&limit=1`,
     ...(email ? [`/rest/v1/entitlement?email=eq.${encodeURIComponent(email)}&select=email&limit=1`] : []),
+    ...(print ? [`/rest/v1/former_member?email_sha256=eq.${print}&select=at&limit=1`] : []),
   ];
   const answers = await Promise.all(asks.map(async (path) => {
     const r = await fetch(new URL(path, env.SUPABASE_URL), { headers: as });

@@ -606,13 +606,18 @@ const OFFERS = [
   { id: 'derby', kind: 'deal', plan_id: 'monthly', price_minor: 499, trial_days: null },
   { id: 'try7', kind: 'trial', plan_id: 'monthly', price_minor: null, trial_days: 7 },
 ];
-const OFFER_ROUTE = (had: { membership?: boolean; payment?: boolean; entitlement?: boolean } = {}) => (url: string) => {
+const OFFER_ROUTE = (had: { membership?: boolean; payment?: boolean; entitlement?: boolean; deleted?: boolean } = {}) => (url: string) => {
   if (url.includes('/auth/v1/user')) return new Response(JSON.stringify({ id: 'user-1', email: 'a@b.c' }), { status: 200 });
   if (url.includes('/rest/v1/plan')) return new Response(JSON.stringify([{ id: 'monthly', name: 'Monthly', amount_minor: 900, currency: 'GBP', days: 30, checkout_url: 'https://whop.com/checkout/plan_m' }]), { status: 200 });
   if (url.includes('/rpc/get_promos')) return new Response(JSON.stringify(OFFERS), { status: 200 });
   if (url.includes('/rest/v1/membership?')) return new Response(JSON.stringify(had.membership ? [{ user_id: 'user-1' }] : []), { status: 200 });
   if (url.includes('/rest/v1/payment?')) return new Response(JSON.stringify(had.payment ? [{ id: 1 }] : []), { status: 200 });
   if (url.includes('/rest/v1/entitlement?')) return new Response(JSON.stringify(had.entitlement ? [{ email: 'a@b.c' }] : []), { status: 200 });
+  // A deleted account with this email had a membership: asked by fingerprint, never by address.
+  if (url.includes('/rest/v1/former_member?')) {
+    assert.match(url, /email_sha256=eq\.[0-9a-f]{64}&/);
+    return new Response(JSON.stringify(had.deleted ? [{ at: 1 }] : []), { status: 200 });
+  }
   if (url.includes('/checkout_configurations')) return new Response(JSON.stringify({ id: 'ch_9', purchase_url: '/checkout/ch_9/' }), { status: 200 });
   if (url.includes('/payments')) return new Response(JSON.stringify({ id: 'pay_1', status: 'paid' }), { status: 200 });
   return new Response('{}', { status: 200 });
@@ -662,7 +667,7 @@ test('a free trial for a new member: the free days go to Whop and nothing is tak
 });
 
 test('a free trial is refused to anyone who has had a membership, however they had it', async () => {
-  for (const had of [{ membership: true }, { payment: true }, { entitlement: true }]) {
+  for (const had of [{ membership: true }, { payment: true }, { entitlement: true }, { deleted: true }]) {
     sent = [];
     route = OFFER_ROUTE(had);
     const res = await checkout(post('/api/pay/checkout', { consent: OK, plan: 'monthly', promo: 'try7' }), WHOP, 'jwt');

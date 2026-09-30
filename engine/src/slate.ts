@@ -1265,6 +1265,8 @@ export async function pruneBoard(): Promise<void> {
   const cutoff = Math.floor(Date.now() / 1000) - 7 * 86400;
   await archiveSnapshots(cutoff);
   await dbSelect('DELETE FROM fixture WHERE kickoff < ?', [cutoff]);
+  // Deleted accounts' fingerprints go after the six years the privacy policy gives them.
+  if (config.dbBackend === 'postgres') await dbExec('DELETE FROM former_member WHERE at < ?', [Math.floor(Date.now() / 1000) - 6 * 365 * 86400]);
 }
 
 /** Copy finished fixtures' snapshots older than `before` into market_snapshot. */

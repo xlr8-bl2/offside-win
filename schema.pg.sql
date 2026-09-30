@@ -480,6 +480,18 @@ ALTER TABLE entitlement ADD COLUMN IF NOT EXISTS renew_stopped_at bigint;
 -- remembers its latest reference: a reader who bought a matchday pass and then
 -- went monthly has two, and with only the latest remembered the sweep kept
 -- re-applying the other one, flipping the plan back and forth.
+-- A deleted account that had a membership, remembered only as a one-way
+-- fingerprint of its email, so a free trial is once per person rather than
+-- once per account: without it, deleting and signing up again with the same
+-- address was a fresh trial every time. Kept six years (pruneBoard purges
+-- older rows), and named in the privacy policy's retention table.
+CREATE TABLE IF NOT EXISTS former_member (
+  email_sha256 text PRIMARY KEY,
+  at           bigint NOT NULL
+);
+ALTER TABLE former_member ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON former_member FROM anon, authenticated;
+
 CREATE TABLE IF NOT EXISTS entitlement_grant (
   ref        text PRIMARY KEY,
   email      text NOT NULL,
@@ -980,14 +992,16 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
            ),
            -- A Whop subscription that will take money again, whichever
            -- membership is shown: the page must always offer to stop it.
-           -- Has this account ever had a membership, by any route. Free
-           -- trials are for new members, and checkout refuses one otherwise
-           -- (hadMembership in worker/src/pay.ts asks the same three things),
-           -- so the site does not offer it.
+           -- Has this account, or a deleted one with the same email, ever
+           -- had a membership. Free trials are for new members, and checkout
+           -- refuses one otherwise (hadMembership in worker/src/pay.ts asks
+           -- the same four things), so the site does not offer it.
            'returning', auth.uid() IS NOT NULL AND (
              EXISTS (SELECT 1 FROM membership WHERE user_id = auth.uid())
              OR EXISTS (SELECT 1 FROM payment WHERE user_id = auth.uid())
-             OR (auth.email() IS NOT NULL AND EXISTS (SELECT 1 FROM entitlement WHERE email = lower(auth.email())))),
+             OR (auth.email() IS NOT NULL AND EXISTS (SELECT 1 FROM entitlement WHERE email = lower(auth.email())))
+             OR (auth.email() IS NOT NULL AND EXISTS (SELECT 1 FROM former_member
+                   WHERE email_sha256 = encode(sha256(convert_to(lower(btrim(auth.email())), 'UTF8')), 'hex')))),
            'whop', (SELECT json_build_object('renewing', true, 'manage_url', manage_url, 'until', expires_at)
                       FROM entitlement
                      WHERE auth.email() IS NOT NULL AND lower(email) = lower(auth.email()) AND status = 'active'
@@ -1019,9 +1033,11 @@ $fn$;
 -- gets a clear error rather than a second function.
 DROP FUNCTION IF EXISTS save_profile(text, text);
 DROP FUNCTION IF EXISTS save_profile(text, text, text, text, bigint, text, text);
--- Save the account's profile. Every argument after the name is optional and
--- NULL means "leave it as it is", so the odds switch can save the odds without
--- knowing about the picture. A club of 0 clears the club.
+-- Save the account's profile. Every argument, the name included, is optional
+-- and NULL means "leave it as it is", so the odds switch can save the odds
+-- without knowing the name: a page open since before the name was changed
+-- elsewhere must not write the old one back. '' clears the name. A club of 0
+-- clears the club.
 CREATE OR REPLACE FUNCTION save_profile(
   p_name text, p_odds text,
   p_avatar text DEFAULT NULL, p_color text DEFAULT NULL,
@@ -1070,8 +1086,8 @@ BEGIN
           nullif(p_club_id, 0), CASE WHEN coalesce(p_club_id, 0) = 0 THEN NULL ELSE club_clean END,
           coalesce(p_clock, '24'), nullif(handle, ''), now_s, now_s)
   ON CONFLICT (user_id) DO UPDATE SET
-    display_name = excluded.display_name,
-    odds_format  = excluded.odds_format,
+    display_name = CASE WHEN p_name IS NULL THEN profile.display_name ELSE excluded.display_name END,
+    odds_format  = coalesce(p_odds, profile.odds_format),
     avatar_style = coalesce(p_avatar, profile.avatar_style),
     avatar_color = coalesce(p_color, profile.avatar_color),
     club_id      = CASE WHEN p_club_id IS NULL THEN profile.club_id ELSE nullif(p_club_id, 0) END,
@@ -1130,6 +1146,13 @@ $fn$;
 DROP FUNCTION IF EXISTS delete_account_data(uuid);
 CREATE OR REPLACE FUNCTION delete_account_data(p_user uuid, p_email text DEFAULT NULL)
 RETURNS void LANGUAGE sql VOLATILE SET search_path = public AS $fn$
+  INSERT INTO former_member (email_sha256, at)
+  SELECT encode(sha256(convert_to(lower(btrim(p_email)), 'UTF8')), 'hex'), floor(extract(epoch FROM now()))::bigint
+   WHERE p_email IS NOT NULL AND p_email <> '' AND (
+         EXISTS (SELECT 1 FROM membership WHERE user_id = p_user)
+      OR EXISTS (SELECT 1 FROM payment WHERE user_id = p_user)
+      OR EXISTS (SELECT 1 FROM entitlement WHERE lower(email) = lower(p_email)))
+  ON CONFLICT (email_sha256) DO UPDATE SET at = excluded.at;
   DELETE FROM follow WHERE user_id = p_user;
   DELETE FROM profile WHERE user_id = p_user;
   DELETE FROM payment_method WHERE user_id = p_user;

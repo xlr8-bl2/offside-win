@@ -6728,7 +6728,8 @@ async function viewAccount() {
       const pic = app.querySelector('input[name="pic"]:checked')?.value ?? 'auto';
       const saved = await accountRpc('save_profile', {
         p_name: document.getElementById('display-name').value,
-        p_odds: oddsFormat,
+        // The odds and the clock are saved by their own switches.
+        p_odds: null,
         // A crest with no club to show falls back to the ordinary picture.
         p_avatar: pic === 'crest' && !clubId ? 'auto' : pic,
         p_color: app.querySelector('input[name="colour"]:checked')?.value ?? null,
@@ -6798,7 +6799,7 @@ async function viewAccount() {
       setClock(r.value);
       note('clock-note', 'Saving…');
       try {
-        account.profile = await accountRpc('save_profile', { p_name: account.profile?.display_name ?? user.name ?? '', p_odds: oddsFormat, p_clock: r.value });
+        account.profile = await accountRpc('save_profile', { p_name: null, p_odds: null, p_clock: r.value });
         if (state.account) state.account.profile = account.profile;
         note('clock-note', `Saved. Kick-offs now read like ${clockTime(new Date(2026, 0, 1, 20, 45))}.`);
         state.board = null;
@@ -6814,7 +6815,7 @@ async function viewAccount() {
       setOddsFormat(r.value);
       note('odds-note', 'Saving…');
       try {
-        account.profile = await accountRpc('save_profile', { p_name: account.profile?.display_name ?? user.name ?? '', p_odds: r.value });
+        account.profile = await accountRpc('save_profile', { p_name: null, p_odds: r.value });
         note('odds-note', `Saved. Odds now read like ${showOdds(2.5)}.`);
         state.board = null;
       } catch (err) {
