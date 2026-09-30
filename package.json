@@ -23,6 +23,7 @@
     "slate:loop": "npm -w engine run slate:loop",
     "slate:fresh": "npm -w engine run slate:fresh",
     "lab:model": "npm -w engine run lab:model",
+    "lab:losses": "npm -w engine run lab:losses",
     "lab:leans": "npm -w engine run lab:leans",
     "poster:preview": "npm -w engine run poster:preview",
     "settle": "npm -w engine run settle",
