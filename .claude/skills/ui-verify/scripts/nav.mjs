@@ -94,6 +94,50 @@ const scenarios = {
     await ctx.close();
   },
 
+  /** A filter or tab changed on a page is part of where the reader was: Back comes to it, scrolled as it was. */
+  async backfiltered() {
+    const { ctx, page } = await fresh(390);
+    await page.goto(`${BASE}/#/board`, { waitUntil: 'load' });
+    await settle(page, 4000);
+    // The day tab, which rewrites the address in place.
+    const tab = page.locator('button[data-when="played"]');
+    if (await tab.count()) { await tab.click(); await settle(page, 1500); }
+    const hash = (await where(page)).hash;
+    const link = page.locator('#app a[href*="/match/"], #app a[href^="#/fixture/"]').nth(6);
+    await link.scrollIntoViewIfNeeded();
+    await page.evaluate(() => scrollBy(0, -100));
+    await page.waitForTimeout(300);
+    const y = (await where(page)).y;
+    await link.click();
+    await settle(page, 3000);
+    await page.goBack();
+    await settle(page, 3000);
+    const after = await where(page);
+    report('backfiltered: Back returns to the filtered board, where it was', after.hash === hash && Math.abs(after.y - y) < 60, `${hash} at ${y}; came back to ${after.hash} at ${after.y}`);
+    await ctx.close();
+  },
+
+  /** A match page and the front page keep their own places. */
+  async backmatch() {
+    const { ctx, page } = await fresh(390);
+    await page.goto(`${BASE}/#/home`, { waitUntil: 'load' });
+    await settle(page, 3000);
+    await page.evaluate(() => scrollTo(0, 700));
+    await page.waitForTimeout(300);
+    await page.evaluate((id) => { location.hash = `#/fixture/${id}`; }, FX[1]);
+    await settle(page, 3000);
+    await page.evaluate(() => scrollTo(0, 1500));
+    await page.waitForTimeout(300);
+    const matchY = (await where(page)).y;
+    await page.evaluate(() => { location.hash = '#/results'; });
+    await settle(page, 2500);
+    await page.goBack();
+    await settle(page, 3000);
+    const back1 = await where(page);
+    report('backmatch: Back to a match page returns to its own place', /match|fixture/.test(back1.path + back1.hash) && Math.abs(back1.y - matchY) < 60, `left at ${matchY}, back at ${back1.y} (${back1.path}${back1.hash})`);
+    await ctx.close();
+  },
+
   /** A new page starts at the top, and the keyboard's place moves with it. */
   async top() {
     const { ctx, page } = await fresh(390);
