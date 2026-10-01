@@ -1166,6 +1166,22 @@
 .row.is-played:hover { background: var(--stand); }
 
 .row-call { min-width: 0; }
+/* Free call or members' call, above the call itself (rowHTML). */
+.row-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 3px;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.04em;
+}
+.row-kind svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.row-kind.is-free { padding: 2px var(--space-2); border-radius: var(--radius-sm); background: var(--sodium); color: var(--pitch); }
+.row-kind.is-members { color: var(--floodlight-hi); }
+/* The free call's row carries its colour down the edge, so it is found in a
+   list of members' calls without reading a word. */
+.row.is-free { box-shadow: inset 3px 0 0 var(--sodium); }
 .row-sel {
   font-family: var(--display);
   font-weight: var(--weight-bold);
@@ -5123,3 +5139,6 @@ html.dd-locked, html.dd-locked body { overflow: hidden; }
 .read-line p { margin: var(--space-2) 0 0; font-size: var(--text-sm); color: var(--chalk-3); }
 .row-read { max-width: 10.5rem; }
 .row-read b { text-wrap: balance; }
+
+/* The kind of call, at the top of its panel on the match page. */
+.verdict > .row-kind { margin-bottom: var(--space-3); }

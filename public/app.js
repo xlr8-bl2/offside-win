@@ -2035,8 +2035,23 @@ function rowHTML(f) {
   const clubId = myClubId();
   const isClub = clubId && (Number(f.home_id) === clubId || Number(f.away_id) === clubId);
 
+  /*
+   * Which kind of call this is, at a glance: the one free call of the day, or
+   * a members' call. A member sees every call, and they all looked the same,
+   * so nothing said which one everybody else could see; a free reader saw the
+   * free call drawn exactly like a member's. Amber for free (the colour the
+   * free call wears on the front page), the accent for members (the colour of
+   * the lock), and only on calls still to be settled.
+   */
+  const kind = played ? null : f.free_call && pick ? 'free' : pick || f.locked ? 'members' : null;
+  const kindTag = kind === 'free'
+    ? '<span class="row-kind is-free">Free today</span>'
+    : kind === 'members' && pick
+      ? `<span class="row-kind is-members"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>Members</span>`
+      : '';
+
   return `
-  <a class="row is-${state.kind}${played ? ' is-played' : ''}${terse ? ' is-terse' : ''}${isClub ? ' is-club' : ''}" href="#/fixture/${encodeURIComponent(f.id)}"
+  <a class="row is-${state.kind}${played ? ' is-played' : ''}${terse ? ' is-terse' : ''}${isClub ? ' is-club' : ''}${kind ? ` is-${kind}` : ''}" href="#/fixture/${encodeURIComponent(f.id)}"
      aria-label="${esc(f.home)} versus ${esc(f.away)}">
     <div class="row-when">
       ${state.kind === 'upcoming'
@@ -2066,6 +2081,7 @@ function rowHTML(f) {
     </div>
 
     ${d ? `<div class="row-call">
+      ${kindTag}
       <div class="row-sel">${esc(d.name)}</div>
       <p class="row-wins">${
         played
@@ -3180,6 +3196,9 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
 
   return `
   <div class="verdict${landed ? ` settled ${landed}` : ''}${!played && isMember() && !isFreeFixture(fixture?.id) ? ' is-members' : ''}">
+    ${played || landed ? '' : isFreeFixture(fixture?.id) || fixture?.free_call
+      ? '<span class="row-kind is-free">Free call today: open to everyone</span>'
+      : `<span class="row-kind is-members"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>Members' call</span>`}
     <div class="verdict-head">
       <span class="sel">${esc(d.name)}</span>
       ${landed
