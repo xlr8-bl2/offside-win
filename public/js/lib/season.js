@@ -22,7 +22,8 @@
  * Anything else is an ordinary week and says nothing.
  *
  * A reader sees each one once: a break once per break, the close season once
- * per close season, a tournament once a day (its games change daily).
+ * per close season, a tournament once a day (its games change daily), and
+ * only when nothing else has had their attention lately (attention.js).
  */
 
 /** Champions League and the big five: when none of them plays, the club game is off. */
@@ -125,7 +126,7 @@ export function listOf(names) {
 }
 
 /** The promise, said where the quiet is (worker/src/goodwill.ts keeps it). */
-const GIVEN_BACK = 'Members lose nothing: a free day is added for every quiet day, automatically.';
+const GIVEN_BACK = 'Members lose nothing: every quiet day comes back as a free day, automatically.';
 
 const plural = (n, one, many) => `${n === 0 ? 'No' : n} ${n === 1 ? one : many}`;
 
@@ -161,7 +162,7 @@ export function wordsFor(r) {
       title: 'It’s an international break.',
       lead: 'That’s why there are fewer calls this week.',
       text: [
-        'Qualifiers and friendlies mean rotated squads and form that tells you next to nothing, so we only call the games we trust.',
+        'Qualifiers and friendlies. Managers rest half the squad, the form book goes in the bin, and we don’t guess for you. We only call what we actually trust.',
         [board, still].filter(Boolean).join(' '),
         GIVEN_BACK,
       ],
@@ -174,7 +175,7 @@ export function wordsFor(r) {
     title: 'It’s the close season.',
     lead: 'That’s why there are fewer calls right now.',
     text: [
-      'Pre-season friendlies tell you less than they look like they do, so most of them get no call.',
+      'Pre-season friendlies. Kids, trialists, sixty-minute run-outs. Nobody’s trying to win them, so we mostly don’t call them.',
       [board, still].filter(Boolean).join(' '),
       GIVEN_BACK,
     ],
@@ -186,14 +187,15 @@ export function wordsFor(r) {
 export function countdownWords(days, league = 'the Premier League') {
   if (days === null || days === undefined) return null;
   if (days <= 0) return { n: null, text: `${cap(league)} is back today` };
-  if (days === 1) return { n: null, text: `${cap(league)} is back tomorrow` };
-  return { n: days, text: `days until ${league} is back` };
+  if (days === 1) return { n: null, text: `${cap(league)} is back tomorrow. Let’s gooo.` };
+  return { n: days, text: `days till ${league} is back` };
 }
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /* ------------------------------------------------------------- the note */
 
 import { scrollAway, moving } from './scrollaway.js';
+import { mayInterrupt, noteInterruption } from './attention.js';
 
 const KEY = 'ow.season';
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -285,9 +287,15 @@ let stopAway = null;
 const EXPO = 'cubic-bezier(0.16, 1, 0.3, 1)';
 const QUART_IN = 'cubic-bezier(0.5, 0, 0.75, 0)';
 
-/** Hidden for this visit from the chip's own cross. */
+/*
+ * Hidden from the chip's own cross, for as long as this break (or close
+ * season, or tournament day) lasts: the reader has read it and said so. It
+ * used to come back on the next visit, which is a reminder nobody asked for.
+ */
 const HIDE_KEY = 'ow.season.chip';
-const chipHidden = (key) => { try { return sessionStorage.getItem(HIDE_KEY) === key; } catch { return false; } };
+const hiddenKeys = () => { try { const v = JSON.parse(localStorage.getItem(HIDE_KEY) ?? '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+const chipHidden = (key) => hiddenKeys().includes(key);
+const hideChip = (key) => { try { localStorage.setItem(HIDE_KEY, JSON.stringify([...new Set([...hiddenKeys(), key])].slice(-20))); } catch { /* shown again next visit */ } };
 
 /** The small reminder left behind once the note is closed: tap it and the note comes back. */
 export function showChip(r, helpers) {
@@ -301,7 +309,7 @@ export function showChip(r, helpers) {
   el.innerHTML = chipHTML(r, helpers.esc);
   el.querySelector('.sn-chip-open').onclick = () => openSeason(r, helpers, { fromChip: true });
   el.querySelector('.sn-chip-x').onclick = () => {
-    try { sessionStorage.setItem(HIDE_KEY, r.key); } catch { /* private mode */ }
+    hideChip(r.key);
     if (reduced()) { el.remove(); return; }
     el.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(8px) scale(0.96)' }], { duration: 200, easing: QUART_IN, fill: 'forwards' })
       .finished.then(() => el.remove(), () => el.remove());
@@ -438,6 +446,10 @@ export function showSeason(r, helpers) {
   if (open && current?.key === r.key) return;
   if (open) { closeSeason({ quick: true }); }
   if (dismissed(r.key)) { showChip(r, helpers); return; }
+  // Something else already had this visit (attention.js): the chip now, the
+  // note itself on a later visit, since it is not marked as seen.
+  if (!mayInterrupt('season')) { showChip(r, helpers); return; }
+  noteInterruption('season');
   openSeason(r, helpers);
 }
 

@@ -2598,6 +2598,279 @@
 @media (prefers-reduced-motion: reduce) { .sn-chip-dot { animation: none; } }
 @media print { .sn-root, .sn-chip { display: none !important; } }
 
+/*
+ * The big moments (js/lib/moments.js): a named fixture within the day, a big
+ * league back after a break, a Champions League night. Same frame as the
+ * break note (a card over a darkened page that never locks it, a scroll takes
+ * it away), and each kind has its own one idea:
+ *
+ *   derby   two clubs' colours slam together at a diagonal seam, the crests
+ *           meet in the middle, the name goes up a letter at a time;
+ *   return  the centre circle the break note counted down inside gets its
+ *           ball back, and the fixtures come in on a vidiprinter;
+ *   ucl     a ring of stars, and the night's games on the vidiprinter.
+ */
+.mo-root {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-overlay) + 20);
+  display: grid;
+  place-items: center;
+  padding: var(--space-5);
+  perspective: 1200px;
+}
+.mo-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 5, 8, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.mo-card {
+  position: relative;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  width: min(480px, 100%);
+  max-height: min(90dvh, 780px);
+  border: var(--border) solid var(--rule);
+  border-radius: 20px;
+  background: var(--stand);
+  box-shadow: var(--elev-3), 0 0 0 1px rgba(0, 0, 0, 0.4);
+  outline: none;
+}
+.mo-x {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(5, 5, 8, 0.35);
+  color: var(--chalk-2);
+  cursor: pointer;
+}
+.mo-x:hover { background: var(--terrace); color: var(--chalk); }
+/* The card takes the focus when it opens so a keyboard starts inside it; it
+   is a place, not a control, so no ring (the buttons inside have theirs). */
+.mo-card:focus-visible, .sn-card:focus-visible { box-shadow: var(--elev-3), 0 0 0 1px rgba(0, 0, 0, 0.4); }
+.mo-x:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.mo-x svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.mo-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-6); }
+.mo-actions .btn { flex: 1 1 140px; }
+
+/* The shout: a stamp that slams on before anything else, in sodium, the
+   colour of the floodlights coming on. The brief was "Let's gooo". */
+.mo-shout {
+  display: inline-block;
+  margin: 0 0 var(--space-3);
+  font-family: var(--display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-black);
+  line-height: 1;
+  letter-spacing: var(--tracking-xl);
+  color: var(--sodium);
+  text-shadow: 0 0 24px rgba(245, 165, 36, 0.45);
+  transform-origin: 0 60%;
+}
+/* The football: who is top, who has not won, who is scoring, how they got on
+   last time. Short lines, a bar of light down the side. */
+.mo-takes { margin: 0 0 var(--space-5); padding: 0; list-style: none; display: grid; gap: var(--space-2); }
+.mo-takes li {
+  position: relative;
+  padding-left: var(--space-4);
+  font-size: var(--text-read);
+  line-height: var(--leading-snug);
+  color: var(--chalk);
+}
+.mo-takes li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.2em;
+  bottom: 0.2em;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--floodlight);
+}
+
+/* --- derby: the stage */
+.mo-stage {
+  position: relative;
+  height: 176px;
+  overflow: hidden;
+  background: var(--pitch);
+}
+.mo-half { position: absolute; inset: 0; }
+.mo-home {
+  clip-path: polygon(0 0, 57% 0, 43% 100%, 0 100%);
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0) 40%, rgba(0, 0, 0, 0.55)),
+    radial-gradient(120% 120% at 0% 0%, var(--home-c), color-mix(in srgb, var(--home-c) 45%, var(--pitch)));
+}
+.mo-away {
+  clip-path: polygon(57% 0, 100% 0, 100% 100%, 43% 100%);
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0) 40%, rgba(0, 0, 0, 0.55)),
+    radial-gradient(120% 120% at 100% 100%, var(--away-c), color-mix(in srgb, var(--away-c) 45%, var(--pitch)));
+}
+/* Where they meet: a white line on the same diagonal as the two halves (the
+   same polygon geometry, so it sits on the edge at every width) and a soft
+   band of light round it, both lit at the hit. */
+.mo-seam, .mo-flare { position: absolute; inset: 0; pointer-events: none; }
+.mo-seam {
+  clip-path: polygon(56.6% 0, 57.4% 0, 43.4% 100%, 42.6% 100%);
+  background: var(--chalk);
+  opacity: 0.6;
+}
+.mo-flare {
+  clip-path: polygon(53% 0, 61% 0, 47% 100%, 39% 100%);
+  background: linear-gradient(90deg, transparent 38%, rgba(244, 246, 250, 0.35) 50%, transparent 62%);
+  opacity: 0;
+}
+.mo-shock {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 120px;
+  height: 120px;
+  border: 2px solid rgba(244, 246, 250, 0.85);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0.1);
+  opacity: 0;
+  pointer-events: none;
+}
+.mo-side {
+  position: absolute;
+  top: 50%;
+  margin-top: -38px;
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.55));
+}
+.mo-side-home { left: 19%; }
+.mo-side-away { right: 19%; }
+.mo-body { padding: var(--space-7) var(--space-8) var(--space-7); }
+.mo-kicker {
+  margin: 0 0 var(--space-3);
+  font-family: var(--display);
+  font-size: var(--text-4xl);
+  font-weight: var(--weight-black);
+  line-height: var(--leading-display);
+  letter-spacing: var(--tracking-hero);
+  color: var(--chalk);
+  perspective: 600px;
+}
+.mo-kicker span[style] { display: inline-block; transform-origin: 50% 100%; }
+.mo-teams { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); margin: 0 0 var(--space-2); font-size: var(--text-lg); color: var(--chalk); }
+.mo-teams b { font-weight: var(--weight-bold); }
+.mo-teams em { font-style: normal; color: var(--chalk-3); }
+.mo-when { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin: 0 0 var(--space-5); font-size: var(--text-md); color: var(--chalk-2); font-variant-numeric: tabular-nums; }
+.mo-clock { color: var(--floodlight-hi); font-weight: var(--weight-medium); }
+.mo-clock:empty { display: none; }
+.mo-line-text { margin: 0; font-size: var(--text-read); line-height: var(--leading-normal); color: var(--chalk-2); }
+
+/* --- return and ucl: the head, the vidiprinter */
+.mo-card:not([data-kind="derby"]) {
+  padding: var(--space-8) var(--space-8) var(--space-7);
+  background:
+    radial-gradient(120% 60% at 50% 0%, var(--floodlight-dim), transparent 70%),
+    var(--stand);
+}
+.mo-glow { position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: inherit; }
+.mo-sweep {
+  position: absolute;
+  inset: -20% auto -20% 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(244, 246, 250, 0.08), transparent);
+  opacity: 0;
+}
+.mo-head { display: flex; align-items: center; gap: var(--space-5); margin: 0 0 var(--space-4); padding-right: var(--space-7); }
+/* The competition's real logo on a white disc: the provider's marks are dark
+   on nothing (the Premier League lion is purple, the starball navy) and would
+   vanish on the card. */
+.mo-emblem { position: relative; flex: none; display: grid; place-items: center; width: 92px; height: 92px; }
+.mo-pitch { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.mo-line { fill: none; stroke: var(--rule-firm); stroke-width: 1.5; }
+.mo-logo { position: relative; display: grid; place-items: center; }
+.mo-logo .crest { border: 0; background: var(--chalk); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); }
+.mo-logo .crest img { width: 70%; height: 70%; }
+.mo-emblem[data-kind="return"] .mo-logo .crest { width: 54px; height: 54px; }
+.mo-emblem[data-kind="ucl"] .mo-logo .crest { width: 84px; height: 84px; }
+.mo-ripple {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border: 1.5px solid var(--floodlight-hi);
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+}
+.mo-comp { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--chalk); }
+.mo-logo-sm .crest { width: 22px; height: 22px; box-shadow: none; }
+.mo-title {
+  margin: 0;
+  font-family: var(--display);
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-black);
+  line-height: var(--leading-display);
+  color: var(--chalk);
+}
+.mo-w { display: inline-block; overflow: hidden; padding: 0.06em 0.02em 0.1em; margin: -0.06em -0.02em -0.1em; vertical-align: top; }
+.mo-w > span { display: inline-block; }
+.mo-lead { margin: 0 0 var(--space-5); font-size: calc(var(--text-read) * 1.125); font-weight: var(--weight-bold); line-height: var(--leading-snug); color: var(--floodlight-hi); }
+.mo-vidi { margin: 0; padding: 0; list-style: none; border-top: var(--border) solid var(--hairline); }
+.mo-vidi a {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: var(--border) solid var(--hairline);
+  color: var(--chalk);
+  text-decoration: none;
+  font-size: var(--text-read);
+}
+.mo-vidi a:hover .mo-type { text-decoration: underline; text-underline-offset: 3px; }
+.mo-vidi a:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+.mo-type { min-width: 0; }
+/* The vidiprinter's cursor: a solid block at the end of the line being typed. */
+.mo-type.is-typing::after {
+  content: '';
+  display: inline-block;
+  width: 0.55em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.12em;
+  background: var(--floodlight-hi);
+}
+.mo-vidi time { flex: none; display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--chalk-3); font-variant-numeric: tabular-nums; }
+/* The reason the card is up: how many of these games we have called. */
+.mo-calls { margin: 0 0 var(--space-3); font-size: var(--text-md); font-weight: var(--weight-bold); color: var(--sodium); }
+.mo-called { width: 8px; height: 8px; border-radius: 50%; background: var(--floodlight-hi); box-shadow: 0 0 8px rgba(158, 134, 255, 0.7); }
+
+@media (max-width: 520px) {
+  .mo-root { padding: var(--space-4); align-items: end; }
+  .mo-card { max-height: calc(100dvh - 2 * var(--space-4)); border-radius: 18px; }
+  .mo-stage { height: 150px; }
+  .mo-side { margin-top: -38px; }
+  .mo-side-home { left: 12%; }
+  .mo-side-away { right: 12%; }
+  .mo-body { padding: var(--space-6) var(--space-6) var(--space-6); }
+  .mo-card:not([data-kind="derby"]) { padding: var(--space-8) var(--space-6) var(--space-6); }
+  .mo-emblem { width: 76px; height: 76px; }
+  .mo-emblem[data-kind="ucl"] .mo-logo .crest { width: 70px; height: 70px; }
+  .mo-emblem[data-kind="return"] .mo-logo .crest { width: 46px; height: 46px; }
+  .mo-head { gap: var(--space-4); }
+  .mo-title { font-size: var(--text-2xl); }
+  .mo-kicker { font-size: var(--text-3xl); }
+}
+@media print { .mo-root { display: none !important; } }
+
 /* ===================================================== reduced motion */
 
 /* Everything above degrades to a colour change. Nothing here is load-bearing

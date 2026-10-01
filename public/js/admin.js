@@ -105,7 +105,9 @@ function refusal(err) {
     </div>`;
 }
 
-export async function viewAdmin(app, parts, params) {
+let previewHelpers = {};
+export async function viewAdmin(app, parts, params, helpers = {}) {
+  previewHelpers = helpers;
   ensureStyles();
   const tab = TABS.some(([k]) => k === (parts[1] ?? '')) ? (parts[1] ?? '') : '';
   app.innerHTML = frame(tab, loading);
@@ -401,7 +403,45 @@ async function offers(main, editId) {
         <b>${esc(p.title)}</b>
         <small>${esc(KINDS[p.kind])}${p.plan_id ? `, ${esc(planName(p.plan_id))}` : ''}${p.price_minor ? ` at ${money(p.price_minor)}` : ''}${p.trial_days ? `, ${p.trial_days} days free` : ''}</small>
       </a></li>`;
-    }).join('')}</ul>` : '<p class="adm-quiet">No offers yet. A deal takes a plan to a lower price until a deadline; a free trial gives new members days before the first charge.</p>'}`;
+    }).join('')}</ul>` : '<p class="adm-quiet">No offers yet. A deal takes a plan to a lower price until a deadline; a free trial gives new members days before the first charge.</p>'}
+    <section class="adm-moments">
+      <h2>Big moments</h2>
+      <p>These open by themselves: a named derby within a day, a big league back after a break (one card for the whole comeback weekend), a Champions League night. They wait for our calls: a derby until its call is in (a pass only shows on the day, and says so), a league or a night until most of its games are looked at and one is called. Each reader sees each once, and never more than one card a visit. Men’s senior football only. Preview them here with real teams; nothing is remembered.</p>
+      <div class="adm-moment-btns">
+        <button class="btn btn-ghost btn-sm" type="button" data-moment="derby">El Clásico</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-moment="return">Premier League back</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-moment="ucl">Champions League night</button>
+      </div>
+    </section>`;
+  for (const b of main.querySelectorAll('[data-moment]')) b.onclick = () => previewMoment(b.dataset.moment);
+}
+
+/* Real teams and real fixtures for the previews, read from the public API. */
+async function previewMoment(kind) {
+  const moments = await import('./lib/moments.js');
+  const get = (path) => fetch(path).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const now = Math.floor(Date.now() / 1000);
+  let m;
+  if (kind === 'derby') {
+    const liga = await get('/api/league/3');
+    const id = (re) => (liga?.standings ?? []).find((r) => re.test(r.team ?? ''))?.team_id ?? null;
+    m = { kind: 'derby', key: 'preview', kicker: 'El Clásico', today: false, fixture: {
+      id: 0, home: 'Real Madrid', away: 'FC Barcelona', home_id: id(/real madrid/i), away_id: id(/barcelona/i),
+      kickoff: now + 26 * 3600, league: 'La Liga', league_id: 3, colors: { home: '#febe10', away: '#a50044' }, call: 'members' },
+      table: { standings: liga?.standings ?? [], last: liga?.last ?? [], scorers: liga?.scorers ?? [] } };
+  } else {
+    const lid = kind === 'ucl' ? 7 : 1;
+    const l = await get(`/api/league/${lid}`);
+    const next = (l?.next ?? []).slice().sort((a, b) => a.kickoff - b.kickoff);
+    const last = Math.max(0, ...(l?.last ?? []).map((g) => Number(g.kickoff)));
+    // As if our calls were in on the first two (the cards wait for calls).
+    const games = next.slice(0, 4).map((g, i) => ({ id: g.id, home: g.home, away: g.away, home_id: g.home_id, away_id: g.away_id, kickoff: kind === 'ucl' ? now + 3 * 3600 : g.kickoff, call: i < 2 ? 'open' : 'pass' }));
+    const table = { standings: l?.standings ?? [], last: l?.last ?? [], scorers: l?.scorers ?? [] };
+    m = kind === 'ucl'
+      ? { kind: 'ucl', key: 'preview', leagueId: 7, league: 'Champions League', count: 4, calls: 2, games, table }
+      : { kind: 'return', key: 'preview', leagueId: 1, league: 'Premier League', name: 'the Premier League', count: 10, calls: 2, gap: last && next[0] ? Math.floor((next[0].kickoff - last) / 86400) : 19, games, table };
+  }
+  moments.openMoment(m, previewHelpers, { preview: true });
 }
 
 function offerEditor(main, p, planRows) {

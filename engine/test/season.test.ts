@@ -95,8 +95,8 @@ test('games already over are not counted as on', async () => {
 });
 
 test('the countdown says days a fan would say', () => {
-  assert.deepEqual(countdownWords(9), { n: 9, text: 'days until the Premier League is back' });
-  assert.equal(countdownWords(1).text, 'The Premier League is back tomorrow');
+  assert.deepEqual(countdownWords(9), { n: 9, text: 'days till the Premier League is back' });
+  assert.equal(countdownWords(1).text, 'The Premier League is back tomorrow. Let’s gooo.');
   assert.equal(countdownWords(0).text, 'The Premier League is back today');
   assert.equal(countdownWords(null), null);
   assert.equal(daysBetween(NOW, NOW + 9 * 86400), 9);

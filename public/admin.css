@@ -313,3 +313,9 @@
   .adm-offers a { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
   .adm-head-row { flex-direction: column; align-items: flex-start; }
 }
+
+/* Previews of the big-moment cards, under the offers. */
+.adm-moments { margin-top: var(--space-9); padding-top: var(--space-6); border-top: var(--border) solid var(--hairline); }
+.adm-moments h2 { margin: 0 0 var(--space-2); font-size: var(--text-lg); }
+.adm-moments p { margin: 0 0 var(--space-4); max-width: 60ch; color: var(--chalk-2); font-size: var(--text-md); }
+.adm-moment-btns { display: flex; flex-wrap: wrap; gap: var(--space-3); }

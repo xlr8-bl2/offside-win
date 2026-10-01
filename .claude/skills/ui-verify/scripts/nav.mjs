@@ -46,7 +46,7 @@ async function fresh(width = 390, { slow = 0, height = 800, touch = false } = {}
   // would sit over whatever is being measured.
   // The week's note (an international break) too, for the same reason; it
   // has its own scenario below.
-  await page.addInitScript((ids) => { try { localStorage.setItem('ow.consent', 'declined'); localStorage.setItem('ow.promo', JSON.stringify({ seen: ids, closed: ids })); localStorage.setItem('ow.season', '["*"]'); } catch {} }, promoIds);
+  await page.addInitScript((ids) => { try { localStorage.setItem('ow.consent', 'declined'); localStorage.setItem('ow.promo', JSON.stringify({ seen: ids, closed: ids })); localStorage.setItem('ow.season', '["*"]'); localStorage.setItem('ow.moments', '["*"]'); } catch {} }, promoIds);
   return { ctx, page, errors };
 }
 const settle = (page, ms = 2500) => page.waitForTimeout(ms);
@@ -519,6 +519,82 @@ const scenarios = {
       for (const x of await scan(page)) found.push(`dropdown ${x}`);
     }
     report('phantom: no panel scrolls into empty space', !found.length, found.join(' | '));
+    await ctx.close();
+  },
+
+  /** A tap anywhere on the offer bar opens the whole offer; its cross only closes the bar. */
+  async offerbar() {
+    if (!promoIds.length) { report('offerbar: no offer is running, nothing to check', true); return; }
+    for (const target of ['.pb-text', '.pb-clock', '.pb-cta']) {
+      const { ctx, page } = await fresh(390, { touch: true });
+      await page.addInitScript((ids) => { try { localStorage.setItem('ow.promo', JSON.stringify({ seen: ids, closed: [] })); } catch {} }, promoIds);
+      await page.goto(`${BASE}/#/board`, { waitUntil: 'load' });
+      await settle(page, 4000);
+      const el = page.locator(`#promo-bar ${target}`).first();
+      if (!(await el.count())) { report(`offerbar: no ${target} on the bar`, true); await ctx.close(); continue; }
+      await el.tap();
+      await settle(page, 1500);
+      const r = await page.evaluate(() => ({ popup: !!document.querySelector('.ofr-root'), hash: location.hash }));
+      report(`offerbar: tapping the bar's ${target.slice(4)} opens the offer, not checkout`, r.popup && r.hash === '#/board', JSON.stringify(r));
+      await ctx.close();
+    }
+    const { ctx, page } = await fresh(390, { touch: true });
+    await page.addInitScript((ids) => { try { localStorage.setItem('ow.promo', JSON.stringify({ seen: ids, closed: [] })); } catch {} }, promoIds);
+    await page.goto(`${BASE}/#/board`, { waitUntil: 'load' });
+    await settle(page, 4000);
+    await page.locator('#promo-bar .pb-x').tap();
+    await settle(page, 1000);
+    const x = await page.evaluate(() => ({ popup: !!document.querySelector('.ofr-root'), bar: !!document.getElementById('promo-bar') }));
+    report('offerbar: its cross closes the bar and opens nothing', !x.popup && !x.bar, JSON.stringify(x));
+    await ctx.close();
+  },
+
+  /**
+   * A big fixture on the board opens its card by itself, once; the week's
+   * note and the offer wait their turn (attention.js). The board is faked
+   * with El Clásico tomorrow so this runs on any day.
+   */
+  async moments() {
+    const { ctx, page, errors } = await fresh(390, { height: 844, touch: true });
+    await page.addInitScript((ids) => {
+      try {
+        if (!sessionStorage.getItem('nav.mo')) { localStorage.removeItem('ow.moments'); localStorage.removeItem('ow.season'); localStorage.removeItem('ow.attention'); localStorage.setItem('ow.promo', JSON.stringify({ seen: [], closed: [] })); sessionStorage.setItem('nav.mo', '1'); }
+      } catch {}
+    }, promoIds);
+    await page.route('**/api/board?hours=72', async (route) => {
+      const res = await route.fetch();
+      const body = await res.json();
+      const now = Math.floor(Date.now() / 1000);
+      body.fixtures = [{ id: 990001, home: 'Real Madrid', away: 'FC Barcelona', home_id: 57, away_id: 44, league: 'La Liga', league_id: 3, kickoff: now + 20 * 3600, status: 'notstarted', locked: true, colors: { home: '#febe10', away: '#a50044' } }, ...(body.fixtures ?? [])];
+      await route.fulfill({ response: res, json: body });
+    });
+    await page.goto(`${BASE}/#/home`, { waitUntil: 'load' });
+    const opened = await page.waitForSelector('#moment', { timeout: 9000 }).then(() => true, () => false);
+    await settle(page, 2600);
+    const m = await page.evaluate(() => {
+      const c = document.querySelector('.mo-card')?.getBoundingClientRect();
+      return { title: document.getElementById('mo-title')?.getAttribute('aria-label'), top: c && Math.round(c.top), bottom: c && Math.round(c.bottom), vh: innerHeight,
+        note: !!document.getElementById('season-note'), offer: !!document.querySelector('.ofr-root'), overflow: getComputedStyle(document.documentElement).overflowY,
+        focus: !!document.activeElement?.closest('#moment') };
+    });
+    report('moments: El Clásico tomorrow opens its card by itself, alone, focused, page not locked', opened && m.title === 'El Clásico' && !m.note && !m.offer && m.overflow !== 'hidden' && m.focus, JSON.stringify(m));
+    report('moments: the card is on screen at 390x844', m.top >= 0 && m.bottom <= m.vh, JSON.stringify(m));
+    await page.screenshot({ path: `${process.env.SHOTS ?? '/tmp'}/moment-derby-auto.png` });
+    const y0 = await page.evaluate(() => scrollY);
+    await swipe(page, 195, 100, 450);
+    await settle(page, 900);
+    const away = await page.evaluate(() => ({ moment: !!document.getElementById('moment'), y: scrollY }));
+    report('moments: a swipe takes it away and moves the page', !away.moment && away.y > y0 + 100, JSON.stringify(away));
+    // The rest of the visit: the offer would normally open after a scroll a
+    // third of the way down. It does not: one card a visit.
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight * 0.5));
+    await settle(page, 9000);
+    const rest = await page.evaluate(() => ({ offer: !!document.querySelector('.ofr-root'), note: !!document.getElementById('season-note') }));
+    report('moments: nothing else opens by itself on the same visit', !rest.offer && !rest.note, JSON.stringify(rest));
+    await page.reload({ waitUntil: 'load' });
+    await settle(page, 5000);
+    report('moments: seen once, it does not open again', !(await page.evaluate(() => !!document.getElementById('moment'))));
+    report('moments: no errors', !errors.length, errors.join(' | '));
     await ctx.close();
   },
 
