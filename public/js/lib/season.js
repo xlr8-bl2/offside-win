@@ -94,7 +94,7 @@ export async function readSeason({ fixtures = [], now = Date.now() / 1000, nextT
   const days = back ? daysBetween(now, back) : null;
   const base = {
     calls: real.filter(isCall).length,
-    still: busiest(club).slice(0, 3).map((c) => c.name),
+    still: busiest(club).slice(0, 2).map((c) => c.name),
     back,
     days,
   };
@@ -125,7 +125,7 @@ export function listOf(names) {
 }
 
 /** The promise, said where the quiet is (worker/src/goodwill.ts keeps it). */
-const GIVEN_BACK = 'Members lose nothing: every paying member gets a day added for each quiet day, automatically.';
+const GIVEN_BACK = 'Members lose nothing: a free day is added for every quiet day, automatically.';
 
 const plural = (n, one, many) => `${n === 0 ? 'No' : n} ${n === 1 ? one : many}`;
 
@@ -146,7 +146,7 @@ export function wordsFor(r) {
     };
   }
   const still = r.still.length ? cap(`${listOf(r.still)} ${r.still.length === 1 ? 'carries' : 'carry'} on as normal.`) : '';
-  const board = `${plural(r.calls, 'call', 'calls')} on the board right now.`;
+  const board = `${plural(r.calls, 'call', 'calls')} on the board.`;
   /*
    * The reason first. The headline used to be "Club football is on hold" and
    * the why ("so we call fewer games") was the last words of the second
@@ -192,6 +192,8 @@ export function countdownWords(days, league = 'the Premier League') {
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /* ------------------------------------------------------------- the note */
+
+import { scrollAway, moving } from './scrollaway.js';
 
 const KEY = 'ow.season';
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -254,7 +256,7 @@ function cardHTML(r, { crest, esc, kickoff, now }) {
   return `
     <div class="sn-scrim" data-season-close></div>
     <div class="sn-card" role="dialog" aria-modal="true" aria-labelledby="sn-title" tabindex="-1" data-kind="${esc(r.kind)}">
-      <div class="sn-sweep" aria-hidden="true"></div>
+      <div class="sn-glow" aria-hidden="true"><div class="sn-sweep"></div></div>
       <button class="sn-x" type="button" data-season-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       <h2 class="sn-title" id="sn-title">${words(esc(w.title))}</h2>
       <p class="sn-lead">${esc(w.lead)}</p>
@@ -278,6 +280,7 @@ function chipHTML(r, esc) {
 
 let current = null;
 let helpersNow = null;
+let stopAway = null;
 
 const EXPO = 'cubic-bezier(0.16, 1, 0.3, 1)';
 const QUART_IN = 'cubic-bezier(0.5, 0, 0.75, 0)';
@@ -316,7 +319,8 @@ export function closeSeason({ keep = false, quick = false } = {}) {
   if (!root) return;
   if (keep && r) remember(r.key);
   current = null;
-  document.documentElement.classList.remove('sn-lock');
+  stopAway?.();
+  stopAway = null;
   removeEventListener('keydown', onKey, true);
   const after = () => {
     root.remove();
@@ -360,7 +364,6 @@ export function openSeason(r, helpers, { fromChip = false } = {}) {
   root.className = 'sn-root';
   root.innerHTML = cardHTML(r, { ...helpers, now: helpers.now ?? Date.now() / 1000 });
   document.body.append(root);
-  document.documentElement.classList.add('sn-lock');
   addEventListener('keydown', onKey, true);
   root.addEventListener('click', (e) => {
     const t = e.target.closest?.('[data-season-close], [data-season-go], .sn-games a');
@@ -369,6 +372,10 @@ export function openSeason(r, helpers, { fromChip = false } = {}) {
   chip?.remove();
   const card = root.querySelector('.sn-card');
   card.focus({ preventScroll: true });
+  // The page behind is never locked. Scrolling it means "not now": the note
+  // folds into its chip and the page moves under the same gesture.
+  stopAway?.();
+  stopAway = scrollAway(card, () => closeSeason({ keep: true }));
   if (reduced()) return;
 
   const go = (el, frames, opts) => el?.animate(frames, { fill: 'both', ...opts });
@@ -432,4 +439,9 @@ export function showSeason(r, helpers) {
   if (open) { closeSeason({ quick: true }); }
   if (dismissed(r.key)) { showChip(r, helpers); return; }
   openSeason(r, helpers);
+}
+
+/** Whether now is a bad moment to open it: the reader is moving the page. */
+export function readerMoving() {
+  return moving();
 }

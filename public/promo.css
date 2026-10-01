@@ -8,8 +8,6 @@
  * itself is in promo.js; this is what it moves.
  */
 
-.ofr-lock { overflow: hidden; }
-
 .ofr-root { position: fixed; inset: 0; z-index: calc(var(--z-overlay) + 20); }
 .ofr-scrim {
   position: absolute;
@@ -44,6 +42,7 @@
   transform-origin: 50% 100%;
   pointer-events: auto;
   scrollbar-width: none;
+  overscroll-behavior: contain;
 }
 .ofr-card::-webkit-scrollbar { display: none; }
 .ofr-card:focus { outline: none; }
@@ -69,7 +68,10 @@
   opacity: 0;
 }
 /* The beams: soft cones falling from each lamp across the card. */
-.ofr-beams { position: absolute; inset: 0; pointer-events: none; z-index: 1; mix-blend-mode: screen; }
+/* Clipped to the card: a beam is longer than the card, and its overhang
+   counted as content, so the card scrolled 130px into nothing and swallowed
+   the swipe that should have moved the page. */
+.ofr-beams { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; z-index: 1; mix-blend-mode: screen; }
 .ofr-beam {
   position: absolute;
   top: 22px;

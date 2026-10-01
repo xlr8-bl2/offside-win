@@ -28,6 +28,8 @@
  * listed in the cookie notice.
  */
 
+import { scrollAway, moving } from './scrollaway.js';
+
 const KEY = 'ow.promo';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const money = (minor, cur = 'GBP') => new Intl.NumberFormat('en-GB', { style: 'currency', currency: cur, minimumFractionDigits: minor % 100 ? 2 : 0 }).format((Number(minor) || 0) / 100);
@@ -275,7 +277,6 @@ export function showPopup(p, { previewing = false } = {}) {
   const scrim = root.querySelector('.ofr-scrim');
   const before = document.activeElement;
   const stopClock = mountClock(root.querySelector('.ofr-clock'), p.ends_at, { onEnd: () => close() });
-  document.documentElement.classList.add('ofr-lock');
 
   const still = reduced();
   const run = [];
@@ -326,8 +327,8 @@ export function showPopup(p, { previewing = false } = {}) {
   const close = (instant = false) => {
     if (!root.isConnected) return;
     stopClock();
+    stopAway();
     document.removeEventListener('keydown', onKey, true);
-    document.documentElement.classList.remove('ofr-lock');
     open = null;
     const gone = () => { root.remove(); before?.focus?.({ preventScroll: true }); };
     if (instant || still) { gone(); return; }
@@ -338,6 +339,9 @@ export function showPopup(p, { previewing = false } = {}) {
     scrim.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 380, easing: 'ease-in', fill: 'forwards', delay: 120 }).finished.then(gone, gone);
   };
   open = { close };
+  // The page behind is never locked: scrolling it takes the popup down and
+  // the page moves under the same gesture. The bar still has the offer.
+  const stopAway = scrollAway(card, () => close());
 
   // Focus stays inside while it is open; Escape and the scrim close it.
   const focusables = () => [...root.querySelectorAll('a[href], button')];
@@ -498,6 +502,9 @@ export async function runPromos({ route, signedIn, member, returning = false, an
     // mid-word), another dialog, or a tab they are not looking at. It waits
     // and tries again rather than giving up the visit's one showing.
     if (busy()) { setTimeout(fire, 4000); return; }
+    // It used to open mid-scroll, a third of the way down, under a moving
+    // thumb. It waits for the page to come to rest.
+    if (moving()) { setTimeout(fire, 700); return; }
     fired = true;
     removeEventListener('scroll', onScroll);
     const here = (location.hash.slice(2).split(/[/?]/)[0]) || 'home';
@@ -507,7 +514,7 @@ export async function runPromos({ route, signedIn, member, returning = false, an
   };
   const onScroll = () => {
     const depth = scrollY / Math.max(1, document.documentElement.scrollHeight - innerHeight);
-    if (depth > 0.35) fire();
+    if (depth > 0.35) { removeEventListener('scroll', onScroll); fire(); }
   };
   addEventListener('scroll', onScroll, { passive: true });
   setTimeout(fire, 6000);
