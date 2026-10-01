@@ -17,10 +17,11 @@ import { LEGAL, SUPPORT_EMAIL, TERMS_VERSION, UPDATED as TERMS_DATE, legalHTML }
 import { mountPayment, openCheckout } from './js/lib/whop.js';
 import { absenceReason } from './js/lib/absence.js';
 import { enhanceSelects } from './js/lib/dropdown.js';
+import { LANDING_FAQ, LANDING_HEADLINE, LANDING_LEDE, LANDING_STEPS } from './js/lib/front.js';
 import * as attention from './js/lib/attention.js';
 import { anchorClock, clockText, diffEvents, eachFixture, eventKey, fixtureIdOf, ingest, inPlayWindow, overlay, signature } from './js/lib/live.js';
 import { TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle, ukDay } from './js/lib/titles.js';
-import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, prepareGoogleRedirect, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, siteConfig, viewingAsFree } from './js/lib/auth.js';
+import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, prepareGoogleRedirect, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, siteConfig, viewingAsFree, hasStoredSession } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
 
@@ -2338,7 +2339,262 @@ function spread(fixtures, limit) {
   return out;
 }
 
+/*
+ * The front door.
+ *
+ * The front page was a dashboard: a match masthead, a fixture list, the
+ * record. Everything a member wants every morning, and nothing that tells a
+ * stranger what the site is, why to trust it or what it costs. So "/" is now
+ * two pages. A member gets the dashboard (viewDashboard). Everyone else gets
+ * the landing page: what this is in one line, today's free call with its
+ * actual write-up, how it works, the record in public, the big games coming,
+ * the plans, and the questions people actually ask.
+ *
+ * No odds on it. The pages traffic arrives on are analysis-led (offside-ui,
+ * "Two registers"), and a pick is never shown without its price, so the free
+ * call appears as its reasoning and a link, not as a pick.
+ *
+ * Telling them apart costs nothing for a visitor with no stored session: the
+ * landing page draws at once. With a session, the board says whether it
+ * belongs to a member, and the board is the first thing either page needs.
+ */
 async function viewHome() {
+  if (!hasStoredSession()) return viewLanding();
+  const board = await loadBoard().catch(() => null);
+  return isMember() || board?.member ? viewDashboard() : viewLanding();
+}
+
+
+/** The shout over the headline, for the day it is. */
+function landingShout(now = new Date()) {
+  const d = now.getDay();
+  if (d === 5 || d === 6 || d === 0) return 'Weekend’s here. Let’s gooo.';
+  if (d === 2 || d === 3) return 'Midweek football. Let’s go.';
+  return 'Football’s on. Let’s gooo.';
+}
+
+function landingHTML() {
+  return `
+  <section class="ld-hero">
+    <div class="ld-bg" aria-hidden="true">
+      <div class="ld-shot" data-ld="shot"></div>
+      <div class="ld-scrim"></div>
+      <div class="ld-lights">${[14, 38, 62, 86].map((x, i) => `<span class="ld-beam" style="--x:${x}%;--n:${i}"></span>`).join('')}</div>
+      <div class="ld-lamps">${[14, 38, 62, 86].map((x) => `<span class="ld-lamp" style="--x:${x}%"></span>`).join('')}</div>
+    </div>
+    <div class="wrap ld-hero-in">
+      <div class="ld-copy">
+        <p class="ld-shout">${esc(landingShout())}</p>
+        <h1 class="ld-h1"><span class="ld-l">${esc(LANDING_HEADLINE[0])}</span> <span class="ld-l ld-lit">${esc(LANDING_HEADLINE[1])}</span></h1>
+        <p class="ld-lede">${esc(LANDING_LEDE)}</p>
+        <div class="ld-actions">
+          <a class="btn btn-primary btn-lg ld-go" href="#/board" data-ld="free">See today’s free call</a>
+          <a class="btn btn-ghost btn-lg" href="#/pricing">Join from £3.49</a>
+        </div>
+        <p class="ld-small">18+. No guaranteed winners, because there’s no such thing.</p>
+      </div>
+      <aside class="ld-call" data-ld="call" aria-label="Today’s free call"><div class="ld-call-wait"></div></aside>
+    </div>
+  </section>
+  <div class="ld-ticker" data-ld="ticker"></div>
+
+  <section class="ld-strip" data-ld="strip" aria-label="The site in numbers"><div class="wrap ld-strip-in"></div></section>
+
+  <section class="wrap ld-sec">
+    <h2 class="ld-h2">How it works</h2>
+    <ol class="ld-how">${LANDING_STEPS.map(([h, p]) => `<li><b>${esc(h)}</b><p>${esc(p)}</p></li>`).join('')}</ol>
+  </section>
+
+  <section class="wrap ld-sec" data-ld="record"></section>
+  <section class="wrap ld-sec" data-ld="week"></section>
+  <section class="wrap ld-sec" data-ld="plans"></section>
+
+  <section class="wrap ld-sec ld-faq-sec">
+    <h2 class="ld-h2">Straight answers</h2>
+    <div class="ld-faq">${LANDING_FAQ.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}</div>
+  </section>
+
+  <section class="ld-end">
+    <div class="wrap ld-end-in">
+      <h2 class="ld-h2">Your game’s probably on the board already.</h2>
+      <div class="ld-actions">
+        <a class="btn btn-primary btn-lg" href="#/search">Find your game</a>
+        <a class="btn btn-ghost btn-lg" href="#/board">Today’s games</a>
+      </div>
+    </div>
+  </section>`;
+}
+
+/**
+ * The football in a write-up, without the call: whole sentences, up to about
+ * two hundred and fifty characters. A write-up closes on the call and its
+ * price ("Back under 3.5 goals, at odds of 1.17"), which the landing page
+ * does not carry, so any sentence with a price, a line or the word "odds" in
+ * it is left out, and what is left still has to pass the vocabulary rule.
+ */
+function excerpt(text, max = 260) {
+  const sentences = String(text ?? '').match(/[^.!?]+[.!?]+(\s|$)/g) ?? [];
+  let out = '';
+  for (const s of sentences) {
+    if (/\d\.\d|\bodds\b|\bback(ing)?\b/i.test(s)) continue;
+    if ((out + s).length > max && out) break;
+    out += s;
+  }
+  return cleanProse(out.trim()) ?? '';
+}
+
+async function viewLanding() {
+  const nav = navTicket;
+  app.innerHTML = landingHTML();
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    /*
+     * One entrance, at the top, and it is the floodlights: the lamps strike
+     * along the gantry, stuttering before they hold, their beams fall across
+     * the ground, the shout slams on, the headline rises, and the second line
+     * fills with light from left to right. Nothing below the hero moves.
+     */
+    const EXPO = 'cubic-bezier(0.16, 1, 0.3, 1)';
+    const strike = [{ opacity: 0 }, { opacity: 0.9, offset: 0.08 }, { opacity: 0.1, offset: 0.16 }, { opacity: 0.8, offset: 0.26 }, { opacity: 0.3, offset: 0.34 }, { opacity: 1, offset: 0.5 }, { opacity: 1 }];
+    app.querySelectorAll('.ld-lamp').forEach((l, i) => l.animate(strike, { duration: 900, delay: 100 + i * 130, easing: 'linear', fill: 'both' }));
+    app.querySelectorAll('.ld-beam').forEach((b, i) => b.animate(strike.map((f) => ({ ...f, opacity: f.opacity * 0.85 })), { duration: 900, delay: 120 + i * 130, easing: 'linear', fill: 'both' }));
+    app.querySelector('.ld-shout')?.animate([
+      { transform: 'scale(2.4) rotate(-6deg)', opacity: 0, filter: 'blur(6px)' },
+      { transform: 'scale(0.94) rotate(1deg)', opacity: 1, filter: 'blur(0)', offset: 0.55 },
+      { transform: 'scale(1.03) rotate(-0.5deg)', offset: 0.75 },
+      { transform: 'none', opacity: 1, filter: 'blur(0)' }], { duration: 640, delay: 420, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'both' });
+    app.querySelectorAll('.ld-l').forEach((l, i) => l.animate([{ transform: 'translateY(45%)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 900, delay: 620 + i * 160, easing: EXPO, fill: 'both' }));
+    app.querySelector('.ld-lit')?.animate([{ backgroundPosition: '100% 0' }, { backgroundPosition: '0% 0' }], { duration: 1100, delay: 1150, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', fill: 'both' });
+    for (const [sel, d] of [['.ld-lede', 1000], ['.ld-actions', 1120], ['.ld-small', 1200]]) {
+      app.querySelector(`.ld-hero ${sel}`)?.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 700, delay: d, easing: EXPO, fill: 'both' });
+    }
+    app.querySelector('.ld-go')?.animate([{ boxShadow: '0 0 0 0 rgba(122, 90, 248, 0.7)' }, { boxShadow: '0 0 0 16px rgba(122, 90, 248, 0)' }], { duration: 1200, delay: 1700, iterations: 2, easing: 'ease-out' });
+  } else {
+    app.querySelector('.ld-lit')?.style.setProperty('background-position', '0% 0');
+  }
+
+  const [board, hero, picks, plans] = await Promise.all([
+    loadBoard().catch(() => null),
+    getJSON('/api/hero').catch(() => null),
+    getJSON('/api/picks?limit=40&settled=true').then((r) => r.picks ?? []).catch(() => []),
+    getJSON('/api/plans').catch(() => []),
+  ]);
+  if (nav !== navTicket) return;
+  const fixtures = board?.fixtures ?? [];
+  const put = (key, html) => { const el = app.querySelector(`[data-ld="${key}"]`); if (el) { el.innerHTML = html; smartQuotes(el); } return el; };
+
+  // Today's free call: the match and the reasoning, linked. No pick, no price.
+  const freeId = hero?.free_fixture_id ?? fixtures.find((f) => f.free_call)?.id ?? null;
+  const freeRow = freeId ? fixtures.find((f) => Number(f.id) === Number(freeId)) : null;
+  const detail = freeId ? await getJSON(`/api/fixture/${freeId}`).catch(() => null) : null;
+  if (nav !== navTicket) return;
+  const fx = detail?.fixture ?? detail ?? freeRow;
+  const why = excerpt((fx?.verdicts ?? []).map((v) => v.why ?? v.narrative).find(Boolean));
+  const cta = app.querySelector('[data-ld="free"]');
+  if (fx && why) {
+    if (cta) cta.setAttribute('href', `#/fixture/${encodeURIComponent(fx.id)}`);
+    const hex = (c) => (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c : null);
+    const hc = hex(fx.colors?.home) ?? '#5b4ad6';
+    const ac = hex(fx.colors?.away) ?? '#c9334a';
+    put('call', `
+      <div class="ld-tk-band" style="--home-c:${hc};--away-c:${ac}" aria-hidden="true">
+        <div class="ld-tk-h"></div><div class="ld-tk-a"></div><div class="ld-tk-seam"></div>
+        <span class="ld-tk-crest ld-tk-ch">${crest(fx.home, 'xl', fx.home_id)}</span>
+        <span class="ld-tk-crest ld-tk-ca">${crest(fx.away, 'xl', fx.away_id)}</span>
+      </div>
+      <div class="ld-tk-perf" aria-hidden="true"></div>
+      <div class="ld-tk-body">
+        <p class="ld-call-tag">Today’s free call</p>
+        <p class="ld-tk-teams"><b>${esc(fx.home)}</b> <em>v</em> <b>${esc(fx.away)}</b></p>
+        <p class="ld-tk-meta">${fx.league ? `<span class="ld-tk-comp">${crest(fx.league, 'xs', fx.league_id, 'league')}${esc(fx.league)}</span>` : ''}<span>${esc(kickoffLabel(fx.kickoff))}</span>${fx.kickoff > Date.now() / 1000 ? `<span class="ld-tk-count">Kick-off in <b data-countdown="${Number(fx.kickoff)}" data-done="now">—</b></span>` : ''}</p>
+        <blockquote class="ld-call-why">${esc(why)}</blockquote>
+        <a class="ld-call-go" href="#/fixture/${encodeURIComponent(fx.id)}">Read the whole call, free</a>
+      </div>`);
+    const card = app.querySelector('.ld-call');
+    if (card && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // The ticket is handed over: in on a tilt, and the two sides of the
+      // band slam together behind the crests.
+      card.animate([{ opacity: 0, transform: 'translateY(30px) rotate(3deg) scale(0.96)' }, { opacity: 1, transform: 'rotate(-1deg)', offset: 0.7 }, { opacity: 1, transform: 'none' }], { duration: 1000, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
+      card.querySelector('.ld-tk-h')?.animate([{ transform: 'translateX(-105%)' }, { transform: 'none' }], { duration: 560, delay: 200, easing: 'cubic-bezier(0.7, 0, 0.84, 0)', fill: 'both' });
+      card.querySelector('.ld-tk-a')?.animate([{ transform: 'translateX(105%)' }, { transform: 'none' }], { duration: 560, delay: 200, easing: 'cubic-bezier(0.7, 0, 0.84, 0)', fill: 'both' });
+      card.querySelectorAll('.ld-tk-crest').forEach((c, i) => c.animate([{ transform: `translateX(${i ? '' : '-'}160%) scale(1.4)`, opacity: 0, filter: 'blur(8px)' }, { transform: 'none', opacity: 1, filter: 'blur(0)' }], { duration: 700, delay: 520, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)', fill: 'both' }));
+      card.querySelector('.ld-tk-seam')?.animate([{ opacity: 0 }, { opacity: 1, offset: 0.15 }, { opacity: 0.6 }], { duration: 900, delay: 760, fill: 'both' });
+    }
+    // The ground it is played at, behind the whole hero.
+    const shot = app.querySelector('[data-ld="shot"]');
+    // The engine names a ground it found a photograph for (shot_venue_id);
+    // then the match's own, then the rest of the board's. The browser works
+    // down the list until one is a real photograph (venueShot).
+    const venues = [...new Set([hero?.shot_venue_id, fx.venue_id, ...fixtures.filter(hasCall).map((f) => f.venue_id), ...fixtures.map((f) => f.venue_id)].filter(Boolean))];
+    if (shot && venues.length) {
+      shot.innerHTML = venueShot(venues, 'ld-shot-img', true);
+      const img = shot.querySelector('img');
+      img?.addEventListener('load', () => img.classList.add('is-in'), { once: true });
+    }
+  } else {
+    app.querySelector('.ld-call')?.remove();
+    app.querySelector('.ld-hero')?.classList.add('ld-solo');
+  }
+
+  // The numbers, all of them real and all of them pub numbers.
+  const settled = picks.filter((x) => x.result && x.result !== 'VOID' && x.result !== 'PUSH');
+  const won = settled.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
+  const lost = settled.filter((x) => x.result === 'LOST' || x.result === 'HALF_LOST').length;
+  const comps = new Set(fixtures.map((f) => f.league).filter(Boolean)).size;
+  const facts = [
+    comps && [String(comps), comps === 1 ? 'competition on the board' : 'competitions on the board'],
+    fixtures.length && [String(fixtures.length), 'games read in the next three days'],
+    settled.length && [`${won} of ${settled.length}`, 'of our last calls landed'],
+    ['15 min', 'between fresh looks at every call'],
+  ].filter(Boolean);
+  put('strip', `<div class="wrap ld-strip-in">${facts.map(([n, l]) => `<div><b>${esc(n)}</b><span>${esc(l)}</span></div>`).join('')}</div>`);
+  // The ticker: today's calls kicking off, landing and missing, rolling under the hero.
+  const tick = tickerHTML(fixtures, picks);
+  if (tick) put('ticker', tick); else app.querySelector('[data-ld="ticker"]')?.remove();
+
+  // The record, in public.
+  if (settled.length) {
+    put('record', `
+      <div class="ld-sec-head"><h2 class="ld-h2">We keep score in public.</h2>
+        <a class="btn btn-ghost btn-sm" href="#/results">Every result</a></div>
+      <p class="ld-sub">Every call we’ve made is on the results page, the ones that went wrong included. Here are the last ${settled.length}.</p>
+      ${formBarHTML(won, settled.length - won - lost, lost, ['won', 'void', 'lost'], '')}
+      ${playedHTML(settled.slice(0, 3))}`);
+  } else app.querySelector('[data-ld="record"]')?.remove();
+
+  // The big games coming, biggest first. Called ones are marked; no prices.
+  const coming = fixtures.filter((f) => matchState(f).kind === 'upcoming')
+    .sort((a, b) => (a.rank ?? 9) - (b.rank ?? 9) || (a.kickoff ?? 0) - (b.kickoff ?? 0)).slice(0, 6)
+    .sort((a, b) => (a.kickoff ?? 0) - (b.kickoff ?? 0));
+  if (coming.length) {
+    put('week', `
+      <div class="ld-sec-head"><h2 class="ld-h2">Big games coming up</h2>
+        <a class="btn btn-ghost btn-sm" href="#/board">The full board</a></div>
+      <ol class="next-list">${coming.map(nextRowHTML).join('')}</ol>`);
+  } else app.querySelector('[data-ld="week"]')?.remove();
+
+  // The plans, as they are sold: the price here is the price charged.
+  const BLURB = {
+    matchday: 'Seven days of every call. Made for one big weekend.',
+    monthly: 'Thirty days, renews monthly. Cancel in one tap.',
+    quarter: 'Three months, the cheapest way in.',
+  };
+  const list = (Array.isArray(plans) ? plans : []).filter((p) => p && p.amount_minor).sort((a, b) => a.amount_minor - b.amount_minor);
+  if (list.length) {
+    put('plans', `
+      <div class="ld-sec-head"><h2 class="ld-h2">Every call, from ${esc(money(list[0].amount_minor, list[0].currency))}</h2></div>
+      <p class="ld-sub">The previews and the record stay free whatever you do. A membership gets you every call the moment it goes up, the bet slip, and the reasons behind all of them.</p>
+      <ul class="ld-plans">${list.map((p) => `
+        <li><a href="#/pricing">
+          <b>${esc(p.name)}</b>
+          <span class="ld-price">${esc(money(p.amount_minor, p.currency))}${p.id === 'quarter' ? `<small>works out at ${esc(money(Math.round(p.amount_minor / 3), p.currency))} a month</small>` : ''}</span>
+          <span class="ld-blurb">${esc(BLURB[p.id] ?? `${p.days} days of every call.`)}</span>
+        </a></li>`).join('')}</ul>
+      <a class="btn btn-primary" href="#/pricing">See the plans</a>`);
+  } else app.querySelector('[data-ld="plans"]')?.remove();
+  tickCountdowns();
+}
+
+async function viewDashboard() {
   // Which navigation this page belongs to: a newer one makes it stand down (see route).
   const nav = navTicket;
   placeholder(heroHTML(state.hero, state.heroVenue) + skeletonHTML('rows'));

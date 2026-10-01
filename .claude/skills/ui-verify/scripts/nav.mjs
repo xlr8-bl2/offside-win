@@ -598,6 +598,40 @@ const scenarios = {
     await ctx.close();
   },
 
+  /**
+   * A visitor who is not a member lands on the landing page: what this is,
+   * today's free call as its reasoning, the record, the plans. No odds
+   * anywhere on it (offside-ui, "Two registers").
+   */
+  async landing() {
+    for (const w of [390, 1440]) {
+      const { ctx, page, errors } = await fresh(w, { height: w < 700 ? 844 : 900 });
+      await page.goto(`${BASE}/`, { waitUntil: 'load' });
+      await settle(page, 4000);
+      const m = await page.evaluate(() => {
+        const app = document.getElementById('app');
+        const text = app.innerText;
+        return {
+          h1: app.querySelector('h1')?.textContent.trim(),
+          call: !!app.querySelector('.ld-call-why')?.textContent.trim(),
+          freeHref: app.querySelector('[data-ld="free"]')?.getAttribute('href'),
+          sections: [...app.querySelectorAll('.ld-h2')].map((h) => h.textContent.trim()),
+          // Money is fine (the plans); a bare decimal or the word is a price.
+          odds: (text.replace(/[£$€]\d+(\.\d\d)?/g, '').match(/\b\d\.\d\d?\b|\bodds\b/gi) ?? []).slice(0, 5),
+          hscroll: document.documentElement.scrollWidth > innerWidth,
+          faq: app.querySelectorAll('.ld-faq details').length,
+        };
+      });
+      report(`landing ${w}: the headline, today's free call and every section`, /We call the big games/.test(m.h1 ?? '') && m.sections.length >= 5 && m.faq === 5, JSON.stringify({ h1: m.h1, sections: m.sections, call: m.call }));
+      report(`landing ${w}: the free call is its reasoning, linked to its match`, !m.call || /^(#\/fixture|\/match)\/\d+/.test(m.freeHref ?? ''), JSON.stringify({ call: m.call, href: m.freeHref }));
+      report(`landing ${w}: no odds anywhere on it`, !m.odds.length, m.odds.join(' | '));
+      report(`landing ${w}: nothing spills sideways, no errors`, !m.hscroll && !errors.length, errors.join(' | '));
+      await page.locator('.ld-faq summary').first().click();
+      report(`landing ${w}: a question opens its answer`, await page.evaluate(() => document.querySelector('.ld-faq details')?.open === true));
+      await ctx.close();
+    }
+  },
+
   /** The phone menu holds the page still behind it and keeps the keyboard inside. */
   async menulock() {
     const { ctx, page } = await fresh(390);
