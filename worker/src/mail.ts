@@ -138,8 +138,8 @@ const termsDate = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v)
 /* ------------------------------------------------------------- the look */
 
 /*
- * One frame for every message, drawn the way the site is: the warm
- * near-black ground, chalk type, violet only where something can be tapped.
+ * One frame for every message, drawn the way the site is (public/tokens.css):
+ * the near-black ground, chalk type, violet only where something can be tapped.
  * Tables and inline styles throughout, because that is what Outlook and Gmail
  * still read. Dark by design and declared as such, so a mail app in dark mode
  * leaves it alone rather than inverting it into grey.
@@ -148,18 +148,18 @@ const termsDate = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v)
  * is quiet.
  */
 const C = {
-  pitch: '#0c0b09',
-  stand: '#15130f',
-  terrace: '#201c17',
-  line: '#2c2720',
-  chalk: '#f7f4ed',
-  chalk2: '#d6cfc2',
-  chalk3: '#958d80',
+  pitch: '#0a0a0c',
+  stand: '#16171b',
+  terrace: '#202329',
+  line: '#2a2d34',
+  chalk: '#f4f6fa',
+  chalk2: '#c3c8d2',
+  chalk3: '#8d94a3',
   violet: '#7a5af8',
-  violetHi: '#9b82fb',
+  violetHi: '#9e86ff',
 };
 const SANS = `-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif`;
-const DISPLAY = `'Bricolage Grotesque',${SANS}`;
+const DISPLAY = `'Big Shoulders Display','Arial Narrow',${SANS}`;
 
 /** A line of body copy. `html` is trusted markup; everything else is escaped. */
 type Part =
@@ -195,7 +195,7 @@ function part(x: Part): string {
 <td style="border-left:3px solid ${C.violet};padding:2px 0 2px 14px;font:14px/1.6 ${SANS};color:${C.chalk2}">${esc(x.note)}</td></tr></table>`;
   }
   if ('code' in x) {
-    return `<p style="margin:0 0 24px;font:600 34px/1 ${DISPLAY};letter-spacing:.18em;color:${C.chalk}">${esc(x.code)}</p>`;
+    return `<p style="margin:0 0 24px;font:800 38px/1 ${DISPLAY};letter-spacing:.18em;color:${C.chalk}">${esc(x.code)}</p>`;
   }
   return `<p style="margin:0 0 18px;font:13px/1.5 ${SANS};color:${C.chalk3};word-break:break-all">${esc(x.link)}<br><a href="${esc(x.href)}" style="color:${C.violetHi}">${esc(x.href)}</a></p>`;
 }
@@ -238,7 +238,7 @@ function compose(f: Frame): Mail {
   const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark">
 <title>${esc(f.subject)}</title>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&display=swap" rel="stylesheet">
 <style>:root{color-scheme:dark;supported-color-schemes:dark}a{color:${C.violetHi}}@media (max-width:480px){.card{border-radius:0!important}.pad{padding-left:22px!important;padding-right:22px!important}.h1{font-size:30px!important}}</style>
 </head>
 <body style="margin:0;padding:0;background:${C.pitch};-webkit-text-size-adjust:100%">
@@ -252,7 +252,7 @@ function compose(f: Frame): Mail {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
 <tr><td style="height:3px;line-height:3px;font-size:0;background:${C.violet};border-radius:16px 16px 0 0">&nbsp;</td></tr>
 <tr><td class="pad" style="padding:34px 30px 12px">
-<h1 class="h1" style="margin:0 0 22px;font:600 36px/1.05 ${DISPLAY};letter-spacing:-.02em;color:${C.chalk}">${esc(f.heading)}</h1>
+<h1 class="h1" style="margin:0 0 22px;font:800 40px/1 ${DISPLAY};letter-spacing:.005em;color:${C.chalk}">${esc(f.heading)}</h1>
 ${f.parts.map(part).join('\n')}
 ${linkRow}
 </td></tr>
