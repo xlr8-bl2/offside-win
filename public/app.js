@@ -7715,6 +7715,7 @@ async function route({ soft = false } = {}) {
   // Whop's card fields belong to the checkout page; leaving it takes them down.
   if (!soft && state.payHandle) { state.payHandle.destroy(); state.payHandle = null; }
   if (!soft) setMenu(false);
+  if (!soft) unstick();
   try {
     await render(name, parts, params);
   } catch (err) {
@@ -7728,6 +7729,24 @@ async function route({ soft = false } = {}) {
     }
   }
 }
+
+/*
+ * A page that will not scroll is the worst thing this site can do to a
+ * reader, and every overlay that locks the page has its own way out. This is
+ * the belt to those braces: a lock whose overlay is no longer on the page is
+ * lifted, on every move of page and on a page brought back from the
+ * back-forward cache (which keeps the classes it was frozen with).
+ */
+const LOCKS = {
+  'menu-lock': () => document.getElementById('nav')?.classList.contains('open'),
+  'dd-locked': () => document.querySelector('.dd-panel.is-sheet'),
+  'pay-open': () => document.querySelector('.pay-panel'),
+};
+function unstick() {
+  const html = document.documentElement;
+  for (const [cls, held] of Object.entries(LOCKS)) if (html.classList.contains(cls) && !held()) html.classList.remove(cls);
+}
+addEventListener('pageshow', (e) => { if (e.persisted) unstick(); });
 
 function finishRoute(name, soft, keepY, backTo) {
   {
@@ -7830,6 +7849,9 @@ async function scheduleSeason() {
         seasonTimer = setTimeout(go, 4000);
         return;
       }
+      // Mid-scroll: a card that lands under a moving thumb is swiped away
+      // by that same thumb before anyone reads it. Wait for a pause.
+      if (season.readerMoving()) { seasonTimer = setTimeout(go, 700); return; }
       season.showSeason(reading, helpers);
     };
     seasonTimer = setTimeout(go, 1400);

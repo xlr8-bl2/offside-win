@@ -33,8 +33,11 @@ once something rendered the page and measured it.
 
 - `node .claude/skills/ui-verify/scripts/nav.mjs` drives navigation: two taps
   racing, Back to a filtered board or a match, focus after a page change,
-  missing pages, the menu, the offer popup, tab keys, titles. `BASE=` points it
-  at another server, as for check.mjs.
+  missing pages, the menu, the offer popup, tab keys, titles, and the week's
+  note (`season`, `seasonsizes`, `popupsizes`, `phantom`) with real touch
+  swipes at phone sizes: neither card ever locks the page, a scroll takes it
+  down, and no panel scrolls into empty space. `BASE=` points it at another
+  server, as for check.mjs; `SHOTS=` is where the screenshots go.
 - The deployed copy is `dist/` (`node scripts/build-public.mjs`), minified and
   versioned. Check it, not only `public/`, after touching imports or the build:
   `ROOT=dist PORT=8791 node .claude/skills/ui-verify/scripts/serve.mjs &` then

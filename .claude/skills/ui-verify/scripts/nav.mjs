@@ -34,8 +34,8 @@ const report = (name, ok, detail) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `: ${detail}` : ''}`);
 };
 
-async function fresh(width = 390, { slow = 0 } = {}) {
-  const ctx = await browser.newContext({ viewport: { width, height: 800 } });
+async function fresh(width = 390, { slow = 0, height = 800, touch = false } = {}) {
+  const ctx = await browser.newContext({ viewport: { width, height }, ...(touch ? { hasTouch: true, isMobile: true, deviceScaleFactor: 2 } : {}) });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -50,6 +50,18 @@ async function fresh(width = 390, { slow = 0 } = {}) {
   return { ctx, page, errors };
 }
 const settle = (page, ms = 2500) => page.waitForTimeout(ms);
+/** A finger dragged up the screen by `dy` from (x, y): real touch events, so the page scrolls as a phone's would. */
+async function swipe(page, x, y, dy, steps = 16) {
+  const cdp = await page.context().newCDPSession(page);
+  const at = (yy) => [{ x, y: Math.round(yy), id: 1 }];
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(y) });
+  for (let i = 1; i <= steps; i++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(y - (dy * i) / steps) });
+    await new Promise((ok) => setTimeout(ok, 16));
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await cdp.detach();
+}
 const where = (page) => page.evaluate(() => ({
   hash: location.hash, path: location.pathname, y: Math.round(scrollY),
   title: document.title,
@@ -240,43 +252,273 @@ const scenarios = {
     await settle(page, 1500);
     const gone = await page.evaluate(() => ({ popup: !!document.querySelector('.ofr-root'), lock: document.documentElement.classList.contains('ofr-lock') }));
     report('popup: Back takes it down and frees the page', !gone.popup && !gone.lock, JSON.stringify(gone));
+    // The bar's words open it again; it never locks the page, and a scroll
+    // takes it down and moves the page under the same gesture.
+    await page.goto(`${BASE}/#/board`, { waitUntil: 'load' });
+    await settle(page, 4000);
+    const words = page.locator('#promo-bar .pb-text');
+    if (await words.count()) {
+      await words.click();
+      await settle(page, 1800);
+      const y0 = await page.evaluate(() => ({ y: scrollY, open: !!document.querySelector('.ofr-root'), overflow: getComputedStyle(document.documentElement).overflowY }));
+      report('popup: the bar opens it, and the page behind is not locked', y0.open && y0.overflow !== 'hidden', JSON.stringify(y0));
+      await page.mouse.move(20, 300);
+      await page.mouse.wheel(0, 700);
+      await settle(page, 1000);
+      const y1 = await page.evaluate(() => ({ y: scrollY, open: !!document.querySelector('.ofr-root'), bar: !!document.getElementById('promo-bar') }));
+      report('popup: a scroll takes it down, the page moves and the bar stays', !y1.open && y1.y > y0.y + 100 && y1.bar, JSON.stringify(y1));
+    }
     await ctx.close();
   },
 
   /**
-   * The week's note, when there is one: it opens over a darkened page, holds
-   * the page still, closes into the corner chip, and the chip opens it again.
+   * The week's note (an international break, the close season, a
+   * tournament). It sits over a darkened page but never locks it: a swipe or
+   * a wheel anywhere outside it folds it into its chip and the page moves
+   * under the same gesture. Checked with a real touch screen at phone sizes.
    */
   async season() {
-    const { ctx, page } = await fresh(390);
-    // The shared setup turns the notes off on every load; this one wants them.
-    // Cleared fully on the first load only: the reload below checks what was remembered.
-    await page.addInitScript(() => {
+    // Wants the notes, so the shared setup's opt-out is undone. Cleared fully
+    // on the first load only: the reload at the end checks what was remembered.
+    const notes = async (page) => page.addInitScript(() => {
       try {
         if (!sessionStorage.getItem('nav.season')) { localStorage.removeItem('ow.season'); sessionStorage.setItem('nav.season', '1'); }
         else localStorage.setItem('ow.season', sessionStorage.getItem('nav.season.kept') ?? '[]');
         addEventListener('pagehide', () => sessionStorage.setItem('nav.season.kept', localStorage.getItem('ow.season') ?? '[]'));
       } catch {}
     });
+    const state = (page) => page.evaluate(() => {
+      const card = document.querySelector('#season-note .sn-card');
+      const r = card?.getBoundingClientRect();
+      return {
+        note: !!document.getElementById('season-note'), chip: !!document.getElementById('season-chip'),
+        y: Math.round(scrollY), overflow: getComputedStyle(document.documentElement).overflowY,
+        locked: [...document.documentElement.classList].filter((c) => /lock|open/.test(c)),
+        card: r ? { top: Math.round(r.top), bottom: Math.round(r.bottom), h: Math.round(r.height), scroll: card.scrollHeight - card.clientHeight } : null,
+        vh: innerHeight,
+      };
+    });
+
+    const { ctx, page, errors } = await fresh(390, { height: 844, touch: true });
+    await notes(page);
     await page.goto(`${BASE}/#/home`, { waitUntil: 'load' });
-    const opened = await page.waitForSelector('#season-note', { timeout: 7000 }).then(() => true, () => false);
+    const opened = await page.waitForSelector('#season-note', { timeout: 8000 }).then(() => true, () => false);
     if (!opened) { report('season: no break, close season or tournament on now, nothing to check', true); await ctx.close(); return; }
-    await settle(page, 2500);
-    const up = await page.evaluate(() => ({ lock: document.documentElement.classList.contains('sn-lock'), focus: !!document.activeElement?.closest('#season-note'), title: document.querySelector('#sn-title')?.textContent.trim() }));
-    report('season: opens over the page, holds it still, takes the focus', up.lock && up.focus, JSON.stringify(up));
-    await page.keyboard.press('Escape');
-    await settle(page, 1200);
-    const closed = await page.evaluate(() => ({ note: !!document.getElementById('season-note'), chip: !!document.getElementById('season-chip'), lock: document.documentElement.classList.contains('sn-lock') }));
-    report('season: Escape folds it into the chip and frees the page', !closed.note && closed.chip && !closed.lock, JSON.stringify(closed));
-    await page.click('#season-chip .sn-chip-open');
-    await settle(page, 800);
-    report('season: the chip opens it again', await page.evaluate(() => !!document.getElementById('season-note')));
-    await page.click('#season-note .sn-x');
-    await settle(page, 800);
+    await settle(page, 2600);
+    const up = await state(page);
+    const focus = await page.evaluate(() => !!document.activeElement?.closest('#season-note'));
+    report('season: opens with the focus, and the page behind is not locked', focus && up.overflow !== 'hidden' && !up.locked.length, JSON.stringify(up));
+    report('season: the whole card is on screen at 390x844', up.card && up.card.top >= 0 && up.card.bottom <= up.vh, JSON.stringify(up.card));
+
+    // A swipe on the darkened page: the note folds away and the page scrolls.
+    await swipe(page, 195, 120, 500);
+    await settle(page, 900);
+    const swiped = await state(page);
+    report('season: a swipe outside the card folds it into the chip and scrolls the page', !swiped.note && swiped.chip && swiped.y > up.y + 100, `y ${up.y} to ${swiped.y}, note ${swiped.note}, chip ${swiped.chip}`);
+
+    // The chip brings it back; a swipe that starts on the card does the same
+    // when the card has nothing of its own to scroll.
+    await page.tap('#season-chip .sn-chip-open');
+    await settle(page, 1600);
+    const again = await state(page);
+    report('season: the chip opens it again, wherever the page is', again.note && !again.chip, JSON.stringify({ y: again.y, note: again.note }));
+    if (again.card && again.card.scroll <= 1) {
+      await swipe(page, 195, Math.round((again.card.top + again.card.bottom) / 2), 400);
+      await settle(page, 900);
+      const fromCard = await state(page);
+      report('season: a swipe on a card that fits folds it too, and the page moves', !fromCard.note && fromCard.chip && fromCard.y > again.y + 80, `y ${again.y} to ${fromCard.y}`);
+    }
+
+    // A wheel (a laptop) does the same.
+    const desk = await fresh(1280, { height: 800 });
+    await notes(desk.page);
+    await desk.page.goto(`${BASE}/#/home`, { waitUntil: 'load' });
+    if (await desk.page.waitForSelector('#season-note', { timeout: 8000 }).then(() => true, () => false)) {
+      await settle(desk.page, 2600);
+      const d0 = await state(desk.page);
+      await desk.page.mouse.move(80, 400);
+      await desk.page.mouse.wheel(0, 600);
+      await settle(desk.page, 900);
+      const d1 = await state(desk.page);
+      report('season: a mouse wheel over the page folds it and scrolls', !d1.note && d1.chip && d1.y > d0.y + 100, `y ${d0.y} to ${d1.y}, note ${d1.note}`);
+      // Escape and the scrim, from the chip.
+      await desk.page.click('#season-chip .sn-chip-open');
+      await settle(desk.page, 1500);
+      await desk.page.keyboard.press('Escape');
+      await settle(desk.page, 900);
+      const esc = await state(desk.page);
+      report('season: Escape folds it into the chip', !esc.note && esc.chip, JSON.stringify(esc));
+      await desk.page.click('#season-chip .sn-chip-open');
+      await settle(desk.page, 1500);
+      await desk.page.mouse.click(30, 30);
+      await settle(desk.page, 900);
+      report('season: a click on the darkened page folds it', !(await state(desk.page)).note);
+      // Tab stays in the card.
+      await desk.page.click('#season-chip .sn-chip-open');
+      await settle(desk.page, 1500);
+      let out = null;
+      for (let i = 0; i < 8; i++) {
+        await desk.page.keyboard.press('Tab');
+        if (!(await desk.page.evaluate(() => !!document.activeElement?.closest('#season-note')))) { out = await desk.page.evaluate(() => document.activeElement?.outerHTML.slice(0, 60)); break; }
+      }
+      report('season: Tab stays inside the open note', !out, out ?? '');
+      await desk.page.keyboard.press('Escape');
+      report('season: no errors on the desktop page', !desk.errors.length, desk.errors.join(' | '));
+    }
+    await desk.ctx.close();
+
+    // Opening under a moving thumb gets it swiped away unread, so it waits.
+    const busy = await fresh(390, { height: 844, touch: true });
+    await busy.page.addInitScript(() => { try { localStorage.removeItem('ow.season'); } catch {} });
+    await busy.page.goto(`${BASE}/#/home`, { waitUntil: 'load' });
+    await busy.page.waitForTimeout(600);
+    let seenWhileMoving = false;
+    const until = Date.now() + 4000;
+    while (Date.now() < until) {
+      await swipe(busy.page, 195, 600, 120).catch(() => {});
+      if (await busy.page.evaluate(() => !!document.getElementById('season-note'))) { seenWhileMoving = true; break; }
+    }
+    const thenOpens = await busy.page.waitForSelector('#season-note', { timeout: 6000 }).then(() => true, () => false);
+    report('season: it does not open mid-scroll, and opens once the page is still', !seenWhileMoving && thenOpens, `opened mid-scroll ${seenWhileMoving}, then ${thenOpens}`);
+    await busy.ctx.close();
+
+    // Seen once, it stays a chip on the next visit.
     await page.reload({ waitUntil: 'load' });
-    await settle(page, 3500);
-    const after = await page.evaluate(() => ({ note: !!document.getElementById('season-note'), chip: !!document.getElementById('season-chip') }));
-    report('season: seen once, it stays a chip on the next visit', !after.note && after.chip, JSON.stringify(after));
+    await settle(page, 4000);
+    const after = await state(page);
+    report('season: seen once, it stays a chip on the next visit', !after.note && after.chip, JSON.stringify({ note: after.note, chip: after.chip }));
+    report('season: no errors on the phone page', !errors.length, errors.join(' | '));
+    await ctx.close();
+  },
+
+  /** The note at every phone size: the card fits or scrolls itself, the chip clears the offer bar. */
+  async seasonsizes() {
+    for (const [w, h] of [[320, 568], [360, 640], [375, 667], [390, 844], [414, 896], [768, 1024], [1440, 900]]) {
+      const { ctx, page, errors } = await fresh(w, { height: h, touch: w < 700 });
+      await page.addInitScript(() => { try { localStorage.removeItem('ow.season'); localStorage.removeItem('ow.promo'); } catch {} });
+      await page.goto(`${BASE}/#/home`, { waitUntil: 'load' });
+      if (!(await page.waitForSelector('#season-note', { timeout: 8000 }).then(() => true, () => false))) { report(`seasonsizes ${w}x${h}: no note on now`, true); await ctx.close(); continue; }
+      await settle(page, 2800);
+      const m = await page.evaluate(() => {
+        const card = document.querySelector('.sn-card');
+        const r = card.getBoundingClientRect();
+        // The sweep overhangs on purpose, clipped by .sn-glow.
+        const over = [...card.querySelectorAll(':scope > :not(.sn-glow), :scope > :not(.sn-glow) *')].filter((el) => {
+          const b = el.getBoundingClientRect();
+          return b.width && (b.right > r.right + 1 || b.left < r.left - 1);
+        }).map((el) => el.className || el.tagName).slice(0, 3);
+        const lead = getComputedStyle(card.querySelector('.sn-lead'));
+        return {
+          top: Math.round(r.top), bottom: Math.round(r.bottom), vh: innerHeight, vw: innerWidth,
+          inner: card.scrollHeight - card.clientHeight, over, hscroll: document.documentElement.scrollWidth > innerWidth,
+          lead: parseFloat(lead.fontSize), text: parseFloat(getComputedStyle(card.querySelector('.sn-text p')).fontSize),
+          buttons: [...card.querySelectorAll('.sn-actions .btn')].map((b) => Math.round(b.getBoundingClientRect().height)),
+        };
+      });
+      await page.screenshot({ path: `${process.env.SHOTS ?? '/tmp'}/season-${w}x${h}.png` });
+      report(`seasonsizes ${w}x${h}: card on screen, nothing spills sideways`, m.top >= 0 && m.bottom <= m.vh && !m.over.length && !m.hscroll, JSON.stringify(m));
+      report(`seasonsizes ${w}x${h}: readable (lead >= 18px, text >= 16px, buttons >= 44px)`, m.lead >= 18 && m.text >= 16 && m.buttons.every((b) => b >= 44), JSON.stringify({ lead: m.lead, text: m.text, buttons: m.buttons, inner: m.inner }));
+      if (m.inner > 1 && w < 700) {
+        // Too tall for this phone: the card scrolls itself and the note stays.
+        await swipe(page, Math.round(w / 2), Math.round((m.top + m.bottom) / 2), Math.min(m.inner, 150));
+        await settle(page, 600);
+        const s = await page.evaluate(() => ({ note: !!document.getElementById('season-note'), inner: document.querySelector('.sn-card')?.scrollTop ?? 0, y: scrollY }));
+        report(`seasonsizes ${w}x${h}: a tall card scrolls itself first, the note stays`, s.note && s.inner > 0 && s.y === 0, JSON.stringify(s));
+      }
+      // Folded: the chip sits clear of the offer bar and inside the screen.
+      await page.keyboard.press('Escape');
+      await settle(page, 1200);
+      const c = await page.evaluate(() => {
+        const chip = document.getElementById('season-chip')?.getBoundingClientRect();
+        const bar = document.getElementById('promo-bar')?.getBoundingClientRect();
+        const hit = (a, b) => a && b && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+        return { chip: chip && { top: Math.round(chip.top), bottom: Math.round(chip.bottom), right: Math.round(chip.right) }, bar: bar && { top: Math.round(bar.top) }, overlap: !!hit(chip, bar), vh: innerHeight, vw: innerWidth };
+      });
+      report(`seasonsizes ${w}x${h}: the chip is on screen and clear of the offer bar`, c.chip && !c.overlap && c.chip.bottom <= c.vh && c.chip.right <= c.vw, JSON.stringify(c));
+      report(`seasonsizes ${w}x${h}: no errors`, !errors.length, errors.join(' | '));
+      await ctx.close();
+    }
+  },
+
+  /** The offer popup at phone sizes: no empty scroll in the card, a swipe outside takes it down and moves the page. */
+  async popupsizes() {
+    if (!promoIds.length) { report('popupsizes: no offer is running, nothing to check', true); return; }
+    for (const [w, h] of [[320, 568], [375, 667], [390, 844], [1440, 900]]) {
+      const { ctx, page, errors } = await fresh(w, { height: h, touch: w < 700 });
+      // The bar wanted, the popup not opening by itself.
+      await page.addInitScript((ids) => { try { localStorage.setItem('ow.promo', JSON.stringify({ seen: ids, closed: [] })); } catch {} }, promoIds);
+      await page.goto(`${BASE}/#/board`, { waitUntil: 'load' });
+      await settle(page, 4000);
+      if (!(await page.locator('#promo-bar .pb-text').count())) { report(`popupsizes ${w}x${h}: no bar`, true); await ctx.close(); continue; }
+      await page.locator('#promo-bar .pb-text').click();
+      await settle(page, 2200);
+      const m = await page.evaluate(() => {
+        const card = document.querySelector('.ofr-card');
+        const r = card.getBoundingClientRect();
+        const inner = card.querySelector('.ofr-inner').getBoundingClientRect();
+        return { top: Math.round(r.top), bottom: Math.round(r.bottom), vh: innerHeight, scroll: card.scrollHeight - card.clientHeight, content: Math.round(inner.height - r.height), overflow: getComputedStyle(document.documentElement).overflowY };
+      });
+      await page.screenshot({ path: `${process.env.SHOTS ?? '/tmp'}/popup-${w}x${h}.png` });
+      // Whatever the card scrolls by is its own content, never decoration hanging off it.
+      report(`popupsizes ${w}x${h}: on screen, page not locked, no empty scroll`, m.top >= 0 && m.bottom <= m.vh && m.overflow !== 'hidden' && m.scroll <= Math.max(0, m.content) + 2, JSON.stringify(m));
+      const y0 = await page.evaluate(() => scrollY);
+      if (w < 700) await swipe(page, Math.round(w / 2), Math.max(20, Math.round(m.top / 2)) || 20, 400);
+      else { await page.mouse.move(40, 450); await page.mouse.wheel(0, 600); }
+      await settle(page, 1000);
+      const after = await page.evaluate(() => ({ open: !!document.querySelector('.ofr-root'), y: scrollY }));
+      report(`popupsizes ${w}x${h}: a scroll outside takes it down and moves the page`, !after.open && after.y > y0 + 80, JSON.stringify({ y0, ...after }));
+      report(`popupsizes ${w}x${h}: no errors`, !errors.length, errors.join(' | '));
+      await ctx.close();
+    }
+  },
+
+  /**
+   * Every scrolling panel on the site scrolls only as far as its own content.
+   * A decoration hanging off a card (a light beam, a sweep) counts as content
+   * to the browser, and the card then scrolls into nothing and keeps the
+   * swipe that should have gone to the page. Twice now.
+   */
+  async phantom() {
+    const scan = (page) => page.evaluate(() => {
+      const out = [];
+      for (const el of document.querySelectorAll('body *')) {
+        const cs = getComputedStyle(el);
+        if (!/(auto|scroll)/.test(cs.overflowY) || el.scrollHeight <= el.clientHeight + 1 || !el.offsetParent && cs.position !== 'fixed') continue;
+        const top = el.getBoundingClientRect().top - el.scrollTop;
+        let bottom = 0;
+        for (const d of el.querySelectorAll('*')) {
+          if (d.closest('[aria-hidden="true"]') || getComputedStyle(d).position === 'absolute' && !d.textContent.trim()) continue;
+          const b = d.getBoundingClientRect();
+          if (b.height) bottom = Math.max(bottom, b.bottom - top);
+        }
+        const pad = parseFloat(cs.paddingBottom) || 0;
+        const empty = Math.round(el.scrollHeight - bottom - pad);
+        if (empty > 24) out.push(`${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0]} ${empty}px`);
+      }
+      return out;
+    });
+    const { ctx, page } = await fresh(390, { height: 700, touch: true });
+    const found = [];
+    for (const r of ['#/home', '#/board', '#/results', '#/leagues', '#/pricing', `#/fixture/${FX[0]}`, '#/slip', '#/search']) {
+      await page.goto(`${BASE}/${r}`, { waitUntil: 'load' });
+      await settle(page, 2500);
+      for (const x of await scan(page)) found.push(`${r} ${x}`);
+    }
+    // And the panels that only exist when opened.
+    await page.goto(`${BASE}/#/board`, { waitUntil: 'load' });
+    await settle(page, 3000);
+    await page.tap('#burger');
+    await settle(page, 600);
+    for (const x of await scan(page)) found.push(`menu ${x}`);
+    await page.tap('#burger');
+    await settle(page, 400);
+    const dd = page.locator('.dd-btn').first();
+    if (await dd.count()) {
+      await dd.tap().catch(() => {});
+      await settle(page, 600);
+      for (const x of await scan(page)) found.push(`dropdown ${x}`);
+    }
+    report('phantom: no panel scrolls into empty space', !found.length, found.join(' | '));
     await ctx.close();
   },
 
