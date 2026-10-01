@@ -192,7 +192,9 @@ for (const width of WIDTHS) {
         overlaps: [...new Set(overlaps)],
         overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         unresolved: [...new Set(unresolved)],
-        decimals: [...new Set(text.match(/\b\d+\.\d{1,2}\b/g) ?? [])].slice(0, 5),
+        // Money is not a price: "£3.49" on the plans is what membership
+        // costs, not odds. Amounts with a currency sign are taken out first.
+        decimals: [...new Set(text.replace(/[£$€]\s?\d+(?:\.\d\d)?/g, '').match(/\b\d+\.\d{1,2}\b/g) ?? [])].slice(0, 5),
         // A finished match's page is history, like the results page: its
         // calls are public once the match is over (get_fixture unwalls them).
         finished: Boolean(document.querySelector('.fx-top .live-badge.done')),
