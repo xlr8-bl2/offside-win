@@ -23,6 +23,7 @@
  */
 
 import type { PayEnv } from './pay.ts';
+import { accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, membershipMail, renewalStoppedMail, renewedMail, sendMail } from './mail.ts';
 
 export interface AdminEnv extends PayEnv {
   /** Comma-separated SHA-256 hex digests of the owner's lower-cased email. */
@@ -91,6 +92,16 @@ async function body(request: Request): Promise<Record<string, unknown>> {
   } catch { return {}; }
 }
 
+/** An account's sign-in email, from GoTrue with the service key. */
+async function emailOf(env: AdminEnv, user: string): Promise<string | null> {
+  const res = await fetch(new URL(`/auth/v1/admin/users/${user}`, env.SUPABASE_URL), {
+    headers: { apikey: env.SUPABASE_SERVICE_KEY ?? '', authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
+  }).catch(() => null);
+  if (!res?.ok) return null;
+  const u = await res.json().catch(() => null) as { email?: unknown } | null;
+  return typeof u?.email === 'string' && u.email ? u.email : null;
+}
+
 const int = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) ? v : typeof v === 'string' && /^-?\d+$/.test(v) ? Number(v) : null);
 
 export async function admin(request: Request, env: AdminEnv, jwt: string | null, path: string): Promise<Response> {
@@ -123,7 +134,39 @@ export async function admin(request: Request, env: AdminEnv, jwt: string | null,
     const user = String(b['user'] ?? '');
     const days = int(b['days']);
     if (!UUID.test(user) || days === null) return refuse('Pick an account and a number of days.', 400);
-    return db(env, 'admin_grant', { p_actor: who.id, p_user: user, p_days: days });
+    const res = await db(env, 'admin_grant', { p_actor: who.id, p_user: user, p_days: days });
+    // Tell them. The grant stands whether or not the email goes.
+    if (res.ok) {
+      const out = await res.clone().json().catch(() => null) as { expires_at?: unknown } | null;
+      const until = Number(out?.expires_at);
+      const email = await emailOf(env, user);
+      if (email && Number.isFinite(until)) {
+        const sent = await sendMail(env, email, freeTimeMail({ days, until }));
+        console.log('mail: free time', sent ? 'sent' : 'not sent');
+      }
+    }
+    return res;
+  }
+  // Every email the site sends, to the owner's own address, so the designs
+  // and the sending can be checked from a phone. Sample values throughout.
+  if (post && route === 'mail-test') {
+    const now = Math.floor(Date.now() / 1000);
+    const until = now + 30 * 86400;
+    const link = `${new URL(request.url).origin}/#/home`;
+    const all = [
+      authMail({ action: 'magiclink', link }),
+      authMail({ action: 'signup', link }),
+      membershipMail({ plan: 'monthly', until, consent: { at: now, terms: '2026-09-27' } }),
+      membershipMail({ plan: 'matchday', until: now + 86400 }),
+      renewedMail({ plan: 'monthly', until }),
+      renewalStoppedMail({ plan: 'monthly', until }),
+      freeTimeMail({ days: 7, until: now + 7 * 86400 }),
+      accessEndedMail({ reason: 'refund' }),
+      accountDeletedMail({ stoppedRenewal: true }),
+    ];
+    const via: Record<string, string | null> = {};
+    for (const m of all) via[m.tag + (via[m.tag] !== undefined ? '+' : '')] = await deliver(env, who.email, { ...m, subject: `[Test] ${m.subject}` });
+    return reply({ to: 'your own address', sent: Object.values(via).filter(Boolean).length, of: all.length, via, cloudflare: Boolean(env.EMAIL) });
   }
   if (post && route === 'end') {
     const b = await body(request);

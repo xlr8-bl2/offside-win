@@ -20,7 +20,8 @@
  * name someone else's account to delete.
  */
 
-import { provider, stopRenewals, type PayEnv } from './pay.ts';
+import { accountOf, provider, stopRenewals, type PayEnv } from './pay.ts';
+import { accountDeletedMail, sendMail } from './mail.ts';
 
 interface Env extends PayEnv {
   SUPABASE_URL: string;
@@ -56,7 +57,10 @@ export async function deleteAccount(request: Request, env: Env, jwt: string | nu
   // A Whop subscription bills whether or not the account exists, so it is
   // stopped before anything is removed. Deleting first left members paying
   // every month for a membership they could no longer sign in to.
-  if (provider(env) === 'whop' && env.WHOP_API_KEY && !(await stopRenewals(env, { id, email }))) {
+  const whop = provider(env) === 'whop' && Boolean(env.WHOP_API_KEY);
+  // Whether something was set to renew, only so the goodbye email can say it was stopped.
+  const renewing = whop && Boolean((await accountOf(env, jwt).catch(() => null))?.whop);
+  if (whop && !(await stopRenewals(env, { id, email }))) {
     return say('Nothing was deleted: your membership with Whop could not be stopped just now, and deleting would leave it charging. Try again in a minute.', 503);
   }
 
@@ -73,5 +77,8 @@ export async function deleteAccount(request: Request, env: Env, jwt: string | nu
   if (!gone.ok && gone.status !== 404) {
     return say('Your details were removed but the sign-in was not. Try again, or write to support@offside.win.', 502);
   }
+  // The receipt for the deletion. The address is used once, here, and kept
+  // nowhere: the account it belonged to is already gone.
+  if (email) await sendMail(env, email, accountDeletedMail({ stoppedRenewal: renewing }));
   return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
 }

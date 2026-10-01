@@ -31,7 +31,9 @@ Not dev tooling, and stays at launch: the `#/trace` page (`viewTrace()`) and
 the `trace` command (`engine/src/trace.ts`, the `trace` option in `pg.yml`).
 They turn a leaked pick's hidden code back into the account that copied it.
 `mail:setup` (`engine/src/mailsetup.ts`) is setup, not dev tooling, and stays too:
-it re-checks Brevo's DNS records and sends a test email.
+it re-checks Brevo's DNS records and sends a test email. `mail:auth` (`engine/src/authmail.ts`)
+is setup too and stays: it switches Supabase's sign-in emails to the Worker's designed ones
+(`worker/src/authhook.ts`) or back. So does the admin dashboard's "send me every email" test.
 The admin dashboard (`#/admin`, `public/js/admin.js`, `worker/src/admin.ts`, the
 `admin_*` functions and `promo` table in `schema.pg.sql`) is the owner's tool and
 stays at launch. Its "give free time" replaces the `grant` command for everyday

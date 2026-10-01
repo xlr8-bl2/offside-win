@@ -25,6 +25,7 @@
     "whop:check": "tsx src/run.ts whop:check",
     "gemini:check": "tsx src/run.ts gemini:check",
     "mail:setup": "tsx src/run.ts mail:setup",
+    "mail:auth": "tsx src/run.ts mail:auth",
     "cards": "tsx src/run.ts cards",
     "lab": "tsx src/run.ts lab",
     "lab:odds": "tsx src/run.ts lab:odds",
