@@ -181,7 +181,30 @@ async function overview(main) {
           <li><i class="${writer?.exhausted ? 'late' : 'ok'}" aria-hidden="true"></i><b>Writer</b><span>${writer ? `${count(writer.used)} of today's Gemini requests used${writer.exhausted ? ', allowance spent until 08:00 UK' : ''}` : 'no record yet'}</span></li>
         </ul>
       </section>
+      <section class="adm-card">
+        <h2>Emails</h2>
+        <p class="adm-quiet">Every email the site sends, to your own address, so you can see them as members do.</p>
+        <p><button class="btn btn-ghost btn-sm" type="button" id="adm-mail">Send me every email</button></p>
+        <p class="adm-quiet" id="adm-mail-out" role="status"></p>
+      </section>
     </div>`;
+  const btn = main.querySelector('#adm-mail');
+  const out = main.querySelector('#adm-mail-out');
+  btn.onclick = async () => {
+    btn.disabled = true;
+    out.textContent = 'Sending…';
+    try {
+      const r = await api('mail-test', {});
+      const via = [...new Set(Object.values(r.via ?? {}).filter(Boolean))].join(' and ');
+      out.textContent = r.sent
+        ? `Sent ${r.sent} of ${r.of}${via ? ` through ${via === 'cloudflare' ? 'Cloudflare' : via === 'brevo' ? 'Brevo' : via}` : ''}. Check your inbox.`
+        : 'None went out: no way to send email is set up yet.';
+    } catch (err) {
+      out.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  };
 }
 
 /* ---------------------------------------------------------------- users */
