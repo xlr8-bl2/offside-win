@@ -189,6 +189,8 @@ export function freeBundle(bundle: Obj): Obj {
     ...rest,
     ledger: freeFactors(rest['ledger']),
     verdicts,
+    // A written preview of a match with no call: free, through the same gate.
+    ...('preview' in rest ? { preview: freeProse(rest['preview']) } : {}),
     ...lockState(calls),
   }) as Obj;
 }

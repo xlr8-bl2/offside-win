@@ -36,6 +36,12 @@ export interface WriteRequest {
   facts: PubFact[];
   /** The price the call is published at, for the members' paragraph. */
   odds?: number | null;
+  /**
+   * A match we passed on: the preview alone, no members' paragraph. Written
+   * with the day's spare allowance, so a match page with no call still reads
+   * like someone who watches football wrote it.
+   */
+  previewOnly?: boolean;
 }
 
 export interface Writer {
@@ -83,9 +89,52 @@ const MAX_WORDS = 150;
  * something real. The previous output closed on "which is worth knowing and is
  * not an edge" — talking a reader out of the call it had just made.
  */
+/*
+ * Every rule the checks below hold a draft to, said in the brief. A rule the
+ * model is not told is a rule it breaks by accident: "confidence" is in the
+ * banned list (it is our filing system's word), and a pundit writing "low on
+ * confidence" about a side on a bad run was a draft thrown away for using the
+ * most natural phrase in football. Kept beside the checks so the two move
+ * together.
+ */
+const NEVER = [
+  'confidence (say "belief", "nerve" or "form" instead)', 'probability', 'expected goals', 'xG', 'edge',
+  'value', 'the model', 'our numbers', 'fair price', 'points per game', 'goal difference per game',
+  'goal share', 'stake', 'units', 'bankroll', 'yield', 'ROI', 'calibrated', 'Poisson', 'Kelly',
+  'any percentage or % sign',
+].join(', ');
+
 export function buildPrompt(req: WriteRequest): string {
   const facts = req.facts.slice(0, 18).map((f) => `- ${f.text}`).join('\n');
   const odds = oddsPhrase(req.odds);
+  const rules = `Hard rules:
+- Use ONLY the facts listed. Do not invent a statistic, a result, a player, a score or a date.
+- Every number you write must appear in the facts, written the same way (if a fact says "four", write "four" or "4", nothing else). When unsure, leave the number out and say it in words: "a poor run", "goals in most of them".
+- No number with a decimal point${odds ? `, except the odds exactly as given: "${odds}"` : ''}.
+- Never use these words: ${NEVER}.
+- Never mention a bet, market, odds, price or bookmaker${req.previewOnly ? '' : ' in PREVIEW'}.
+- Short sentences against longer ones. Talk to someone who watches football.
+- No dashes between clauses. Use a full stop, a comma or a colon instead.
+- No heading beyond the label${req.previewOnly ? '' : 's'}, no sign-off, no quotation marks around the paragraph.`;
+
+  if (req.previewOnly) {
+    return `You are a football pundit writing a preview of ${req.home} v ${req.away} in the ${req.competition}.
+
+These are the only facts you may use:
+${facts}
+
+Write one paragraph, introduced by its label on its own line, exactly like this:
+
+PREVIEW:
+<the preview>
+
+PREVIEW: 70 to 120 words about the football only. Count them.
+- Open with an opinion, not a fact. Have a take on how this one goes.
+- Name players and managers from the facts: who is out, who starts, who scores.
+- Be willing to say a team is poor, in trouble, or flattered by the table.
+
+${rules}`;
+  }
 
   return `You are a football pundit writing about ${req.home} v ${req.away} in the ${req.competition}.
 
@@ -99,7 +148,7 @@ PREVIEW:
 WHY:
 <why the call>
 
-PREVIEW — 70 to 120 words about the football only.
+PREVIEW: 70 to 120 words about the football only. Count them.
 - Open with an opinion, not a fact. Have a take.
 - Name players and managers from the facts: who is out, who starts, who scores.
   A reader pays for names. "Nice are missing four players" is not analysis;
@@ -107,21 +156,39 @@ PREVIEW — 70 to 120 words about the football only.
 - Be willing to say a team is poor, in trouble, or flattered by the table.
 - Do NOT mention any bet, market, call, odds, price or bookmaker in this paragraph.
 
-WHY — 40 to 90 words explaining why our call is: ${req.call}${odds ? `, ${odds}` : ''}.
+WHY: 40 to 90 words explaining why our call is: ${req.call}${odds ? `, ${odds}` : ''}.
 - Say plainly how the football above leads to THIS outcome, not just that one side is good.
   If the call is about goals, argue about goals: who scores, who cannot defend.
   If it is about a side not losing, argue about why that side avoids defeat.
 - Name at least one player from the facts.${odds ? `
 - Include the exact words "${odds}" once.` : ''}
 
-Hard rules for both:
-- Use ONLY the facts listed. Do not invent a statistic, a result, a player or a score.
-- Do not use any number that is not in the facts above${odds ? ', apart from the odds' : ''}.
-- Never write: confidence, probability, expected goals, xG, edge, value, model,
-  our numbers, points per game, stake, units, bankroll, or any percentage.
-- Short sentences against longer ones. Talk to someone who watches football.
-- No dashes between clauses. Use a full stop, a comma or a colon instead.
-- No heading beyond the two labels, no sign-off.`;
+${rules.replace('Hard rules:', 'Hard rules for both:')}`;
+}
+
+/** What to tell the model about its last draft, so the second is not the first again. */
+export function feedback(preview: string, why: string | null, req: WriteRequest): string {
+  const allowed = backing(req);
+  const whyAllowed = [...allowed, req.call, oddsPhrase(req.odds) ?? ''];
+  const notes: string[] = [];
+  const nums = [...new Set([...unbackedNumbers(preview, allowed), ...(why ? unbackedNumbers(why, whyAllowed) : [])])];
+  if (nums.length) notes.push(`It used ${nums.map((n) => `"${n}"`).join(', ')}, which ${nums.length === 1 ? 'is' : 'are'} not in the facts. Leave ${nums.length === 1 ? 'it' : 'them'} out entirely.`);
+  const banned = [...new Set([...findBannedInProse(preview, allowed), ...(why ? findBannedInProse(why, whyAllowed) : [])].map((v) => v.term))];
+  if (banned.length) notes.push(`It used ${banned.map((t) => `"${t}"`).join(', ')}, which ${banned.length === 1 ? 'is' : 'are'} not allowed. Say it another way.`);
+  const words = (t: string) => t.trim().split(/\s+/).filter(Boolean).length;
+  const pw = words(preview);
+  if (pw < MIN_WORDS) notes.push(`PREVIEW was ${pw} words. Write 70 to 120.`);
+  if (pw > MAX_WORDS) notes.push(`PREVIEW was ${pw} words. Write 70 to 120.`);
+  if (!req.previewOnly) {
+    if (!why) notes.push('WHY was missing. Write it, under its own label.');
+    else {
+      const ww = words(why);
+      if (ww < WHY_MIN || ww > WHY_MAX) notes.push(`WHY was ${ww} words. Write 40 to 90.`);
+      const odds = oddsPhrase(req.odds);
+      if (odds && !why.includes(odds.replace(/^at /, ''))) notes.push(`WHY must include the exact words "${odds}".`);
+    }
+  }
+  return notes.length ? `\n\nYour last draft was rejected. ${notes.join(' ')}` : '';
 }
 
 /**
@@ -291,6 +358,10 @@ export async function write(req: WriteRequest, writer: Writer): Promise<WriteRes
   let prompt = buildPrompt(req);
   const allowed = backing(req);
   const whyAllowed = [...allowed, req.call, oddsPhrase(req.odds) ?? ''];
+  // What has passed so far: a preview from the first draft is kept if the
+  // second is only for the members' paragraph, and the other way round.
+  let good: string | null = null;
+  let goodWhy: string | null = null;
 
   for (let attempt = 0; attempt < 2; attempt++) {
     let draft: string;
@@ -317,24 +388,24 @@ export async function write(req: WriteRequest, writer: Writer): Promise<WriteRes
     if (why && unbackedNumbers(why, whyAllowed).length) why = withoutUnbacked(why, whyAllowed);
 
     const problems = validate(preview, req);
+    const whyOk = !req.previewOnly && why && validateWhy(why, req).length === 0 ? tidy(why) : null;
     if (problems.length === 0) {
-      // The preview can stand without the members' paragraph; a failed WHY
-      // costs that paragraph, not the whole write-up.
-      const whyOk = why && validateWhy(why, req).length === 0 ? tidy(why) : null;
-      return { text: tidy(preview), why: whyOk, rejections, unbacked, provider: writer.name };
+      good ??= tidy(preview);
+      // A members' paragraph that failed is worth one more try while there is
+      // one: it is the part a member pays to read. The preview already stands.
+      if (req.previewOnly || whyOk || attempt === 1) {
+        return { text: good, why: whyOk ?? goodWhy, rejections, unbacked, provider: writer.name };
+      }
+    } else {
+      rejections.push(...problems);
     }
-    rejections.push(...problems);
-    // The second attempt is told what went wrong, rather than asked the same
-    // question and given the same answer.
-    const again = [...new Set(seen)];
-    prompt = buildPrompt(req) + (again.length
-      ? `\n\nYour last draft used ${again.map((n) => `"${n}"`).join(', ')}, which ${again.length === 1 ? 'is' : 'are'} not in the facts. Leave ${again.length === 1 ? 'it' : 'them'} out entirely. Every number you write must appear in the facts, word for word.`
-      : problems.includes('too-short') ? '\n\nYour last draft was too short. Write the full length asked for.'
-      : problems.includes('too-long') ? '\n\nYour last draft was too long. Keep to the length asked for.'
-      : '');
+    goodWhy ??= whyOk;
+    // The second attempt is told exactly what went wrong, rather than asked
+    // the same question and given the same answer.
+    prompt = buildPrompt(req) + feedback(preview, why, req);
   }
 
-  return { text: null, rejections, unbacked, provider: writer.name };
+  return { text: good, why: goodWhy, rejections, unbacked, provider: writer.name };
 }
 
 /** Strip the wrapper a model reaches for even when told not to. */

@@ -4414,7 +4414,10 @@ async function viewFixture(id, params = new URLSearchParams()) {
             // Older pass notes were written for us ("the 58.1 needed against a
             // 109.1% margin"); the gate withholds those and the plain line
             // stands in.
-            : `<p class="narrative">${esc(cleanProse(f.pass) ?? 'Nothing here is worth a call. The bookmakers have it about right.')}</p>${
+            // A match with no call can still carry a written preview (the
+            // slate writes one with the day's spare allowance): the football
+            // first, then why there is no call.
+            : `${!played && cleanProse(f.preview) ? `<p class="narrative">${f._link(esc(cleanProse(f.preview)))}</p>` : ''}<p class="narrative${!played && cleanProse(f.preview) ? ' narrative-pass' : ''}">${esc(cleanProse(f.pass) ?? 'Nothing here is worth a call. The bookmakers have it about right.')}</p>${
               !played && f.read?.text ? `<div class="read-line"><small>Our read</small><b>${esc(f.read.text)}</b>
                   <p>What we think happens. It is a read, not a call: we would not bet it, so it has no price and it is not in our record.</p></div>` : ''}`}
         </div>

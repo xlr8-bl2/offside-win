@@ -4460,6 +4460,8 @@ html.pay-open { overflow: hidden; }
 .seo-meta { color: var(--chalk-3); font-size: var(--text-sm); }
 .seo-list { padding-left: var(--space-5); }
 .seo-list li { margin-bottom: var(--space-2); }
+/* After a written preview, the line on why there is no call is the footnote it is. */
+.narrative.narrative-pass { color: var(--chalk-3); font-size: var(--text-sm); }
 /* The links to the other pages, at the foot of every page the Worker writes. */
 .seo-more { margin-top: var(--space-9); padding-top: var(--space-5); border-top: var(--border) solid var(--hairline); }
 .seo-more h2 { margin-top: 0; }

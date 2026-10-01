@@ -236,11 +236,13 @@ test('one bad sentence is cut, and the rest stands when it is long enough', asyn
     + 'this poor on its travels, avoiding defeat should be the floor rather than the ceiling for them tonight.';
   let calls = 0;
   const r = await write(REQ, stub(() => { calls++; return draft; }));
-  assert.equal(calls, 1, 'no second request for a draft that could be mended');
+  // The preview is mended, not rewritten; the second request is only for the
+  // missing members' paragraph.
+  assert.equal(calls, 2, 'one more request, for the members\' paragraph only');
   assert.ok(r.text);
   assert.ok(!/seven/.test(r.text!), 'the invented claim is gone');
   assert.match(r.text!, /four games in charge/);
-  assert.deepEqual(r.unbacked, ['seven']);
+  assert.deepEqual([...new Set(r.unbacked)], ['seven']);
 });
 
 test('the retry is told which numbers to leave out', async () => {
@@ -249,5 +251,31 @@ test('the retry is told which numbers to leave out', async () => {
   await write(REQ, { name: 'stub', generate: async (p) => { prompts.push(p); return short; } });
   assert.equal(prompts.length, 2);
   assert.ok(!prompts[0]!.includes('Your last draft'));
-  assert.match(prompts[1]!, /Your last draft used "seven", "eight", which are not in the facts/);
+  assert.match(prompts[1]!, /Your last draft was rejected\. It used "seven", "eight", which are not in the facts/);
+});
+
+test('the retry is told which banned words it used, and how long it ran', async () => {
+  const prompts: string[] = [];
+  const draft = 'PREVIEW: KFUM Oslo are low on confidence. That is all there is to it.';
+  await write(REQ, { name: 'stub', generate: async (p) => { prompts.push(p); return draft; } });
+  assert.match(prompts[1]!, /"confidence"/);
+  assert.match(prompts[1]!, /PREVIEW was \d+ words/);
+});
+
+test('a good preview is kept while the members\' paragraph gets its second go', async () => {
+  const preview = 'PREVIEW: KFUM Oslo travel badly, and that is the whole story here. '
+    + 'The new manager has had four games in charge and nothing on the road has changed yet. Sarpsborg have lost two '
+    + 'of their last six, so nobody is claiming they are flying, and they do not need to be. At home against a side '
+    + 'this poor on its travels, avoiding defeat should be the floor rather than the ceiling for them tonight, and '
+    + 'nobody at the ground will expect anything less from them.';
+  const drafts = [preview, 'PREVIEW: short.\nWHY: too short.'];
+  const r = await write(REQ, stub(() => drafts.shift() ?? ''));
+  assert.ok(r.text && /travel badly/.test(r.text), 'the first preview stands');
+});
+
+test('a preview on its own asks for no members\' paragraph and never mentions a bet', () => {
+  const p = buildPrompt({ ...REQ, previewOnly: true });
+  assert.doesNotMatch(p, /WHY:/);
+  assert.match(p, /Never mention a bet, market, odds, price or bookmaker/);
+  assert.match(p, /confidence \(say "belief"/);
 });
