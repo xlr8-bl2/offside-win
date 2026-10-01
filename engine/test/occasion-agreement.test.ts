@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { NAMED, namedFixture, normalise } from '../src/occasion.ts';
-import * as browser from '../../public/js/lib/occasion.js';
+
+// @ts-expect-error plain ES module from the site
+const browser = await import('../../public/js/lib/occasion.js');
 
 /*
  * The site names the big fixtures itself (public/js/lib/occasion.js, for the
