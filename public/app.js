@@ -7316,6 +7316,8 @@ function applyConsent(value) {
   try { localStorage.setItem(CONSENT_KEY, value); } catch { /* private mode: ask again next visit */ }
   document.getElementById('cookie-notice')?.remove();
   document.body.style.paddingBottom = '';
+  // Whatever was waiting for the bottom of the screen (the offer bar) can have it.
+  dispatchEvent(new Event('ow:consent'));
   if (canCount()) countView();
   // A no to saved pages removes what a yes stored.
   if (!canSave()) cacheClear({ keepMemory: true });
@@ -7338,17 +7340,13 @@ function countView() {
 /*
  * Keep the page out from under the notice.
  *
- * On a wide screen the notice floats bottom-right, where it can still sit over
- * the last thing in the footer, so its height is reserved at the foot of the
- * document. Measured rather than guessed, because it wraps to two or three
- * lines depending on width.
- *
- * On a phone it does not float at all -- see `.cookie` in components.css --
- * so there is nothing to reserve and the style is cleared. That is the actual
- * fix for the pricing page, where a floating notice sat on top of the button
- * that takes the money: `elementFromPoint` on Buy returned the notice, so the
- * tap went to the notice and nothing happened. A buyer with a card out,
- * tapping a dead target.
+ * On a wide screen the notice floats bottom-right and on a phone it is a sheet
+ * along the bottom edge (`.cookie` in components.css). Either way it covers
+ * the foot of the screen, so its height is reserved at the foot of the
+ * document and everything under it can be scrolled clear. Measured rather
+ * than guessed, because it wraps differently at every width. This matters
+ * most on the pricing page: a notice over Buy, with nothing to scroll it out
+ * from under, once took the tap meant for the button that takes the money.
  */
 function reserveForNotice() {
   const el = document.getElementById('cookie-notice');

@@ -2262,29 +2262,53 @@
 .switch:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 /*
- * On a phone it stops floating.
+ * On a phone it is a sheet along the bottom edge.
  *
- * A fixed card at the bottom of a 390px viewport sat on top of the pricing
- * page's Buy button, and the tap went to the notice instead: nothing a reader
- * could see was wrong, and nothing they did worked. So on a narrow screen it
- * is a band in the flow, directly under the header, full width like the
- * header itself, where it pushes the page down instead of covering it.
+ * It was a band in the flow under the header, which kept it off the Buy
+ * button but cost the first screen of every first visit: 230px of cookie
+ * question where the day's biggest game should be, the hero pushed half off
+ * the screen. Docked at the bottom instead, the page opens as it is meant to
+ * and the question waits underneath it, where a thumb already is.
+ *
+ * Nothing is lost under it: reserveForNotice (app.js) pads the foot of the
+ * page by its height, so every button can be scrolled clear of it. And it is
+ * the only thing at the bottom: the offer bar waits until it has been
+ * answered (runPromos in promo.js), rather than stacking two bars and a
+ * third of the screen.
+ *
+ * The title runs into the first line of the text so it reads as one short
+ * paragraph, and the two answers stay side by side at the same size.
  */
 @media (max-width: 700px) {
   .cookie {
-    position: static;
+    left: 0;
+    right: 0;
+    bottom: var(--pb-h);
     width: auto;
-    max-height: none;
-    margin: 0;
-    padding: var(--space-5) var(--space-5) var(--space-5);
+    max-height: 85vh;
+    max-height: 85dvh;
+    padding: var(--space-4) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
     border: 0;
-    border-bottom: var(--border) solid var(--rule);
-    border-radius: 0;
-    box-shadow: none;
-    animation: none;
+    border-top: var(--border) solid var(--rule-firm);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    animation-name: cookie-sheet;
+    animation-duration: 420ms;
   }
-  .cookie-title { font-size: var(--text-lg); }
+  .cookie-title {
+    display: inline;
+    margin: 0;
+    font-family: var(--body);
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
+  }
+  .cookie-title::after { content: ' '; }
+  .cookie-text { display: inline; }
+  .cookie-options { margin-top: var(--space-3); }
+  .cookie-actions { margin-top: var(--space-3); }
+  .cookie-actions .btn { min-height: 44px; }
+  .cookie-foot { margin-top: var(--space-2); }
 }
+@keyframes cookie-sheet { from { transform: translateY(100%); } }
 
 /* ===================================================== reduced motion */
 

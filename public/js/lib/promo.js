@@ -443,6 +443,7 @@ if (typeof window !== 'undefined') {
 const NO_POPUP = new Set(['pricing', 'checkout', 'signin', 'account', 'admin', 'legal', 'trace', 'dev']);
 const NO_BAR = new Set(['checkout', 'admin']);
 let armed = false;
+let waiting = false;
 
 /**
  * Called after every route. Puts up the bar for the running offer and, once a
@@ -455,7 +456,15 @@ export async function runPromos({ route, signedIn, member, returning = false, an
   const mine = all.filter((p) => eligible(p, { signedIn, member, returning }));
   const bar = mine.find((p) => !(mem.closed ?? []).includes(p.id));
   const shown = document.getElementById('promo-bar');
-  if (NO_BAR.has(route) || !bar) shown?.remove();
+  // On a phone the cookie question is a sheet along the bottom edge, and the
+  // bar would stack on it. It waits for the answer, then comes up as usual.
+  const asking = !!document.getElementById('cookie-notice') && matchMedia('(max-width: 700px)').matches;
+  if (asking && bar && !NO_BAR.has(route)) {
+    if (!waiting) {
+      waiting = true;
+      addEventListener('ow:consent', () => { waiting = false; runPromos({ route, signedIn, member, returning, anchor }); }, { once: true });
+    }
+  } else if (NO_BAR.has(route) || !bar) shown?.remove();
   else if (!shown || shown.dataset.id !== bar.id) {
     // After the faces have loaded: a font arriving under a bar already on
     // screen changes its height, and a bar anchored at the bottom then moves.
