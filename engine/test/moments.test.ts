@@ -19,7 +19,8 @@ const H = 3600;
 const D = 86400;
 let id = 1;
 const fx = (home: string, away: string, league_id: number, hoursAhead: number, extra: Record<string, unknown> = {}) =>
-  ({ id: id++, home, away, league_id, league: `L${league_id}`, home_id: 1, away_id: 2, kickoff: NOW + hoursAhead * H, status: 'notstarted', ...extra });
+  ({ id: id++, home, away, league_id, league: `L${league_id}`, home_id: 1, away_id: 2, kickoff: NOW + hoursAhead * H, status: 'notstarted', top_pick: { x: 1 }, ...extra });
+const NO_CALL = { top_pick: null };
 const pl = (n: number, from = 3) => Array.from({ length: n }, (_, i) => fx(`Home ${i}`, `Away ${i}`, 1, from + i * 2));
 const asked: number[] = [];
 /* A league's page data as /api/league/{id} sends it: the table, the last
@@ -46,7 +47,7 @@ const lastPlayedAgo = leagueAgo;
 test('El Clásico within the day is the moment, with its colours and its call', async () => {
   const m = await findMoment({
     now: NOW,
-    fixtures: [...pl(6), fx('Real Madrid', 'FC Barcelona', 3, 20, { colors: { home: '#ffffff', away: '#a50044' }, locked: true })],
+    fixtures: [...pl(6), fx('Real Madrid', 'FC Barcelona', 3, 20, { colors: { home: '#ffffff', away: '#a50044' }, locked: true, ...NO_CALL })],
     league: lastPlayedAgo(19),
   });
   assert.equal(m.kind, 'derby');
@@ -114,7 +115,7 @@ test('every card is in the house voice: no banned words, no middle dots, no shou
   ];
   for (const m of cards) {
     const w = wordsFor(m);
-    const text = [w.shout, w.title, w.lead, w.line, ...(w.takes ?? []), w.cta.label].filter(Boolean).join(' ');
+    const text = [w.shout, w.title, w.lead, w.line, w.calls, ...(w.takes ?? []), w.cta.label].filter(Boolean).join(' ');
     assert.deepEqual(findBannedInProse(text), [], text);
     assert.doesNotMatch(text, /·|undefined|NaN/, text);
     assert.doesNotMatch(text, /\b[A-Z]{4,}\b/, text);
@@ -142,6 +143,51 @@ test('the derby card says where they stand and how they got on last time', async
   const w = wordsFor(d);
   assert.equal(w.shout, 'Matchday. Let’s gooo.');
   assert.ok(w.takes.some((t: string) => t === 'Arsenal won 3–1 at Fulham last time out.'), w.takes.join(' | '));
+});
+
+test('one comeback card a weekend, whichever big league is back first', async () => {
+  const pl1 = await findMoment({ now: NOW, fixtures: pl(4), league: leagueAgo(19) });
+  const liga = await findMoment({ now: NOW, fixtures: Array.from({ length: 4 }, (_, i) => fx(`H${i}`, `A${i}`, 3, 3 + i)), league: leagueAgo(19) });
+  assert.equal(pl1.key, liga.key, 'the same weekend shares one key, so it is shown once');
+});
+
+test('women’s and youth competitions are not hyped as the men’s game', async () => {
+  const liga = fx('Fútbol Club Barcelona', 'Real Madrid', 140, 10, { league: 'Liga F' });
+  assert.equal(await findMoment({ now: NOW, fixtures: [liga] }), null);
+  assert.equal(await findMoment({ now: NOW, fixtures: [fx('Real Madrid', 'RCD Espanyol de Barcelona', 3, 10)] }), null, 'not El Clásico');
+});
+
+test('calls first: a derby waits for our call', async () => {
+  const pending = fx('Manchester City', 'Manchester United', 1, 10, NO_CALL);
+  assert.equal(await findMoment({ now: NOW, fixtures: [pending] }), null, 'not looked at yet: wait');
+  const passed = (h: number) => fx('Manchester City', 'Manchester United', 1, h, { ...NO_CALL, pass: 'Nothing to take on it.' });
+  assert.equal(await findMoment({ now: NOW, fixtures: [passed(20)] }), null, 'a pass the day before: no hype');
+  const onTheDay = await findMoment({ now: NOW, fixtures: [passed(6)] });
+  assert.equal(onTheDay.fixture.call, 'pass');
+  assert.match(wordsFor(onTheDay).line, /No call from us on this one/);
+  const called = await findMoment({ now: NOW, fixtures: [fx('Manchester City', 'Manchester United', 1, 20, { ...NO_CALL, locked: true })] });
+  assert.equal(wordsFor(called).cta.label, 'See our call');
+});
+
+test('calls first: a league back waits until most games are looked at and one is called', async () => {
+  const undecided = Array.from({ length: 5 }, (_, i) => fx(`H${i}`, `A${i}`, 1, 10 + i, NO_CALL));
+  assert.equal(await findMoment({ now: NOW, fixtures: undecided, league: leagueAgo(19) }), null, 'nothing looked at');
+  const allPassed = undecided.map((f) => ({ ...f, pass: 'No.' }));
+  assert.equal(await findMoment({ now: NOW, fixtures: allPassed, league: leagueAgo(19) }), null, 'looked at, nothing called');
+  const ready = [...allPassed.slice(0, 2), { ...undecided[2], top_pick: { x: 1 } }, { ...undecided[3], locked: true }, undecided[4]];
+  const m = await findMoment({ now: NOW, fixtures: ready, league: leagueAgo(19) });
+  assert.equal(m.kind, 'return');
+  assert.equal(m.calls, 2);
+  assert.deepEqual(m.games.slice(0, 2).map((g: { call: string }) => g.call), ['open', 'members'], 'the called games lead');
+  assert.equal(wordsFor(m).calls, 'Our calls are in on two of the five.');
+});
+
+test('calls first: a Champions League night waits for its calls', async () => {
+  const night = [fx('X', 'Y', 7, 9, NO_CALL), fx('Z', 'W', 7, 10, NO_CALL)];
+  assert.equal(await findMoment({ now: NOW, fixtures: night }), null);
+  const m = await findMoment({ now: NOW, fixtures: [{ ...night[0]!, pass: 'No.' }, { ...night[1]!, top_pick: { x: 1 } }] });
+  assert.equal(m.kind, 'ucl');
+  assert.equal(wordsFor(m).calls, 'Our calls are in on one of the two.');
 });
 
 /* ------------------------------------------------------------ attention */

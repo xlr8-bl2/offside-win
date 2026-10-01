@@ -25,6 +25,8 @@ test('normalise strips decoration but keeps the distinguishing word', () => {
 test('El Clasico is found under either spelling and either way round', () => {
   assert.equal(namedFixture('Real Madrid', 'FC Barcelona')?.kicker, 'El Clásico');
   assert.equal(namedFixture('Fútbol Club Barcelona', 'Real Madrid')?.kicker, 'El Clásico');
+  // Espanyol's full name ends in Barcelona. Real Madrid v Espanyol is not El Clásico.
+  assert.equal(namedFixture('Real Madrid', 'RCD Espanyol de Barcelona'), null);
 });
 
 test('the Madrid derby is not mistaken for El Clasico', () => {

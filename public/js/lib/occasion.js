@@ -27,7 +27,9 @@ export function normalise(name) {
 
 export const NAMED = [
   // Spain
-  { kicker: 'El Clásico', weight: 400, a: ['real madrid'], b: ['barcelona'] },
+  // Not Espanyol: "RCD Espanyol de Barcelona" ends in Barcelona, and Real
+  // Madrid v Espanyol was being billed as El Clásico.
+  { kicker: 'El Clásico', weight: 400, a: ['real madrid'], b: ['barcelona'], not: ['espanyol'] },
   { kicker: 'The Madrid derby', weight: 260, a: ['real madrid'], b: ['atletico madrid', 'atletico'] },
   { kicker: 'The Seville derby', weight: 180, a: ['sevilla'], b: ['real betis', 'betis'] },
   { kicker: 'The Basque derby', weight: 150, a: ['athletic', 'athletic bilbao'], b: ['real sociedad'] },
@@ -75,6 +77,7 @@ export function namedFixture(home, away) {
   const a = normalise(away);
   const hit = (list, v) => list.some((n) => v === n || v.endsWith(` ${n}`) || v.startsWith(`${n} `));
   for (const f of NAMED) {
+    if (f.not?.some((w) => ` ${h} ${a} `.includes(` ${w} `))) continue;
     if ((hit(f.a, h) && hit(f.b, a)) || (hit(f.b, h) && hit(f.a, a))) return f;
   }
   return null;

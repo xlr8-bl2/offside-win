@@ -36,14 +36,53 @@ const HOUR = 3600;
 const DAY = 86400;
 const OVER = new Set(['finished', 'ended', 'aet', 'ap', 'postponed', 'canceled', 'cancelled', 'abandoned', 'unresolved']);
 const upcoming = (f, now) => f && f.kickoff > now && !OVER.has(String(f.status ?? '').toLowerCase());
+/*
+ * The cards are for the senior men's game the hype is written for. The
+ * provider names a women's or youth side exactly like the men's, so Barcelona
+ * v Real Madrid in Liga F read as El Clásico; the competition is how to tell.
+ */
+const NOT_SENIOR = /\bwomen|femen|fémin|feminin|frauen|\bliga f\b|\bwsl\b|\bu-?\d\d\b|under[- ]\d\d|youth|junior|primavera|reserve|\bii\b/i;
+const senior = (f) => !NOT_SENIOR.test(String(f.league ?? ''));
 const dayKey = (epoch) => { const d = new Date(epoch * 1000); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
 const sameDay = (a, b) => dayKey(a) === dayKey(b);
+/** The Monday of the week an epoch falls in, as a day key. */
+const weekOf = (epoch) => { const d = new Date(epoch * 1000); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return dayKey(d.getTime() / 1000); };
 const hexOk = (c) => (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c : null);
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const NUM = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen', 'Twenty'];
 const Num = (n) => NUM[n] ?? String(n);
 const num = (n) => (NUM[n] ? NUM[n].toLowerCase() : String(n));
 const ordinal = (n) => { const s = ['th', 'st', 'nd', 'rd']; const v = n % 100; return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`; };
+
+/*
+ * Calls first. A card that shouts about a weekend we have not called is a
+ * card selling nothing, so every moment waits for the calls:
+ *
+ *   - a named fixture shows once our call on it is in (open or members'). If
+ *     we pass on it, it shows only on the day, and says so: no hype for a
+ *     game we are not backing. Not looked at yet: it waits.
+ *   - a league back, or a Champions League night, shows once most of those
+ *     games have been looked at (three in five or more) and at least one has
+ *     a call. It says how many, and the called games lead the list.
+ *
+ * Waiting costs nothing: nothing is remembered until a card is shown, and
+ * the board is read again on every visit.
+ */
+
+/** Where a game stands with us: a call (open, or members'), a pass, or not looked at yet. */
+export const callState = (f) => (f.top_pick || f.called ? 'open' : f.locked ? 'members' : f.pass ? 'pass' : 'pending');
+const isCall = (s) => s === 'open' || s === 'members';
+
+/** Whether a set of games is ready to be shouted about. */
+export function readiness(games) {
+  const states = games.map(callState);
+  const decided = states.filter((x) => x !== 'pending').length;
+  const calls = states.filter(isCall).length;
+  return { total: games.length, decided, calls, ready: calls >= 1 && decided / Math.max(1, games.length) >= 0.6 };
+}
+
+/** The games for the card: called ones first, then by kick-off. */
+const lineup = (games, n) => [...games].sort((a, b) => (isCall(callState(b)) - isCall(callState(a))) || a.kickoff - b.kickoff).slice(0, n).map(slim);
 
 /**
  * The moment on now, if there is one. `league(id)` answers with that
@@ -52,20 +91,21 @@ const ordinal = (n) => { const s = ['th', 'st', 'nd', 'rd']; const v = n % 100; 
  * costs nothing, and its answer is what the card talks about.
  */
 export async function findMoment({ fixtures = [], now = Date.now() / 1000, league = async () => null } = {}) {
-  const ahead = fixtures.filter((f) => upcoming(f, now)).sort((a, b) => a.kickoff - b.kickoff);
+  const ahead = fixtures.filter((f) => upcoming(f, now) && senior(f)).sort((a, b) => a.kickoff - b.kickoff);
   const table = async (id) => {
     const d = await league(id).catch(() => null);
     return d ? { standings: d.standings ?? [], last: d.last ?? [], scorers: d.scorers ?? [], next: d.next ?? [] } : null;
   };
 
-  // A named fixture within the day. The biggest, if two fall together.
+  // A named fixture within the day, with our call on it in (or, on the day
+  // itself, a pass we can own). The biggest that qualifies.
   const named = ahead
     .filter((f) => f.kickoff - now <= 30 * HOUR)
-    .map((f) => ({ f, n: namedFixture(f.home, f.away) }))
-    .filter((x) => x.n)
+    .map((f) => ({ f, n: namedFixture(f.home, f.away), state: callState(f) }))
+    .filter((x) => x.n && (isCall(x.state) || (x.state === 'pass' && x.f.kickoff - now <= 12 * HOUR)))
     .sort((a, b) => b.n.weight - a.n.weight)[0];
   if (named) {
-    const { f, n } = named;
+    const { f, n, state } = named;
     return {
       kind: 'derby',
       key: `n:${f.id}`,
@@ -74,41 +114,50 @@ export async function findMoment({ fixtures = [], now = Date.now() / 1000, leagu
       fixture: {
         id: f.id, home: f.home, away: f.away, home_id: f.home_id, away_id: f.away_id, kickoff: f.kickoff, league: f.league, league_id: f.league_id ?? null,
         colors: { home: hexOk(f.colors?.home), away: hexOk(f.colors?.away) },
-        call: f.top_pick ? 'open' : f.locked ? 'members' : 'none',
+        call: state,
       },
       table: f.league_id ? await table(f.league_id) : null,
     };
   }
 
-  // A big league back: on the board within two days, with ten clear days or
-  // more since its last game.
+  // A big league back: on the board within two days, ten clear days or more
+  // since its last game, and the calls in.
   for (const [id, name] of RETURNING) {
     const games = ahead.filter((f) => Number(f.league_id) === id);
     if (!games.length || games[0].kickoff - now > 48 * HOUR) continue;
+    const round = games.filter((f) => f.kickoff - games[0].kickoff <= 72 * HOUR);
+    const r = readiness(round);
+    if (!r.ready) continue;
     const t = await table(id);
     const last = Math.max(0, ...(t?.last ?? []).map((g) => Number(g.kickoff)).filter((k) => k < now));
     if (!last || games[0].kickoff - last < 10 * DAY) continue;
     return {
       kind: 'return',
-      key: `r:${id}:${dayKey(games[0].kickoff)}`,
+      // One key for the whole comeback weekend, not one per league: the big
+      // five come back within a day of each other, and four "is back" cards
+      // in two days is three too many. The first in RETURNING's order that is
+      // ready gets it.
+      key: `r:${weekOf(games[0].kickoff)}`,
       leagueId: id,
       league: games[0].league,
       name,
       gap: Math.floor((games[0].kickoff - last) / DAY),
-      count: games.length,
-      games: games.slice(0, 4).map(slim),
+      count: round.length,
+      calls: r.calls,
+      games: lineup(round, 4),
       table: t,
     };
   }
 
-  // A Champions League night: two games or more still to come today.
+  // A Champions League night: two games or more still to come today, and the calls in.
   const tonight = ahead.filter((f) => Number(f.league_id) === UCL && sameDay(f.kickoff, now));
-  if (tonight.length >= 2) {
-    return { kind: 'ucl', key: `c:${dayKey(now)}`, leagueId: UCL, league: tonight[0].league, count: tonight.length, games: tonight.slice(0, 4).map(slim), table: await table(UCL) };
+  const r = readiness(tonight);
+  if (tonight.length >= 2 && r.ready) {
+    return { kind: 'ucl', key: `c:${dayKey(now)}`, leagueId: UCL, league: tonight[0].league, count: tonight.length, calls: r.calls, games: lineup(tonight, 4), table: await table(UCL) };
   }
   return null;
 }
-const slim = (f) => ({ id: f.id, home: f.home, away: f.away, home_id: f.home_id ?? null, away_id: f.away_id ?? null, kickoff: f.kickoff });
+const slim = (f) => ({ id: f.id, home: f.home, away: f.away, home_id: f.home_id ?? null, away_id: f.away_id ?? null, kickoff: f.kickoff, call: callState(f) });
 
 /* --------------------------------------------------------------- the talk */
 
@@ -199,6 +248,12 @@ function uclTakes(m) {
   return out.slice(0, 2);
 }
 
+/** How many of the games we have called: the reason the card is up at all. */
+function callsLine(m) {
+  if (!m.calls) return '';
+  return m.calls === m.count ? `Our calls are in on all ${num(m.count)}.` : `Our calls are in on ${num(m.calls)} of the ${num(m.count)}.`;
+}
+
 /** What the card says, separate from how it moves, so it can be tested. */
 export function wordsFor(m) {
   if (m.kind === 'derby') {
@@ -210,8 +265,8 @@ export function wordsFor(m) {
       takes: derbyTakes(m),
       line: f.call === 'open' ? 'Our call’s up, reasons and all. Go and get it.'
         : f.call === 'members' ? 'Our call’s in. Members, you know where it is. The preview’s free.'
-        : 'Our call lands when the team sheets do. The preview’s up now.',
-      cta: { label: 'Read the preview', href: `#/fixture/${encodeURIComponent(f.id)}` },
+        : 'No call from us on this one, and we’re not going to pretend. The preview says why.',
+      cta: { label: f.call === 'pass' ? 'Read the preview' : 'See our call', href: `#/fixture/${encodeURIComponent(f.id)}` },
     };
   }
   if (m.kind === 'return') {
@@ -220,6 +275,7 @@ export function wordsFor(m) {
       title: `${cap(m.name)} is back.`,
       lead: `${Num(m.gap)} days of international football. Done. Gone. Over.`,
       takes: returnTakes(m),
+      calls: callsLine(m),
       cta: { label: 'Get the calls', href: `#/league/${m.leagueId}` },
     };
   }
@@ -228,6 +284,7 @@ export function wordsFor(m) {
     title: 'Champions League night.',
     lead: `${Num(m.count)} games under the lights. Anthem on, phones down.`,
     takes: uclTakes(m),
+    calls: callsLine(m),
     cta: { label: 'Get tonight’s calls', href: `#/league/${m.leagueId}` },
   };
 }
@@ -318,12 +375,13 @@ function cardHTML(m, { crest = plainCrest, esc = plainEsc, clock, now }) {
       <div class="mo-head">${emblem(m, crest)}<h2 class="mo-title" id="mo-title">${words(w.title)}</h2></div>
       <p class="mo-lead">${esc(w.lead)}</p>
       ${w.takes.length ? `<ul class="mo-takes">${w.takes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+      ${w.calls ? `<p class="mo-calls">${esc(w.calls)}</p>` : ''}
       <ol class="mo-vidi">${m.games.map((g) => {
         const text = `${g.home} v ${g.away}`;
         return `<li><a href="#/fixture/${encodeURIComponent(g.id)}" data-mo-go>
-          <span class="visually-hidden">${esc(text)}, ${esc(shortWhen(g.kickoff, now, clock))}</span>
+          <span class="visually-hidden">${esc(text)}, ${esc(shortWhen(g.kickoff, now, clock))}${g.call === 'open' || g.call === 'members' ? ', we have a call on it' : ''}</span>
           <span class="mo-type" aria-hidden="true" data-text="${esc(text)}">${esc(text)}</span>
-          <time aria-hidden="true">${esc(shortWhen(g.kickoff, now, clock))}</time></a></li>`;
+          <time aria-hidden="true">${g.call === 'open' || g.call === 'members' ? '<i class="mo-called" title="We have a call on this"></i>' : ''}${esc(shortWhen(g.kickoff, now, clock))}</time></a></li>`;
       }).join('')}</ol>
       ${actions}
     </div>`;
@@ -476,7 +534,8 @@ function animate(root, m) {
   const tail = 520 + ws.length * 60;
   go(root.querySelector('.mo-lead'), [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: 700, delay: tail, easing: EXPO });
   takes(tail + 160);
-  const n = all('.mo-takes li').length;
+  const n = all('.mo-takes li').length + (root.querySelector('.mo-calls') ? 1 : 0);
+  go(root.querySelector('.mo-calls'), [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 600, delay: tail + 160 + all('.mo-takes li').length * 140, easing: EXPO });
   vidiprinter(root, tail + 260 + n * 140);
   go(root.querySelector('.mo-actions'), [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: 700, delay: tail + 400 + n * 140, easing: EXPO });
 }

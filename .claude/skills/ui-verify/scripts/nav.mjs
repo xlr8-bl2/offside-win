@@ -565,7 +565,7 @@ const scenarios = {
       const res = await route.fetch();
       const body = await res.json();
       const now = Math.floor(Date.now() / 1000);
-      body.fixtures = [{ id: 990001, home: 'Real Madrid', away: 'FC Barcelona', home_id: 57, away_id: 44, league: 'La Liga', league_id: 3, kickoff: now + 20 * 3600, status: 'notstarted', colors: { home: '#febe10', away: '#a50044' } }, ...(body.fixtures ?? [])];
+      body.fixtures = [{ id: 990001, home: 'Real Madrid', away: 'FC Barcelona', home_id: 57, away_id: 44, league: 'La Liga', league_id: 3, kickoff: now + 20 * 3600, status: 'notstarted', locked: true, colors: { home: '#febe10', away: '#a50044' } }, ...(body.fixtures ?? [])];
       await route.fulfill({ response: res, json: body });
     });
     await page.goto(`${BASE}/#/home`, { waitUntil: 'load' });
