@@ -40,16 +40,23 @@ const dayKey = (epoch) => { const d = new Date(epoch * 1000); return `${d.getFul
 const sameDay = (a, b) => dayKey(a) === dayKey(b);
 const hexOk = (c) => (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c : null);
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-const NUM = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve'];
-const count = (n, one, many) => `${NUM[n] ?? n} ${n === 1 ? one : many}`;
+const NUM = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen', 'Twenty'];
+const Num = (n) => NUM[n] ?? String(n);
+const num = (n) => (NUM[n] ? NUM[n].toLowerCase() : String(n));
+const ordinal = (n) => { const s = ['th', 'st', 'nd', 'rd']; const v = n % 100; return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`; };
 
 /**
- * The moment on now, if there is one. `lastPlayed(leagueId)` answers when that
- * competition last had a game, as an epoch; it is only asked about a league
- * that is on the board in the next two days, so an ordinary day costs nothing.
+ * The moment on now, if there is one. `league(id)` answers with that
+ * competition's page data (/api/league/{id}: table, last results, scorers).
+ * It is asked only about a league with a moment in it, so an ordinary day
+ * costs nothing, and its answer is what the card talks about.
  */
-export async function findMoment({ fixtures = [], now = Date.now() / 1000, lastPlayed = async () => null } = {}) {
+export async function findMoment({ fixtures = [], now = Date.now() / 1000, league = async () => null } = {}) {
   const ahead = fixtures.filter((f) => upcoming(f, now)).sort((a, b) => a.kickoff - b.kickoff);
+  const table = async (id) => {
+    const d = await league(id).catch(() => null);
+    return d ? { standings: d.standings ?? [], last: d.last ?? [], scorers: d.scorers ?? [], next: d.next ?? [] } : null;
+  };
 
   // A named fixture within the day. The biggest, if two fall together.
   const named = ahead
@@ -63,11 +70,13 @@ export async function findMoment({ fixtures = [], now = Date.now() / 1000, lastP
       kind: 'derby',
       key: `n:${f.id}`,
       kicker: n.kicker,
+      today: sameDay(f.kickoff, now),
       fixture: {
         id: f.id, home: f.home, away: f.away, home_id: f.home_id, away_id: f.away_id, kickoff: f.kickoff, league: f.league, league_id: f.league_id ?? null,
         colors: { home: hexOk(f.colors?.home), away: hexOk(f.colors?.away) },
         call: f.top_pick ? 'open' : f.locked ? 'members' : 'none',
       },
+      table: f.league_id ? await table(f.league_id) : null,
     };
   }
 
@@ -76,7 +85,8 @@ export async function findMoment({ fixtures = [], now = Date.now() / 1000, lastP
   for (const [id, name] of RETURNING) {
     const games = ahead.filter((f) => Number(f.league_id) === id);
     if (!games.length || games[0].kickoff - now > 48 * HOUR) continue;
-    const last = await lastPlayed(id).catch(() => null);
+    const t = await table(id);
+    const last = Math.max(0, ...(t?.last ?? []).map((g) => Number(g.kickoff)).filter((k) => k < now));
     if (!last || games[0].kickoff - last < 10 * DAY) continue;
     return {
       kind: 'return',
@@ -86,43 +96,139 @@ export async function findMoment({ fixtures = [], now = Date.now() / 1000, lastP
       name,
       gap: Math.floor((games[0].kickoff - last) / DAY),
       count: games.length,
-      games: games.slice(0, 5).map(slim),
+      games: games.slice(0, 4).map(slim),
+      table: t,
     };
   }
 
   // A Champions League night: two games or more still to come today.
   const tonight = ahead.filter((f) => Number(f.league_id) === UCL && sameDay(f.kickoff, now));
   if (tonight.length >= 2) {
-    return { kind: 'ucl', key: `c:${dayKey(now)}`, leagueId: UCL, league: tonight[0].league, count: tonight.length, games: tonight.slice(0, 6).map(slim) };
+    return { kind: 'ucl', key: `c:${dayKey(now)}`, leagueId: UCL, league: tonight[0].league, count: tonight.length, games: tonight.slice(0, 4).map(slim), table: await table(UCL) };
   }
   return null;
 }
-const slim = (f) => ({ id: f.id, home: f.home, away: f.away, kickoff: f.kickoff });
+const slim = (f) => ({ id: f.id, home: f.home, away: f.away, home_id: f.home_id ?? null, away_id: f.away_id ?? null, kickoff: f.kickoff });
+
+/* --------------------------------------------------------------- the talk */
+
+/*
+ * The brief, in the client's words: "where's the football, I want the real
+ * deal", and "Let's gooo". So every card opens with a shout and then earns
+ * it with the football: who is top and by how much, who has not won, who is
+ * scoring, how each side got on last time out. Only pub numbers (positions,
+ * points, scores, goals), never a rate or a decimal; offside-voice has the
+ * rule and vocabulary.ts enforces it.
+ */
+const rowOf = (t, id, name) => (t?.standings ?? []).find((r) => (id != null && Number(r.team_id) === Number(id)) || r.team === name) ?? null;
+const sorted = (t) => [...(t?.standings ?? [])].filter((r) => r.position).sort((a, b) => a.position - b.position);
+const gapWords = (n) => (n === 0 ? 'level on points' : n === 1 ? 'a point between them' : `${num(n)} points between them`);
+
+/** How a side's last game went, said from their side: "won 3–1 at Fulham". */
+function lastOut(t, id, name) {
+  const g = [...(t?.last ?? [])].filter((x) => Array.isArray(x.score) && ((id != null && (Number(x.home_id) === Number(id) || Number(x.away_id) === Number(id))) || x.home === name || x.away === name))
+    .sort((a, b) => b.kickoff - a.kickoff)[0];
+  if (!g) return null;
+  const home = (id != null && Number(g.home_id) === Number(id)) || g.home === name;
+  const [f, a] = home ? g.score : [g.score[1], g.score[0]];
+  const opp = home ? g.away : g.home;
+  const res = f > a ? 'won' : f < a ? 'lost' : 'drew';
+  // The winner's score first, the way it is said: "lost 2–1 at Atlético".
+  const score = f >= a ? `${f}–${a}` : `${a}–${f}`;
+  return { res, f, a, opp, home, text: `${res} ${score} ${home ? 'at home to' : 'at'} ${opp}` };
+}
+
+function derbyTakes(m) {
+  const f = m.fixture;
+  const t = m.table;
+  const out = [];
+  const H = rowOf(t, f.home_id, f.home);
+  const A = rowOf(t, f.away_id, f.away);
+  if (H && A) {
+    const [hi, lo] = H.position < A.position ? [H, A] : [A, H];
+    const gap = hi.points - lo.points;
+    if (hi.position === 1 && lo.position === 2) out.push(`Top against second, ${gapWords(gap)}. This is the title, early.`);
+    else if (hi.position === 1) out.push(`${hi.team} top, ${lo.team} ${ordinal(lo.position)}, ${gapWords(gap)}.`);
+    else if (gap === 0) out.push(`Level on points. Somebody blinks.`);
+    else out.push(`${hi.team} ${ordinal(hi.position)}, ${lo.team} ${ordinal(lo.position)}, ${gapWords(gap)}.`);
+    const perfect = [H, A].find((r) => r.played >= 3 && r.won === r.played);
+    const winless = [H, A].find((r) => r.played >= 3 && r.won === 0);
+    if (perfect) out.push(`${perfect.team} have won all ${num(perfect.played)}. This is where that gets tested.`);
+    else if (winless) out.push(`${winless.team} haven’t won yet. Imagine the first one being this.`);
+  }
+  for (const [id, name] of [[f.home_id, f.home], [f.away_id, f.away]]) {
+    if (out.length >= 3) break;
+    const l = lastOut(t, id, name);
+    if (l) out.push(`${name} ${l.text} last time out.`);
+  }
+  return out.slice(0, 3);
+}
+
+function returnTakes(m) {
+  const t = m.table;
+  const rows = sorted(t);
+  const out = [];
+  const top = rows[0];
+  const second = rows[1];
+  if (top) {
+    const gap = top.points - (second?.points ?? top.points);
+    if (top.played >= 3 && top.won === top.played) out.push(`${top.team} top, ${num(top.won)} from ${num(top.played)}. Nobody’s laid a glove on them.`);
+    else if (gap >= 3) out.push(`${top.team} top and ${num(gap)} points clear already.`);
+    else if (gap > 0) out.push(`${top.team} top, but only by ${gap === 1 ? 'a point' : `${num(gap)} points`}. It’s wide open.`);
+    else out.push(`${top.team} top on goal difference. Wide open.`);
+  }
+  // The pick of the weekend: the game between the two highest-placed sides.
+  const pos = (id, name) => rowOf(t, id, name)?.position ?? 99;
+  const pick = m.games.map((g) => ({ g, a: pos(g.home_id, g.home), b: pos(g.away_id, g.away) })).filter((x) => x.a <= 8 && x.b <= 8).sort((x, y) => (x.a + x.b) - (y.a + y.b))[0];
+  if (pick) out.push(`Pick of the weekend: ${pick.g.home} v ${pick.g.away}, ${ordinal(pick.a)} against ${ordinal(pick.b)}.`);
+  const boot = (t?.scorers ?? [])[0];
+  if (boot && boot.goals >= 3) out.push(`${boot.name}’s got ${num(boot.goals)} already. Somebody mark him.`);
+  const winless = rows.filter((r) => r.played >= 3 && r.won === 0).map((r) => r.team);
+  if (winless.length === 1) out.push(`${winless[0]} still haven’t won a game. Sort it out.`);
+  return out.slice(0, 3);
+}
+
+function uclTakes(m) {
+  const t = m.table;
+  const out = [];
+  const seen = m.games.flatMap((g) => [[g.home_id, g.home], [g.away_id, g.away]]).map(([id, name]) => ({ name, l: lastOut(t, id, name) })).filter((x) => x.l);
+  const thrash = seen.filter((x) => x.l.res === 'won').sort((a, b) => (b.l.f - b.l.a) - (a.l.f - a.l.a))[0];
+  if (thrash && thrash.l.f - thrash.l.a >= 2) out.push(`${thrash.name} put ${num(thrash.l.f)} past ${thrash.l.opp} last time. Again?`);
+  const hurt = seen.find((x) => x.l.res === 'lost');
+  if (hurt) out.push(`${hurt.name} lost last time out. Lose again and it gets ugly.`);
+  return out.slice(0, 2);
+}
 
 /** What the card says, separate from how it moves, so it can be tested. */
 export function wordsFor(m) {
   if (m.kind === 'derby') {
     const f = m.fixture;
     return {
+      shout: m.today ? 'Matchday. Let’s gooo.' : 'Tomorrow. Clear your diary.',
       title: m.kicker,
       teams: [f.home, f.away],
-      line: f.call === 'open' ? 'Our call is up, and the reasons with it.'
-        : f.call === 'members' ? 'Our call is up, for members. The preview is free.'
-        : 'Our call goes up once the team news is in. The preview is up now.',
+      takes: derbyTakes(m),
+      line: f.call === 'open' ? 'Our call’s up, reasons and all. Go and get it.'
+        : f.call === 'members' ? 'Our call’s in. Members, you know where it is. The preview’s free.'
+        : 'Our call lands when the team sheets do. The preview’s up now.',
       cta: { label: 'Read the preview', href: `#/fixture/${encodeURIComponent(f.id)}` },
     };
   }
   if (m.kind === 'return') {
     return {
+      shout: 'Let’s gooo.',
       title: `${cap(m.name)} is back.`,
-      lead: `${count(m.count, 'game', 'games')} in the next three days, after ${m.gap} days without one.`,
-      cta: { label: 'See the calls', href: `#/league/${m.leagueId}` },
+      lead: `${Num(m.gap)} days of international football. Done. Gone. Over.`,
+      takes: returnTakes(m),
+      cta: { label: 'Get the calls', href: `#/league/${m.leagueId}` },
     };
   }
   return {
+    shout: 'Big night. Let’s go.',
     title: 'Champions League night.',
-    lead: `${count(m.count, 'game', 'games')} tonight.`,
-    cta: { label: 'See tonight’s games', href: `#/league/${m.leagueId}` },
+    lead: `${Num(m.count)} games under the lights. Anthem on, phones down.`,
+    takes: uclTakes(m),
+    cta: { label: 'Get tonight’s calls', href: `#/league/${m.leagueId}` },
   };
 }
 
@@ -192,9 +298,11 @@ function cardHTML(m, { crest = plainCrest, esc = plainEsc, clock, now }) {
         </div>
         ${x}
         <div class="mo-body">
+          <p class="mo-shout">${esc(w.shout)}</p>
           <h2 class="mo-kicker" id="mo-title" aria-label="${esc(w.title)}"><span aria-hidden="true">${letters}</span></h2>
           <p class="mo-teams"><b>${esc(f.home)}</b><em>v</em><b>${esc(f.away)}</b></p>
           <p class="mo-when">${f.league ? `<span class="mo-comp">${f.league_id ? `<span class="mo-logo mo-logo-sm">${crest(f.league, 'sm', f.league_id, 'league')}</span>` : ''}${esc(f.league)}</span>` : ''}<span>${esc(shortWhen(f.kickoff, now, clock))}</span><span class="mo-clock" data-to="${f.kickoff}" aria-hidden="true"></span></p>
+          ${w.takes.length ? `<ul class="mo-takes">${w.takes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
           <p class="mo-line-text">${esc(w.line)}</p>
           ${actions}
         </div>
@@ -206,8 +314,10 @@ function cardHTML(m, { crest = plainCrest, esc = plainEsc, clock, now }) {
     <div class="mo-card" role="dialog" aria-modal="true" aria-labelledby="mo-title" tabindex="-1" data-kind="${esc(m.kind)}">
       <div class="mo-glow" aria-hidden="true"><div class="mo-sweep"></div></div>
       ${x}
+      <p class="mo-shout">${esc(w.shout)}</p>
       <div class="mo-head">${emblem(m, crest)}<h2 class="mo-title" id="mo-title">${words(w.title)}</h2></div>
       <p class="mo-lead">${esc(w.lead)}</p>
+      ${w.takes.length ? `<ul class="mo-takes">${w.takes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
       <ol class="mo-vidi">${m.games.map((g) => {
         const text = `${g.home} v ${g.away}`;
         return `<li><a href="#/fixture/${encodeURIComponent(g.id)}" data-mo-go>
@@ -296,6 +406,18 @@ function animate(root, m) {
   const card = root.querySelector('.mo-card');
   go(root.querySelector('.mo-scrim'), [{ opacity: 0, backdropFilter: 'blur(0px)' }, { opacity: 1, backdropFilter: 'blur(8px)' }], { duration: 520, easing: EXPO });
 
+  // The shout slams on: big and tilted, down hard, a kick of light.
+  const stamp = (delay) => {
+    go(root.querySelector('.mo-shout'), [
+      { transform: 'scale(2.6) rotate(-8deg)', opacity: 0, filter: 'blur(6px)' },
+      { transform: 'scale(0.92) rotate(1deg)', opacity: 1, filter: 'blur(0)', offset: 0.55 },
+      { transform: 'scale(1.04) rotate(-1deg)', offset: 0.75 },
+      { transform: 'none', opacity: 1, filter: 'blur(0)' }], { duration: 620, delay, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' });
+    card.animate([{ translate: '0 0' }, { translate: '0 4px' }, { translate: '0 -2px' }, { translate: '0 0' }], { duration: 260, delay: delay + 330, easing: 'ease-out' });
+  };
+  const takes = (delay) => all('.mo-takes li').forEach((li, i) =>
+    go(li, [{ opacity: 0, transform: 'translateX(-14px)' }, { opacity: 1, transform: 'none' }], { duration: 600, delay: delay + i * 140, easing: EXPO }));
+
   if (m.kind === 'derby') {
     // The card arrives empty and dark; the two sides come in from either
     // edge and hit at the seam.
@@ -312,9 +434,11 @@ function animate(root, m) {
     card.animate([{ translate: '0 0' }, { translate: '-6px 2px' }, { translate: '5px -2px' }, { translate: '-3px 1px' }, { translate: '1px 0' }, { translate: '0 0' }], { duration: 420, delay: HIT, easing: 'ease-out' });
     // The name, a letter at a time, like boards going up round a ground.
     all('.mo-kicker span[style]').forEach((s, i) => go(s, [{ transform: 'translateY(70%) rotateX(80deg)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 640, delay: HIT + 140 + i * 32, easing: EXPO }));
+    stamp(HIT + 40);
     const after = HIT + 220 + all('.mo-kicker span[style]').length * 32;
-    [['.mo-teams', 0], ['.mo-when', 120], ['.mo-line-text', 220], ['.mo-actions', 320]].forEach(([sel, d]) =>
+    [['.mo-teams', 0], ['.mo-when', 120], ['.mo-line-text', 260 + all('.mo-takes li').length * 140], ['.mo-actions', 360 + all('.mo-takes li').length * 140]].forEach(([sel, d]) =>
       go(root.querySelector(sel), [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: 700, delay: after + d, easing: EXPO }));
+    takes(after + 220);
     return;
   }
 
@@ -348,10 +472,13 @@ function animate(root, m) {
   }
   const ws = all('.mo-w > span');
   ws.forEach((w, i) => go(w, [{ transform: 'translateY(105%) rotate(4deg)' }, { transform: 'none' }], { duration: 900, delay: 420 + i * 60, easing: EXPO }));
+  stamp(240);
   const tail = 520 + ws.length * 60;
   go(root.querySelector('.mo-lead'), [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: 700, delay: tail, easing: EXPO });
-  vidiprinter(root, tail + 200);
-  go(root.querySelector('.mo-actions'), [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: 700, delay: tail + 400, easing: EXPO });
+  takes(tail + 160);
+  const n = all('.mo-takes li').length;
+  vidiprinter(root, tail + 260 + n * 140);
+  go(root.querySelector('.mo-actions'), [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: 700, delay: tail + 400 + n * 140, easing: EXPO });
 }
 
 /*

@@ -126,7 +126,7 @@ export function listOf(names) {
 }
 
 /** The promise, said where the quiet is (worker/src/goodwill.ts keeps it). */
-const GIVEN_BACK = 'Members lose nothing: a free day is added for every quiet day, automatically.';
+const GIVEN_BACK = 'Members lose nothing: every quiet day comes back as a free day, automatically.';
 
 const plural = (n, one, many) => `${n === 0 ? 'No' : n} ${n === 1 ? one : many}`;
 
@@ -162,7 +162,7 @@ export function wordsFor(r) {
       title: 'It’s an international break.',
       lead: 'That’s why there are fewer calls this week.',
       text: [
-        'Qualifiers and friendlies mean rotated squads and form that tells you next to nothing, so we only call the games we trust.',
+        'Qualifiers and friendlies. Managers rest half the squad, the form book goes in the bin, and we don’t guess for you. We only call what we actually trust.',
         [board, still].filter(Boolean).join(' '),
         GIVEN_BACK,
       ],
@@ -175,7 +175,7 @@ export function wordsFor(r) {
     title: 'It’s the close season.',
     lead: 'That’s why there are fewer calls right now.',
     text: [
-      'Pre-season friendlies tell you less than they look like they do, so most of them get no call.',
+      'Pre-season friendlies. Kids, trialists, sixty-minute run-outs. Nobody’s trying to win them, so we mostly don’t call them.',
       [board, still].filter(Boolean).join(' '),
       GIVEN_BACK,
     ],
@@ -187,8 +187,8 @@ export function wordsFor(r) {
 export function countdownWords(days, league = 'the Premier League') {
   if (days === null || days === undefined) return null;
   if (days <= 0) return { n: null, text: `${cap(league)} is back today` };
-  if (days === 1) return { n: null, text: `${cap(league)} is back tomorrow` };
-  return { n: days, text: `days until ${league} is back` };
+  if (days === 1) return { n: null, text: `${cap(league)} is back tomorrow. Let’s gooo.` };
+  return { n: days, text: `days till ${league} is back` };
 }
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 

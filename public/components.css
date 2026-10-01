@@ -2662,6 +2662,41 @@
 .mo-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-6); }
 .mo-actions .btn { flex: 1 1 140px; }
 
+/* The shout: a stamp that slams on before anything else, in sodium, the
+   colour of the floodlights coming on. The brief was "Let's gooo". */
+.mo-shout {
+  display: inline-block;
+  margin: 0 0 var(--space-3);
+  font-family: var(--display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-black);
+  line-height: 1;
+  letter-spacing: var(--tracking-xl);
+  color: var(--sodium);
+  text-shadow: 0 0 24px rgba(245, 165, 36, 0.45);
+  transform-origin: 0 60%;
+}
+/* The football: who is top, who has not won, who is scoring, how they got on
+   last time. Short lines, a bar of light down the side. */
+.mo-takes { margin: 0 0 var(--space-5); padding: 0; list-style: none; display: grid; gap: var(--space-2); }
+.mo-takes li {
+  position: relative;
+  padding-left: var(--space-4);
+  font-size: var(--text-read);
+  line-height: var(--leading-snug);
+  color: var(--chalk);
+}
+.mo-takes li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.2em;
+  bottom: 0.2em;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--floodlight);
+}
+
 /* --- derby: the stage */
 .mo-stage {
   position: relative;

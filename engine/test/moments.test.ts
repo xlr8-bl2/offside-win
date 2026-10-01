@@ -22,7 +22,24 @@ const fx = (home: string, away: string, league_id: number, hoursAhead: number, e
   ({ id: id++, home, away, league_id, league: `L${league_id}`, home_id: 1, away_id: 2, kickoff: NOW + hoursAhead * H, status: 'notstarted', ...extra });
 const pl = (n: number, from = 3) => Array.from({ length: n }, (_, i) => fx(`Home ${i}`, `Away ${i}`, 1, from + i * 2));
 const asked: number[] = [];
-const lastPlayedAgo = (days: number) => async (league: number) => { asked.push(league); return NOW - days * D; };
+/* A league's page data as /api/league/{id} sends it: the table, the last
+   round's results, the scorers. */
+const row = (team: string, team_id: number, position: number, played: number, won: number, drawn: number, points: number) =>
+  ({ team, team_id, position, played, won, drawn, lost: played - won - drawn, points });
+const TABLE = [
+  row('Manchester City', 12, 1, 5, 5, 0, 15), row('Liverpool', 13, 2, 5, 4, 0, 12), row('Arsenal', 18, 3, 5, 3, 1, 10),
+  row('Chelsea', 14, 4, 5, 3, 0, 9), row('Wolves', 20, 20, 5, 0, 2, 2),
+];
+const leagueAgo = (days: number) => async (league: number) => {
+  asked.push(league);
+  return {
+    standings: TABLE,
+    last: [{ home: 'Fulham', away: 'Arsenal', home_id: 6, away_id: 18, kickoff: NOW - days * D, score: [1, 3] },
+      { home: 'Liverpool', away: 'Wolves', home_id: 13, away_id: 20, kickoff: NOW - days * D, score: [0, 0] }],
+    scorers: [{ name: 'Erling Haaland', goals: 5 }],
+  };
+};
+const lastPlayedAgo = leagueAgo;
 
 /* -------------------------------------------------------------- moments */
 
@@ -30,7 +47,7 @@ test('El Clásico within the day is the moment, with its colours and its call', 
   const m = await findMoment({
     now: NOW,
     fixtures: [...pl(6), fx('Real Madrid', 'FC Barcelona', 3, 20, { colors: { home: '#ffffff', away: '#a50044' }, locked: true })],
-    lastPlayed: lastPlayedAgo(19),
+    league: lastPlayedAgo(19),
   });
   assert.equal(m.kind, 'derby');
   assert.equal(m.kicker, 'El Clásico');
@@ -54,17 +71,17 @@ test('a colour that is not a plain hex never reaches a style attribute', async (
 });
 
 test('the Premier League after a break is back; after a normal week it is not', async () => {
-  const back = await findMoment({ now: NOW, fixtures: pl(10), lastPlayed: lastPlayedAgo(19) });
+  const back = await findMoment({ now: NOW, fixtures: pl(10), league: lastPlayedAgo(19) });
   assert.equal(back.kind, 'return');
   assert.equal(back.name, 'the Premier League');
   assert.equal(back.count, 10);
-  assert.equal(back.games.length, 5);
-  assert.equal(await findMoment({ now: NOW, fixtures: pl(10), lastPlayed: lastPlayedAgo(6) }), null);
+  assert.equal(back.games.length, 4);
+  assert.equal(await findMoment({ now: NOW, fixtures: pl(10), league: lastPlayedAgo(6) }), null);
 });
 
 test('a league is only asked about when it is on the board in the next two days', async () => {
   asked.length = 0;
-  await findMoment({ now: NOW, fixtures: [fx('A', 'B', 3, 60), fx('C', 'D', 99, 2)], lastPlayed: lastPlayedAgo(19) });
+  await findMoment({ now: NOW, fixtures: [fx('A', 'B', 3, 60), fx('C', 'D', 99, 2)], league: lastPlayedAgo(19) });
   assert.deepEqual(asked, []);
 });
 
@@ -78,9 +95,9 @@ test('a Champions League night needs two games or more today', async () => {
 
 test('a derby outranks a return, which outranks a Champions League night', async () => {
   const both = [...pl(6), fx('Arsenal', 'Tottenham Hotspur', 1, 6), fx('X', 'Y', 7, 9), fx('X', 'Y', 7, 10)];
-  assert.equal((await findMoment({ now: NOW, fixtures: both, lastPlayed: lastPlayedAgo(19) })).kind, 'derby');
+  assert.equal((await findMoment({ now: NOW, fixtures: both, league: lastPlayedAgo(19) })).kind, 'derby');
   const noDerby = both.filter((f) => f.home !== 'Arsenal');
-  assert.equal((await findMoment({ now: NOW, fixtures: noDerby, lastPlayed: lastPlayedAgo(19) })).kind, 'return');
+  assert.equal((await findMoment({ now: NOW, fixtures: noDerby, league: lastPlayedAgo(19) })).kind, 'return');
 });
 
 test('finished and postponed games are not moments', async () => {
@@ -92,16 +109,39 @@ test('every card is in the house voice: no banned words, no middle dots, no shou
   const cards = [
     await findMoment({ now: NOW, fixtures: [fx('Real Madrid', 'FC Barcelona', 3, 20, { top_pick: { x: 1 } })] }),
     await findMoment({ now: NOW, fixtures: [fx('Real Madrid', 'FC Barcelona', 3, 20)] }),
-    await findMoment({ now: NOW, fixtures: pl(10), lastPlayed: lastPlayedAgo(19) }),
+    await findMoment({ now: NOW, fixtures: pl(10), league: lastPlayedAgo(19) }),
     await findMoment({ now: NOW, fixtures: [fx('X', 'Y', 7, 9), fx('X', 'Y', 7, 10)] }),
   ];
   for (const m of cards) {
     const w = wordsFor(m);
-    const text = [w.title, w.lead, w.line, w.cta.label].filter(Boolean).join(' ');
+    const text = [w.shout, w.title, w.lead, w.line, ...(w.takes ?? []), w.cta.label].filter(Boolean).join(' ');
     assert.deepEqual(findBannedInProse(text), [], text);
     assert.doesNotMatch(text, /·|undefined|NaN/, text);
     assert.doesNotMatch(text, /\b[A-Z]{4,}\b/, text);
   }
+});
+
+test('the league card talks football: who is top, the pick of the weekend, who is scoring', async () => {
+  const m = await findMoment({
+    now: NOW,
+    fixtures: [fx('Liverpool', 'Chelsea', 1, 20, { home_id: 13, away_id: 14 }), fx('Arsenal', 'Leeds United', 1, 22, { home_id: 18, away_id: 19 })],
+    league: leagueAgo(19),
+  });
+  const w = wordsFor(m);
+  assert.equal(w.shout, 'Let’s gooo.');
+  assert.match(w.lead, /^Nineteen days of international football/);
+  assert.equal(w.takes[0], 'Manchester City top, five from five. Nobody’s laid a glove on them.');
+  assert.equal(w.takes[1], 'Pick of the weekend: Liverpool v Chelsea, 2nd against 4th.');
+  assert.match(w.takes[2], /Erling Haaland’s got five already/);
+});
+
+test('the derby card says where they stand and how they got on last time', async () => {
+  const m = await findMoment({ now: NOW, fixtures: [fx('Liverpool', 'Arsenal', 1, 6, { home_id: 13, away_id: 18 })], league: leagueAgo(6) });
+  assert.equal(m, null, 'Liverpool v Arsenal is not a named fixture');
+  const d = await findMoment({ now: NOW, fixtures: [fx('Arsenal', 'Tottenham Hotspur', 1, 6, { home_id: 18, away_id: 99 })], league: leagueAgo(6) });
+  const w = wordsFor(d);
+  assert.equal(w.shout, 'Matchday. Let’s gooo.');
+  assert.ok(w.takes.some((t: string) => t === 'Arsenal won 3–1 at Fulham last time out.'), w.takes.join(' | '));
 });
 
 /* ------------------------------------------------------------ attention */

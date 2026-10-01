@@ -425,18 +425,20 @@ async function previewMoment(kind) {
   if (kind === 'derby') {
     const liga = await get('/api/league/3');
     const id = (re) => (liga?.standings ?? []).find((r) => re.test(r.team ?? ''))?.team_id ?? null;
-    m = { kind: 'derby', key: 'preview', kicker: 'El Clásico', fixture: {
+    m = { kind: 'derby', key: 'preview', kicker: 'El Clásico', today: false, fixture: {
       id: 0, home: 'Real Madrid', away: 'FC Barcelona', home_id: id(/real madrid/i), away_id: id(/barcelona/i),
-      kickoff: now + 26 * 3600, colors: { home: '#febe10', away: '#a50044' }, call: 'members' } };
+      kickoff: now + 26 * 3600, league: 'La Liga', league_id: 3, colors: { home: '#febe10', away: '#a50044' }, call: 'members' },
+      table: { standings: liga?.standings ?? [], last: liga?.last ?? [], scorers: liga?.scorers ?? [] } };
   } else {
     const lid = kind === 'ucl' ? 7 : 1;
     const l = await get(`/api/league/${lid}`);
     const next = (l?.next ?? []).slice().sort((a, b) => a.kickoff - b.kickoff);
     const last = Math.max(0, ...(l?.last ?? []).map((g) => Number(g.kickoff)));
-    const games = next.slice(0, kind === 'ucl' ? 6 : 5).map((g) => ({ id: g.id, home: g.home, away: g.away, kickoff: kind === 'ucl' ? now + 3 * 3600 : g.kickoff }));
+    const games = next.slice(0, 4).map((g) => ({ id: g.id, home: g.home, away: g.away, home_id: g.home_id, away_id: g.away_id, kickoff: kind === 'ucl' ? now + 3 * 3600 : g.kickoff }));
+    const table = { standings: l?.standings ?? [], last: l?.last ?? [], scorers: l?.scorers ?? [] };
     m = kind === 'ucl'
-      ? { kind: 'ucl', key: 'preview', leagueId: 7, count: Math.max(games.length, 2), games }
-      : { kind: 'return', key: 'preview', leagueId: 1, name: 'the Premier League', count: next.length || 10, gap: last && next[0] ? Math.floor((next[0].kickoff - last) / 86400) : 19, games };
+      ? { kind: 'ucl', key: 'preview', leagueId: 7, league: 'Champions League', count: Math.max(next.filter((g) => g.kickoff === next[0]?.kickoff).length, 2), games, table }
+      : { kind: 'return', key: 'preview', leagueId: 1, league: 'Premier League', name: 'the Premier League', count: next.length || 10, gap: last && next[0] ? Math.floor((next[0].kickoff - last) / 86400) : 19, games, table };
   }
   moments.openMoment(m, previewHelpers, { preview: true });
 }

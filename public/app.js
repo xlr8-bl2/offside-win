@@ -7823,25 +7823,23 @@ async function scheduleSeason() {
     const board = await getJSON('/api/board?hours=72', { quiet: true }).catch(() => null);
     const now = Date.now() / 1000;
     const fixtures = board?.fixtures ?? [];
+    // One read per league, shared: the note asks when the Premier League is
+    // back, the moment asks for the table it talks about.
+    const leagues = new Map();
+    const league = (id) => {
+      if (!leagues.has(id)) leagues.set(id, getJSON(`/api/league/${id}`, { quiet: true }).catch(() => null));
+      return leagues.get(id);
+    };
     const [reading, moment] = await Promise.all([
       season.readSeason({
         fixtures,
         now,
         nextTop: async () => {
-          const pl = await getJSON('/api/league/1', { quiet: true }).catch(() => null);
+          const pl = await league(1);
           return (pl?.next ?? []).map((g) => Number(g.kickoff)).filter((k) => k > now).sort((a, b) => a - b)[0] ?? null;
         },
       }),
-      moments.findMoment({
-        fixtures,
-        now,
-        // When a league last played: asked only of a big league on the board
-        // in the next two days, to tell a return from an ordinary weekend.
-        lastPlayed: async (id) => {
-          const l = await getJSON(`/api/league/${id}`, { quiet: true }).catch(() => null);
-          return (l?.last ?? []).map((g) => Number(g.kickoff)).filter((k) => k < now).sort((a, b) => b - a)[0] ?? null;
-        },
-      }).catch(() => null),
+      moments.findMoment({ fixtures, now, league }).catch(() => null),
     ]);
     const helpers = { crest, esc, kickoff: kickoffLabel, clock: clockTime, now };
     // Already up: leave it. Seen already: the small chip, which opens it again.
