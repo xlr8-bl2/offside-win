@@ -7799,7 +7799,7 @@ async function scheduleSeason() {
   const name = parseHash().parts[0] || 'home';
   try {
     const season = await import('./js/lib/season.js');
-    if (!SEASON_ROUTES.has(name)) { season.closeSeason({ quick: true }); return; }
+    if (!SEASON_ROUTES.has(name)) { season.removeSeason(); return; }
     const board = await getJSON('/api/board?hours=72', { quiet: true }).catch(() => null);
     const now = Date.now() / 1000;
     const reading = await season.readSeason({
@@ -7811,9 +7811,10 @@ async function scheduleSeason() {
       },
     });
     const helpers = { crest, esc, kickoff: kickoffLabel, now };
-    // Already up: bring it up to date in place, no second entrance.
-    if (document.getElementById('season-note')) { season.showSeason(reading, helpers); return; }
-    if (!reading || season.dismissed(reading.key)) return;
+    // Already up: leave it. Seen already: the small chip, which opens it again.
+    if (document.getElementById('season-note')) return;
+    if (!reading) { season.removeSeason(); return; }
+    if (season.dismissed(reading.key)) { season.showChip(reading, helpers); return; }
     const go = () => {
       if ((parseHash().parts[0] || 'home') !== name) return;
       if (document.getElementById('cookie-notice')) {

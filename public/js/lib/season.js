@@ -134,10 +134,12 @@ export function wordsFor(r) {
   if (r.kind === 'tournament') {
     const short = r.name.replace(/^(fifa|uefa|conmebol|caf|afc|concacaf)\s+/i, '');
     return {
-      label: 'Tournament football',
+      label: short,
+      chip: `${short} on now`,
       title: `The ${short} is on.`,
+      lead: `${plural(r.count, 'game', 'games')} in the next three days, every one read like a club game.`,
       text: [
-        `${plural(r.count, 'game', 'games')} in the next three days, and every one gets the look a club game does: who is fit, who is being rested, who needs the result.`,
+        'Who is fit, who is being rested, who needs the result: the same look a league match gets.',
         r.calls ? `${plural(r.calls, 'call', 'calls')} on them so far.` : 'Calls go up as the line-ups firm up.',
       ],
       cta: { label: `All ${short} games`, href: r.leagueId ? `#/league/${encodeURIComponent(r.leagueId)}` : '#/board' },
@@ -145,12 +147,21 @@ export function wordsFor(r) {
   }
   const still = r.still.length ? cap(`${listOf(r.still)} ${r.still.length === 1 ? 'carries' : 'carry'} on as normal.`) : '';
   const board = `${plural(r.calls, 'call', 'calls')} on the board right now.`;
+  /*
+   * The reason first. The headline used to be "Club football is on hold" and
+   * the why ("so we call fewer games") was the last words of the second
+   * paragraph, so a reader who read the headline and left (most of them)
+   * never learned why the board was thin. Now the headline names the break
+   * and the line under it, in bold, says what that means for the calls.
+   */
   if (r.kind === 'break') {
     return {
       label: 'International break',
-      title: 'Club football is on hold.',
+      chip: 'International break',
+      title: 'It’s an international break.',
+      lead: 'That’s why there are fewer calls this week.',
       text: [
-        'Qualifiers and friendlies mean rotated squads, half-fit stars and form that tells you next to nothing. So we call fewer games, not worse ones.',
+        'Qualifiers and friendlies mean rotated squads and form that tells you next to nothing, so we only call the games we trust.',
         [board, still].filter(Boolean).join(' '),
         GIVEN_BACK,
       ],
@@ -159,7 +170,9 @@ export function wordsFor(r) {
   }
   return {
     label: 'Close season',
-    title: 'The big leagues are resting.',
+    chip: 'Close season',
+    title: 'It’s the close season.',
+    lead: 'That’s why there are fewer calls right now.',
     text: [
       'Pre-season friendlies tell you less than they look like they do, so most of them get no call.',
       [board, still].filter(Boolean).join(' '),
@@ -186,7 +199,11 @@ function seen() { try { return JSON.parse(localStorage.getItem(KEY) ?? '[]') ?? 
 function remember(key) {
   try { localStorage.setItem(KEY, JSON.stringify([...new Set([...seen(), key])].slice(-20))); } catch { /* shown again next visit */ }
 }
-export const dismissed = (key) => seen().includes(key);
+export const dismissed = (key) => seen().includes(key) || off();
+/* '*' in the list turns the notes off altogether, chip included. Nothing on
+   the site writes it; the ui-verify checks do, so a note does not sit over
+   whatever they are measuring (the note has a check of its own). */
+const off = () => seen().includes('*');
 
 /**
  * The days between now and the club game's return, one cell each, the last
@@ -198,8 +215,7 @@ function daysStrip(now, back, days) {
   const at = (i) => dayStart(now) + i * DAY + 12 * 3600;
   const cell = (i, cls = '') => {
     const d = new Date(at(i) * 1000);
-    const wk = d.toLocaleDateString([], { weekday: 'narrow' });
-    const label = i === days ? d.toLocaleDateString([], { day: 'numeric' }) : wk;
+    const label = i === days ? d.toLocaleDateString([], { day: 'numeric' }) : d.toLocaleDateString([], { weekday: 'narrow' });
     return `<li class="${cls}" title="${d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}"><i>${label}</i></li>`;
   };
   if (days <= 14) {
@@ -209,84 +225,211 @@ function daysStrip(now, back, days) {
     cells.push('<li class="is-gap" aria-hidden="true"><i>…</i></li>');
     cells.push(cell(days, 'is-back'));
   }
-  return `<ol class="season-days" aria-hidden="true">${cells.join('')}</ol>`;
+  return `<ol class="sn-days" aria-hidden="true">${cells.join('')}</ol>`;
 }
 
-function body(r, { crest, esc, kickoff, now }) {
+/* The centre circle and halfway line, drawn behind the countdown. */
+const PITCH = `<svg class="sn-pitch" viewBox="0 0 120 120" aria-hidden="true"><path class="sn-line" d="M60 8V112"/><circle class="sn-line" cx="60" cy="60" r="40"/><circle class="sn-spot" cx="60" cy="60" r="2.5"/></svg>`;
+
+const words = (t) => t.split(/\s+/).map((w, i) => `<span class="sn-w"><span style="--i:${i}">${w}</span></span>`).join(' ');
+
+function cardHTML(r, { crest, esc, kickoff, now }) {
   const w = wordsFor(r);
   let feature = '';
   if (r.kind === 'tournament') {
-    feature = `<ul class="season-games">${r.games.map((g) => `
+    feature = `<ul class="sn-games">${r.games.map((g) => `
       <li><a href="#/fixture/${encodeURIComponent(g.id)}">
-        <span class="season-teams">${crest(g.home, 'xs', g.home_id)}<b>${esc(g.home)}</b><em>v</em>${crest(g.away, 'xs', g.away_id)}<b>${esc(g.away)}</b></span>
-        <span class="season-when">${g.live ? '<span class="live-badge"><i></i>Live</span>' : esc(kickoff(g.kickoff))}${g.call ? '<span class="season-called" title="We have a call on this one"><span class="visually-hidden">We have a call on this one</span></span>' : ''}</span>
+        <span class="sn-teams">${crest(g.home, 'xs', g.home_id)}<b>${esc(g.home)}</b><em>v</em>${crest(g.away, 'xs', g.away_id)}<b>${esc(g.away)}</b></span>
+        <span class="sn-when">${g.live ? '<span class="live-badge"><i></i>Live</span>' : esc(kickoff(g.kickoff))}${g.call ? '<span class="sn-called" title="We have a call on this one"><span class="visually-hidden">We have a call on this one</span></span>' : ''}</span>
       </a></li>`).join('')}</ul>`;
   } else {
     const c = countdownWords(r.days);
     if (c) {
-      feature = `<div class="season-gap">
-        <p class="season-count">${c.n !== null ? `<b>${c.n}</b>` : ''}<span>${esc(c.text)}</span></p>
+      feature = `<div class="sn-gap">
+        <div class="sn-count">${c.n !== null ? `<span class="sn-num">${PITCH}<b data-to="${c.n}">${c.n}</b></span>` : ''}<span>${esc(c.text)}</span></div>
         ${daysStrip(now, r.back, r.days)}
       </div>`;
     }
   }
   return `
-    <button class="season-x" type="button" data-season-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-    <p class="season-label">${esc(w.label)}</p>
-    <h2 class="season-title" id="season-title">${esc(w.title)}</h2>
-    ${feature}
-    ${w.text.filter(Boolean).map((t) => `<p class="season-text">${esc(t)}</p>`).join('')}
-    <div class="season-actions">
-      <a class="btn btn-primary btn-sm" href="${w.cta.href}" data-season-go>${esc(w.cta.label)}</a>
-      <button class="btn btn-ghost btn-sm" type="button" data-season-close>Got it</button>
+    <div class="sn-scrim" data-season-close></div>
+    <div class="sn-card" role="dialog" aria-modal="true" aria-labelledby="sn-title" tabindex="-1" data-kind="${esc(r.kind)}">
+      <div class="sn-sweep" aria-hidden="true"></div>
+      <button class="sn-x" type="button" data-season-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <h2 class="sn-title" id="sn-title">${words(esc(w.title))}</h2>
+      <p class="sn-lead">${esc(w.lead)}</p>
+      ${feature}
+      <div class="sn-text">${w.text.filter(Boolean).map((t) => `<p>${esc(t)}</p>`).join('')}</div>
+      <div class="sn-actions">
+        <a class="btn btn-primary" href="${w.cta.href}" data-season-go>${esc(w.cta.label)}</a>
+        <button class="btn btn-ghost" type="button" data-season-close>Got it</button>
+      </div>
     </div>`;
 }
 
-let current = null;
-
-/** Take the note down. `keep` remembers it as seen. */
-export function closeSeason({ keep = false, quick = false } = {}) {
-  const el = document.getElementById('season-note');
-  if (!el) return;
-  if (keep && current) remember(current.key);
-  current = null;
-  removeEventListener('keydown', onKey);
-  if (quick || reduced()) { el.remove(); return; }
-  el.animate([{ opacity: 1, transform: 'translateY(0)' }, { opacity: 0, transform: 'translateY(16px)' }], { duration: 220, easing: 'cubic-bezier(0.5, 0, 0.75, 0)', fill: 'forwards' })
-    .finished.then(() => el.remove(), () => el.remove());
+function chipHTML(r, esc) {
+  const w = wordsFor(r);
+  const tail = r.kind === 'tournament' ? `${r.count} games` : r.days > 1 ? `${r.days} days to go` : r.days === 1 ? 'back tomorrow' : '';
+  return `<button class="sn-chip-open" type="button" aria-haspopup="dialog">
+      <i class="sn-chip-dot" aria-hidden="true"></i><b>${esc(w.chip)}</b>${tail ? `<span>${esc(tail)}</span>` : ''}
+    </button>
+    <button class="sn-chip-x" type="button" aria-label="Hide this for now"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
 }
-function onKey(e) { if (e.key === 'Escape') closeSeason({ keep: true }); }
+
+let current = null;
+let helpersNow = null;
+
+const EXPO = 'cubic-bezier(0.16, 1, 0.3, 1)';
+const QUART_IN = 'cubic-bezier(0.5, 0, 0.75, 0)';
+
+/** Hidden for this visit from the chip's own cross. */
+const HIDE_KEY = 'ow.season.chip';
+const chipHidden = (key) => { try { return sessionStorage.getItem(HIDE_KEY) === key; } catch { return false; } };
+
+/** The small reminder left behind once the note is closed: tap it and the note comes back. */
+export function showChip(r, helpers) {
+  const old = document.getElementById('season-chip');
+  if (!r || chipHidden(r.key) || off()) { old?.remove(); return; }
+  helpersNow = helpers;
+  const el = old ?? document.createElement('div');
+  el.id = 'season-chip';
+  el.className = 'sn-chip';
+  el.dataset.kind = r.kind;
+  el.innerHTML = chipHTML(r, helpers.esc);
+  el.querySelector('.sn-chip-open').onclick = () => openSeason(r, helpers, { fromChip: true });
+  el.querySelector('.sn-chip-x').onclick = () => {
+    try { sessionStorage.setItem(HIDE_KEY, r.key); } catch { /* private mode */ }
+    if (reduced()) { el.remove(); return; }
+    el.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(8px) scale(0.96)' }], { duration: 200, easing: QUART_IN, fill: 'forwards' })
+      .finished.then(() => el.remove(), () => el.remove());
+  };
+  if (!old) {
+    document.body.append(el);
+    if (!reduced()) el.animate([{ opacity: 0, transform: 'translateY(12px) scale(0.9)' }, { opacity: 1, transform: 'none' }], { duration: 520, easing: EXPO });
+  }
+}
+
+/** Take the note down. `keep` remembers it as seen and leaves the chip. */
+export function closeSeason({ keep = false, quick = false } = {}) {
+  const root = document.getElementById('season-note');
+  const r = current;
+  if (!root) return;
+  if (keep && r) remember(r.key);
+  current = null;
+  document.documentElement.classList.remove('sn-lock');
+  removeEventListener('keydown', onKey, true);
+  const after = () => {
+    root.remove();
+    if (keep && r && helpersNow) showChip(r, helpersNow);
+  };
+  if (quick || reduced()) { after(); return; }
+  const card = root.querySelector('.sn-card');
+  // It folds away towards the corner where the chip will be.
+  card.style.transformOrigin = 'left bottom';
+  card.animate([{ transform: 'none', opacity: 1 }, { transform: 'translate(-12%, 18%) scale(0.35)', opacity: 0 }], { duration: 380, easing: QUART_IN, fill: 'forwards' });
+  root.querySelector('.sn-scrim').animate([{ opacity: 1 }, { opacity: 0 }], { duration: 360, delay: 60, easing: 'ease-in', fill: 'forwards' })
+    .finished.then(after, after);
+}
+/** Kept for callers that only want it gone (another page). */
+export function removeSeason() {
+  closeSeason({ quick: true });
+  document.getElementById('season-chip')?.remove();
+}
+
+function onKey(e) {
+  const root = document.getElementById('season-note');
+  if (!root) return;
+  if (e.key === 'Escape') { e.preventDefault(); closeSeason({ keep: true }); return; }
+  if (e.key !== 'Tab') return;
+  const f = [...root.querySelectorAll('a[href], button')];
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+}
+
+/** Open the note, with its entrance. */
+export function openSeason(r, helpers, { fromChip = false } = {}) {
+  if (!r) return;
+  helpersNow = helpers;
+  document.getElementById('season-note')?.remove();
+  const chip = document.getElementById('season-chip');
+  current = r;
+  const root = document.createElement('div');
+  root.id = 'season-note';
+  root.className = 'sn-root';
+  root.innerHTML = cardHTML(r, { ...helpers, now: helpers.now ?? Date.now() / 1000 });
+  document.body.append(root);
+  document.documentElement.classList.add('sn-lock');
+  addEventListener('keydown', onKey, true);
+  root.addEventListener('click', (e) => {
+    const t = e.target.closest?.('[data-season-close], [data-season-go], .sn-games a');
+    if (t) closeSeason({ keep: true, quick: !t.hasAttribute('data-season-close') });
+  });
+  chip?.remove();
+  const card = root.querySelector('.sn-card');
+  card.focus({ preventScroll: true });
+  if (reduced()) return;
+
+  const go = (el, frames, opts) => el?.animate(frames, { fill: 'both', ...opts });
+  // The dark falls and the page behind goes soft.
+  go(root.querySelector('.sn-scrim'), [{ opacity: 0, backdropFilter: 'blur(0px)' }, { opacity: 1, backdropFilter: 'blur(8px)' }], { duration: 520, easing: EXPO });
+  // The card opens out of a slit (or out of the chip, when that is what was tapped).
+  go(card, fromChip
+    ? [{ transform: 'translate(-30%, 40%) scale(0.3)', opacity: 0 }, { opacity: 1, offset: 0.3 }, { transform: 'none', opacity: 1 }]
+    : [{ transform: 'translateY(56px) scale(0.94) rotateX(10deg)', clipPath: 'inset(46% 8% 46% 8% round 20px)', opacity: 0 },
+      { opacity: 1, offset: 0.25 },
+      { transform: 'translateY(-4px) scale(1.005)', clipPath: 'inset(0% 0% 0% 0% round 20px)', offset: 0.7 },
+      { transform: 'none', clipPath: 'inset(0% 0% 0% 0% round 20px)', opacity: 1 }],
+    { duration: 900, delay: 100, easing: EXPO });
+  // A floodlight sweeps across it once.
+  go(root.querySelector('.sn-sweep'), [{ transform: 'translateX(-120%) skewX(-18deg)', opacity: 0 }, { opacity: 1, offset: 0.2 }, { transform: 'translateX(220%) skewX(-18deg)', opacity: 0 }], { duration: 1400, delay: 520, easing: 'cubic-bezier(0.65, 0, 0.35, 1)' });
+  // The headline, a word at a time, up through its mask.
+  const ws = root.querySelectorAll('.sn-w > span');
+  ws.forEach((w, i) => go(w, [{ transform: 'translateY(105%) rotate(4deg)' }, { transform: 'none' }], { duration: 900, delay: 360 + i * 60, easing: EXPO }));
+  const tail = 420 + ws.length * 60;
+  // The reason, then everything under it.
+  for (const [sel, extra] of [['.sn-lead', 0], ['.sn-gap, .sn-games', 120], ['.sn-text', 260], ['.sn-actions', 360]]) {
+    go(root.querySelector(sel), [{ opacity: 0, transform: 'translateY(14px)', filter: 'blur(4px)' }, { opacity: 1, transform: 'none', filter: 'blur(0)' }], { duration: 800, delay: tail + extra, easing: EXPO });
+  }
+  // The halfway line and the centre circle draw themselves.
+  root.querySelectorAll('.sn-line').forEach((l, i) => {
+    const len = l.getTotalLength?.() ?? 220;
+    l.style.strokeDasharray = String(len);
+    go(l, [{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: 1100, delay: tail + 120 + i * 160, easing: EXPO });
+  });
+  // The count rolls up to its number.
+  const b = root.querySelector('.sn-count b[data-to]');
+  if (b) {
+    const to = Number(b.dataset.to);
+    const start = performance.now() + tail + 160;
+    const tick = (t) => {
+      if (!b.isConnected) return;
+      const p = Math.min(1, Math.max(0, (t - start) / 900));
+      b.textContent = String(Math.round(to * (1 - Math.pow(1 - p, 3))));
+      if (p < 1) requestAnimationFrame(tick);
+    };
+    b.textContent = '0';
+    requestAnimationFrame(tick);
+  }
+  // The days light up one by one to the day the club game is back, like
+  // floodlights coming on down a stand.
+  root.querySelectorAll('.sn-days li, .sn-games li').forEach((li, i) => {
+    go(li, [{ opacity: 0, transform: 'translateY(6px) scale(0.9)' }, { opacity: 1, transform: 'none' }], { duration: 420, delay: tail + 240 + i * 55, easing: EXPO });
+  });
+  const back = root.querySelector('.sn-days .is-back');
+  if (back) go(back, [{ boxShadow: '0 0 0 0 rgba(158, 134, 255, 0.7)' }, { boxShadow: '0 0 0 10px rgba(158, 134, 255, 0)' }], { duration: 1200, delay: tail + 300 + root.querySelectorAll('.sn-days li').length * 55, iterations: 2, easing: 'ease-out' });
+}
 
 /**
- * Show the note for this reading, or bring an open one up to date. Nothing
- * when it has been seen already.
+ * The note for this reading: opened when it has not been seen, the chip when
+ * it has, an open one brought up to date in place.
  */
 export function showSeason(r, helpers) {
   const open = document.getElementById('season-note');
-  if (!r) { if (open) closeSeason({ quick: true }); return; }
-  if (dismissed(r.key)) { if (open) closeSeason({ quick: true }); return; }
-  const html = body(r, { ...helpers, now: helpers.now ?? Date.now() / 1000 });
-  current = r;
-  if (open) { open.dataset.kind = r.kind; open.innerHTML = html; return; }
-
-  const el = document.createElement('aside');
-  el.id = 'season-note';
-  el.className = 'season';
-  el.dataset.kind = r.kind;
-  el.setAttribute('role', 'dialog');
-  el.setAttribute('aria-labelledby', 'season-title');
-  el.innerHTML = html;
-  el.addEventListener('click', (e) => {
-    const t = e.target.closest?.('[data-season-close], [data-season-go], .season-games a');
-    if (t) closeSeason({ keep: true, quick: !t.hasAttribute('data-season-close') });
-  });
-  document.body.append(el);
-  addEventListener('keydown', onKey);
-  if (reduced()) return;
-  // One entrance: the card rises, then the days light up one by one to the
-  // day the club game is back.
-  el.animate([{ opacity: 0, transform: 'translateY(24px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 520, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'backwards' });
-  [...el.querySelectorAll('.season-days li, .season-games li')].forEach((li, i) => {
-    li.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 320, delay: 260 + i * 45, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'backwards' });
-  });
+  if (!r) { removeSeason(); return; }
+  if (open && current?.key === r.key) return;
+  if (open) { closeSeason({ quick: true }); }
+  if (dismissed(r.key)) { showChip(r, helpers); return; }
+  openSeason(r, helpers);
 }

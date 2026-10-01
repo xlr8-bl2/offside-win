@@ -116,7 +116,7 @@ test('nothing the note says breaks the vocabulary rule', async () => {
   ];
   for (const r of readings) {
     const w = wordsFor(r);
-    const prose = [w.label, w.title, ...w.text, w.cta.label].join(' ');
+    const prose = [w.label, w.title, w.lead, w.chip, ...w.text, w.cta.label].join(' ');
     const bad = findBannedInProse(prose);
     assert.ok(!bad || (Array.isArray(bad) && !bad.length), `${r.kind}: ${JSON.stringify(bad)}`);
   }

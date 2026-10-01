@@ -409,6 +409,18 @@ export function showBar(p, { anchor }) {
     bar.animate([{ transform: 'translateY(100%)' }, { transform: 'translateY(0)' }], { duration: 700, easing: EXPO, fill: 'both' });
     bar.querySelector('.pb-inner').animate([{ backgroundPosition: '-60% 0' }, { backgroundPosition: '160% 0' }], { duration: 1600, delay: 300, easing: 'cubic-bezier(0.65, 0, 0.35, 1)' });
   }
+  // The bar is the offer folded away: tapping its words opens it again, the
+  // whole of it, the way it first appeared. The button still goes straight
+  // to checkout.
+  const text = bar.querySelector('.pb-text');
+  if (text && p.kind !== 'notice') {
+    text.setAttribute('role', 'button');
+    text.setAttribute('tabindex', '0');
+    text.setAttribute('aria-label', `${p.title}: see the offer`);
+    text.classList.add('pb-open');
+    text.onclick = () => showPopup(p);
+    text.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showPopup(p); } };
+  }
   bar.querySelector('.pb-x').onclick = () => {
     remember('closed', p.id);
     if (reduced()) { gone(); return; }

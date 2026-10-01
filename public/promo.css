@@ -271,3 +271,8 @@
   .pb-x { position: absolute; right: var(--space-3); }
   .pb-inner { position: relative; padding-bottom: var(--space-3); }
 }
+
+/* The bar's words open the offer again (showBar in promo.js). */
+.pb-text.pb-open { cursor: pointer; border-radius: var(--radius-sm); }
+.pb-text.pb-open:hover b { text-decoration: underline; text-underline-offset: 3px; }
+.pb-text.pb-open:focus-visible { outline: none; box-shadow: var(--focus-ring); }
