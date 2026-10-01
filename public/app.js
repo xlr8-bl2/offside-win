@@ -6697,7 +6697,8 @@ async function viewAccount() {
     <a class="acct-upgrade" href="#/checkout?plan=${m.plan_id === 'matchday' ? 'monthly' : 'quarter'}">
       <b>${m.plan_id === 'matchday' ? 'Carry on by the month' : 'Go to three months and pay less a month'}</b>
       <span>Nothing to pay today: the new plan's first payment is on ${esc(when(m.expires_at))}, when what you have paid for runs out.</span>
-    </a>` : active ? `<p class="acct-line"><a href="#/pricing">Change plan</a></p>` : ''}
+    </a>` : ''}
+    ${active ? `<p class="acct-line"><a class="btn btn-ghost btn-sm" href="#/pricing">See all plans</a></p>` : ''}
     ${account.receipts?.length ? `
       <h2 class="acct-sub">Payments</h2>
       <table class="tbl"><tbody>
@@ -7894,7 +7895,7 @@ function accountMenuHTML() {
       <a href="#/account?tab=following" role="menuitem">Teams you follow</a>
       <a href="#/account?tab=membership" role="menuitem">${m ? 'Membership and payments' : 'Membership'}</a>
       <a href="#/account?tab=settings" role="menuitem">Settings</a>
-      ${m ? '' : '<a class="am-cta" href="#/pricing" role="menuitem">See the plans</a>'}
+      <a class="am-cta" href="#/pricing" role="menuitem">${m ? 'See all plans' : 'See the plans'}</a>
       ${state.isAdmin ? '<a class="am-admin" href="#/admin" role="menuitem">Admin dashboard</a>' : ''}
     </nav>
     <button class="am-out" type="button" id="am-out" role="menuitem">Sign out</button>`;
@@ -8028,15 +8029,17 @@ async function headerAuth() {
   if (user) { link.setAttribute('aria-haspopup', 'menu'); link.setAttribute('aria-expanded', 'false'); }
   else { link.removeAttribute('aria-haspopup'); link.removeAttribute('aria-expanded'); closeAccountMenu(); }
 
-  // "Membership" in the menu and the footer is the member's own plan for a
-  // member, and the plans for anyone else.
+  // "Membership" in the menu and the footer goes to the plans for everyone.
+  // For a member it used to go to their own account page instead, and with
+  // the header button hidden too, a signed-in member had no way to see the
+  // plans short of a small link three taps deep. The plans page shows a
+  // member their own plan first anyway, with the way to their account.
   for (const a of document.querySelectorAll('a[data-member-link]')) {
-    const hash = member ? '#/account?tab=membership' : '#/pricing';
-    (a.querySelector('.nl') ?? a).textContent = member ? 'Your membership' : 'Membership';
+    (a.querySelector('.nl') ?? a).textContent = member ? 'Plans' : 'Membership';
     const sub = a.querySelector('small');
-    if (sub) sub.textContent = member ? 'When it runs to, and your payments' : 'Every call, every day';
-    if (a.dataset.hash) { a.dataset.hash = hash; a.setAttribute('href', member ? '/#/account?tab=membership' : '/pricing'); }
-    else a.setAttribute('href', hash);
+    if (sub) sub.textContent = member ? 'Yours, and moving to another' : 'Every call, every day';
+    if (a.dataset.hash) { a.dataset.hash = '#/pricing'; a.setAttribute('href', '/pricing'); }
+    else a.setAttribute('href', '#/pricing');
   }
 
   paintMemberMark();
@@ -8047,10 +8050,14 @@ async function headerAuth() {
     link.title = `${accountName(user, state.account?.profile)}${member ? ', member' : ''}`;
   }
   if (upgrade) {
-    upgrade.hidden = member;
+    // Always there: the plans one tap away from every page. For a member it
+    // is a quiet "Plans" rather than a sales button, because they have one.
     // The long words on a laptop, one word on a phone, where it sits in the
     // bar in place of "Sign in" (which moves into the menu).
-    upgrade.innerHTML = user ? '<span>Upgrade</span>' : '<span class="ul-long">Get the calls</span><span class="ul-short">Join</span>';
+    upgrade.hidden = false;
+    upgrade.classList.toggle('btn-primary', !member);
+    upgrade.classList.toggle('btn-ghost', member);
+    upgrade.innerHTML = member ? '<span>Plans</span>' : user ? '<span>Upgrade</span>' : '<span class="ul-long">Get the calls</span><span class="ul-short">Join</span>';
   }
   const navSignin = document.getElementById('nav-signin');
   if (navSignin) navSignin.hidden = Boolean(user);
