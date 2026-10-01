@@ -2871,6 +2871,192 @@
 }
 @media print { .mo-root { display: none !important; } }
 
+/* ========================================================= the landing page
+ *
+ * "/" for anyone who is not a member (viewLanding in app.js). The football
+ * media register (offside-ui, "Two registers"): roomy, analysis-led, no
+ * odds. One loud thing, the headline in signage type across the top with
+ * today's free call beside it as the proof; everything under it is quiet,
+ * left-aligned, and earns its place with something real: the record, the
+ * games, the prices.
+ */
+.ld-hero {
+  position: relative;
+  padding: var(--space-12) 0 var(--space-11);
+  background:
+    radial-gradient(70% 90% at 85% 0%, var(--floodlight-dim), transparent 70%),
+    radial-gradient(50% 60% at 0% 100%, rgba(245, 165, 36, 0.06), transparent 70%),
+    var(--pitch);
+  border-bottom: var(--border) solid var(--hairline);
+  overflow: hidden;
+}
+.ld-hero-in {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.9fr);
+  gap: var(--space-11);
+  align-items: center;
+}
+.ld-hero.ld-solo .ld-hero-in { grid-template-columns: minmax(0, 1fr); max-width: 900px; }
+.ld-h1 {
+  margin: 0 0 var(--space-6);
+  font-family: var(--display);
+  font-size: clamp(3rem, 1.9rem + 4.6vw, 6.25rem);
+  font-weight: var(--weight-black);
+  line-height: 0.9;
+  letter-spacing: var(--tracking-hero);
+  color: var(--chalk);
+}
+.ld-l { display: block; }
+.ld-lede {
+  max-width: 54ch;
+  margin: 0 0 var(--space-8);
+  font-size: calc(var(--text-read) * 1.125);
+  line-height: var(--leading-normal);
+  color: var(--chalk-2);
+}
+.ld-actions { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.ld-small { margin: var(--space-5) 0 0; font-size: var(--text-sm); color: var(--chalk-3); }
+
+/* Today's free call, as the proof: the match and the reasoning, word for word. */
+.ld-call {
+  position: relative;
+  padding: var(--space-8);
+  border: var(--border) solid var(--rule);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, var(--terrace), var(--stand));
+  box-shadow: var(--elev-3);
+}
+.ld-call-wait { min-height: 360px; }
+.ld-call-tag { margin: 0 0 var(--space-4); font-size: var(--text-sm); font-weight: var(--weight-bold); color: var(--sodium); }
+.ld-call-comp { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-5); font-size: var(--text-sm); color: var(--chalk-2); }
+.ld-call-comp:empty { display: none; }
+.ld-call-teams { display: grid; gap: var(--space-3); margin: 0 0 var(--space-3); }
+.ld-call-teams span { display: flex; align-items: center; gap: var(--space-4); }
+.ld-call-teams b {
+  font-family: var(--display);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-black);
+  line-height: var(--leading-tight);
+  color: var(--chalk);
+}
+.ld-call-when { margin: 0 0 var(--space-6); font-size: var(--text-sm); color: var(--chalk-3); font-variant-numeric: tabular-nums; }
+.ld-call-why {
+  margin: 0 0 var(--space-6);
+  padding-left: var(--space-5);
+  border-left: 3px solid var(--floodlight);
+  font-size: var(--text-read);
+  line-height: var(--leading-read);
+  color: var(--chalk);
+}
+.ld-call-go { font-weight: var(--weight-bold); color: var(--floodlight-hi); text-decoration: none; }
+.ld-call-go:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* The site in numbers: a band under the hero. */
+.ld-strip { border-bottom: var(--border) solid var(--hairline); background: var(--stand); }
+.ld-strip-in { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-6); padding-block: var(--space-8); min-height: 120px; }
+.ld-strip-in > div { display: grid; gap: var(--space-1); align-content: start; }
+.ld-strip b {
+  font-family: var(--display-figures);
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-black);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--chalk);
+}
+.ld-strip span { font-size: var(--text-sm); color: var(--chalk-3); }
+
+.ld-sec { padding-block: var(--space-12) 0; }
+.ld-sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-5); margin: 0 0 var(--space-4); }
+.ld-h2 {
+  margin: 0 0 var(--space-4);
+  font-family: var(--display);
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-black);
+  line-height: var(--leading-display);
+  color: var(--chalk);
+}
+.ld-sec-head .ld-h2 { margin: 0; }
+.ld-sub { max-width: 62ch; margin: 0 0 var(--space-7); font-size: var(--text-read); line-height: var(--leading-normal); color: var(--chalk-2); }
+
+/* How it works: a real sequence, so numbered. */
+.ld-how { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-9); margin: var(--space-7) 0 0; padding: 0; list-style: none; counter-reset: ld; }
+.ld-how li { counter-increment: ld; padding-top: var(--space-5); border-top: 2px solid var(--rule); }
+.ld-how li::before {
+  content: counter(ld);
+  display: block;
+  margin-bottom: var(--space-4);
+  font-family: var(--display-figures);
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-black);
+  line-height: 1;
+  color: var(--floodlight-hi);
+}
+.ld-how b { display: block; margin-bottom: var(--space-3); font-size: var(--text-lg); color: var(--chalk); }
+.ld-how p { margin: 0; font-size: var(--text-read); line-height: var(--leading-normal); color: var(--chalk-2); }
+
+/* The plans. */
+.ld-plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-5); margin: 0 0 var(--space-7); padding: 0; list-style: none; }
+.ld-plans a {
+  display: grid;
+  gap: var(--space-3);
+  height: 100%;
+  padding: var(--space-7);
+  border: var(--border) solid var(--rule);
+  border-radius: var(--radius-lg);
+  background: var(--stand);
+  color: var(--chalk);
+  text-decoration: none;
+}
+.ld-plans a:hover { border-color: var(--floodlight); }
+.ld-plans a:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.ld-plans b { font-size: var(--text-lg); }
+.ld-price { display: grid; gap: var(--space-1); font-family: var(--display-figures); font-size: var(--text-3xl); font-weight: var(--weight-black); line-height: 1; font-variant-numeric: tabular-nums; }
+.ld-price small { font-family: var(--body); font-size: var(--text-sm); font-weight: var(--weight-normal); color: var(--sodium); }
+.ld-blurb { font-size: var(--text-md); line-height: var(--leading-normal); color: var(--chalk-2); }
+
+/* Straight answers. */
+.ld-faq { max-width: 760px; border-top: var(--border) solid var(--hairline); }
+.ld-faq details { border-bottom: var(--border) solid var(--hairline); }
+.ld-faq summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-6) 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  color: var(--chalk);
+  cursor: pointer;
+  list-style: none;
+}
+.ld-faq summary::-webkit-details-marker { display: none; }
+.ld-faq summary::after { content: '+'; flex: none; font-size: var(--text-xl); font-weight: var(--weight-normal); color: var(--chalk-3); transition: transform var(--dur-fast) var(--ease-out); }
+.ld-faq details[open] summary::after { transform: rotate(45deg); }
+.ld-faq p { max-width: 62ch; margin: 0 0 var(--space-6); font-size: var(--text-read); line-height: var(--leading-read); color: var(--chalk-2); }
+
+.ld-end {
+  margin-top: var(--space-12);
+  padding: var(--space-12) 0;
+  border-top: var(--border) solid var(--hairline);
+  background: radial-gradient(60% 120% at 50% 100%, var(--floodlight-dim), transparent 70%), var(--pitch);
+}
+.ld-end .ld-h2 { max-width: 18ch; margin-bottom: var(--space-7); font-size: var(--text-4xl); }
+
+@media (max-width: 900px) {
+  .ld-hero { padding: var(--space-10) 0 var(--space-10); }
+  .ld-hero-in { grid-template-columns: minmax(0, 1fr); gap: var(--space-9); }
+  .ld-how, .ld-plans { grid-template-columns: minmax(0, 1fr); gap: var(--space-6); }
+  .ld-strip-in { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .ld-call { padding: var(--space-6); }
+  .ld-call-wait { min-height: 300px; }
+  .ld-actions .btn { flex: 1 1 100%; }
+  .ld-sec { padding-top: var(--space-11); }
+  .ld-h2 { font-size: var(--text-2xl); }
+  .ld-end .ld-h2 { font-size: var(--text-3xl); }
+}
+
 /* ===================================================== reduced motion */
 
 /* Everything above degrades to a colour change. Nothing here is load-bearing

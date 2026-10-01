@@ -197,10 +197,14 @@ test('the competitions page links every competition playing this fortnight', asy
   assert.match(p.body, /href="\/league\/64\/uefa-nations-league">UEFA Nations League<\/a>/);
 });
 
-test('the front page starts the masthead photograph with the HTML when the engine found one', async () => {
+test('the front page is the landing page: its words and FAQ data, and no photograph to preload', async () => {
+  // The masthead photograph used to be preloaded here. Visitors now get the
+  // landing page (viewLanding), which has no photograph, so a preload would
+  // spend every visitor's data on an image nothing shows.
   const e = env({ get_board: { fixtures: [FIX] }, get_hero: { fixture_id: 212602, shot_venue_id: 1771 } });
   const html = await (await seoResponse(new Request('https://offside.win/'), e as any))!.text();
-  assert.match(html, /<link rel="preload" as="image" href="https:\/\/sports\.bzzoiro\.com\/img\/venue\/1771\/" fetchpriority="high">\n[\s\S]*<\/head>/);
-  const none = await (await seoResponse(new Request('https://offside.win/'), env({ get_board: { fixtures: [FIX] }, get_hero: {} }) as any))!.text();
-  assert.doesNotMatch(none, /rel="preload" as="image"/);
+  assert.doesNotMatch(html, /rel="preload" as="image"/);
+  assert.match(html, /How it works/);
+  assert.match(html, /"@type":"FAQPage"/);
+  assert.match(html, /Do your calls always come in\?/);
 });

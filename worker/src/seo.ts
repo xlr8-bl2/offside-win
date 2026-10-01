@@ -32,6 +32,7 @@ import { describe as describeCall } from '../../public/js/lib/markets.js';
 import { findBannedInProse } from '../../engine/src/vocabulary.ts';
 import { HOME_DESCRIPTION, SITE_NAME, TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle } from '../../public/js/lib/titles.js';
 import { cardPath, cardState } from '../../public/js/lib/cards.js';
+import { LANDING_FAQ, LANDING_LEDE, LANDING_STEPS } from '../../public/js/lib/front.js';
 import { KINDS, LEGAL_PATHS, freePage, moreHTML, kindPage, legalPage, predictionsHub, searchPage, teamPage, teamPath, tomorrowPage, weekendPage } from './landing.ts';
 
 export interface SeoEnv {
@@ -499,10 +500,10 @@ export async function homePage(env: SeoEnv, site: string): Promise<Page> {
     read<Rec>(env, 'get_board', { p_from: now - 3 * 3600, p_to: now + 48 * 3600 }),
     read<Rec>(env, 'get_hero', {}).catch(() => null),
   ]);
-  // The masthead's photograph is the largest thing on the front page. Named
-  // in the head, it starts downloading with the HTML instead of after the
-  // script has run and drawn the page.
-  const shot = Number(hero?.shot_venue_id);
+  // No masthead photograph to preload any more: the front page a visitor
+  // gets is the landing page (viewLanding), which has none. Members get the
+  // dashboard and its photograph loads as it always did on other pages.
+  void hero;
   const fixtures: Rec[] = Array.isArray(b?.fixtures) ? b!.fixtures : [];
   const calls = fixtures.filter((f) => f.top_pick || f.locked || f.called).length;
   const comps = new Set(fixtures.map((f) => f.league)).size;
@@ -511,16 +512,24 @@ export async function homePage(env: SeoEnv, site: string): Promise<Page> {
     title: '',
     description: HOME_DESCRIPTION,
     canonical: `${site}/`,
-    ...(Number.isFinite(shot) && shot > 0 ? { preloadImage: `https://sports.bzzoiro.com/img/venue/${shot}/` } : {}),
     body: `
   <article class="wrap section narrow seo">
     <h1 class="display">Football predictions for today's biggest games</h1>
-    <p>${esc(fixtures.length ? `${fixtures.length} matches in the next two days across ${comps} competitions, with ${calls} calls.` : 'The next matches go up as soon as they are analysed.')} Every call comes with the reason behind it, and <a href="/results">every result stays on the record</a>, the misses included. One call a day is free.</p>
+    <p>${esc(LANDING_LEDE)}</p>
+    <p>${esc(fixtures.length ? `${fixtures.length} matches in the next two days across ${comps} competitions, with ${calls} calls.` : 'The next matches go up as soon as they are analysed.')} <a href="/results">Every result stays on the record</a>, the misses included. One call a day is free.</p>
     ${free ? `<p>Today's free call is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
+    <h2>How it works</h2>
+    <ol>${LANDING_STEPS.map(([h, p]) => `<li><b>${esc(h)}</b> ${esc(p)}</li>`).join('')}</ol>
     ${byDayAndLeague(fixtures)}
+    <h2>Straight answers</h2>
+    ${LANDING_FAQ.map(([q, a]) => `<h3>${esc(q)}</h3><p>${esc(a)}</p>`).join('')}
     ${moreHTML()}
   </article>`,
-    jsonLd: [],
+    jsonLd: [{
+      '@context': 'https://schema.org',
+      '@type': 'FAQPage',
+      mainEntity: LANDING_FAQ.map(([q, a]) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } })),
+    }],
   };
 }
 
