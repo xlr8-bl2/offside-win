@@ -7645,6 +7645,7 @@ function finishRoute(name, soft, keepY, backTo) {
     if (!soft) setReading(name);
     if (!soft) countView();
     if (!soft) schedulePromos();
+    if (!soft) scheduleSeason();
     state.soft = false;
     liveTick();
     playFlashes();
@@ -7691,6 +7692,57 @@ function finishRoute(name, soft, keepY, backTo) {
       }
     }
   }
+}
+
+/*
+ * The week's note (js/lib/season.js): an international break, the close
+ * season or a tournament, read from the board every time, so it changes when
+ * the football does and needs nobody to switch it on. Only on the pages that
+ * show the board, a beat after the page has drawn, never over the cookie
+ * question or an offer, and once per break (or once a day in a tournament).
+ */
+const SEASON_ROUTES = new Set(['home', 'board', 'today', 'leagues']);
+let seasonTimer = 0;
+let seasonWaiting = false;
+async function scheduleSeason() {
+  clearTimeout(seasonTimer);
+  const name = parseHash().parts[0] || 'home';
+  try {
+    const season = await import('./js/lib/season.js');
+    if (!SEASON_ROUTES.has(name)) { season.closeSeason({ quick: true }); return; }
+    const board = await getJSON('/api/board?hours=72', { quiet: true }).catch(() => null);
+    const now = Date.now() / 1000;
+    const reading = await season.readSeason({
+      fixtures: board?.fixtures ?? [],
+      now,
+      nextTop: async () => {
+        const pl = await getJSON('/api/league/1', { quiet: true }).catch(() => null);
+        return (pl?.next ?? []).map((g) => Number(g.kickoff)).filter((k) => k > now).sort((a, b) => a - b)[0] ?? null;
+      },
+    });
+    const helpers = { crest, esc, kickoff: kickoffLabel, now };
+    // Already up: bring it up to date in place, no second entrance.
+    if (document.getElementById('season-note')) { season.showSeason(reading, helpers); return; }
+    if (!reading || season.dismissed(reading.key)) return;
+    const go = () => {
+      if ((parseHash().parts[0] || 'home') !== name) return;
+      if (document.getElementById('cookie-notice')) {
+        if (!seasonWaiting) {
+          seasonWaiting = true;
+          addEventListener('ow:consent', () => { seasonWaiting = false; seasonTimer = setTimeout(scheduleSeason, 900); }, { once: true });
+        }
+        return;
+      }
+      // An offer popup or an open menu: try again shortly.
+      const menu = document.getElementById('acct-menu');
+      if (document.hidden || document.querySelector('.ofr-root, [aria-modal="true"]') || document.getElementById('nav')?.classList.contains('open') || (menu && !menu.hidden)) {
+        seasonTimer = setTimeout(go, 4000);
+        return;
+      }
+      season.showSeason(reading, helpers);
+    };
+    seasonTimer = setTimeout(go, 1400);
+  } catch { /* a note about the calendar is never worth an error */ }
 }
 
 /*

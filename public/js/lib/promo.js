@@ -489,7 +489,7 @@ export async function runPromos({ route, signedIn, member, returning = false, an
     fired = true;
     removeEventListener('scroll', onScroll);
     const here = (location.hash.slice(2).split(/[/?]/)[0]) || 'home';
-    if (NO_POPUP.has(here) || document.querySelector('.ofr-root, #cookie-notice')) { armed = false; return; }
+    if (NO_POPUP.has(here) || document.querySelector('.ofr-root, #cookie-notice, #season-note')) { armed = false; return; }
     remember('seen', pop.id);
     showPopup(pop);
   };
