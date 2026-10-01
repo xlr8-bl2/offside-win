@@ -28,11 +28,12 @@ import { cardImage, seoResponse, sitemap } from './seo.ts';
 import { bearer, jsonHeaders } from './http.ts';
 import { charge, checkout, confirm, payStatus, sweepWhop, renewal, webhook, type PayEnv } from './pay.ts';
 import { deleteAccount } from './account.ts';
+import { authEmailHook, type HookEnv } from './authhook.ts';
 import { admin, type AdminEnv } from './admin.ts';
 import { fixtureChanges, liveList, liveMatch, type LiveEnv } from './live.ts';
 import { EDGE_PATHS, edgeCached } from './edge.ts';
 
-interface Env extends PayEnv, LiveEnv, AdminEnv {
+interface Env extends PayEnv, LiveEnv, AdminEnv, HookEnv {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   GOOGLE_CLIENT_ID?: string;
@@ -170,6 +171,10 @@ const worker = {
 
     try {
       if (path === '/api/config') return config(env);
+
+      // Supabase's send-email hook: sign-in links, sent in the site's own
+      // design. Signed by Supabase; authhook.ts checks it before anything.
+      if (path === '/api/auth/email') return await authEmailHook(request, env);
 
       // Deleting an account: the reader's token names the account, GoTrue
       // vouches for it, and the service key does the removing. account.ts.

@@ -8,6 +8,7 @@ import { grant, plans } from './grant.ts';
 import { whopCheck } from './whopcheck.ts';
 import { geminiCheck } from './geminicheck.ts';
 import { mailSetup } from './mailsetup.ts';
+import { authMail } from './authmail.ts';
 import { syncCards } from './cards/sync.ts';
 import { probeHistoricOdds, runLab } from './lab/run.ts';
 import { backfillSnapshots } from './lab/backfill.ts';
@@ -364,6 +365,11 @@ const commands: Record<string, () => Promise<unknown>> = {
   // Brevo: the key, the domain's DNS records, the sender, and a test email.
   async 'mail:setup'() {
     return mailSetup(process.argv[3] ?? (process.env['GRANT_EMAIL'] || undefined));
+  },
+
+  // Sign-in emails: from the Worker in the site's design, or back to Supabase's.
+  async 'mail:auth'() {
+    return authMail(process.argv[3] ?? (process.env['GRANT_EMAIL'] || 'status'));
   },
 
   // The account a leaked call came from, by the code #/trace reads out of it.

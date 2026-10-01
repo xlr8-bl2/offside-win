@@ -1,39 +1,92 @@
 /**
- * Email from Offside.win, sent through Brevo.
+ * Email from Offside.win.
  *
- * One message so far, and the one the law needs: the confirmation after a
- * membership is switched on. It restates what was bought, until when, whether
- * it renews and how to stop it, and -- when the buyer ticked the boxes at
- * checkout -- that they asked for it to start at once and accepted that this
- * ends the 14-day right to cancel. The Consumer Contracts Regulations 2013
- * (reg. 16 and 37) want that confirmation on a durable medium; an email is
- * one, a web page is not.
+ * Two ways out, tried in order:
+ *   1. Cloudflare Email Service, through the Worker's `EMAIL` binding
+ *      (`[[send_email]]` in wrangler.toml). Needs Workers Paid and offside.win
+ *      onboarded under Email Service; until then the binding is absent.
+ *   2. Brevo, with BREVO_API_KEY, which is what sent mail before.
+ * Whichever answers first wins; a refusal from the first falls through to the
+ * second, so switching providers is never a window with no mail.
  *
- * Sending never fails the thing it reports on. No key, a refusal or a network
- * error is logged by shape and the membership stands.
+ * What gets sent, and from where:
+ *   - sign-in, sign-up and email-change links: Supabase's send-email hook
+ *     calls /api/auth/email (authhook.ts), so the sign-in email looks like
+ *     the rest of the site rather than like Supabase's default;
+ *   - "you're in": the confirmation after a membership switches on. The one
+ *     the law needs: the Consumer Contracts Regulations 2013 (reg. 16 and 37)
+ *     want what was bought and what was agreed on a durable medium, and an
+ *     email is one where a web page is not;
+ *   - renewed, renewal stopped, access ended (refund or chargeback);
+ *   - free time given from the owner's dashboard;
+ *   - account deleted.
+ *
+ * Sending never fails the thing it reports on, except the sign-in hook, where
+ * the email is the whole job. No transport, a refusal or a network error is
+ * logged by shape (never the address) and the membership stands.
  */
 
+/** The parts of Cloudflare's send_email binding used here. */
+export interface EmailBinding {
+  send(message: {
+    to: string;
+    from: { email: string; name?: string };
+    replyTo?: { email: string; name?: string };
+    subject: string;
+    html?: string;
+    text?: string;
+    headers?: Record<string, string>;
+  }): Promise<{ messageId: string }>;
+}
+
 export interface MailEnv {
+  EMAIL?: EmailBinding;
   BREVO_API_KEY?: string;
   MAIL_FROM?: string;
 }
 
 export const SUPPORT = 'support@offside.win';
 const SITE = 'https://offside.win';
+const FROM_NAME = 'Offside.win';
 
 export interface Mail { subject: string; html: string; text: string; tag: string }
 
-/** Send one email. True when Brevo accepted it. */
-export async function sendMail(env: MailEnv, to: string, mail: Mail): Promise<boolean> {
-  if (!env.BREVO_API_KEY) { console.log('mail: no BREVO_API_KEY, not sent'); return false; }
+/** Which way a message went out, or null when neither would take it. */
+export type Sent = 'cloudflare' | 'brevo' | null;
+
+/** Send one email. Never throws. */
+export async function deliver(env: MailEnv, to: string, mail: Mail): Promise<Sent> {
+  const from = env.MAIL_FROM || 'hello@offside.win';
+  if (env.EMAIL) {
+    try {
+      await env.EMAIL.send({
+        to,
+        from: { email: from, name: FROM_NAME },
+        replyTo: { email: SUPPORT, name: FROM_NAME },
+        subject: mail.subject,
+        html: mail.html,
+        text: mail.text,
+      });
+      return 'cloudflare';
+    } catch (err) {
+      // The code only: E_SENDER_NOT_VERIFIED means the domain is not onboarded
+      // yet, E_RATE_LIMIT_EXCEEDED that it is. The message can echo the address.
+      const code = (err as { code?: unknown })?.code;
+      console.error('mail: cloudflare refused', typeof code === 'string' ? code : 'error', mail.tag);
+    }
+  }
+  if (!env.BREVO_API_KEY) {
+    if (!env.EMAIL) console.log('mail: no EMAIL binding and no BREVO_API_KEY, not sent', mail.tag);
+    return null;
+  }
   try {
     const res = await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
       headers: { 'api-key': env.BREVO_API_KEY, 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({
-        sender: { name: 'Offside.win', email: env.MAIL_FROM || 'hello@offside.win' },
+        sender: { name: FROM_NAME, email: from },
         to: [{ email: to }],
-        replyTo: { email: SUPPORT, name: 'Offside.win' },
+        replyTo: { email: SUPPORT, name: FROM_NAME },
         subject: mail.subject,
         htmlContent: mail.html,
         textContent: mail.text,
@@ -42,15 +95,22 @@ export async function sendMail(env: MailEnv, to: string, mail: Mail): Promise<bo
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null) as { code?: string } | null;
-      console.error('mail: refused', res.status, body?.code ?? '');
-      return false;
+      console.error('mail: brevo refused', res.status, body?.code ?? '', mail.tag);
+      return null;
     }
-    return true;
+    return 'brevo';
   } catch (err) {
-    console.error('mail: not sent', err instanceof Error ? err.message : String(err));
-    return false;
+    console.error('mail: not sent', err instanceof Error ? err.name : 'error', mail.tag);
+    return null;
   }
 }
+
+/** Send one email. True when something accepted it. */
+export async function sendMail(env: MailEnv, to: string, mail: Mail): Promise<boolean> {
+  return (await deliver(env, to, mail)) !== null;
+}
+
+/* ------------------------------------------------------------- the words */
 
 const PLAN_NAME: Record<string, string> = {
   matchday: 'Matchday pass',
@@ -58,17 +118,163 @@ const PLAN_NAME: Record<string, string> = {
   quarter: '3-month membership',
   season: 'Season ticket',
 };
+const planName = (plan: string) => PLAN_NAME[plan] ?? 'Membership';
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
-const longDate = (epoch: number) => new Intl.DateTimeFormat('en-GB', {
+export const longDate = (epoch: number) => new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Europe/London', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+}).format(new Date(epoch * 1000));
+
+const shortDate = (epoch: number) => new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/London', day: 'numeric', month: 'long', year: 'numeric',
 }).format(new Date(epoch * 1000));
 
 /** "2026-09-27" as "27 September 2026"; anything else as it is. */
 const termsDate = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v)
   ? new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${v}T00:00:00Z`))
   : v);
+
+/* ------------------------------------------------------------- the look */
+
+/*
+ * One frame for every message, drawn the way the site is (public/tokens.css):
+ * the near-black ground, chalk type, violet only where something can be tapped.
+ * Tables and inline styles throughout, because that is what Outlook and Gmail
+ * still read. Dark by design and declared as such, so a mail app in dark mode
+ * leaves it alone rather than inverting it into grey.
+ *
+ * The one loud thing is the headline: big, tight, chalk. Everything under it
+ * is quiet.
+ */
+const C = {
+  pitch: '#0a0a0c',
+  stand: '#16171b',
+  terrace: '#202329',
+  line: '#2a2d34',
+  chalk: '#f4f6fa',
+  chalk2: '#c3c8d2',
+  chalk3: '#8d94a3',
+  violet: '#7a5af8',
+  violetHi: '#9e86ff',
+};
+const SANS = `-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif`;
+const DISPLAY = `'Big Shoulders Display','Arial Narrow',${SANS}`;
+
+/** A line of body copy. `html` is trusted markup; everything else is escaped. */
+type Part =
+  | { p: string; small?: boolean }
+  | { html: string }
+  | { button: string; href: string }
+  | { facts: Array<[string, string]> }
+  | { note: string }
+  | { code: string }
+  | { link: string; href: string };
+
+function part(x: Part): string {
+  if ('p' in x) {
+    const size = x.small ? '14px/1.6' : '16px/1.65';
+    const color = x.small ? C.chalk3 : C.chalk2;
+    return `<p style="margin:0 0 18px;font:${size} ${SANS};color:${color}">${esc(x.p)}</p>`;
+  }
+  if ('html' in x) return x.html;
+  if ('button' in x) {
+    return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 26px"><tr>
+<td style="border-radius:10px;background:${C.violet}"><a href="${esc(x.href)}" style="display:inline-block;padding:15px 26px;font:600 16px/1 ${SANS};color:#ffffff;text-decoration:none;border-radius:10px">${esc(x.button)}</a></td>
+</tr></table>`;
+  }
+  if ('facts' in x) {
+    const rows = x.facts.map(([k, v], i) => `<tr>
+<td style="padding:13px 16px;${i ? `border-top:1px solid ${C.line};` : ''}font:14px/1.4 ${SANS};color:${C.chalk3};white-space:nowrap">${esc(k)}</td>
+<td style="padding:13px 16px;${i ? `border-top:1px solid ${C.line};` : ''}font:600 14px/1.4 ${SANS};color:${C.chalk};text-align:right">${esc(v)}</td>
+</tr>`).join('');
+    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;background:${C.terrace};border-radius:10px">${rows}</table>`;
+  }
+  if ('note' in x) {
+    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 22px"><tr>
+<td style="border-left:3px solid ${C.violet};padding:2px 0 2px 14px;font:14px/1.6 ${SANS};color:${C.chalk2}">${esc(x.note)}</td></tr></table>`;
+  }
+  if ('code' in x) {
+    return `<p style="margin:0 0 24px;font:800 38px/1 ${DISPLAY};letter-spacing:.18em;color:${C.chalk}">${esc(x.code)}</p>`;
+  }
+  return `<p style="margin:0 0 18px;font:13px/1.5 ${SANS};color:${C.chalk3};word-break:break-all">${esc(x.link)}<br><a href="${esc(x.href)}" style="color:${C.violetHi}">${esc(x.href)}</a></p>`;
+}
+
+/** The text-only twin of a part, for the plain-text alternative. */
+function plain(x: Part): string {
+  if ('p' in x) return x.p;
+  if ('html' in x) return '';
+  if ('button' in x) return `${x.button}: ${x.href}`;
+  if ('facts' in x) return x.facts.map(([k, v]) => `${k}: ${v}`).join('\n');
+  if ('note' in x) return x.note;
+  if ('code' in x) return x.code;
+  return `${x.link}\n${x.href}`;
+}
+
+interface Frame {
+  tag: string;
+  subject: string;
+  /** The line a mail app shows beside the subject. */
+  preheader: string;
+  heading: string;
+  parts: Part[];
+  /** Account and legal links under the body. Off for sign-in mail. */
+  links?: boolean;
+  /** The gambling line. Off for mail about the account itself. */
+  gamble?: boolean;
+}
+
+function compose(f: Frame): Mail {
+  const links = f.links !== false;
+  const gamble = f.gamble !== false;
+  const foot = [
+    gamble ? `18+. Offside.win gives opinions about football matches, not advice to bet. Only bet what you can afford to lose. <a href="https://www.begambleaware.org" style="color:${C.chalk3}">BeGambleAware.org</a>` : '',
+    `Questions? Reply to this email or write to <a href="mailto:${SUPPORT}" style="color:${C.chalk3}">${SUPPORT}</a>.`,
+  ].filter(Boolean).join('<br><br>');
+  const linkRow = links
+    ? `<p style="margin:4px 0 0;font:14px/1.6 ${SANS}"><a href="${SITE}/#/account" style="color:${C.violetHi};text-decoration:none">Your account</a>&nbsp;&nbsp;&nbsp;<a href="${SITE}/terms" style="color:${C.violetHi};text-decoration:none">Terms</a>&nbsp;&nbsp;&nbsp;<a href="${SITE}/privacy" style="color:${C.violetHi};text-decoration:none">Privacy</a></p>`
+    : '';
+
+  const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark">
+<title>${esc(f.subject)}</title>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&display=swap" rel="stylesheet">
+<style>:root{color-scheme:dark;supported-color-schemes:dark}a{color:${C.violetHi}}@media (max-width:480px){.card{border-radius:0!important}.pad{padding-left:22px!important;padding-right:22px!important}.h1{font-size:30px!important}}</style>
+</head>
+<body style="margin:0;padding:0;background:${C.pitch};-webkit-text-size-adjust:100%">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:${C.pitch}">${esc(f.preheader)}&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.pitch}"><tr><td align="center" style="padding:28px 0 36px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
+<tr><td class="pad" style="padding:0 30px 18px">
+<a href="${SITE}" style="text-decoration:none;font:700 24px/1 ${SANS};letter-spacing:-1px;color:${C.chalk}">offside<span style="display:inline-block;width:6px;height:6px;margin:0 2px 0 2px;border-radius:3px;background:${C.violetHi};vertical-align:baseline"></span><span style="color:${C.chalk3}">win</span></a>
+</td></tr>
+<tr><td class="card" style="background:${C.stand};border:1px solid ${C.line};border-radius:16px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tr><td style="height:3px;line-height:3px;font-size:0;background:${C.violet};border-radius:16px 16px 0 0">&nbsp;</td></tr>
+<tr><td class="pad" style="padding:34px 30px 12px">
+<h1 class="h1" style="margin:0 0 22px;font:800 40px/1 ${DISPLAY};letter-spacing:.005em;color:${C.chalk}">${esc(f.heading)}</h1>
+${f.parts.map(part).join('\n')}
+${linkRow}
+</td></tr>
+<tr><td class="pad" style="padding:22px 30px 28px">
+<p style="margin:0;padding-top:20px;border-top:1px solid ${C.line};font:12px/1.6 ${SANS};color:${C.chalk3}">${foot}</p>
+</td></tr>
+</table></td></tr>
+<tr><td class="pad" style="padding:18px 30px 0;font:12px/1.5 ${SANS};color:${C.chalk3}">Offside.win &nbsp; <a href="${SITE}" style="color:${C.chalk3}">offside.win</a></td></tr>
+</table></td></tr></table></body></html>`;
+
+  const text = [
+    f.heading, '',
+    ...f.parts.map(plain).filter(Boolean).flatMap((t) => [t, '']),
+    ...(links ? [`Your account: ${SITE}/#/account`, `Terms: ${SITE}/terms`, ''] : []),
+    `Questions? Reply to this email or write to ${SUPPORT}.`,
+    ...(gamble ? ['', '18+. Offside.win gives opinions about football matches, not advice to bet. BeGambleAware.org'] : []),
+  ].join('\n');
+
+  return { subject: f.subject, html, text, tag: f.tag };
+}
+
+/* --------------------------------------------------------- the messages */
 
 export interface MembershipMailInput {
   plan: string;
@@ -80,46 +286,248 @@ export interface MembershipMailInput {
 
 /** "You're in": the membership confirmation, and the record of what was agreed. */
 export function membershipMail({ plan, until, consent }: MembershipMailInput): Mail {
-  const name = PLAN_NAME[plan] ?? 'Membership';
+  const name = planName(plan);
   const renews = plan !== 'matchday';
   const when = longDate(until);
-  const lines: string[] = [
-    `Your ${name.toLowerCase()} is on. Every call, the bet slip's legs and the reasons behind every call are open to you${renews ? '' : ` until ${when}`}.`,
-    renews
-      ? `It runs to ${when} and then renews at the same price until you cancel. Cancel any time, in one step, from your account page or your Whop account; you keep access to the end of the period you have paid for.`
-      : `It ends by itself on ${when}. Nothing renews and nothing more is charged.`,
+  const parts: Part[] = [
+    { p: `Your ${name.toLowerCase()} is on. Every call, every leg of the bet slip and the reasons behind each one are open to you now.` },
+    { button: "See today's calls", href: `${SITE}/#/board` },
+    { facts: [
+      ['Plan', name],
+      [renews ? 'Paid to' : 'Runs to', shortDate(until)],
+      ['Renews', renews ? 'Yes, until you stop it' : 'No, it ends by itself'],
+    ] },
+    { p: renews
+      ? `It renews at the same price on ${when} unless you stop it. Stopping takes one tap on your account page, and you keep everything you have paid for until then.`
+      : `It ends by itself on ${when}. Nothing renews and nothing more is charged.` },
   ];
-  const agreed = consent
-    ? `At checkout on ${longDate(consent.at)} you confirmed you are 18 or over and agreed to our terms of use (the version in force from ${termsDate(consent.terms)}). You asked for your membership to start straight away and accepted that, once it started, you lose the 14-day right to cancel for a change of mind. If anything of ours fails, you still get it put right or your money back.`
-    : null;
-  const own = 'Members’ calls are for you alone. Please don’t post, sell or pass them on.';
-  const help = `Questions, or something not working? Reply to this email or write to ${SUPPORT}.`;
+  if (consent) {
+    parts.push({ note: `What you agreed: at checkout on ${longDate(consent.at)} you confirmed you are 18 or over and agreed to our terms of use (the version in force from ${termsDate(consent.terms)}). You asked for your membership to start straight away and accepted that, once it started, you lose the 14-day right to cancel for a change of mind. If anything of ours fails, you still get it put right or your money back.` });
+  }
+  parts.push({ p: 'Members’ calls are for you alone. Don’t post, sell or pass them on.', small: true });
 
-  const text = [
-    `You're in.`, '', ...lines, '', ...(agreed ? [agreed, ''] : []), own, '',
-    `Your account: ${SITE}/#/account`, `Terms of use: ${SITE}/terms`, '', help, '',
-    '18+. Offside.win gives opinions about football matches, not advice to bet. BeGambleAware.org',
-  ].join('\n');
+  return compose({
+    tag: 'membership',
+    subject: renews ? `You're in: your ${name.toLowerCase()} is on` : `You're in: your ${name.toLowerCase()} runs to ${shortDate(until)}`,
+    preheader: renews ? `Everything is open. It renews on ${shortDate(until)} unless you stop it.` : `Everything is open until ${when}.`,
+    heading: "You're in.",
+    parts,
+  });
+}
 
-  const p = (s: string, extra = '') => `<p style="margin:0 0 16px;font:16px/1.6 -apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#1d1f24;${extra}">${s}</p>`;
-  const html = `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<meta name="color-scheme" content="light only"><title>${esc(name)}</title></head>
-<body style="margin:0;padding:0;background:#f1f2f5">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f2f5"><tr><td align="center" style="padding:24px 12px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;overflow:hidden">
-<tr><td style="background:#0a0a0c;padding:22px 28px;font:700 22px/1 'Arial Narrow',Arial,sans-serif;letter-spacing:.01em;color:#f4f6fa">off<span style="color:#7a5af8">|</span>side<span style="color:#8d94a3">.win</span></td></tr>
-<tr><td style="padding:32px 28px 12px">
-<h1 style="margin:0 0 20px;font:700 30px/1.1 'Arial Narrow',Arial,sans-serif;color:#0a0a0c">You're in.</h1>
-${lines.map((l) => p(esc(l))).join('\n')}
-<p style="margin:8px 0 24px"><a href="${SITE}/#/board" style="display:inline-block;background:#7a5af8;color:#ffffff;text-decoration:none;font:600 15px/1 -apple-system,'Segoe UI',Helvetica,Arial,sans-serif;padding:14px 22px;border-radius:8px">See today's calls</a></p>
-${agreed ? `<div style="border-left:3px solid #7a5af8;background:#f6f4ff;padding:14px 16px;margin:0 0 20px">${p(esc(agreed), 'margin:0;font-size:14px;color:#3a3d45;')}</div>` : ''}
-${p(esc(own), 'font-size:14px;color:#3a3d45;')}
-${p(`<a href="${SITE}/#/account" style="color:#5b3fe0">Your account</a> &nbsp; <a href="${SITE}/terms" style="color:#5b3fe0">Terms of use</a> &nbsp; <a href="${SITE}/privacy" style="color:#5b3fe0">Privacy</a>`, 'font-size:14px;')}
-${p(esc(help), 'font-size:14px;color:#3a3d45;')}
-</td></tr>
-<tr><td style="padding:16px 28px 24px;border-top:1px solid #e6e7eb;font:12px/1.5 -apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#6b7080">
-18+. Offside.win gives opinions about football matches, not advice to bet. Only bet what you can afford to lose. <a href="https://www.begambleaware.org" style="color:#6b7080">BeGambleAware.org</a>
-</td></tr></table></td></tr></table></body></html>`;
+/** A renewing membership took its next payment. */
+export function renewedMail({ plan, until }: { plan: string; until: number }): Mail {
+  const name = planName(plan);
+  return compose({
+    tag: 'renewal',
+    subject: `Renewed: you're in until ${shortDate(until)}`,
+    preheader: 'Your membership renewed. Nothing to do.',
+    heading: 'Renewed. Still in.',
+    parts: [
+      { p: `Your ${name.toLowerCase()} renewed, so nothing changes: every call stays open to you.` },
+      { facts: [['Plan', name], ['Paid to', shortDate(until)], ['Next renewal', shortDate(until)]] },
+      { p: 'Whop, who take the payment, send the receipt for the money itself. Want it to stop? One tap on your account page, and you keep the time you have paid for.' },
+      { button: 'Open your account', href: `${SITE}/#/account` },
+    ],
+  });
+}
 
-  return { subject: renews ? `You're in: your ${name.toLowerCase()} is on` : `You're in: your ${name.toLowerCase()} runs to ${when}`, html, text, tag: 'membership' };
+/** Renewal switched off: nothing more will be charged. */
+export function renewalStoppedMail({ plan, until }: { plan?: string | null; until?: number | null }): Mail {
+  const name = plan ? planName(plan) : 'Membership';
+  const facts: Array<[string, string]> = [['Plan', name], ['Renews', 'No']];
+  if (until) facts.splice(1, 0, ['Open until', shortDate(until)]);
+  return compose({
+    tag: 'renewal-stopped',
+    subject: until ? `Renewal stopped. You're in until ${shortDate(until)}` : 'Renewal stopped',
+    preheader: 'Nothing more will be charged.',
+    heading: 'Renewal stopped.',
+    parts: [
+      { p: until
+        ? `Done. Nothing more will be charged, and everything stays open to you until ${longDate(until)}. After that the site goes back to the free view.`
+        : 'Done. Nothing more will be charged. You keep everything until the end of the time you have paid for.' },
+      { facts },
+      { p: 'Changed your mind? Pick a plan again from the pricing page whenever you like.' },
+      { button: 'See plans', href: `${SITE}/#/pricing` },
+    ],
+  });
+}
+
+/** The money went back, so the access it bought ends now. */
+export function accessEndedMail({ reason }: { reason: 'refund' | 'chargeback' | 'other' }): Mail {
+  const why = reason === 'refund'
+    ? 'Your payment was refunded, so the membership it paid for has ended today.'
+    : reason === 'chargeback'
+      ? 'Your bank reversed the payment, so the membership it paid for has ended today.'
+      : 'Your membership has ended today.';
+  return compose({
+    tag: 'access-ended',
+    subject: 'Your membership has ended',
+    preheader: 'The free view stays open to you.',
+    heading: 'Membership ended.',
+    parts: [
+      { p: why },
+      { p: 'Your account stays, and so does everything free: the day’s free call, every match page and the full results record, losses included.' },
+      { p: 'Think this is a mistake? Reply to this email and it gets looked at by a person.', small: true },
+      { button: 'Open the site', href: `${SITE}/#/home` },
+    ],
+  });
+}
+
+/** Free time from the owner's dashboard. */
+export function freeTimeMail({ days, until }: { days: number; until: number }): Mail {
+  const span = days === 1 ? 'a day' : days === 7 ? 'a week' : `${days} days`;
+  return compose({
+    tag: 'free-time',
+    subject: `${span[0]!.toUpperCase()}${span.slice(1)} on us`,
+    preheader: `Everything is open until ${shortDate(until)}. Nothing to pay.`,
+    heading: `${span[0]!.toUpperCase()}${span.slice(1)} on us.`,
+    parts: [
+      { p: `Every call, every leg of the bet slip and the reasons behind each one are open to you until ${longDate(until)}.` },
+      { facts: [['Open until', shortDate(until)], ['Cost', 'Nothing'], ['Renews', 'No']] },
+      { p: 'No card is taken and nothing renews. When it ends the site goes back to the free view by itself.' },
+      { button: "See today's calls", href: `${SITE}/#/board` },
+    ],
+  });
+}
+
+/** The account and what was held about it are gone. */
+export function accountDeletedMail({ stoppedRenewal }: { stoppedRenewal: boolean }): Mail {
+  return compose({
+    tag: 'account-deleted',
+    subject: 'Your Offside.win account is deleted',
+    preheader: 'Your sign-in and your details are gone.',
+    heading: 'Account deleted.',
+    links: false,
+    gamble: false,
+    parts: [
+      { p: 'Your sign-in, profile, follows and membership are gone. This email address can no longer sign in to Offside.win.' },
+      ...(stoppedRenewal ? [{ p: 'Your membership with Whop was stopped first, so nothing more will be charged.' } as Part] : []),
+      { p: 'Payment records stay, because tax law requires it. Nothing else of yours is kept.', small: true },
+      { p: 'You can make a new account with this address whenever you like. It starts from scratch.', small: true },
+    ],
+  });
+}
+
+/* ------------------------------------------------------- sign-in emails */
+
+/** What Supabase's send-email hook asks for, by email_action_type. */
+export type AuthAction =
+  | 'magiclink' | 'signup' | 'invite' | 'recovery' | 'email' | 'email_change' | 'email_change_current'
+  | 'reauthentication' | string;
+
+/**
+ * A sign-in or confirmation link, or a code.
+ *
+ * The site signs people in with a link only, so recovery (there are no
+ * passwords) reads as a sign-in, and the six-digit code is shown only where
+ * Supabase sends nothing else.
+ */
+export function authMail({ action, link, code, newEmail }: { action: AuthAction; link: string | null; code?: string | null; newEmail?: string | null }): Mail {
+  const tail: Part[] = [
+    { p: 'It works once, and only for the next hour. Open it on the phone or computer you want to be signed in on.', small: true },
+    { p: 'Didn’t ask for this? Ignore it. Nobody gets in without this email.', small: true },
+  ];
+  const fallback: Part[] = link ? [{ link: 'Button not working? Paste this into your browser:', href: link }] : [];
+
+  if (action === 'reauthentication' || !link) {
+    return compose({
+      tag: 'auth-code', links: false, gamble: false,
+      subject: `Your Offside.win code: ${code ?? ''}`.trim(),
+      preheader: 'Type this code where you were asked for it.',
+      heading: 'Your code.',
+      parts: [
+        { p: 'Type this where Offside.win asked for it.' },
+        { code: code ?? '' },
+        { p: 'It runs out within the hour. Didn’t ask for this? Ignore it.', small: true },
+      ],
+    });
+  }
+  if (action === 'signup') {
+    return compose({
+      tag: 'auth-signup', links: false, gamble: false,
+      subject: 'Confirm your email for Offside.win',
+      preheader: 'One tap and your account is ready.',
+      heading: 'One tap and you’re set.',
+      parts: [
+        { p: 'Confirm this is your email and your Offside.win account is ready. You’ll be signed in straight away.' },
+        { button: 'Confirm and sign in', href: link },
+        ...tail, ...fallback,
+      ],
+    });
+  }
+  if (action === 'invite') {
+    return compose({
+      tag: 'auth-invite', links: false, gamble: false,
+      subject: 'You’ve been invited to Offside.win',
+      preheader: 'Tap to accept and sign in.',
+      heading: 'You’re invited.',
+      parts: [
+        { p: 'An Offside.win account has been set up for this email. Tap to accept it and sign in.' },
+        { button: 'Accept and sign in', href: link },
+        ...tail, ...fallback,
+      ],
+    });
+  }
+  if (action === 'email_change') {
+    return compose({
+      tag: 'auth-email-change', links: false, gamble: false,
+      subject: 'Confirm your new email for Offside.win',
+      preheader: 'Tap to move your account to this address.',
+      heading: 'Confirm your new email.',
+      parts: [
+        { p: 'Tap to move your Offside.win account to this address. Until you do, nothing changes.' },
+        { button: 'Confirm new email', href: link },
+        ...tail, ...fallback,
+      ],
+    });
+  }
+  if (action === 'email_change_current') {
+    return compose({
+      tag: 'auth-email-change', links: false, gamble: false,
+      subject: 'Your Offside.win email is changing',
+      preheader: newEmail ? `To ${newEmail}. Tap to confirm.` : 'Tap to confirm.',
+      heading: 'Your email is changing.',
+      parts: [
+        { p: newEmail
+          ? `Someone asked to move your Offside.win account to ${newEmail}. If that was you, confirm it here too.`
+          : 'Someone asked to move your Offside.win account to a new address. If that was you, confirm it here too.' },
+        { button: 'Confirm the change', href: link },
+        { p: 'Wasn’t you? Ignore this and the change does not happen. Then write to us.', small: true },
+        ...fallback,
+      ],
+    });
+  }
+  // magiclink, recovery, email, and anything new: a sign-in link.
+  return compose({
+    tag: 'auth-signin', links: false, gamble: false,
+    subject: 'Your sign-in link for Offside.win',
+    preheader: 'Tap to sign in. The link works once.',
+    heading: 'Tap to sign in.',
+    parts: [
+      { p: 'Here’s your link to Offside.win. No password, nothing to remember.' },
+      { button: 'Sign in to Offside.win', href: link },
+      ...tail, ...fallback,
+    ],
+  });
+}
+
+/** Supabase's security notices (password changed, identity linked and so on). */
+export function noticeMail(action: string): Mail {
+  const what: Record<string, string> = {
+    email_changed_notification: 'The email address on your Offside.win account was changed.',
+    identity_linked_notification: 'A new way of signing in was linked to your Offside.win account.',
+    identity_unlinked_notification: 'A way of signing in was removed from your Offside.win account.',
+    password_changed_notification: 'The password on your Offside.win account was changed.',
+  };
+  return compose({
+    tag: 'auth-notice', gamble: false,
+    subject: 'A change to your Offside.win account',
+    preheader: 'If this was you, there is nothing to do.',
+    heading: 'Your account changed.',
+    parts: [
+      { p: what[action] ?? 'A sign-in setting on your Offside.win account was changed.' },
+      { p: 'If this was you, there is nothing to do. If it wasn’t, reply to this email straight away.' },
+    ],
+  });
 }

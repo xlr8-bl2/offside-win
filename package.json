@@ -35,6 +35,7 @@
     "whop:check": "npm -w engine run whop:check",
     "gemini:check": "npm -w engine run gemini:check",
     "mail:setup": "npm -w engine run mail:setup",
+    "mail:auth": "npm -w engine run mail:auth",
     "cards": "npm -w engine run cards",
     "lab": "npm -w engine run lab",
     "lab:odds": "npm -w engine run lab:odds",

@@ -67,3 +67,11 @@ ADMIN_EMAIL_SHA256 = "5a2087bbcb792ea743dd4e445fcef43ccb4818f37f5199981e3ec93d9e
 # is what makes a payment certain to count even when a delivery never comes.
 [triggers]
 crons = ["*/10 * * * *"]
+
+# Outbound email through Cloudflare Email Service (src/mail.ts). Off until the
+# account is on Workers Paid and offside.win is onboarded under Compute, Email
+# Service, Email Sending; a binding the plan does not allow would fail the
+# deploy. Until then mail goes through Brevo, and mail.ts falls back to Brevo
+# whenever Cloudflare refuses, so switching this on leaves no gap.
+# [[send_email]]
+# name = "EMAIL"

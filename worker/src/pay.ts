@@ -12,18 +12,16 @@
  * this file is a mistake against the whole database.
  */
 
-import { membershipMail, sendMail } from './mail.ts';
+import { accessEndedMail, membershipMail, renewalStoppedMail, renewedMail, sendMail, type MailEnv } from './mail.ts';
 import { createCheckoutLink, parseWebhook, type CoinflowConfig } from './coinflow.ts';
 import { verifyWebhook } from './webhook.ts';
 import { sha256Hex } from './admin.ts';
 import { WhopError, cancelWhopAtPeriodEnd, createWhopCheckout, createWhopPayment, parseWhop, verifyWhop, whopAccountId, whopPeriodEnd } from './whop.ts';
 
-export interface PayEnv {
+export interface PayEnv extends MailEnv {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_KEY?: string;
-  BREVO_API_KEY?: string;
-  MAIL_FROM?: string;
   /**
    * Which processor is live: 'whop' or 'coinflow'. Whop runs its own checkout
    * and billing, so with it the checkout route hands back the plan's own
@@ -206,15 +204,15 @@ async function liveMembershipOf(env: PayEnv, jwt: string): Promise<{ plan_id: st
 }
 
 /** The reader's account, read with their own token: the live membership and any Whop subscription still renewing. */
-async function accountOf(env: PayEnv, jwt: string): Promise<{ whop: { manage_url?: string | null } | null } | null> {
+export async function accountOf(env: PayEnv, jwt: string): Promise<{ whop: { manage_url?: string | null; until?: number | null } | null; plan: string | null } | null> {
   const res = await fetch(new URL('/rest/v1/rpc/get_account', env.SUPABASE_URL), {
     method: 'POST',
     headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${jwt}`, 'content-type': 'application/json' },
     body: '{}',
   });
   if (!res.ok) return null;
-  const a = await res.json() as { whop?: { manage_url?: string | null } | null };
-  return { whop: a?.whop ?? null };
+  const a = await res.json() as { whop?: { manage_url?: string | null; until?: number | null } | null; membership?: { plan_id?: string | null } | null };
+  return { whop: a?.whop ?? null, plan: a?.membership?.plan_id ?? null };
 }
 
 /**
@@ -449,7 +447,12 @@ export async function renewal(request: Request, env: PayEnv, jwt: string | null)
       if (!(await stopRenewals(env, user))) {
         return json({ error: 'Whop could not be reached, so it is still set to renew. Nothing has changed. Try again in a minute.' }, 503);
       }
-      if (user.email) await rpcAsService(env, 'stop_entitlement_renewal', { p_email: user.email }).catch(() => null);
+      if (user.email) {
+        await rpcAsService(env, 'stop_entitlement_renewal', { p_email: user.email }).catch(() => null);
+        // Only here, where something was renewing (acct.whop is the renewing
+        // subscription): a second tap on an already-stopped one sends nothing.
+        await sendMail(env, user.email, renewalStoppedMail({ plan: acct.plan, until: acct.whop.until ?? null }));
+      }
       return json({ auto_renew: false });
     }
   }
@@ -614,6 +617,10 @@ async function handleWhop(raw: string, via: string, env: PayEnv): Promise<Respon
       return json({ ok: true, ignored: event.eventType, reason: 'runs to its paid date', via: verdict.via });
     }
     const out = await rpcAsService(env, 'revoke_entitlement', { p_email: event.email, p_status: event.eventType });
+    if (out?.applied) {
+      const reason = /refund/i.test(event.eventType) ? 'refund' : /chargeback|dispute/i.test(event.eventType) ? 'chargeback' : 'other';
+      await sendMail(env, event.email, accessEndedMail({ reason }));
+    }
     return json({ ok: true, ...(out ?? {}) });
   }
 
@@ -802,8 +809,28 @@ export async function grantFromMembership(env: PayEnv, m: Rec): Promise<GrantOut
   const granted = Boolean(out?.applied);
   // Once per grant (the ledger applies each one once, however often Whop
   // replays it): the confirmation email, with what the buyer agreed to.
-  if (granted) await confirmByEmail(env, email, plan, end, uid && UUID_RE.test(uid) ? uid.toLowerCase() : null);
+  // An earlier period of this same membership already granted means this one
+  // is a renewal: a "renewed" note rather than the full confirmation again.
+  // Asked only after a grant, so the ten-minute sweep adds no calls.
+  const renewing = granted && plan !== 'matchday' && await grantedBefore(env, id, `${id}:${end}`);
+  if (renewing) {
+    const sent = await sendMail(env, email, renewedMail({ plan, until: end }));
+    console.log('mail: renewal', sent ? 'sent' : 'not sent');
+  } else if (granted) {
+    await confirmByEmail(env, email, plan, end, uid && UUID_RE.test(uid) ? uid.toLowerCase() : null);
+  }
   return { membership: id, result: granted ? 'granted' : String(out?.reason ?? 'not applied'), user: uid };
+}
+
+/** Whether an earlier period of this Whop membership was granted (refs are `<membership>:<period end>`). */
+async function grantedBefore(env: PayEnv, membershipId: string, current: string): Promise<boolean> {
+  if (!env.SUPABASE_SERVICE_KEY || !/^[A-Za-z0-9_-]{1,80}$/.test(membershipId)) return false;
+  try {
+    const res = await fetch(new URL(`/rest/v1/entitlement_grant?ref=like.${encodeURIComponent(`${membershipId}:*`)}&ref=neq.${encodeURIComponent(current)}&select=ref&limit=1`, env.SUPABASE_URL), {
+      headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, accept: 'application/json' },
+    });
+    return res.ok && (await res.json() as unknown[]).length > 0;
+  } catch { return false; }
 }
 
 /** The confirmation email. Never throws: the membership is on whatever happens here. */
