@@ -2882,31 +2882,114 @@
  */
 .ld-hero {
   position: relative;
-  padding: var(--space-12) 0 var(--space-11);
-  background:
-    radial-gradient(70% 90% at 85% 0%, var(--floodlight-dim), transparent 70%),
-    radial-gradient(50% 60% at 0% 100%, rgba(245, 165, 36, 0.06), transparent 70%),
-    var(--pitch);
+  isolation: isolate;
+  display: grid;
+  align-items: center;
+  min-height: min(92vh, 860px);
+  min-height: min(92dvh, 860px);
+  padding: var(--space-13) 0 var(--space-11);
+  background: var(--pitch);
   border-bottom: var(--border) solid var(--hairline);
   overflow: hidden;
 }
+/* The ground, the dark, and the lights. */
+.ld-bg { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+.ld-shot { position: absolute; inset: 0; }
+.ld-shot-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 40%;
+  opacity: 0;
+  filter: saturate(0.85) contrast(1.05);
+  transform: scale(1.06);
+  transition: opacity 1.4s var(--ease-out), transform 6s var(--ease-out);
+}
+.ld-shot-img.is-in { opacity: 0.42; transform: none; }
+.ld-scrim {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, var(--pitch) 0%, rgba(10, 10, 12, 0.88) 38%, rgba(10, 10, 12, 0.35) 75%, rgba(10, 10, 12, 0.55) 100%),
+    linear-gradient(0deg, var(--pitch) 0%, rgba(10, 10, 12, 0) 40%),
+    radial-gradient(70% 90% at 85% 0%, var(--floodlight-dim), transparent 70%);
+}
+/* The gantry along the top: four lamps, each with its beam falling down the ground. */
+.ld-lamps, .ld-lights { position: absolute; inset: 0; }
+.ld-lamp {
+  position: absolute;
+  top: 18px;
+  left: var(--x, 50%);
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: #fffaf0;
+  box-shadow: 0 0 8px 2px rgba(255, 244, 214, 0.95), 0 0 30px 8px rgba(255, 236, 190, 0.45), 0 0 80px 24px rgba(158, 134, 255, 0.22);
+  opacity: 0;
+}
+.ld-beam {
+  position: absolute;
+  top: 22px;
+  left: var(--x, 50%);
+  width: 420px;
+  height: 120%;
+  margin-left: -210px;
+  background: linear-gradient(180deg, rgba(255, 246, 222, 0.16), rgba(255, 246, 222, 0.05) 18%, transparent 60%);
+  clip-path: polygon(48.5% 0, 51.5% 0, 100% 100%, 0 100%);
+  transform-origin: 50% 0;
+  transform: rotate(calc((var(--n, 1.5) - 1.5) * 14deg));
+  filter: blur(12px);
+  mix-blend-mode: screen;
+  opacity: 0;
+}
 .ld-hero-in {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.9fr);
   gap: var(--space-11);
   align-items: center;
 }
 .ld-hero.ld-solo .ld-hero-in { grid-template-columns: minmax(0, 1fr); max-width: 900px; }
-.ld-h1 {
-  margin: 0 0 var(--space-6);
+/* The shout: slams on in sodium before the headline. */
+.ld-shout {
+  display: inline-block;
+  margin: 0 0 var(--space-5);
   font-family: var(--display);
-  font-size: clamp(3rem, 1.9rem + 4.6vw, 6.25rem);
+  font-size: var(--text-2xl);
   font-weight: var(--weight-black);
-  line-height: 0.9;
+  line-height: 1;
+  color: var(--sodium);
+  text-shadow: 0 0 28px rgba(245, 165, 36, 0.5);
+  transform-origin: 0 60%;
+}
+.ld-h1 {
+  margin: 0 0 var(--space-7);
+  font-family: var(--display);
+  font-size: clamp(3.25rem, 1.9rem + 5.2vw, 7rem);
+  font-weight: var(--weight-black);
+  line-height: 0.88;
   letter-spacing: var(--tracking-hero);
   color: var(--chalk);
+  text-wrap: balance;
 }
 .ld-l { display: block; }
+/* The second line starts as an outline and fills with light, left to right.
+   The fill is the background, clipped to the letters; the outline is the
+   stroke underneath. Final state, and the reduced-motion state: filled. */
+.ld-lit {
+  color: transparent;
+  -webkit-text-stroke: 1.5px rgba(244, 246, 250, 0.7);
+  background: linear-gradient(90deg, var(--chalk) 0 50%, transparent 50% 100%);
+  background-size: 200% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  /* Room for the descenders: the fill is the box's background, and a "g"
+     hanging below the box was left as a bare outline. */
+  padding-bottom: 0.16em;
+  margin-bottom: -0.16em;
+}
 .ld-lede {
   max-width: 54ch;
   margin: 0 0 var(--space-8);
@@ -2915,31 +2998,57 @@
   color: var(--chalk-2);
 }
 .ld-actions { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.ld-go { box-shadow: 0 10px 30px -10px rgba(122, 90, 248, 0.8); }
 .ld-small { margin: var(--space-5) 0 0; font-size: var(--text-sm); color: var(--chalk-3); }
 
-/* Today's free call, as the proof: the match and the reasoning, word for word. */
+/* Today's free call, as a matchday ticket: the two clubs' colours meeting at
+   a seam with the crests on them, a perforation, then the match and the
+   reasoning, word for word. */
 .ld-call {
   position: relative;
-  padding: var(--space-8);
   border: var(--border) solid var(--rule);
   border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, var(--terrace), var(--stand));
-  box-shadow: var(--elev-3);
+  background: var(--stand);
+  box-shadow: 0 40px 100px -30px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
 }
-.ld-call-wait { min-height: 360px; }
-.ld-call-tag { margin: 0 0 var(--space-4); font-size: var(--text-sm); font-weight: var(--weight-bold); color: var(--sodium); }
-.ld-call-comp { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-5); font-size: var(--text-sm); color: var(--chalk-2); }
-.ld-call-comp:empty { display: none; }
-.ld-call-teams { display: grid; gap: var(--space-3); margin: 0 0 var(--space-3); }
-.ld-call-teams span { display: flex; align-items: center; gap: var(--space-4); }
-.ld-call-teams b {
+.ld-call-wait { min-height: 420px; }
+.ld-tk-band { position: relative; height: 128px; overflow: hidden; background: var(--pitch); }
+.ld-tk-h, .ld-tk-a { position: absolute; inset: 0; }
+.ld-tk-h { clip-path: polygon(0 0, 56% 0, 44% 100%, 0 100%); background: linear-gradient(180deg, transparent 40%, rgba(0, 0, 0, 0.5)), radial-gradient(120% 120% at 0 0, var(--home-c), color-mix(in srgb, var(--home-c) 40%, var(--pitch))); }
+.ld-tk-a { clip-path: polygon(56% 0, 100% 0, 100% 100%, 44% 100%); background: linear-gradient(180deg, transparent 40%, rgba(0, 0, 0, 0.5)), radial-gradient(120% 120% at 100% 100%, var(--away-c), color-mix(in srgb, var(--away-c) 40%, var(--pitch))); }
+.ld-tk-seam { position: absolute; inset: 0; clip-path: polygon(55.6% 0, 56.4% 0, 44.4% 100%, 43.6% 100%); background: var(--chalk); opacity: 0.6; }
+.ld-tk-crest { position: absolute; top: 50%; margin-top: -38px; filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.55)); }
+.ld-tk-ch { left: 16%; }
+.ld-tk-ca { right: 16%; }
+/* The tear-off line: notches either side and a dashed rule between. */
+.ld-tk-perf { position: relative; height: 0; border-top: 2px dashed var(--rule); }
+.ld-tk-perf::before, .ld-tk-perf::after {
+  content: '';
+  position: absolute;
+  top: -11px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--pitch);
+}
+.ld-tk-perf::before { left: -11px; }
+.ld-tk-perf::after { right: -11px; }
+.ld-tk-body { padding: var(--space-7) var(--space-8) var(--space-8); }
+.ld-call-tag { margin: 0 0 var(--space-3); font-size: var(--text-sm); font-weight: var(--weight-bold); color: var(--sodium); }
+.ld-tk-teams {
+  margin: 0 0 var(--space-3);
   font-family: var(--display);
   font-size: var(--text-2xl);
   font-weight: var(--weight-black);
   line-height: var(--leading-tight);
   color: var(--chalk);
 }
-.ld-call-when { margin: 0 0 var(--space-6); font-size: var(--text-sm); color: var(--chalk-3); font-variant-numeric: tabular-nums; }
+.ld-tk-teams em { font-style: normal; font-weight: var(--weight-normal); color: var(--chalk-3); }
+.ld-tk-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-5); margin: 0 0 var(--space-6); font-size: var(--text-sm); color: var(--chalk-3); font-variant-numeric: tabular-nums; }
+.ld-tk-comp { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--chalk-2); }
+.ld-tk-count { color: var(--floodlight-hi); font-weight: var(--weight-medium); }
+.ld-tk-count b { font-weight: var(--weight-bold); }
 .ld-call-why {
   margin: 0 0 var(--space-6);
   padding-left: var(--space-5);
@@ -2950,6 +3059,7 @@
 }
 .ld-call-go { font-weight: var(--weight-bold); color: var(--floodlight-hi); text-decoration: none; }
 .ld-call-go:hover { text-decoration: underline; text-underline-offset: 3px; }
+.ld-ticker:empty { display: none; }
 
 /* The site in numbers: a band under the hero. */
 .ld-strip { border-bottom: var(--border) solid var(--hairline); background: var(--stand); }
@@ -3043,14 +3153,20 @@
 .ld-end .ld-h2 { max-width: 18ch; margin-bottom: var(--space-7); font-size: var(--text-4xl); }
 
 @media (max-width: 900px) {
-  .ld-hero { padding: var(--space-10) 0 var(--space-10); }
+  .ld-hero { min-height: 0; padding: var(--space-11) 0 var(--space-10); }
+  .ld-scrim { background: linear-gradient(180deg, rgba(10, 10, 12, 0.6) 0%, rgba(10, 10, 12, 0.85) 45%, var(--pitch) 100%), radial-gradient(90% 60% at 80% 0%, var(--floodlight-dim), transparent 70%); }
+  .ld-beam { width: 260px; margin-left: -130px; }
   .ld-hero-in { grid-template-columns: minmax(0, 1fr); gap: var(--space-9); }
   .ld-how, .ld-plans { grid-template-columns: minmax(0, 1fr); gap: var(--space-6); }
   .ld-strip-in { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 520px) {
-  .ld-call { padding: var(--space-6); }
-  .ld-call-wait { min-height: 300px; }
+  .ld-tk-body { padding: var(--space-6); }
+  .ld-tk-band { height: 112px; }
+  .ld-tk-ch { left: 10%; }
+  .ld-tk-ca { right: 10%; }
+  .ld-call-wait { min-height: 380px; }
+  .ld-shout { font-size: var(--text-xl); }
   .ld-actions .btn { flex: 1 1 100%; }
   .ld-sec { padding-top: var(--space-11); }
   .ld-h2 { font-size: var(--text-2xl); }

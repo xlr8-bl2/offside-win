@@ -2365,15 +2365,30 @@ async function viewHome() {
 }
 
 
+/** The shout over the headline, for the day it is. */
+function landingShout(now = new Date()) {
+  const d = now.getDay();
+  if (d === 5 || d === 6 || d === 0) return 'Weekend’s here. Let’s gooo.';
+  if (d === 2 || d === 3) return 'Midweek football. Let’s go.';
+  return 'Football’s on. Let’s gooo.';
+}
+
 function landingHTML() {
   return `
   <section class="ld-hero">
+    <div class="ld-bg" aria-hidden="true">
+      <div class="ld-shot" data-ld="shot"></div>
+      <div class="ld-scrim"></div>
+      <div class="ld-lights">${[14, 38, 62, 86].map((x, i) => `<span class="ld-beam" style="--x:${x}%;--n:${i}"></span>`).join('')}</div>
+      <div class="ld-lamps">${[14, 38, 62, 86].map((x) => `<span class="ld-lamp" style="--x:${x}%"></span>`).join('')}</div>
+    </div>
     <div class="wrap ld-hero-in">
       <div class="ld-copy">
-        <h1 class="ld-h1">${LANDING_HEADLINE.map((l) => `<span class="ld-l">${esc(l)}</span>`).join(' ')}</h1>
+        <p class="ld-shout">${esc(landingShout())}</p>
+        <h1 class="ld-h1"><span class="ld-l">${esc(LANDING_HEADLINE[0])}</span> <span class="ld-l ld-lit">${esc(LANDING_HEADLINE[1])}</span></h1>
         <p class="ld-lede">${esc(LANDING_LEDE)}</p>
         <div class="ld-actions">
-          <a class="btn btn-primary btn-lg" href="#/board" data-ld="free">See today’s free call</a>
+          <a class="btn btn-primary btn-lg ld-go" href="#/board" data-ld="free">See today’s free call</a>
           <a class="btn btn-ghost btn-lg" href="#/pricing">Join from £3.49</a>
         </div>
         <p class="ld-small">18+. No guaranteed winners, because there’s no such thing.</p>
@@ -2381,6 +2396,7 @@ function landingHTML() {
       <aside class="ld-call" data-ld="call" aria-label="Today’s free call"><div class="ld-call-wait"></div></aside>
     </div>
   </section>
+  <div class="ld-ticker" data-ld="ticker"></div>
 
   <section class="ld-strip" data-ld="strip" aria-label="The site in numbers"><div class="wrap ld-strip-in"></div></section>
 
@@ -2431,12 +2447,29 @@ async function viewLanding() {
   const nav = navTicket;
   app.innerHTML = landingHTML();
   if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    // One entrance, at the top: the two lines of the headline up through
-    // their masks, the free call sliding in beside them. Nothing below moves.
-    app.querySelectorAll('.ld-l').forEach((l, i) => l.animate([{ transform: 'translateY(40%)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 800, delay: 80 + i * 140, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'both' }));
-    for (const [sel, d] of [['.ld-lede', 360], ['.ld-actions', 460], ['.ld-small', 520]]) {
-      app.querySelector(`.ld-hero ${sel}`)?.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 700, delay: d, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'both' });
+    /*
+     * One entrance, at the top, and it is the floodlights: the lamps strike
+     * along the gantry, stuttering before they hold, their beams fall across
+     * the ground, the shout slams on, the headline rises, and the second line
+     * fills with light from left to right. Nothing below the hero moves.
+     */
+    const EXPO = 'cubic-bezier(0.16, 1, 0.3, 1)';
+    const strike = [{ opacity: 0 }, { opacity: 0.9, offset: 0.08 }, { opacity: 0.1, offset: 0.16 }, { opacity: 0.8, offset: 0.26 }, { opacity: 0.3, offset: 0.34 }, { opacity: 1, offset: 0.5 }, { opacity: 1 }];
+    app.querySelectorAll('.ld-lamp').forEach((l, i) => l.animate(strike, { duration: 900, delay: 100 + i * 130, easing: 'linear', fill: 'both' }));
+    app.querySelectorAll('.ld-beam').forEach((b, i) => b.animate(strike.map((f) => ({ ...f, opacity: f.opacity * 0.85 })), { duration: 900, delay: 120 + i * 130, easing: 'linear', fill: 'both' }));
+    app.querySelector('.ld-shout')?.animate([
+      { transform: 'scale(2.4) rotate(-6deg)', opacity: 0, filter: 'blur(6px)' },
+      { transform: 'scale(0.94) rotate(1deg)', opacity: 1, filter: 'blur(0)', offset: 0.55 },
+      { transform: 'scale(1.03) rotate(-0.5deg)', offset: 0.75 },
+      { transform: 'none', opacity: 1, filter: 'blur(0)' }], { duration: 640, delay: 420, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'both' });
+    app.querySelectorAll('.ld-l').forEach((l, i) => l.animate([{ transform: 'translateY(45%)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 900, delay: 620 + i * 160, easing: EXPO, fill: 'both' }));
+    app.querySelector('.ld-lit')?.animate([{ backgroundPosition: '100% 0' }, { backgroundPosition: '0% 0' }], { duration: 1100, delay: 1150, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', fill: 'both' });
+    for (const [sel, d] of [['.ld-lede', 1000], ['.ld-actions', 1120], ['.ld-small', 1200]]) {
+      app.querySelector(`.ld-hero ${sel}`)?.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 700, delay: d, easing: EXPO, fill: 'both' });
     }
+    app.querySelector('.ld-go')?.animate([{ boxShadow: '0 0 0 0 rgba(122, 90, 248, 0.7)' }, { boxShadow: '0 0 0 16px rgba(122, 90, 248, 0)' }], { duration: 1200, delay: 1700, iterations: 2, easing: 'ease-out' });
+  } else {
+    app.querySelector('.ld-lit')?.style.setProperty('background-position', '0% 0');
   }
 
   const [board, hero, picks, plans] = await Promise.all([
@@ -2459,19 +2492,43 @@ async function viewLanding() {
   const cta = app.querySelector('[data-ld="free"]');
   if (fx && why) {
     if (cta) cta.setAttribute('href', `#/fixture/${encodeURIComponent(fx.id)}`);
+    const hex = (c) => (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c : null);
+    const hc = hex(fx.colors?.home) ?? '#5b4ad6';
+    const ac = hex(fx.colors?.away) ?? '#c9334a';
     put('call', `
-      <p class="ld-call-tag">Today’s free call</p>
-      <p class="ld-call-comp">${fx.league ? `${crest(fx.league, 'xs', fx.league_id, 'league')}<span>${esc(fx.league)}</span>` : ''}</p>
-      <div class="ld-call-teams">
-        <span>${crest(fx.home, 'lg', fx.home_id)}<b>${esc(fx.home)}</b></span>
-        <span>${crest(fx.away, 'lg', fx.away_id)}<b>${esc(fx.away)}</b></span>
+      <div class="ld-tk-band" style="--home-c:${hc};--away-c:${ac}" aria-hidden="true">
+        <div class="ld-tk-h"></div><div class="ld-tk-a"></div><div class="ld-tk-seam"></div>
+        <span class="ld-tk-crest ld-tk-ch">${crest(fx.home, 'xl', fx.home_id)}</span>
+        <span class="ld-tk-crest ld-tk-ca">${crest(fx.away, 'xl', fx.away_id)}</span>
       </div>
-      <p class="ld-call-when">${esc(kickoffLabel(fx.kickoff))}</p>
-      <blockquote class="ld-call-why">${esc(why)}</blockquote>
-      <a class="ld-call-go" href="#/fixture/${encodeURIComponent(fx.id)}">Read the whole call, free</a>`);
+      <div class="ld-tk-perf" aria-hidden="true"></div>
+      <div class="ld-tk-body">
+        <p class="ld-call-tag">Today’s free call</p>
+        <p class="ld-tk-teams"><b>${esc(fx.home)}</b> <em>v</em> <b>${esc(fx.away)}</b></p>
+        <p class="ld-tk-meta">${fx.league ? `<span class="ld-tk-comp">${crest(fx.league, 'xs', fx.league_id, 'league')}${esc(fx.league)}</span>` : ''}<span>${esc(kickoffLabel(fx.kickoff))}</span>${fx.kickoff > Date.now() / 1000 ? `<span class="ld-tk-count">Kick-off in <b data-countdown="${Number(fx.kickoff)}" data-done="now">—</b></span>` : ''}</p>
+        <blockquote class="ld-call-why">${esc(why)}</blockquote>
+        <a class="ld-call-go" href="#/fixture/${encodeURIComponent(fx.id)}">Read the whole call, free</a>
+      </div>`);
     const card = app.querySelector('.ld-call');
     if (card && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      card.animate([{ opacity: 0, transform: 'translateX(24px) rotate(1.5deg)' }, { opacity: 1, transform: 'none' }], { duration: 900, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
+      // The ticket is handed over: in on a tilt, and the two sides of the
+      // band slam together behind the crests.
+      card.animate([{ opacity: 0, transform: 'translateY(30px) rotate(3deg) scale(0.96)' }, { opacity: 1, transform: 'rotate(-1deg)', offset: 0.7 }, { opacity: 1, transform: 'none' }], { duration: 1000, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
+      card.querySelector('.ld-tk-h')?.animate([{ transform: 'translateX(-105%)' }, { transform: 'none' }], { duration: 560, delay: 200, easing: 'cubic-bezier(0.7, 0, 0.84, 0)', fill: 'both' });
+      card.querySelector('.ld-tk-a')?.animate([{ transform: 'translateX(105%)' }, { transform: 'none' }], { duration: 560, delay: 200, easing: 'cubic-bezier(0.7, 0, 0.84, 0)', fill: 'both' });
+      card.querySelectorAll('.ld-tk-crest').forEach((c, i) => c.animate([{ transform: `translateX(${i ? '' : '-'}160%) scale(1.4)`, opacity: 0, filter: 'blur(8px)' }, { transform: 'none', opacity: 1, filter: 'blur(0)' }], { duration: 700, delay: 520, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)', fill: 'both' }));
+      card.querySelector('.ld-tk-seam')?.animate([{ opacity: 0 }, { opacity: 1, offset: 0.15 }, { opacity: 0.6 }], { duration: 900, delay: 760, fill: 'both' });
+    }
+    // The ground it is played at, behind the whole hero.
+    const shot = app.querySelector('[data-ld="shot"]');
+    // The engine names a ground it found a photograph for (shot_venue_id);
+    // then the match's own, then the rest of the board's. The browser works
+    // down the list until one is a real photograph (venueShot).
+    const venues = [...new Set([hero?.shot_venue_id, fx.venue_id, ...fixtures.filter(hasCall).map((f) => f.venue_id), ...fixtures.map((f) => f.venue_id)].filter(Boolean))];
+    if (shot && venues.length) {
+      shot.innerHTML = venueShot(venues, 'ld-shot-img', true);
+      const img = shot.querySelector('img');
+      img?.addEventListener('load', () => img.classList.add('is-in'), { once: true });
     }
   } else {
     app.querySelector('.ld-call')?.remove();
@@ -2490,6 +2547,9 @@ async function viewLanding() {
     ['15 min', 'between fresh looks at every call'],
   ].filter(Boolean);
   put('strip', `<div class="wrap ld-strip-in">${facts.map(([n, l]) => `<div><b>${esc(n)}</b><span>${esc(l)}</span></div>`).join('')}</div>`);
+  // The ticker: today's calls kicking off, landing and missing, rolling under the hero.
+  const tick = tickerHTML(fixtures, picks);
+  if (tick) put('ticker', tick); else app.querySelector('[data-ld="ticker"]')?.remove();
 
   // The record, in public.
   if (settled.length) {
