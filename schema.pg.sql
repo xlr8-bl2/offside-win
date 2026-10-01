@@ -1305,6 +1305,47 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
   );
 $fn$;
 
+-- One team: its games either side of today, for its own page
+-- (/team/<id>/<name>, worker/src/landing.ts). The cards are the board's own,
+-- built by board_card and walled exactly as the board is, so a team's page
+-- shows a free reader what the board would and no more.
+CREATE INDEX IF NOT EXISTS fixture_home_team ON fixture(home_team_id, kickoff);
+CREATE INDEX IF NOT EXISTS fixture_away_team ON fixture(away_team_id, kickoff);
+CREATE OR REPLACE FUNCTION get_team(p_id bigint)
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  WITH q AS (SELECT floor(extract(epoch FROM now()))::bigint AS now),
+       m AS MATERIALIZED (SELECT has_membership() AS ok),
+       games AS (
+         SELECT f.* FROM fixture f, q
+         WHERE (f.home_team_id = p_id OR f.away_team_id = p_id)
+           AND f.kickoff BETWEEN q.now - 60 * 86400 AND q.now + 21 * 86400
+         ORDER BY f.kickoff DESC
+         LIMIT 30),
+       later AS (
+         SELECT s.*, l.name AS league FROM schedule s LEFT JOIN league l ON l.id = s.league_id, q
+         WHERE (s.home_team_id = p_id OR s.away_team_id = p_id)
+           AND s.kickoff > q.now AND s.kickoff <= q.now + 45 * 86400
+           AND NOT EXISTS (SELECT 1 FROM fixture f WHERE f.id = s.id)
+         ORDER BY s.kickoff ASC
+         LIMIT 10),
+       named AS (
+         SELECT CASE WHEN x.home_team_id = p_id THEN x.home_team ELSE x.away_team END AS name
+         FROM (SELECT home_team_id, home_team, away_team, kickoff FROM games
+               UNION ALL SELECT home_team_id, home_team, away_team, kickoff FROM later) x
+         ORDER BY x.kickoff DESC
+         LIMIT 1)
+  SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM named) THEN NULL ELSE json_build_object(
+    'id', p_id,
+    'name', (SELECT name FROM named),
+    'member', (SELECT ok FROM m),
+    'games', coalesce((SELECT json_agg(board_card(g, (SELECT ok FROM m)) ORDER BY g.kickoff) FROM games g), '[]'::json),
+    'later', coalesce((SELECT json_agg(json_build_object(
+                'id', x.id, 'league_id', x.league_id, 'league', x.league, 'kickoff', x.kickoff,
+                'home', x.home_team, 'away', x.away_team, 'home_id', x.home_team_id, 'away_id', x.away_team_id)
+              ORDER BY x.kickoff) FROM later x), '[]'::json)
+  ) END;
+$fn$;
+
 CREATE OR REPLACE FUNCTION get_fixture(p_id bigint)
 RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   SELECT (
@@ -1946,6 +1987,7 @@ GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint) TO anon;
 GRANT EXECUTE ON FUNCTION board_card(fixture, boolean) TO anon;
 GRANT EXECUTE ON FUNCTION fold(text) TO anon;
 GRANT EXECUTE ON FUNCTION search_games(text) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_team(bigint) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_fixture(bigint) TO anon;
 GRANT EXECUTE ON FUNCTION get_picks(integer, text) TO anon;
 GRANT EXECUTE ON FUNCTION get_model() TO anon;

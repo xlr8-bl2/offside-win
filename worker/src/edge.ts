@@ -25,7 +25,7 @@ const STAMP = 'x-edge-stored';
 export interface Ctx { waitUntil(p: Promise<unknown>): void }
 
 /** The public reads, by path. Nothing signed-in, nothing that writes. */
-export const EDGE_PATHS = /^\/api\/(?:board|hero|picks|slip|plans|promos|model|health|search|(?:fixture|league|player)\/\d+)$/;
+export const EDGE_PATHS = /^\/api\/(?:board|hero|picks|slip|plans|promos|model|health|search|(?:fixture|league|player|team)\/\d+)$/;
 
 function cacheOf(): Cache | null {
   const c = (globalThis as { caches?: { default?: Cache } }).caches;

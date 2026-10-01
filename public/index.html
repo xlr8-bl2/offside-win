@@ -36,7 +36,10 @@
      shows as the site's name above a result, and the Organization's logo is
      the one it can put beside it. On every page, since every page is this one. -->
 <script type="application/ld+json">{"@context":"https://schema.org","@graph":[
-{"@type":"WebSite","@id":"https://offside.win/#website","name":"Offside.win","alternateName":["offside.win","Offside"],"url":"https://offside.win/","inLanguage":"en-GB","publisher":{"@id":"https://offside.win/#org"}},
+{"@type":"WebSite","@id":"https://offside.win/#website","name":"Offside.win","alternateName":["offside.win","Offside"],"url":"https://offside.win/","inLanguage":"en-GB","publisher":{"@id":"https://offside.win/#org"},
+ "potentialAction":{"@type":"SearchAction","target":{"@type":"EntryPoint","urlTemplate":"https://offside.win/search?q={search_term_string}"},"query-input":"required name=search_term_string"}},
+{"@type":"SiteNavigationElement","@id":"https://offside.win/#nav","name":["Today's predictions","Tomorrow","Weekend","Free prediction","Bet slip","Competitions","Results","Membership"],
+ "url":["https://offside.win/today","https://offside.win/tomorrow","https://offside.win/weekend","https://offside.win/free-prediction","https://offside.win/slip","https://offside.win/leagues","https://offside.win/results","https://offside.win/pricing"]},
 {"@type":"Organization","@id":"https://offside.win/#org","name":"Offside.win","url":"https://offside.win/","logo":{"@type":"ImageObject","url":"https://offside.win/icon-512.png","width":512,"height":512}}
 ]}</script>
 <link rel="preconnect" href="https://sports.bzzoiro.com">
@@ -70,6 +73,9 @@
 <link rel="icon" href="/icon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
+<!-- For assistants and agents: what the site is, and the data behind it. -->
+<link rel="alternate" type="text/markdown" href="/llms.txt" title="Offside.win, for AI assistants">
+<link rel="service-desc" type="application/openapi+json" href="/openapi.json">
 </head>
 <body>
 
@@ -196,7 +202,11 @@
       <div class="foot-col">
         <h4>Picks</h4>
         <a href="#/board" id="foot-live" hidden></a>
-        <a href="#/board">Today's board</a>
+        <a href="#/board">Today's predictions</a>
+        <a href="#/page/tomorrow">Tomorrow's predictions</a>
+        <a href="#/page/weekend">Weekend predictions</a>
+        <a href="#/page/free-prediction">Free prediction of the day</a>
+        <a href="#/page/predictions">Predictions by type</a>
         <a href="#/slip">Bet slip</a>
         <a href="#/results">Results</a>
         <a href="#/search">Find a game</a>
