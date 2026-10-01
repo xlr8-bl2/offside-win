@@ -44,7 +44,9 @@ async function fresh(width = 390, { slow = 0 } = {}) {
   if (slow) await page.route('**/api/**', async (r) => { await new Promise((ok) => setTimeout(ok, slow)); await r.continue(); });
   // Answer the cookie notice first: it is its own scenario, and here it
   // would sit over whatever is being measured.
-  await page.addInitScript((ids) => { try { localStorage.setItem('ow.consent', 'declined'); localStorage.setItem('ow.promo', JSON.stringify({ seen: ids, closed: ids })); } catch {} }, promoIds);
+  // The week's note (an international break) too, for the same reason; it
+  // has its own scenario below.
+  await page.addInitScript((ids) => { try { localStorage.setItem('ow.consent', 'declined'); localStorage.setItem('ow.promo', JSON.stringify({ seen: ids, closed: ids })); localStorage.setItem('ow.season', '["*"]'); } catch {} }, promoIds);
   return { ctx, page, errors };
 }
 const settle = (page, ms = 2500) => page.waitForTimeout(ms);
@@ -238,6 +240,43 @@ const scenarios = {
     await settle(page, 1500);
     const gone = await page.evaluate(() => ({ popup: !!document.querySelector('.ofr-root'), lock: document.documentElement.classList.contains('ofr-lock') }));
     report('popup: Back takes it down and frees the page', !gone.popup && !gone.lock, JSON.stringify(gone));
+    await ctx.close();
+  },
+
+  /**
+   * The week's note, when there is one: it opens over a darkened page, holds
+   * the page still, closes into the corner chip, and the chip opens it again.
+   */
+  async season() {
+    const { ctx, page } = await fresh(390);
+    // The shared setup turns the notes off on every load; this one wants them.
+    // Cleared fully on the first load only: the reload below checks what was remembered.
+    await page.addInitScript(() => {
+      try {
+        if (!sessionStorage.getItem('nav.season')) { localStorage.removeItem('ow.season'); sessionStorage.setItem('nav.season', '1'); }
+        else localStorage.setItem('ow.season', sessionStorage.getItem('nav.season.kept') ?? '[]');
+        addEventListener('pagehide', () => sessionStorage.setItem('nav.season.kept', localStorage.getItem('ow.season') ?? '[]'));
+      } catch {}
+    });
+    await page.goto(`${BASE}/#/home`, { waitUntil: 'load' });
+    const opened = await page.waitForSelector('#season-note', { timeout: 7000 }).then(() => true, () => false);
+    if (!opened) { report('season: no break, close season or tournament on now, nothing to check', true); await ctx.close(); return; }
+    await settle(page, 2500);
+    const up = await page.evaluate(() => ({ lock: document.documentElement.classList.contains('sn-lock'), focus: !!document.activeElement?.closest('#season-note'), title: document.querySelector('#sn-title')?.textContent.trim() }));
+    report('season: opens over the page, holds it still, takes the focus', up.lock && up.focus, JSON.stringify(up));
+    await page.keyboard.press('Escape');
+    await settle(page, 1200);
+    const closed = await page.evaluate(() => ({ note: !!document.getElementById('season-note'), chip: !!document.getElementById('season-chip'), lock: document.documentElement.classList.contains('sn-lock') }));
+    report('season: Escape folds it into the chip and frees the page', !closed.note && closed.chip && !closed.lock, JSON.stringify(closed));
+    await page.click('#season-chip .sn-chip-open');
+    await settle(page, 800);
+    report('season: the chip opens it again', await page.evaluate(() => !!document.getElementById('season-note')));
+    await page.click('#season-note .sn-x');
+    await settle(page, 800);
+    await page.reload({ waitUntil: 'load' });
+    await settle(page, 3500);
+    const after = await page.evaluate(() => ({ note: !!document.getElementById('season-note'), chip: !!document.getElementById('season-chip') }));
+    report('season: seen once, it stays a chip on the next visit', !after.note && after.chip, JSON.stringify(after));
     await ctx.close();
   },
 
