@@ -2396,151 +2396,32 @@ function landingHTML() {
       <aside class="ld-call" data-ld="call" aria-label="Today’s free call"><div class="ld-call-wait"></div></aside>
     </div>
   </section>
-  <div class="ld-ticker" data-ld="ticker"></div>
 
-  <section class="ld-strip" data-ld="strip" aria-label="The site in numbers"><div class="wrap ld-strip-in"></div></section>
+  <section class="ld-strip" data-ld="strip" aria-label="The site in numbers"></section>
 
-  <section class="wrap ld-sec ld-move-sec" data-reveal="move">
-    <h2 class="ld-h2 ld-big">Three touches. Every match.</h2>
-    <div class="ld-move">
-      <svg class="ld-move-line" aria-hidden="true"><path class="ld-pass" d=""/></svg>
-      <span class="ld-ball" aria-hidden="true"></span>
-      <ol class="ld-how">${LANDING_STEPS.map(([h, p], i) => `<li><span class="ld-node" aria-hidden="true">${i + 1}</span><b>${esc(h)}</b><p>${esc(p)}</p></li>`).join('')}</ol>
-    </div>
+  <section class="wrap ld-sec">
+    <h2 class="ld-h2">How it works</h2>
+    <ol class="ld-how">${LANDING_STEPS.map(([h, p], i) => `<li><span class="ld-node" aria-hidden="true">${i + 1}</span><b>${esc(h)}</b><p>${esc(p)}</p></li>`).join('')}</ol>
   </section>
 
-  <section class="ld-comps" data-ld="comps" aria-label="Competitions we cover"></section>
-
-  <section class="wrap ld-sec" data-ld="record" data-reveal="record"></section>
-  <section class="wrap ld-sec" data-ld="week" data-reveal="week"></section>
-  <section class="wrap ld-sec" data-ld="plans" data-reveal="plans"></section>
+  <section class="wrap ld-sec" data-ld="record"></section>
+  <section class="wrap ld-sec" data-ld="plans"></section>
 
   <section class="wrap ld-sec ld-faq-sec">
-    <div class="ld-faq-head"><h2 class="ld-h2 ld-big">Straight answers.</h2><p class="ld-sub">The questions people actually ask, answered the way we’d answer them in the pub.</p></div>
+    <h2 class="ld-h2">Straight answers</h2>
     <div class="ld-faq">${LANDING_FAQ.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}</div>
   </section>
 
-  <section class="ld-end" data-reveal="end">
-    <div class="ld-end-bg" aria-hidden="true"></div>
+  <section class="ld-end">
     <div class="wrap ld-end-in">
-      <p class="ld-end-shout ld-lit-end">Let’s gooo.</p>
       <h2 class="ld-h2">Your game’s probably on the board already.</h2>
       <div class="ld-actions">
-        <a class="btn btn-primary btn-lg ld-go" href="#/search">Find your game</a>
-        <a class="btn btn-ghost btn-lg" href="#/board">Today’s games</a>
+        <a class="btn btn-primary btn-lg" href="#/board">See today’s games</a>
+        <a class="btn btn-ghost btn-lg" href="#/pricing">Join from £3.49</a>
       </div>
     </div>
   </section>`;
 }
-
-/*
- * The landing page's sections each have one entrance, played the first time
- * a quarter of it comes into view, never again. With reduced motion asked
- * for, they arrive finished.
- */
-const stillPage = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
-function onReveal(root, run) {
-  const seen = new IntersectionObserver((entries) => {
-    for (const e of entries) {
-      if (!e.isIntersecting) continue;
-      seen.unobserve(e.target);
-      e.target.classList.add('is-in');
-      try { run[e.target.dataset.reveal]?.(e.target); } catch { /* an entrance is never worth an error */ }
-    }
-  }, { threshold: 0.22 });
-  for (const el of root.querySelectorAll('[data-reveal]')) seen.observe(el);
-  return seen;
-}
-
-/** Numbers that run up to themselves, like a scoreboard settling. */
-function countUp(root, ms = 1200) {
-  for (const el of root.querySelectorAll('[data-to]')) {
-    const to = Number(el.dataset.to);
-    if (!Number.isFinite(to) || stillPage()) { el.textContent = String(to); continue; }
-    const t0 = performance.now();
-    const step = (t) => {
-      if (!el.isConnected) return;
-      const p = Math.min(1, (t - t0) / ms);
-      el.textContent = String(Math.round(to * (1 - Math.pow(1 - p, 3))));
-      if (p < 1) requestAnimationFrame(step);
-    };
-    el.textContent = '0';
-    requestAnimationFrame(step);
-  }
-}
-
-/*
- * The pass line, drawn in real pixels between the centres of the three
- * touches as they sit on this screen: a ball played up and over, then along
- * the ground. Redrawn when the window changes size.
- */
-function drawPass(sec) {
-  const move = sec?.querySelector('.ld-move');
-  const svg = move?.querySelector('.ld-move-line');
-  const path = svg?.querySelector('.ld-pass');
-  const nodes = [...(move?.querySelectorAll('.ld-node') ?? [])];
-  if (!svg || !path || nodes.length < 3 || getComputedStyle(svg).display === 'none') return;
-  const box = move.getBoundingClientRect();
-  const c = nodes.map((n) => { const r = n.getBoundingClientRect(); return [r.left - box.left + r.width / 2, r.top - box.top + r.height / 2]; });
-  svg.setAttribute('viewBox', `0 0 ${Math.round(box.width)} ${Math.round(box.height)}`);
-  svg.setAttribute('width', String(Math.round(box.width)));
-  svg.setAttribute('height', String(Math.round(box.height)));
-  const [[x1, y], [x2], [x3]] = c;
-  path.setAttribute('d', `M${x1} ${y} Q${(x1 + x2) / 2} ${y - 70} ${x2} ${y} Q${(x2 + x3) / 2} ${y + 40} ${x3} ${y}`);
-}
-
-const EXPO_L = 'cubic-bezier(0.16, 1, 0.3, 1)';
-const LANDING_REVEAL = {
-  // The passing move: the line draws itself from one touch to the next, the
-  // ball runs along it, and each touch lands as the ball reaches it.
-  move(sec) {
-    drawPass(sec);
-    const path = sec.querySelector('.ld-pass');
-    const nodes = [...sec.querySelectorAll('.ld-how li')];
-    if (stillPage() || !path || !path.getAttribute('d')) return;
-    const len = path.getTotalLength();
-    path.style.strokeDasharray = `${len}`;
-    path.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: 1600, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', fill: 'both' });
-    nodes.forEach((li, i) => li.animate([{ opacity: 0, transform: 'translateY(24px)' }, { opacity: 1, transform: 'none' }], { duration: 800, delay: i * 620, easing: EXPO_L, fill: 'both' }));
-    nodes.forEach((li, i) => li.querySelector('.ld-node')?.animate([{ transform: 'scale(0.2)' }, { transform: 'scale(1.25)', offset: 0.6 }, { transform: 'none' }], { duration: 600, delay: i * 620, easing: EXPO_L, fill: 'both' }));
-    // The ball runs the move, in the line's own pixels.
-    const ball = sec.querySelector('.ld-ball');
-    if (!ball) return;
-    const t0 = performance.now();
-    const run = (t) => {
-      if (!ball.isConnected) return;
-      const p = Math.min(1, (t - t0) / 1600);
-      const e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
-      const pt = path.getPointAtLength(len * e);
-      ball.style.transform = `translate(${pt.x}px, ${pt.y}px)`;
-      ball.style.opacity = p < 1 ? '1' : '0';
-      if (p < 1) requestAnimationFrame(run);
-    };
-    requestAnimationFrame(run);
-  },
-  record(sec) {
-    countUp(sec, 1100);
-    if (stillPage()) return;
-    sec.querySelectorAll('.ld-chip').forEach((c, i) => c.animate([{ transform: 'rotateY(90deg)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 420, delay: 200 + i * 45, easing: EXPO_L, fill: 'both' }));
-    sec.querySelectorAll('.played-card, .played > *').forEach((c, i) => c.animate([{ opacity: 0, transform: 'translateY(16px)' }, { opacity: 1, transform: 'none' }], { duration: 700, delay: 700 + i * 120, easing: EXPO_L, fill: 'both' }));
-  },
-  week(sec) {
-    if (stillPage()) return;
-    sec.querySelectorAll('.next-list > li').forEach((li, i) => li.animate([{ opacity: 0, transform: `translateX(${i % 2 ? '' : '-'}40px)` }, { opacity: 1, transform: 'none' }], { duration: 700, delay: i * 90, easing: EXPO_L, fill: 'both' }));
-  },
-  plans(sec) {
-    if (stillPage()) return;
-    sec.querySelectorAll('.ld-plans li').forEach((li, i) => li.animate([{ opacity: 0, transform: 'translateY(40px) scale(0.96)' }, { opacity: 1, transform: 'none' }], { duration: 800, delay: i * 130, easing: EXPO_L, fill: 'both' }));
-    const best = sec.querySelector('.ld-plans .is-best');
-    best?.animate([{ boxShadow: '0 0 0 0 rgba(122, 90, 248, 0.6)' }, { boxShadow: '0 0 0 18px rgba(122, 90, 248, 0)' }], { duration: 1400, delay: 700, iterations: 2, easing: 'ease-out' });
-  },
-  end(sec) {
-    const lit = sec.querySelector('.ld-lit-end');
-    if (stillPage()) { lit?.style.setProperty('background-position', '0% 0'); return; }
-    lit?.animate([{ transform: 'scale(1.6)', opacity: 0, filter: 'blur(10px)' }, { transform: 'scale(0.97)', opacity: 1, filter: 'blur(0)', offset: 0.6 }, { transform: 'none', opacity: 1, filter: 'blur(0)' }], { duration: 800, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'both' });
-    lit?.animate([{ backgroundPosition: '100% 0' }, { backgroundPosition: '0% 0' }], { duration: 1100, delay: 600, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', fill: 'both' });
-  },
-};
 
 /**
  * The football in a write-up, without the call: whole sentences, up to about
@@ -2652,74 +2533,31 @@ async function viewLanding() {
     app.querySelector('.ld-hero')?.classList.add('ld-solo');
   }
 
-  // The numbers, all of them real and all of them pub numbers.
-  const settled = picks.filter((x) => x.result && x.result !== 'VOID' && x.result !== 'PUSH');
-  const won = settled.filter((x) => x.result === 'WON' || x.result === 'HALF_WON').length;
-  const lost = settled.filter((x) => x.result === 'LOST' || x.result === 'HALF_LOST').length;
-  const comps = new Set(fixtures.map((f) => f.league).filter(Boolean)).size;
-  // The scoreboard: every figure real, every one a pub number, each running
-  // up to itself when it comes into view.
-  const facts = [
-    comps && [`<i data-to="${comps}">${comps}</i>`, comps === 1 ? 'competition on the board' : 'competitions on the board'],
-    fixtures.length && [`<i data-to="${fixtures.length}">${fixtures.length}</i>`, 'games read in the next three days'],
-    settled.length && [`<i data-to="${won}">${won}</i><small>of</small><i data-to="${settled.length}">${settled.length}</i>`, 'of our last calls landed'],
-    ['<i data-to="15">15</i><small>min</small>', 'between fresh looks at every call'],
-  ].filter(Boolean);
-  const strip = put('strip', `<div class="wrap ld-strip-in" data-reveal="strip">${facts.map(([n, l]) => `<div><b>${n}</b><span>${esc(l)}</span></div>`).join('')}</div>`);
-
-  // Every league worth staying up for: the real logos, rolling.
-  const NAMES = { 1: 'Premier League', 7: 'Champions League', 3: 'La Liga', 4: 'Serie A', 5: 'Bundesliga', 6: 'Ligue 1', 8: 'Europa League' };
-  const seenComp = new Map(Object.entries(NAMES).map(([id, n]) => [Number(id), n]));
-  for (const f of fixtures) if (f.league_id && f.league && !seenComp.has(Number(f.league_id)) && !/women|femen|fémin|frauen|\bu-?\d\d\b|youth|friendl/i.test(f.league)) seenComp.set(Number(f.league_id), f.league);
-  const comp = [...seenComp].slice(0, 18);
-  const logos = comp.map(([id, n]) => `<li><span class="ld-comp-logo">${crest(n, 'lg', id, 'league')}</span><span>${esc(n)}</span></li>`).join('');
-  put('comps', `
-    <div class="wrap"><h2 class="ld-h2 ld-big">Every league worth staying up for.</h2>
-      <p class="ld-sub">${esc(`${comps || 'Dozens of'} competitions on the board right now, from the Premier League and the Champions League to the ones you only find at two in the morning.`)}</p></div>
-    <div class="ld-marquee"><ul class="ld-marquee-track">${logos}</ul><ul class="ld-marquee-track" aria-hidden="true">${logos}</ul></div>`);
-
-  // The ticker: today's calls kicking off, landing and missing, rolling under the hero.
-  const tick = tickerHTML(fixtures, picks);
-  if (tick) put('ticker', tick); else app.querySelector('[data-ld="ticker"]')?.remove();
-
-  // The record, in public, as a form guide: oldest on the left, green landed,
-  // red missed, and the reds stay up.
-  // One list for the words, the numbers and the chips, so they always agree.
+  // Three numbers, all of them real and all of them pub numbers.
   const all = picks.filter((x) => x.result).slice(0, 40).reverse();
   const isW = (x) => x.result === 'WON' || x.result === 'HALF_WON';
   const isL = (x) => x.result === 'LOST' || x.result === 'HALF_LOST';
-  if (all.length) {
-    const fw = all.filter(isW).length;
-    const fl = all.filter(isL).length;
-    const voids = all.length - fw - fl;
-    put('record', `
-      <div class="ld-sec-head"><h2 class="ld-h2 ld-big">We keep score in public.</h2>
-        <a class="btn btn-ghost btn-sm" href="#/results">Every result</a></div>
-      <p class="ld-sub">Our last ${all.length} calls, oldest on the left. Green landed, red didn’t, grey was void, and the reds stay up for good.</p>
-      <div class="ld-score">
-        <div class="is-won"><b><i data-to="${fw}">${fw}</i></b><span>landed</span></div>
-        <div class="is-lost"><b><i data-to="${fl}">${fl}</i></b><span>missed</span></div>
-        ${voids ? `<div class="is-void"><b><i data-to="${voids}">${voids}</i></b><span>void</span></div>` : ''}
-      </div>
-      <ol class="ld-form" aria-label="Form guide, oldest first">${all.map((x) => {
-        const w = isW(x);
-        const l = isL(x);
-        const k = w ? 'w' : l ? 'l' : 'v';
-        return `<li class="ld-chip is-${k}" title="${esc(`${x.home_team ?? ''} v ${x.away_team ?? ''}`)}">${w ? 'W' : l ? 'L' : 'V'}</li>`;
-      }).join('')}</ol>
-      ${playedHTML(settled.slice(0, 3))}`);
-  } else app.querySelector('[data-ld="record"]')?.remove();
+  const fw = all.filter(isW).length;
+  const fl = all.filter(isL).length;
+  const comps = new Set(fixtures.map((f) => f.league).filter(Boolean)).size;
+  const facts = [
+    comps && [String(comps), comps === 1 ? 'competition on the board' : 'competitions on the board'],
+    fixtures.length && [String(fixtures.length), 'games read in the next three days'],
+    fw + fl && [`${fw} of ${fw + fl}`, 'of our last calls landed'],
+  ].filter(Boolean);
+  put('strip', `<div class="wrap ld-strip-in">${facts.map(([n, l]) => `<div><b>${esc(n)}</b><span>${esc(l)}</span></div>`).join('')}</div>`);
 
-  // The big games coming, biggest first. Called ones are marked; no prices.
-  const coming = fixtures.filter((f) => matchState(f).kind === 'upcoming')
-    .sort((a, b) => (a.rank ?? 9) - (b.rank ?? 9) || (a.kickoff ?? 0) - (b.kickoff ?? 0)).slice(0, 6)
-    .sort((a, b) => (a.kickoff ?? 0) - (b.kickoff ?? 0));
-  if (coming.length) {
-    put('week', `
-      <div class="ld-sec-head"><h2 class="ld-h2 ld-big">This week’s big ones.</h2>
-        <a class="btn btn-ghost btn-sm" href="#/board">The full board</a></div>
-      <ol class="next-list">${coming.map(nextRowHTML).join('')}</ol>`);
-  } else app.querySelector('[data-ld="week"]')?.remove();
+  // The record, as a form guide: oldest on the left, and the reds stay up.
+  if (all.length) {
+    put('record', `
+      <div class="ld-sec-head"><h2 class="ld-h2">We keep score in public</h2>
+        <a class="btn btn-ghost btn-sm" href="#/results">Every result</a></div>
+      <p class="ld-sub">Our last ${all.length} calls, oldest first: ${fw} landed, ${fl} missed. Every one stays on the results page, the misses too.</p>
+      <ol class="ld-form" aria-label="Form guide, oldest first">${all.map((x) => {
+        const k = isW(x) ? 'w' : isL(x) ? 'l' : 'v';
+        return `<li class="ld-chip is-${k}" title="${esc(`${x.home_team ?? ''} v ${x.away_team ?? ''}`)}">${k.toUpperCase()}</li>`;
+      }).join('')}</ol>`);
+  } else app.querySelector('[data-ld="record"]')?.remove();
 
   // The plans, as they are sold: the price here is the price charged.
   const BLURB = {
@@ -2729,38 +2567,17 @@ async function viewLanding() {
   };
   const list = (Array.isArray(plans) ? plans : []).filter((p) => p && p.amount_minor).sort((a, b) => a.amount_minor - b.amount_minor);
   if (list.length) {
-    // The cheapest per day is flagged, because it is a fact about the prices.
-    const perDay = (p) => p.amount_minor / Math.max(1, p.days);
-    const best = [...list].sort((a, b) => perDay(a) - perDay(b))[0];
     put('plans', `
-      <div class="ld-sec-head"><h2 class="ld-h2 ld-big">Get every call.</h2></div>
-      <p class="ld-sub">The previews and the record stay free whatever you do. Members get every call the moment it goes up, the bet slip, and the reasons behind all of them. Cancel in one tap.</p>
+      <h2 class="ld-h2">Every call, from ${esc(money(list[0].amount_minor, list[0].currency))}</h2>
+      <p class="ld-sub">The previews and the record stay free whatever you do. Members get every call the moment it goes up, the bet slip, and the reasons behind all of them.</p>
       <ul class="ld-plans">${list.map((p) => `
-        <li class="${p.id === best.id ? 'is-best' : ''}"><a href="#/checkout?plan=${encodeURIComponent(p.id)}">
-          ${p.id === best.id ? '<span class="ld-best">Cheapest per month</span>' : ''}
+        <li><a href="#/checkout?plan=${encodeURIComponent(p.id)}">
           <b>${esc(p.name)}</b>
-          <span class="ld-price">${esc(money(p.amount_minor, p.currency))}${p.id === 'quarter' ? `<small>works out at ${esc(money(Math.round(p.amount_minor / 3), p.currency))} a month</small>` : ''}</span>
-          <span class="ld-blurb">${esc(BLURB[p.id] ?? `${p.days} days of every call.`)}</span>
-          <span class="ld-plan-go">Get it</span>
-        </a></li>`).join('')}</ul>
-      <a class="ld-all-plans" href="#/pricing">Compare the plans properly</a>`);
+          <span class="ld-price">${esc(money(p.amount_minor, p.currency))}</span>
+          <span class="ld-blurb">${esc(BLURB[p.id] ?? `${p.days} days of every call.`)}${p.id === 'quarter' ? ` Works out at ${esc(money(Math.round(p.amount_minor / 3), p.currency))} a month.` : ''}</span>
+        </a></li>`).join('')}</ul>`);
   } else app.querySelector('[data-ld="plans"]')?.remove();
   tickCountdowns();
-  // The stadium again at the end, so the page closes where it opened.
-  const shotImg = app.querySelector('.ld-shot-img');
-  const endBg = app.querySelector('.ld-end-bg');
-  if (shotImg && endBg) {
-    const set = () => { if (shotImg.isConnected && shotImg.naturalWidth > 40) endBg.style.backgroundImage = `url("${shotImg.currentSrc || shotImg.src}")`; };
-    if (shotImg.complete) set(); else shotImg.addEventListener('load', set, { once: true });
-  }
-  if (stillPage()) { for (const el of app.querySelectorAll('[data-reveal]')) el.classList.add('is-in'); countUp(app); LANDING_REVEAL.end(app.querySelector('.ld-end') ?? app); drawPass(app.querySelector('.ld-move-sec')); return; }
-  onReveal(app, { ...LANDING_REVEAL, strip: (el) => countUp(el) });
-  // The pass line follows the layout; drawn now so it is there before the
-  // move is scrolled to, and again whenever the window changes size.
-  const moveSec = app.querySelector('.ld-move-sec');
-  drawPass(moveSec);
-  const redraw = () => { if (!moveSec.isConnected) { removeEventListener('resize', redraw); return; } const p = moveSec.querySelector('.ld-pass'); if (p) p.style.strokeDasharray = ''; drawPass(moveSec); };
-  addEventListener('resize', redraw, { passive: true });
 }
 
 async function viewDashboard() {

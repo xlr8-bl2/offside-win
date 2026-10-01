@@ -3061,34 +3061,21 @@
 .ld-call-go:hover { text-decoration: underline; text-underline-offset: 3px; }
 .ld-ticker:empty { display: none; }
 
-/* The scoreboard: the site in numbers on an LED board, each figure running up
-   to itself when it comes into view. */
-.ld-strip {
-  border-bottom: var(--border) solid var(--hairline);
-  background:
-    radial-gradient(rgba(244, 246, 250, 0.06) 1px, transparent 1.6px) 0 0 / 6px 6px,
-    linear-gradient(180deg, var(--stand), var(--pitch));
-}
-.ld-strip-in { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-6); padding-block: var(--space-9); min-height: 150px; }
-.ld-strip-in > div { display: grid; gap: var(--space-2); align-content: start; }
-.ld-strip b {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  font-family: var(--display-figures);
-  font-size: var(--text-board);
-  font-weight: var(--weight-black);
-  line-height: 0.9;
-  font-variant-numeric: tabular-nums;
-  color: var(--chalk);
-  text-shadow: 0 0 24px rgba(158, 134, 255, 0.35);
-}
-.ld-strip b i { font-style: normal; }
-.ld-strip b small { font-family: var(--display); font-size: 0.42em; font-weight: var(--weight-bold); color: var(--chalk-3); text-shadow: none; }
+/*
+ * Below the hero, everything is quiet on purpose. The hero is the one loud
+ * thing on the page (the stadium, the lights, the shout); a second and third
+ * loud thing under it made the page shout over itself, and the owner's
+ * verdict was "overwhelming". So: one type size for section heads, no motion,
+ * generous space, and each section saying one thing.
+ */
+.ld-strip { border-bottom: var(--border) solid var(--hairline); background: var(--stand); }
+.ld-strip-in { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-7); padding-block: var(--space-8); }
+.ld-strip-in > div { display: grid; gap: var(--space-1); }
+.ld-strip b { font-family: var(--display-figures); font-size: var(--text-3xl); font-weight: var(--weight-black); line-height: 1; font-variant-numeric: tabular-nums; color: var(--chalk); }
 .ld-strip span { font-size: var(--text-sm); color: var(--chalk-3); }
 
-.ld-sec { padding-block: var(--space-13) 0; }
-.ld-sec-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-5); margin: 0 0 var(--space-4); }
+.ld-sec { padding-block: var(--space-12) 0; }
+.ld-sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-5); margin: 0 0 var(--space-4); }
 .ld-h2 {
   margin: 0 0 var(--space-4);
   font-family: var(--display);
@@ -3097,237 +3084,92 @@
   line-height: var(--leading-display);
   color: var(--chalk);
 }
-/* The section headlines are signage too: big enough to read from the stand. */
-.ld-big { font-size: clamp(2.5rem, 1.6rem + 3.4vw, 4.75rem); line-height: 0.92; letter-spacing: var(--tracking-hero); text-wrap: balance; }
 .ld-sec-head .ld-h2 { margin: 0; }
-.ld-sub { max-width: 62ch; margin: 0 0 var(--space-8); font-size: calc(var(--text-read) * 1.0625); line-height: var(--leading-normal); color: var(--chalk-2); }
+.ld-sub { max-width: 62ch; margin: 0 0 var(--space-7); font-size: var(--text-read); line-height: var(--leading-normal); color: var(--chalk-2); }
 
-/* Three touches: the steps as a passing move on a chalk pitch, the pass line
-   drawing itself and the ball running along it. A real sequence, so numbered. */
-.ld-move-sec .ld-big { margin-bottom: var(--space-10); }
-.ld-move {
-  position: relative;
-  padding: var(--space-6) 0 0;
-  border-radius: var(--radius-lg);
-  background:
-    linear-gradient(90deg, transparent calc(50% - 0.5px), rgba(244, 246, 250, 0.05) calc(50% - 0.5px), rgba(244, 246, 250, 0.05) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
-    radial-gradient(circle at 50% 50%, transparent 119px, rgba(244, 246, 250, 0.05) 120px, rgba(244, 246, 250, 0.05) 121px, transparent 122px);
-}
-.ld-move-line { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-.ld-pass { fill: none; stroke: var(--floodlight-hi); stroke-width: 2; stroke-linecap: round; opacity: 0.85; filter: drop-shadow(0 0 6px rgba(158, 134, 255, 0.6)); }
-.ld-ball {
-  position: absolute;
-  left: -9px;
-  top: -9px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #fff, var(--chalk-2) 60%, var(--chalk-3));
-  box-shadow: 0 0 16px rgba(244, 246, 250, 0.7);
-  opacity: 0;
-  pointer-events: none;
-  z-index: 2;
-}
-.ld-how { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-9); margin: 0; padding: 0; list-style: none; }
-.ld-how li { display: grid; align-content: start; justify-items: center; text-align: center; padding: 0 var(--space-3); }
+/* How it works: a real sequence, so numbered. */
+.ld-how { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-9); margin: var(--space-6) 0 0; padding: 0; list-style: none; }
+.ld-how li { display: grid; align-content: start; gap: var(--space-3); }
 .ld-node {
-  position: relative;
-  z-index: 1;
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
-  margin-bottom: var(--space-6);
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  background: var(--floodlight);
-  box-shadow: 0 0 0 6px var(--pitch), 0 0 0 7px var(--floodlight), 0 0 30px rgba(122, 90, 248, 0.6);
+  border: var(--border) solid var(--floodlight);
   font-family: var(--display-figures);
-  font-size: var(--text-xl);
+  font-size: var(--text-lg);
   font-weight: var(--weight-black);
-  color: #fff;
+  color: var(--floodlight-hi);
 }
-.ld-how b { display: block; margin-bottom: var(--space-3); font-family: var(--display); font-size: var(--text-2xl); font-weight: var(--weight-black); line-height: var(--leading-tight); color: var(--chalk); }
-.ld-how p { max-width: 34ch; margin: 0; font-size: var(--text-read); line-height: var(--leading-normal); color: var(--chalk-2); }
+.ld-how b { font-size: var(--text-lg); color: var(--chalk); }
+.ld-how p { margin: 0; font-size: var(--text-read); line-height: var(--leading-normal); color: var(--chalk-2); }
 
-/* Every league: the real logos on white discs, rolling past. */
-.ld-comps { padding-top: var(--space-13); overflow: hidden; }
-.ld-marquee { display: flex; width: max-content; padding-block: var(--space-4) var(--space-2); }
-.ld-marquee:hover .ld-marquee-track { animation-play-state: paused; }
-.ld-marquee-track { display: flex; gap: var(--space-9); margin: 0; padding: 0 var(--space-9) 0 0; list-style: none; animation: ld-roll 48s linear infinite; }
-@keyframes ld-roll { to { transform: translateX(-100%); } }
-.ld-marquee-track li { display: grid; justify-items: center; gap: var(--space-3); width: 112px; text-align: center; font-size: var(--text-sm); color: var(--chalk-2); }
-.ld-comp-logo .crest { width: 76px; height: 76px; border: 0; background: var(--chalk); box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.8), 0 0 0 4px rgba(244, 246, 250, 0.06); }
-.ld-comp-logo .crest img { width: 66%; height: 66%; }
-
-/* The record as a form guide. */
-.ld-score { display: flex; flex-wrap: wrap; gap: var(--space-10); margin: 0 0 var(--space-7); }
-.ld-score > div { display: grid; gap: var(--space-1); }
-.ld-score b { font-family: var(--display-figures); font-size: var(--text-board); font-weight: var(--weight-black); line-height: 0.9; font-variant-numeric: tabular-nums; }
-.ld-score b i { font-style: normal; }
-.ld-score span { font-size: var(--text-sm); color: var(--chalk-3); }
-.ld-score .is-won b { color: var(--won); text-shadow: 0 0 30px rgba(61, 180, 104, 0.35); }
-.ld-score .is-lost b { color: var(--lost); }
-.ld-score .is-void b { color: var(--chalk-3); }
-.ld-form { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 var(--space-8); padding: 0; list-style: none; perspective: 600px; }
+/* The record as a form guide, and nothing else. */
+.ld-form { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .ld-chip {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-sm);
-  font-family: var(--display-figures);
-  font-size: var(--text-md);
-  font-weight: var(--weight-black);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
   color: #fff;
 }
 .ld-chip.is-w { background: var(--won); }
 .ld-chip.is-l { background: var(--lost); }
 .ld-chip.is-v { background: var(--stand-hi); color: var(--chalk-2); }
 
-/* The plans: big prices, the cheapest per month under a floodlight. */
-.ld-plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-6); margin: 0 0 var(--space-6); padding: 0; list-style: none; align-items: stretch; }
-.ld-plans li { position: relative; border-radius: var(--radius-lg); }
+/* The plans. */
+.ld-plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-5); margin: 0; padding: 0; list-style: none; }
 .ld-plans a {
-  position: relative;
   display: grid;
   align-content: start;
-  gap: var(--space-4);
+  gap: var(--space-3);
   height: 100%;
-  padding: var(--space-8);
+  padding: var(--space-7);
   border: var(--border) solid var(--rule);
   border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, var(--terrace), var(--stand));
+  background: var(--stand);
   color: var(--chalk);
   text-decoration: none;
-  overflow: hidden;
 }
 .ld-plans a:hover { border-color: var(--floodlight); }
 .ld-plans a:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.ld-plans .is-best a {
-  border-color: var(--floodlight);
-  background:
-    radial-gradient(90% 70% at 50% -10%, rgba(158, 134, 255, 0.28), transparent 70%),
-    linear-gradient(180deg, var(--terrace), var(--stand));
-  box-shadow: 0 30px 80px -30px rgba(122, 90, 248, 0.6);
-}
-.ld-best { justify-self: start; padding: 4px 10px; border-radius: var(--radius-sm); background: var(--sodium); color: var(--pitch); font-size: var(--text-xs); font-weight: var(--weight-bold); }
-.ld-plans b { font-size: var(--text-lg); }
-.ld-price { display: grid; gap: var(--space-2); font-family: var(--display-figures); font-size: var(--text-board); font-weight: var(--weight-black); line-height: 0.9; font-variant-numeric: tabular-nums; }
-.ld-price small { font-family: var(--body); font-size: var(--text-sm); font-weight: var(--weight-normal); color: var(--sodium); }
+.ld-plans b { font-size: var(--text-md); color: var(--chalk-2); }
+.ld-price { font-family: var(--display-figures); font-size: var(--text-3xl); font-weight: var(--weight-black); line-height: 1; font-variant-numeric: tabular-nums; }
 .ld-blurb { font-size: var(--text-md); line-height: var(--leading-normal); color: var(--chalk-2); }
-.ld-plan-go {
-  justify-self: start;
-  margin-top: var(--space-3);
-  padding: var(--space-3) var(--space-6);
-  border-radius: var(--radius);
-  background: var(--floodlight);
-  color: #fff;
-  font-weight: var(--weight-bold);
-}
-.ld-plans a:hover .ld-plan-go { background: var(--floodlight-hi); color: var(--pitch); }
-.ld-all-plans { font-weight: var(--weight-bold); color: var(--floodlight-hi); text-decoration: none; }
-.ld-all-plans:hover { text-decoration: underline; text-underline-offset: 3px; }
 
-/* Straight answers: the heading stays put while the answers go by. */
-.ld-faq-sec { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: var(--space-11); align-items: start; }
-.ld-faq-head { position: sticky; top: calc(var(--header-h) + var(--space-7)); }
-.ld-faq { border-top: var(--border) solid var(--hairline); }
+/* Straight answers. */
+.ld-faq { max-width: 760px; border-top: var(--border) solid var(--hairline); }
 .ld-faq details { border-bottom: var(--border) solid var(--hairline); }
 .ld-faq summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-5);
-  padding: var(--space-7) 0;
-  font-family: var(--display);
-  font-size: var(--text-xl);
-  font-weight: var(--weight-black);
-  line-height: var(--leading-tight);
+  padding: var(--space-6) 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
   color: var(--chalk);
   cursor: pointer;
   list-style: none;
 }
-.ld-faq summary:hover { color: var(--floodlight-hi); }
 .ld-faq summary::-webkit-details-marker { display: none; }
-.ld-faq summary::after {
-  content: '+';
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 36px;
-  height: 36px;
-  border: var(--border) solid var(--rule);
-  border-radius: 50%;
-  font-family: var(--body);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-normal);
-  color: var(--chalk-2);
-  transition: transform var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
-}
-.ld-faq details[open] summary::after { transform: rotate(45deg); background: var(--floodlight); border-color: var(--floodlight); color: #fff; }
-.ld-faq p { max-width: 62ch; margin: 0 0 var(--space-7); font-size: var(--text-read); line-height: var(--leading-read); color: var(--chalk-2); }
+.ld-faq summary::after { content: '+'; flex: none; font-size: var(--text-xl); font-weight: var(--weight-normal); color: var(--chalk-3); transition: transform var(--dur-fast) var(--ease-out); }
+.ld-faq details[open] summary::after { transform: rotate(45deg); }
+.ld-faq p { max-width: 62ch; margin: 0 0 var(--space-6); font-size: var(--text-read); line-height: var(--leading-read); color: var(--chalk-2); }
 
-/* The finish: the stadium again, and a shout the size of the screen. */
-.ld-end {
-  position: relative;
-  isolation: isolate;
-  margin-top: var(--space-13);
-  padding: var(--space-13) 0;
-  border-top: var(--border) solid var(--hairline);
-  overflow: hidden;
-  background: var(--pitch);
-}
-.ld-end-bg {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background-size: cover;
-  background-position: 50% 40%;
-  opacity: 0.28;
-  filter: saturate(0.8);
-}
-.ld-end::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background: linear-gradient(180deg, var(--pitch) 0%, rgba(10, 10, 12, 0.5) 50%, var(--pitch) 100%), radial-gradient(60% 80% at 50% 100%, var(--floodlight-dim), transparent 70%);
-}
-.ld-end-shout {
-  margin: 0 0 var(--space-5);
-  font-family: var(--display);
-  font-size: clamp(4.5rem, 2rem + 11vw, 12rem);
-  font-weight: var(--weight-black);
-  line-height: 0.85;
-  letter-spacing: var(--tracking-hero);
-  color: transparent;
-  -webkit-text-stroke: 2px rgba(245, 165, 36, 0.8);
-  background: linear-gradient(90deg, var(--sodium) 0 50%, transparent 50% 100%);
-  background-size: 200% 100%;
-  background-position: 100% 0;
-  -webkit-background-clip: text;
-  background-clip: text;
-  padding-bottom: 0.12em;
-  filter: drop-shadow(0 0 40px rgba(245, 165, 36, 0.25));
-}
-.ld-end .ld-h2 { max-width: 20ch; margin-bottom: var(--space-8); font-size: var(--text-3xl); }
+.ld-end { margin-top: var(--space-12); padding: var(--space-11) 0; border-top: var(--border) solid var(--hairline); }
+.ld-end .ld-h2 { max-width: 22ch; margin-bottom: var(--space-6); }
 
 @media (max-width: 900px) {
   .ld-hero { min-height: 0; padding: var(--space-11) 0 var(--space-10); }
   .ld-scrim { background: linear-gradient(180deg, rgba(10, 10, 12, 0.6) 0%, rgba(10, 10, 12, 0.85) 45%, var(--pitch) 100%), radial-gradient(90% 60% at 80% 0%, var(--floodlight-dim), transparent 70%); }
   .ld-beam { width: 260px; margin-left: -130px; }
   .ld-hero-in { grid-template-columns: minmax(0, 1fr); gap: var(--space-9); }
-  .ld-plans { grid-template-columns: minmax(0, 1fr); gap: var(--space-5); }
-  .ld-strip-in { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-8) var(--space-6); }
-  /* The move runs down the page on a phone: a dashed line down the left, the touches on it. */
-  .ld-move { background: none; padding: 0; }
-  .ld-move-line, .ld-ball { display: none; }
-  .ld-how { grid-template-columns: minmax(0, 1fr); gap: var(--space-8); border-left: 2px dashed rgba(158, 134, 255, 0.5); margin-left: 21px; }
-  .ld-how li { justify-items: start; text-align: left; padding: 0 0 0 var(--space-8); position: relative; }
-  .ld-node { position: absolute; left: -23px; top: -4px; margin: 0; }
-  .ld-how b { padding-top: 4px; }
-  .ld-faq-sec { grid-template-columns: minmax(0, 1fr); gap: var(--space-6); }
-  .ld-faq-head { position: static; }
+  .ld-how, .ld-plans { grid-template-columns: minmax(0, 1fr); gap: var(--space-6); }
 }
 @media (max-width: 520px) {
   .ld-tk-body { padding: var(--space-6); }
@@ -3337,19 +3179,11 @@
   .ld-call-wait { min-height: 380px; }
   .ld-shout { font-size: var(--text-xl); }
   .ld-actions .btn { flex: 1 1 100%; }
-  .ld-sec, .ld-comps { padding-top: var(--space-12); }
-  .ld-strip b { font-size: var(--text-4xl); }
-  .ld-score { gap: var(--space-8); }
-  .ld-chip { width: 28px; height: 28px; font-size: var(--text-sm); }
-  .ld-plans a { padding: var(--space-7); }
-  .ld-faq summary { font-size: var(--text-lg); }
-  .ld-end { padding: var(--space-12) 0; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ld-marquee-track { animation: none; }
-  .ld-marquee { width: auto; flex-wrap: wrap; }
-  .ld-marquee-track[aria-hidden] { display: none; }
-  .ld-marquee-track { flex-wrap: wrap; padding-left: var(--gutter); }
+  .ld-sec { padding-top: var(--space-11); }
+  .ld-h2 { font-size: var(--text-2xl); }
+  .ld-strip-in { grid-template-columns: minmax(0, 1fr); gap: var(--space-5); padding-block: var(--space-7); }
+  .ld-strip-in > div { grid-template-columns: auto 1fr; align-items: baseline; gap: var(--space-4); }
+  .ld-strip b { font-size: var(--text-2xl); }
 }
 
 /* ===================================================== reduced motion */
