@@ -1,10 +1,35 @@
-# Everything a reader can see is open to crawlers. The API stays crawlable
-# because rendering a page needs it; the account and payment routes are not
-# pages, and the sitemap lists the ones that are.
+# Everything a reader can see is open to search engines and to AI assistants
+# and agents acting for a reader. The API stays open because rendering a page
+# needs it, and it is documented for agents at /openapi.json; the account,
+# sign-in and payment routes are not pages. /llms.txt says what the site is.
+#
+# Content-Signal (contentsignals.org): yes to search, yes to an assistant
+# reading a page to answer someone's question. Nothing is said about training.
 User-agent: *
+Content-Signal: search=yes, ai-input=yes
 Allow: /
 Disallow: /api/pay/
 Disallow: /api/account
 Disallow: /api/admin/
+Disallow: /api/auth/
+
+# Named as well, because some read only the group with their own name in it.
+User-agent: Googlebot
+User-agent: Bingbot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: GPTBot
+User-agent: ClaudeBot
+User-agent: Claude-SearchBot
+User-agent: Claude-User
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: Applebot
+User-agent: DuckAssistBot
+Allow: /
+Disallow: /api/pay/
+Disallow: /api/account
+Disallow: /api/admin/
+Disallow: /api/auth/
 
 Sitemap: https://offside.win/sitemap.xml

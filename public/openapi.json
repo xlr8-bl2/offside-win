@@ -1,0 +1,325 @@
+{
+ "openapi": "3.1.0",
+ "info": {
+  "title": "Offside.win public read API",
+  "version": "1",
+  "description": "The data behind every page of offside.win: matches, calls, competitions, teams and the record. Read-only, no key needed, cached at the edge for about a minute. Times are Unix seconds; odds are decimal. A call for members comes back as \"locked\": true without its market or price; the free call of the day and every settled call are public. Opinions about football, not advice to bet. 18+."
+ },
+ "servers": [
+  {
+   "url": "https://offside.win"
+  }
+ ],
+ "paths": {
+  "/api/board": {
+   "get": {
+    "summary": "Matches on the board, with our call or that we passed",
+    "responses": {
+     "200": {
+      "description": "JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "hours",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer"
+      },
+      "description": "How far ahead to look, in hours (e.g. 48)."
+     }
+    ]
+   }
+  },
+  "/api/fixture/{id}": {
+   "get": {
+    "summary": "One match: call, form, head-to-head, line-ups, result",
+    "responses": {
+     "200": {
+      "description": "JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer"
+      },
+      "description": "The match id, as in its page address."
+     }
+    ]
+   }
+  },
+  "/api/live": {
+   "get": {
+    "summary": "Scores of matches being played, at most thirty seconds old",
+    "responses": {
+     "200": {
+      "description": "JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/live/{id}": {
+   "get": {
+    "summary": "One match in play: score, minute, incidents and stats",
+    "responses": {
+     "200": {
+      "description": "JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer"
+      },
+      "description": "The match id, as in its page address."
+     }
+    ]
+   }
+  },
+  "/api/league/{id}": {
+   "get": {
+    "summary": "A competition: fixtures, results, table, scorers, our record there",
+    "responses": {
+     "200": {
+      "description": "JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer"
+      },
+      "description": "The competition id, as in its page address."
+     }
+    ]
+   }
+  },
+  "/api/team/{id}": {
+   "get": {
+    "summary": "A team: its games either side of today",
+    "responses": {
+     "200": {
+      "description": "JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer"
+      },
+      "description": "The team id, as in its page address."
+     }
+    ]
+   }
+  },
+  "/api/player/{id}": {
+   "get": {
+    "summary": "A player: goals, recent reports, next games",
+    "responses": {
+     "200": {
+      "description": "JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer"
+      },
+      "description": "The player id, as in its page address."
+     },
+     {
+      "name": "league",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer"
+      },
+      "description": "Limit to one competition."
+     }
+    ]
+   }
+  },
+  "/api/search": {
+   "get": {
+    "summary": "Find matches and competitions by name",
+    "responses": {
+     "200": {
+      "description": "JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "q",
+      "in": "query",
+      "required": true,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Team or competition name, 2 to 60 characters."
+     }
+    ]
+   }
+  },
+  "/api/picks": {
+   "get": {
+    "summary": "Calls, newest first; settled ones are public",
+    "responses": {
+     "200": {
+      "description": "JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "settled",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "\"true\" for settled calls only."
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer"
+      },
+      "description": "Up to 200."
+     }
+    ]
+   }
+  },
+  "/api/slip": {
+   "get": {
+    "summary": "Today's bet slip and how past slips went",
+    "responses": {
+     "200": {
+      "description": "JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/hero": {
+   "get": {
+    "summary": "The day's headline match and the free call's match id (free_fixture_id)",
+    "responses": {
+     "200": {
+      "description": "JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/plans": {
+   "get": {
+    "summary": "Membership plans and prices",
+    "responses": {
+     "200": {
+      "description": "JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}

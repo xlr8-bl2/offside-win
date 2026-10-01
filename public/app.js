@@ -766,7 +766,14 @@ function pathRoute(pathname = location.pathname) {
   if (m) return `/fixture/${m[1]}`;
   m = pathname.match(/^\/league\/(\d+)/);
   if (m) return `/league/${m[1]}`;
-  return { '/today': '/board', '/results': '/results', '/leagues': '/leagues', '/pricing': '/pricing', '/slip': '/slip' }[pathname.replace(/\/+$/, '')] ?? null;
+  const p = pathname.replace(/\/+$/, '');
+  // The pages written by the Worker (worker/src/landing.ts), shown as written.
+  if (/^\/(?:tomorrow|weekend|free-prediction|predictions(?:\/[a-z0-9-]+)?|team\/\d+(?:\/[^/]*)?)$/.test(p)) return `/page${p}`;
+  if (p === '/search') return `/search${location.pathname === '/search' ? location.search : ''}`;
+  return {
+    '/today': '/board', '/results': '/results', '/leagues': '/leagues', '/pricing': '/pricing', '/slip': '/slip',
+    '/cookies': '/legal/cookies', '/refunds': '/legal/refunds', '/contact': '/legal/contact', '/responsible-gambling': '/legal/responsible',
+  }[p] ?? null;
 }
 const slugOf = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
   .replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
@@ -775,7 +782,28 @@ function hashPath(hash) {
   if (m) return `/match/${m[1]}`;
   m = hash.match(/^#\/league\/(\d+)$/);
   if (m) return `/league/${m[1]}`;
-  return { '#/board': '/today', '#/results': '/results', '#/leagues': '/leagues', '#/pricing': '/pricing', '#/slip': '/slip', '#/home': '/' }[hash] ?? null;
+  if (/^#\/page\/[a-z0-9/-]+$/.test(hash)) return hash.slice('#/page'.length);
+  return {
+    '#/board': '/today', '#/results': '/results', '#/leagues': '/leagues', '#/pricing': '/pricing', '#/slip': '/slip', '#/home': '/',
+    '#/search': '/search', '#/legal/cookies': '/cookies', '#/legal/refunds': '/refunds', '#/legal/contact': '/contact', '#/legal/responsible': '/responsible-gambling',
+  }[hash] ?? null;
+}
+
+/*
+ * The other way: a link written as a real address (the Worker's pages are
+ * nothing but) moves within the app on a tap, like every other link, rather
+ * than loading the whole site again.
+ */
+function appLinks(root = document) {
+  for (const a of root.querySelectorAll('a[href^="/"]:not([data-hash])')) {
+    const href = a.getAttribute('href');
+    if (href.startsWith('//') || /^\/(api|og|fonts)\//.test(href) || /\.(xml|txt|json|png|svg)$/.test(href)) continue;
+    const url = new URL(href, location.origin);
+    if (url.pathname === '/') { a.dataset.hash = '#/home'; continue; }
+    if (url.pathname === '/search') continue;
+    const r = pathRoute(url.pathname);
+    if (r) a.dataset.hash = `#${r}`;
+  }
 }
 /*
  * The tab's title, per page, from the same functions the Worker uses for a
@@ -784,6 +812,8 @@ function hashPath(hash) {
  * calls on today's board, which is counted over the Worker's window.
  */
 function pageTitle(name) {
+  // A page the Worker wrote carries the title it was written with.
+  if (name === 'page' && state.serverTitle) { document.title = state.serverTitle; return; }
   let t = TITLES[name] ?? null;
   if (name === 'fixture' && state.titleFor?.home) {
     const f = state.titleFor;
@@ -7223,6 +7253,39 @@ async function viewDev() {
   }
 }
 
+/*
+ * A page the Worker writes (worker/src/landing.ts): tomorrow's matches, the
+ * weekend's, the free call, the kinds of prediction, a team. Shown exactly as
+ * written, so what a reader sees is what a search engine read. Arriving on
+ * one, it is already on the page; moving to one, it is fetched and dropped in.
+ */
+const serverFirst = app?.querySelector(':scope > article.seo, :scope > .wrap > article.doc')
+  ? (location.pathname.replace(/\/+$/, '') || '/') : null;
+let serverUsed = false;
+async function viewServerPage(parts) {
+  const nav = navTicket;
+  const path = `/${parts.slice(1).join('/')}`;
+  if (!serverUsed && serverFirst === path) {
+    serverUsed = true;
+    state.serverTitle = document.title;
+    return;
+  }
+  serverUsed = true;
+  placeholder(skeletonHTML());
+  const res = await fetch(path, { headers: { accept: 'text/html' } });
+  const html = await res.text();
+  if (nav !== navTicket) return;
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const main = doc.querySelector('main#app');
+  if (!main) throw new Error(`The server said ${res.status}.`);
+  state.serverTitle = doc.title;
+  app.innerHTML = main.innerHTML;
+  // The address bar shows the page's own address, so it can be shared.
+  if (location.hash && location.pathname !== path) {
+    try { history.replaceState(history.state, '', path); } catch { /* keep the hash */ }
+  }
+}
+
 function viewLegal(which) {
   const page = LEGAL[which];
   if (!page) return notFound(`legal/${which}`);
@@ -7656,6 +7719,7 @@ function finishRoute(name, soft, keepY, backTo) {
     if (state.liveFixture) markLiveEvents(Number(state.liveFixture.id), document.getElementById('live-centre'));
     smartQuotes(app);
     crawlable(app);
+    appLinks(app);
     pageTitle(name);
     // A match page's address becomes the match's real one, so a link copied
     // from the address bar unfurls into that match's share card rather than
@@ -7817,6 +7881,7 @@ async function render(name, parts, params) {
     // The owner's dashboard, loaded only when opened. js/admin.js.
     if (name === 'admin') return await (await import('./js/admin.js')).viewAdmin(app, parts, params);
     if (name === 'legal' && parts[1]) return viewLegal(parts[1]);
+    if (name === 'page' && parts[1]) return await viewServerPage(parts);
     if (name === 'home') return await viewHome();
     /*
      * An address we do not have.

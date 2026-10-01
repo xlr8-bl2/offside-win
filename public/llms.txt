@@ -1,0 +1,44 @@
+# Offside.win
+
+> Football predictions for the day's biggest games across 88 competitions: a call on each match we back, the reason behind it in plain English, team news and form, and every result kept on a public record, the misses included. One call a day is free; members get the rest. 18+. Opinions about football, not advice to bet.
+
+Everything below is a real page or a public JSON read. Pages are server-rendered HTML; the same data is at the `/api/` address next to each, described in [/openapi.json](https://offside.win/openapi.json). Times are UK time. Prices are decimal odds.
+
+## Today and next
+
+- [Football predictions today](https://offside.win/today): every match in the next two days, by competition, and whether we have a call on it. JSON: `/api/board?hours=48`
+- [Football predictions tomorrow](https://offside.win/tomorrow): tomorrow's matches.
+- [Weekend football predictions](https://offside.win/weekend): Friday to Monday.
+- [Free prediction of the day](https://offside.win/free-prediction): the one free call, with the odds, the bookmaker and the reason. JSON: `/api/hero` (`free_fixture_id`), then `/api/fixture/{id}`
+- [Today's bet slip](https://offside.win/slip): the day's strongest calls combined into one slip. JSON: `/api/slip`
+
+## Matches, teams and competitions
+
+- Match: `https://offside.win/match/{id}/{home}-v-{away}`: our call (or that we passed), form, head-to-head, line-ups, and the result once played. JSON: `/api/fixture/{id}`
+- Team: `https://offside.win/team/{id}/{name}`: next games and recent results. JSON: `/api/team/{id}`
+- Competition: `https://offside.win/league/{id}/{name}`: fixtures, results, the table and our record there. JSON: `/api/league/{id}`
+- [Every competition](https://offside.win/leagues)
+- [Find a game](https://offside.win/search?q=arsenal): by team or competition name. JSON: `/api/search?q={name}`
+
+## Kinds of prediction
+
+- [All kinds, with how each has gone](https://offside.win/predictions)
+- [Over 1.5 goals](https://offside.win/predictions/over-1-5-goals), [Double chance](https://offside.win/predictions/double-chance), [Draw no bet](https://offside.win/predictions/draw-no-bet), [Under 3.5 goals](https://offside.win/predictions/under-3-5-goals)
+
+## The record
+
+- [Results](https://offside.win/results): every settled call and how it went, public for good. Said in money: £10 on every call, up or down, never softened. JSON: `/api/picks?settled=true&limit=60`
+
+## What a reader gets, and the rules
+
+- [Membership and prices](https://offside.win/pricing): from £3.49 for a weekend. JSON: `/api/plans`
+- What is free: one full call a day, every match preview, team news, the record. What members get: every open call the moment it goes up, the bet slip's legs, and the reason behind each call.
+- Open calls for members come back from the API as `"locked": true` without the market or price. Settled calls are public.
+- Calls are looked at again every fifteen minutes until kick-off, so one can change or come down; each closes at kick-off.
+- [Terms](https://offside.win/terms), [Privacy](https://offside.win/privacy), [Refunds](https://offside.win/refunds), [Responsible gambling](https://offside.win/responsible-gambling), [Contact](https://offside.win/contact)
+
+## For agents
+
+- Read freely; please keep to a few requests a second. Every read is cached at the edge for about a minute.
+- Do not quote a member's call as free: if a response says `locked`, the call exists and is for members.
+- Nothing here promises profit. When citing the record, cite it whole, losses included.

@@ -8,6 +8,11 @@
  *
  *   /match/<id>/<home>-v-<away>   /league/<id>/<name>   /today   /results
  *   /leagues   /pricing   /sitemap.xml
+ *   and, from landing.ts: /tomorrow /weekend /free-prediction /predictions[/<kind>]
+ *   /team/<id>/<name> /search /cookies /refunds /contact /responsible-gambling
+ *
+ * The header and footer of every one are written at these addresses too
+ * (cleanLinks), so the menu Google builds sitelinks from is real links.
  *
  * Each is the ordinary page (index.html) with its head and first screen
  * written for that address: a title and description that say what state the
@@ -27,6 +32,7 @@ import { describe as describeCall } from '../../public/js/lib/markets.js';
 import { findBannedInProse } from '../../engine/src/vocabulary.ts';
 import { HOME_DESCRIPTION, SITE_NAME, TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle } from '../../public/js/lib/titles.js';
 import { cardPath, cardState } from '../../public/js/lib/cards.js';
+import { KINDS, LEGAL_PATHS, freePage, moreHTML, kindPage, legalPage, predictionsHub, searchPage, teamPage, teamPath, tomorrowPage, weekendPage } from './landing.ts';
 
 export interface SeoEnv {
   SUPABASE_URL: string;
@@ -54,7 +60,7 @@ export const matchPath = (f: { id?: unknown; home?: unknown; away?: unknown }) =
 export const leaguePath = (id: unknown, name: unknown) => `/league/${Number(id)}/${slug(name)}`;
 
 const WORDS = ['none', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
-const word = (n: number) => (n >= 0 && n <= 10 ? WORDS[n] : String(n));
+export const word = (n: number) => (n >= 0 && n <= 10 ? WORDS[n] : String(n));
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 /** What a result page shows of a description, cut at a word. */
 export function clip(s: string, n = 158): string {
@@ -63,7 +69,7 @@ export function clip(s: string, n = 158): string {
   return `${cut.slice(0, cut.lastIndexOf(' ')).replace(/[,.:;]$/, '')}…`;
 }
 
-function ukTime(epoch: number): { day: string; time: string; iso: string } {
+export function ukTime(epoch: number): { day: string; time: string; iso: string } {
   const d = new Date(epoch * 1000);
   return {
     day: new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', weekday: 'long', day: 'numeric', month: 'long' }).format(d),
@@ -78,7 +84,7 @@ function ordinal(n: number): string {
   return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
 }
 
-async function read<T>(env: SeoEnv, fn: string, args: Record<string, string | number | undefined>): Promise<T | null> {
+export async function read<T>(env: SeoEnv, fn: string, args: Record<string, string | number | undefined>): Promise<T | null> {
   const url = new URL(`/rest/v1/rpc/${fn}`, env.SUPABASE_URL);
   for (const [k, v] of Object.entries(args)) if (v !== undefined) url.searchParams.set(k, String(v));
   const res = await fetch(url, {
@@ -103,9 +109,9 @@ export function stateOf(f: Rec, now = Date.now() / 1000): 'upcoming' | 'live' | 
   return 'upcoming';
 }
 
-const RESULT_WORD: Record<string, string> = { WON: 'landed', LOST: 'missed', HALF_WON: 'half landed', HALF_LOST: 'half lost', PUSH: 'stakes back', VOID: 'void' };
+export const RESULT_WORD: Record<string, string> = { WON: 'landed', LOST: 'missed', HALF_WON: 'half landed', HALF_LOST: 'half lost', PUSH: 'stakes back', VOID: 'void' };
 
-function callName(p: Rec, home: string, away: string): string {
+export function callName(p: Rec, home: string, away: string): string {
   try { return describeCall({ market: p.market, outcome: p.outcome, line: p.line, home, away, odds: null, stake: 10 }).name; }
   catch { return 'our call'; }
 }
@@ -167,12 +173,14 @@ export interface Page {
   image?: { url: string; alt: string };
   /** An image to start fetching from the head: the front page's masthead photograph. */
   preloadImage?: string;
+  /** The same thing as data: the API address an agent can read instead of the page. */
+  json?: string;
 }
 
 const SITE = SITE_NAME;
-const MOVES = 'Calls are looked at again every fifteen minutes until kick-off, so one can change or come down, and each closes when the match starts. The bet slip stays exactly as posted.';
+export const MOVES = 'Calls are looked at again every fifteen minutes until kick-off, so one can change or come down, and each closes when the match starts. The bet slip stays exactly as posted.';
 
-function crumbs(items: Array<[string, string]>, site: string): { html: string; ld: unknown } {
+export function crumbs(items: Array<[string, string]>, site: string): { html: string; ld: unknown } {
   return {
     html: `<p class="seo-crumbs">${items.map(([name, href]) => `<a href="${esc(href)}">${esc(name)}</a>`).join(' <span aria-hidden="true">/</span> ')}</p>`,
     ld: {
@@ -273,6 +281,7 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
     ${h2h ? `<h2>Head to head</h2><p>${esc(h2h)}</p>` : ''}
     ${table ? `<h2>The table</h2><p>${esc(table)}</p>` : ''}
     ${sheets}
+    ${f.home_id && f.away_id ? `<p>More on <a href="${esc(`/team/${Number(f.home_id)}/${slug(home)}`)}">${esc(home)}</a> and <a href="${esc(`/team/${Number(f.away_id)}/${slug(away)}`)}">${esc(away)}</a>: their next games and results.</p>` : ''}
     <p><a href="/today">Every match on today's board</a>${f.league_id ? ` <span aria-hidden="true">/</span> <a href="${esc(leaguePath(f.league_id, league))}">More from the ${esc(league)}</a>` : ''}</p>
   </article>`;
 
@@ -296,7 +305,7 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
   // The event's picture too: Google lists `image` among an event's
   // recommended properties, and the share card is exactly that.
   event['image'] = [image.url];
-  return { title, description: clip(description), canonical, body, jsonLd: [event, c.ld], image };
+  return { title, description: clip(description), canonical, body, jsonLd: [event, c.ld], image, json: `${site}/api/fixture/${Number(f.id)}` };
 }
 
 function rowStatus(f: Rec): string {
@@ -306,12 +315,13 @@ function rowStatus(f: Rec): string {
     return `Full time, ${f.score[0]}–${f.score[1]}.${r}`;
   }
   if (state === 'live') return f.locked || f.top_pick ? 'Under way. Our call closed at kick-off.' : 'Under way.';
+  if (f.later) return 'Analysed closer to kick-off.';
   if (f.top_pick && f.free_call) return `Today's free call: ${callName(f.top_pick, f.home, f.away)}.`;
   if (f.top_pick || f.locked) return 'We have a call on this one.';
   return 'No call.';
 }
 
-function listHTML(fixtures: Rec[]): string {
+export function listHTML(fixtures: Rec[]): string {
   return `<ul class="seo-list">${fixtures.map((f) => {
     const t = ukTime(Number(f.kickoff));
     const vs = stateOf(f) === 'ft' && Array.isArray(f.score) ? `${f.home} ${f.score[0]}–${f.score[1]} ${f.away}` : `${f.home} v ${f.away}`;
@@ -319,7 +329,7 @@ function listHTML(fixtures: Rec[]): string {
   }).join('')}</ul>`;
 }
 
-function byDayAndLeague(fixtures: Rec[]): string {
+export function byDayAndLeague(fixtures: Rec[]): string {
   const days = new Map<string, Rec[]>();
   for (const f of [...fixtures].sort((a, b) => a.kickoff - b.kickoff)) {
     const d = ukTime(Number(f.kickoff)).day;
@@ -349,6 +359,7 @@ export async function todayPage(env: SeoEnv, site: string): Promise<Page> {
     title: todayTitle(day, calls),
     description: clip(`${calls} calls across ${fixtures.length} matches in ${comps} competitions.${free ? ` Today's free call: ${free.home} v ${free.away}.` : ''} Team news, form and the reason behind every call.`),
     canonical: `${site}/today`,
+    json: `${site}/api/board?hours=48`,
     body: `
   <article class="wrap section narrow seo">
     ${c.html}
@@ -387,6 +398,7 @@ export async function leaguePage(env: SeoEnv, id: number, site: string): Promise
     title: leagueTitle(name),
     description: clip(`${name}: ${ahead.length} matches coming up${ahead[0] ? `, next ${ahead[0].home} v ${ahead[0].away}` : ''}. Our call on each, the latest results${leader ? `, and the table, led by ${leader.team}` : ' and the table'}.`),
     canonical: `${site}${leaguePath(id, name)}`,
+    json: `${site}/api/league/${id}`,
     body: `
   <article class="wrap section narrow seo">
     ${c.html}
@@ -414,6 +426,7 @@ export async function resultsPage(env: SeoEnv, site: string): Promise<Page> {
     title: TITLES.results,
     description: `Of the last ${graded.length} calls, ${won} landed. £10 on every one would have left you ${money}. Every settled call, the misses included.`,
     canonical: `${site}/results`,
+    json: `${site}/api/picks?settled=true&limit=60`,
     body: `
   <article class="wrap section narrow seo">
     ${c.html}
@@ -453,6 +466,7 @@ export async function slipPage(env: SeoEnv, site: string): Promise<Page> {
     title: slipTitle(cur),
     description: clip(`${now} Our most likely calls combined into one slip, and every slip graded afterwards, won or lost.${so}`),
     canonical: `${site}/slip`,
+    json: `${site}/api/slip`,
     body: `
   <article class="wrap section narrow seo">
     ${c.html}
@@ -502,7 +516,7 @@ export async function homePage(env: SeoEnv, site: string): Promise<Page> {
     <p>${esc(fixtures.length ? `${fixtures.length} matches in the next two days across ${comps} competitions, with ${calls} calls.` : 'The next matches go up as soon as they are analysed.')} Every call comes with the reason behind it, and <a href="/results">every result stays on the record</a>, the misses included. One call a day is free.</p>
     ${free ? `<p>Today's free call is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
     ${byDayAndLeague(fixtures)}
-    <p><a href="/today">Today's board</a> <span aria-hidden="true">/</span> <a href="/slip">The bet slip</a> <span aria-hidden="true">/</span> <a href="/leagues">Every competition</a></p>
+    ${moreHTML()}
   </article>`,
     jsonLd: [],
   };
@@ -558,6 +572,33 @@ function staticPage(path: string, site: string): Page | null {
 
 /* ---------------------------------------------------------- the response */
 
+/*
+ * The app's own links, at real addresses.
+ *
+ * The page's header and footer are written as app routes (`#/board`), and to
+ * a search engine everything after a `#` is the front page: the menu Google
+ * builds a site's sitelinks from pointed nowhere but home, and an agent
+ * reading the HTML had nothing to follow. Written out here as the addresses
+ * they are, with the route kept in data-hash so a tap still moves within the
+ * app (public/app.js) instead of loading the page again.
+ */
+const CLEAN: Record<string, string> = {
+  '#/home': '/', '#/board': '/today', '#/results': '/results', '#/leagues': '/leagues', '#/pricing': '/pricing',
+  '#/slip': '/slip', '#/search': '/search', '#/legal/cookies': '/cookies', '#/legal/refunds': '/refunds',
+  '#/legal/contact': '/contact', '#/legal/responsible': '/responsible-gambling',
+};
+export function cleanLinks(html: string): string {
+  return html.replace(/<a\b([^>]*?)\shref="(#\/[^"]*)"([^>]*)>([\s\S]*?)<\/a>/g, (whole, pre: string, hash: string, post: string, inner: string) => {
+    if (/data-hash=/.test(pre + post)) return whole;
+    const league = hash.match(/^#\/league\/(\d+)$/);
+    const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const path = CLEAN[hash] ?? (league ? leaguePath(league[1], text.replace(/ predictions$/i, ''))
+      : /^#\/page\/[a-z0-9/-]+$/.test(hash) ? hash.slice('#/page'.length) : null);
+    if (!path) return whole;
+    return `<a${pre} href="${path}" data-hash="${hash}"${post}>${inner}</a>`;
+  });
+}
+
 /** The page the app lives in, with its head and first screen written for this address. */
 export function render(shell: string, page: Page): string {
   const t = fullTitle(page.title);
@@ -574,9 +615,9 @@ export function render(shell: string, page: Page): string {
     .replace(/<meta property="og:image:alt" content="[^"]*">/, (m) => (page.image ? `<meta property="og:image:alt" content="${esc(page.image.alt)}">` : m))
     .replace(/<meta name="twitter:image" content="[^"]*">/, (m) => (page.image ? `<meta name="twitter:image" content="${esc(page.image.url)}">` : m))
     .replace(/<meta name="robots" content="[^"]*">/, page.noindex ? '<meta name="robots" content="noindex">' : '$&')
-    .replace('</head>', `<meta property="og:url" content="${esc(page.canonical)}">\n${page.preloadImage ? `<link rel="preload" as="image" href="${esc(page.preloadImage)}" fetchpriority="high">\n` : ''}${ld}\n</head>`);
+    .replace('</head>', `<meta property="og:url" content="${esc(page.canonical)}">\n${page.json ? `<link rel="alternate" type="application/json" href="${esc(page.json)}">\n` : ''}${page.preloadImage ? `<link rel="preload" as="image" href="${esc(page.preloadImage)}" fetchpriority="high">\n` : ''}${ld}\n</head>`);
   html = html.replace(/<main id="app">[\s\S]*?<\/main>/, `<main id="app">${page.body}</main>`);
-  return html;
+  return cleanLinks(html);
 }
 
 async function shellHTML(env: SeoEnv, origin: string): Promise<string> {
@@ -596,6 +637,8 @@ export async function seoResponse(request: Request, env: SeoEnv): Promise<Respon
 
   const m = path.match(/^\/match\/(\d+)(?:\/([^/]*))?$/);
   const l = path.match(/^\/league\/(\d+)(?:\/([^/]*))?$/);
+  const t = path.match(/^\/team\/(\d+)(?:\/([^/]*))?$/);
+  const k = path.match(/^\/predictions\/([a-z0-9-]+)$/);
   if (m) {
     page = await matchPage(env, Number(m[1]), site);
     // One address per match: a missing or stale name moves to the right one.
@@ -605,6 +648,25 @@ export async function seoResponse(request: Request, env: SeoEnv): Promise<Respon
     page = await leaguePage(env, Number(l[1]), site);
     if (page && new URL(page.canonical).pathname !== path) return Response.redirect(page.canonical, 301);
     if (!page) page = gone(site, 'That competition is not one we cover', 'The competitions we cover are on the leagues page.');
+  } else if (t) {
+    page = await teamPage(env, Number(t[1]), site);
+    if (page && new URL(page.canonical).pathname !== path) return Response.redirect(page.canonical, 301);
+    if (!page) page = gone(site, 'That team has no games with us right now', 'Their page fills in when they next have a match in a competition we cover.');
+  } else if (k) {
+    page = await kindPage(env, k[1]!, site);
+    if (!page) page = gone(site, 'Not a kind of prediction we make', 'Every kind we make is on the predictions page.');
+  } else if (path === '/predictions') {
+    page = await predictionsHub(env, site);
+  } else if (path === '/tomorrow') {
+    page = await tomorrowPage(env, site);
+  } else if (path === '/weekend') {
+    page = await weekendPage(env, site);
+  } else if (path === '/free-prediction') {
+    page = await freePage(env, site);
+  } else if (path === '/search') {
+    page = await searchPage(env, url.searchParams.get('q') ?? '', site);
+  } else if (LEGAL_PATHS[path]) {
+    page = legalPage(path, site);
   } else if (path === '/today') {
     page = await todayPage(env, site);
   } else if (path === '/results') {
@@ -631,7 +693,7 @@ export async function seoResponse(request: Request, env: SeoEnv): Promise<Respon
   });
 }
 
-function gone(site: string, head: string, why: string): Page {
+export function gone(site: string, head: string, why: string): Page {
   return {
     title: head, description: why, canonical: `${site}/today`, status: 404, noindex: true, jsonLd: [],
     body: `<article class="wrap section narrow seo"><h1 class="display">${esc(head)}</h1><p>${esc(why)}</p><p><a href="/today">Today's board</a></p></article>`,
@@ -653,16 +715,29 @@ export async function sitemap(env: SeoEnv, origin: string): Promise<Response> {
     [`${site}/results`, today, 'daily'],
     [`${site}/slip`, today, 'daily'],
     [`${site}/leagues`, today, 'weekly'],
+    [`${site}/tomorrow`, today, 'hourly'],
+    [`${site}/weekend`, today, 'daily'],
+    [`${site}/free-prediction`, today, 'hourly'],
+    [`${site}/predictions`, today, 'daily'],
     [`${site}/pricing`, today, 'monthly'],
+    ...Object.keys(LEGAL_PATHS).map((p): [string, string, string] => [`${site}${p}`, today, 'monthly']),
   ];
+  // The kinds of prediction with a page behind them (landing.ts: a few settled calls each).
+  const settled = await read<Rec>(env, 'get_picks', { p_limit: 200, p_settled: 'true' });
+  const picks: Rec[] = Array.isArray(settled?.picks) ? settled!.picks : [];
+  for (const k of KINDS) if (picks.filter(k.match).length >= 3) urls.push([`${site}/predictions/${k.slug}`, today, 'daily']);
+  const teams = new Map<number, string>();
   const leagues = new Map<number, string>();
   for (const f of fixtures) {
     if (f.league_id && f.league) leagues.set(Number(f.league_id), String(f.league));
+    if (f.home_id && f.home) teams.set(Number(f.home_id), String(f.home));
+    if (f.away_id && f.away) teams.set(Number(f.away_id), String(f.away));
     // A match to come changes until kick-off; a played one settles the day after.
     const upcoming = stateOf(f) !== 'ft';
     urls.push([`${site}${matchPath(f)}`, upcoming ? today : day(Number(f.kickoff) + 86400 > now ? now : Number(f.kickoff) + 86400), upcoming ? 'hourly' : 'weekly']);
   }
   for (const [id, name] of leagues) urls.push([`${site}${leaguePath(id, name)}`, today, 'daily']);
+  for (const [id, name] of teams) urls.push([`${site}${teamPath(id, name)}`, today, 'daily']);
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${urls.map(([loc, lastmod, freq]) => `  <url><loc>${esc(loc)}</loc><lastmod>${lastmod}</lastmod><changefreq>${freq}</changefreq></url>`).join('\n')}

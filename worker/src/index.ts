@@ -224,6 +224,12 @@ const worker = {
         const lg = Number(url.searchParams.get('league'));
         return await passthrough(env, 'get_player', { p_id: id, p_league: Number.isFinite(lg) && lg > 0 ? lg : undefined });
       }
+      // A team's games either side of today, walled as the board is.
+      if (path.startsWith('/api/team/')) {
+        const id = Number(path.slice('/api/team/'.length));
+        if (!Number.isInteger(id) || id <= 0) return fail('bad team id', 400);
+        return await passthrough(env, 'get_team', { p_id: id }, jwt);
+      }
       if (path.startsWith('/api/league/')) {
         const id = Number(path.slice('/api/league/'.length));
         if (!Number.isFinite(id)) return fail('bad league id', 400);
@@ -356,6 +362,6 @@ async function hit(request: Request, env: Env): Promise<Response> {
 }
 
 /** The pages seo.ts writes; everything else without a file is a 404 from the assets. */
-const SEO_PAGES = /^\/(?:|today|results|slip|leagues|pricing|match\/\d+(?:\/[^/]*)?|league\/\d+(?:\/[^/]*)?)\/?$/;
+const SEO_PAGES = /^\/(?:|today|tomorrow|weekend|free-prediction|predictions(?:\/[a-z0-9-]+)?|results|slip|leagues|pricing|cookies|refunds|contact|responsible-gambling|match\/\d+(?:\/[^/]*)?|league\/\d+(?:\/[^/]*)?|team\/\d+(?:\/[^/]*)?)\/?$/;
 
 export default worker;

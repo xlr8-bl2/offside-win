@@ -4460,6 +4460,19 @@ html.pay-open { overflow: hidden; }
 .seo-meta { color: var(--chalk-3); font-size: var(--text-sm); }
 .seo-list { padding-left: var(--space-5); }
 .seo-list li { margin-bottom: var(--space-2); }
+/* The links to the other pages, at the foot of every page the Worker writes. */
+.seo-more { margin-top: var(--space-9); padding-top: var(--space-5); border-top: var(--border) solid var(--hairline); }
+.seo-more h2 { margin-top: 0; }
+.seo-more .seo-list { columns: 2 220px; column-gap: var(--space-7); }
+/* Find a game, as a plain form: works with or without the app. */
+.seo-search { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin: var(--space-5) 0; }
+.seo-search label { flex-basis: 100%; font-size: var(--text-sm); color: var(--chalk-2); }
+.seo-search input {
+  flex: 1 1 200px; min-width: 0; min-height: 40px; padding: 0 var(--space-4);
+  border: var(--border) solid var(--rule); border-radius: var(--radius-sm); background: var(--terrace);
+  color: var(--chalk); font: inherit;
+}
+.seo-search input:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 /* ========================================================= account menu */
 

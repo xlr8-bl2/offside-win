@@ -128,8 +128,8 @@ const PRIVATE_FUNCTIONS = new Set(['record_payment', 'revoke_membership', 'recor
 // one IS the wall, and every one that returns calls must apply it. Anything
 // else runs as the caller: SECURITY DEFINER on a function that does not
 // filter is the one way a read-only surface becomes a data leak.
-const DEFINER = new Set(['get_promos', 'get_board', 'get_fixture', 'get_picks', 'get_model', 'get_hero', 'get_health', 'get_slip', 'get_plans', 'get_account', 'has_membership', 'free_fixture_id', 'get_league', 'record_view', 'get_player', 'save_profile', 'set_follow', 'search_games', 'record_consent']);
-const WALLED = new Set(['get_board', 'get_fixture', 'get_picks', 'get_slip', 'search_games']);
+const DEFINER = new Set(['get_promos', 'get_board', 'get_fixture', 'get_picks', 'get_model', 'get_hero', 'get_health', 'get_slip', 'get_plans', 'get_account', 'has_membership', 'free_fixture_id', 'get_league', 'record_view', 'get_player', 'save_profile', 'set_follow', 'search_games', 'record_consent', 'get_team']);
+const WALLED = new Set(['get_board', 'get_fixture', 'get_picks', 'get_slip', 'search_games', 'get_team']);
 // The owner's dashboard. Every admin_ function reads auth.users or the
 // payment tables, so it runs as its owner, and none of them may be callable
 // with the public key: Postgres grants EXECUTE to PUBLIC on every new
@@ -263,7 +263,7 @@ test('the fixture page and the board read calls from the record', () => {
 test('the board and search build cards the same way, walled by membership', () => {
   // Search returning a board card of its own would be a second wall to keep
   // in step with the first; both go through board_card with has_membership().
-  for (const fn of ['get_board', 'search_games']) {
+  for (const fn of ['get_board', 'search_games', 'get_team']) {
     const body = sql.slice(sql.indexOf(`CREATE OR REPLACE FUNCTION ${fn}(`));
     const whole = body.slice(0, body.indexOf('$fn$;'));
     assert.match(whole, /has_membership\(\) AS ok/, `${fn}: does not decide membership`);
