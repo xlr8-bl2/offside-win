@@ -13,9 +13,9 @@ export const LANDING_HEADLINE = ['We call the big games.', 'Then we show our wor
 export const LANDING_LEDE = 'One call on each match worth your time, with the reason in plain English: who’s missing, who’s flying, who needs the result. And every result stays on the record, the misses too.';
 
 export const LANDING_STEPS = [
-  ['We read the game.', 'Team news, who’s injured and who matters, form home and away, the table, what’s riding on it. Looked at again every fifteen minutes until kick-off.'],
-  ['We make one call, or none.', 'Only when we’d back it ourselves. Most games get no call, and when we pass we say why, on the match page, for free.'],
-  ['The result goes on the record.', 'Won, lost or void, it stays on the results page for good. Nothing gets quietly deleted.'],
+  ['Read the game.', 'Team news, who’s injured and who actually matters, form home and away, the table, what’s riding on it. Looked at again every fifteen minutes until kick-off.'],
+  ['Make the call. Or don’t.', 'Only when we’d back it ourselves. Most games get no call, and when we pass we say why, on the match page, for free.'],
+  ['Put it on the record.', 'Won, lost or void, it stays on the results page for good. Nothing gets quietly deleted. Ever.'],
 ];
 
 export const LANDING_FAQ = [
