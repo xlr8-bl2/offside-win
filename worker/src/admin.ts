@@ -23,7 +23,7 @@
  */
 
 import type { PayEnv } from './pay.ts';
-import { accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, membershipMail, renewalStoppedMail, renewedMail, sendMail } from './mail.ts';
+import { accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, goodwillEndMail, goodwillStartMail, membershipMail, renewalStoppedMail, renewedMail, sendMail } from './mail.ts';
 
 export interface AdminEnv extends PayEnv {
   /** Comma-separated SHA-256 hex digests of the owner's lower-cased email. */
@@ -162,6 +162,8 @@ export async function admin(request: Request, env: AdminEnv, jwt: string | null,
       renewalStoppedMail({ plan: 'monthly', until }),
       freeTimeMail({ days: 7, until: now + 7 * 86400 }),
       accessEndedMail({ reason: 'refund' }),
+      goodwillStartMail({ until: until + 86400, whop: true }),
+      goodwillEndMail({ days: 9, until: until + 9 * 86400, whop: false }),
       accountDeletedMail({ stoppedRenewal: true }),
     ];
     const via: Record<string, string | null> = {};

@@ -2468,3 +2468,181 @@ $fn$;
 REVOKE ALL ON FUNCTION admin_log_list(integer) FROM PUBLIC, anon, authenticated;
 
 NOTIFY pgrst, 'reload schema';
+
+-- ------------------------------------------------------------- goodwill days
+--
+-- A day added to every paying member for every day the club game is off: an
+-- international break or the close season. Fewer matches means fewer calls,
+-- which is not what anyone paid for, so the membership stops counting down
+-- while it lasts. Worked out and applied once a day by the Worker's cron
+-- (worker/src/goodwill.ts); nothing for a member to ask for or claim.
+--
+-- A quiet day is one inside a run of at least four with no Champions League
+-- or big-five match, which is what a break looks like from the fixture list
+-- and what an ordinary Thursday does not. It also needs matches on the board
+-- that day, so a stalled slate cannot look like a break and hand out time.
+CREATE TABLE IF NOT EXISTS goodwill (
+  day        bigint NOT NULL,   -- the quiet day, as UK midnight
+  account    text NOT NULL,     -- 'u:<user id>' for a card membership, 'e:<email>' for one through Whop
+  email      text,
+  stretch    bigint NOT NULL,   -- the first quiet day of this run, for the emails
+  -- Whop: true once Whop has moved the renewal back; everything else is true
+  -- on the spot, because the expiry is ours.
+  applied    boolean NOT NULL DEFAULT false,
+  created_at bigint NOT NULL,
+  PRIMARY KEY (day, account)
+);
+ALTER TABLE goodwill ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON goodwill FROM anon, authenticated;
+
+-- Which emails have gone: one when a run of quiet days starts, one when it ends.
+CREATE TABLE IF NOT EXISTS goodwill_notice (
+  account  text NOT NULL,
+  stretch  bigint NOT NULL,
+  kind     text NOT NULL,     -- 'start' or 'end'
+  sent_at  bigint NOT NULL,
+  PRIMARY KEY (account, stretch, kind)
+);
+ALTER TABLE goodwill_notice ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON goodwill_notice FROM anon, authenticated;
+
+-- Whether a UK day was quiet.
+CREATE OR REPLACE FUNCTION goodwill_lean(p_day bigint)
+RETURNS boolean LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public AS $fn$
+  WITH top AS (
+    SELECT kickoff FROM fixture WHERE league_id IN (7, 1, 3, 4, 5, 6)
+       AND kickoff >= p_day - 3 * 86400 AND kickoff < p_day + 4 * 86400
+    UNION ALL
+    SELECT kickoff FROM schedule WHERE league_id IN (7, 1, 3, 4, 5, 6)
+       AND kickoff >= p_day - 3 * 86400 AND kickoff < p_day + 4 * 86400)
+  SELECT (SELECT count(*) FROM fixture WHERE kickoff >= p_day AND kickoff < p_day + 86400) >= 5
+     AND EXISTS (
+       SELECT 1 FROM generate_series(0, 3) s
+        WHERE NOT EXISTS (SELECT 1 FROM top
+                           WHERE kickoff >= p_day - s * 86400 AND kickoff < p_day + (4 - s) * 86400));
+$fn$;
+REVOKE ALL ON FUNCTION goodwill_lean(bigint) FROM PUBLIC, anon, authenticated;
+
+-- Credit one quiet day, once. Card memberships are extended here; a Whop
+-- subscription that renews is handed back to the Worker, which asks Whop to
+-- move the renewal (goodwill_whop_applied records it). A Whop pass or a
+-- subscription already stopped is extended here, since nothing will bill it.
+-- Complimentary time is not credited: nobody paid for the day.
+CREATE OR REPLACE FUNCTION goodwill_credit(p_day bigint)
+RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE
+  t bigint := floor(extract(epoch FROM now()))::bigint;
+  v_end bigint := p_day + 86400;
+BEGIN
+  IF NOT goodwill_lean(p_day) THEN
+    RETURN json_build_object('lean', false);
+  END IF;
+
+  -- Card memberships, paid, running the whole day.
+  WITH eligible AS (
+    SELECT m.user_id, u.email FROM membership m JOIN auth.users u ON u.id = m.user_id
+     WHERE m.expires_at > v_end AND m.created_at < p_day AND coalesce(m.card_brand, '') <> 'complimentary'),
+  ins AS (
+    INSERT INTO goodwill (day, account, email, stretch, applied, created_at)
+    SELECT p_day, 'u:' || e.user_id, e.email,
+           coalesce((SELECT g.stretch FROM goodwill g WHERE g.account = 'u:' || e.user_id AND g.day = p_day - 86400), p_day),
+           true, t
+      FROM eligible e
+    ON CONFLICT (day, account) DO NOTHING
+    RETURNING account)
+  UPDATE membership SET expires_at = expires_at + 86400, updated_at = t
+   WHERE 'u:' || user_id IN (SELECT account FROM ins);
+
+  -- Whop: every live entitlement running the whole day. The ones nothing will
+  -- bill again are extended now; the renewing ones wait for Whop.
+  WITH eligible AS (
+    SELECT e.email, (e.plan_id <> 'matchday' AND e.renew_stopped_at IS NULL) AS renews
+      FROM entitlement e
+     WHERE e.status = 'active' AND e.expires_at > v_end AND e.created_at < p_day),
+  ins AS (
+    INSERT INTO goodwill (day, account, email, stretch, applied, created_at)
+    SELECT p_day, 'e:' || e.email, e.email,
+           coalesce((SELECT g.stretch FROM goodwill g WHERE g.account = 'e:' || e.email AND g.day = p_day - 86400), p_day),
+           NOT e.renews, t
+      FROM eligible e
+    ON CONFLICT (day, account) DO NOTHING
+    RETURNING account, applied)
+  UPDATE entitlement SET expires_at = expires_at + 86400, updated_at = t
+   WHERE 'e:' || email IN (SELECT account FROM ins WHERE applied);
+
+  RETURN json_build_object(
+    'lean', true,
+    -- Whop renewals still to move, this day or any in the last week that failed.
+    'pending', coalesce((
+      SELECT json_agg(json_build_object(
+               'day', g.day, 'account', g.account, 'email', g.email,
+               'membership', (SELECT split_part(eg.ref, ':', 1) FROM entitlement_grant eg
+                               WHERE eg.email = g.email AND eg.ref LIKE 'mem\_%' ORDER BY eg.created_at DESC LIMIT 1)))
+        FROM goodwill g WHERE NOT g.applied AND g.day > p_day - 7 * 86400), '[]'::json),
+    -- Runs starting today, whose first email has not gone.
+    'started', coalesce((
+      SELECT json_agg(json_build_object('account', g.account, 'email', g.email, 'stretch', g.stretch,
+               'until', CASE WHEN g.account LIKE 'u:%'
+                             THEN (SELECT m.expires_at FROM membership m WHERE 'u:' || m.user_id = g.account)
+                             ELSE (SELECT e.expires_at FROM entitlement e WHERE 'e:' || e.email = g.account) END,
+               'whop', g.account LIKE 'e:%'))
+        FROM goodwill g
+       WHERE g.day = p_day AND g.stretch = p_day AND g.email IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM goodwill_notice n WHERE n.account = g.account AND n.stretch = g.stretch AND n.kind = 'start')), '[]'::json)
+  );
+END;
+$fn$;
+REVOKE ALL ON FUNCTION goodwill_credit(bigint) FROM PUBLIC, anon, authenticated;
+
+-- Whop has moved a renewal back: the day is applied, the entitlement runs to
+-- Whop's new date, and that period is recorded so the sweep does not take it
+-- for a renewal (and send a receipt for money nobody paid).
+CREATE OR REPLACE FUNCTION goodwill_whop_applied(p_day bigint, p_account text, p_membership text, p_until bigint)
+RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE t bigint := floor(extract(epoch FROM now()))::bigint; v_email text;
+BEGIN
+  UPDATE goodwill SET applied = true WHERE day = p_day AND account = p_account RETURNING email INTO v_email;
+  IF v_email IS NULL THEN RETURN json_build_object('ok', false); END IF;
+  UPDATE entitlement SET expires_at = greatest(expires_at, coalesce(p_until, expires_at + 86400)), updated_at = t
+   WHERE email = v_email;
+  IF p_membership IS NOT NULL AND p_until IS NOT NULL THEN
+    INSERT INTO entitlement_grant (ref, email, plan_id, created_at)
+    SELECT p_membership || ':' || p_until, v_email, coalesce((SELECT plan_id FROM entitlement WHERE email = v_email), 'monthly'), t
+    ON CONFLICT (ref) DO NOTHING;
+  END IF;
+  RETURN json_build_object('ok', true);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION goodwill_whop_applied(bigint, text, text, bigint) FROM PUBLIC, anon, authenticated;
+
+-- Mark an email sent, once. False when it already had been.
+CREATE OR REPLACE FUNCTION goodwill_noted(p_account text, p_stretch bigint, p_kind text)
+RETURNS boolean LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+  WITH ins AS (
+    INSERT INTO goodwill_notice (account, stretch, kind, sent_at)
+    VALUES (p_account, p_stretch, p_kind, floor(extract(epoch FROM now()))::bigint)
+    ON CONFLICT DO NOTHING RETURNING 1)
+  SELECT EXISTS (SELECT 1 FROM ins);
+$fn$;
+REVOKE ALL ON FUNCTION goodwill_noted(text, bigint, text) FROM PUBLIC, anon, authenticated;
+
+-- The runs that ended the day before p_day (p_day itself was not quiet): who
+-- had days added, how many, and when they now run to.
+CREATE OR REPLACE FUNCTION goodwill_ended(p_day bigint)
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  SELECT coalesce(json_agg(json_build_object(
+           'account', r.account, 'email', r.email, 'stretch', r.stretch, 'days', r.days, 'whop', r.account LIKE 'e:%',
+           'until', CASE WHEN r.account LIKE 'u:%'
+                         THEN (SELECT m.expires_at FROM membership m WHERE 'u:' || m.user_id = r.account)
+                         ELSE (SELECT e.expires_at FROM entitlement e WHERE 'e:' || e.email = r.account) END)), '[]'::json)
+    FROM (
+      SELECT g.account, max(g.email) AS email, g.stretch, count(*) AS days
+        FROM goodwill g
+       WHERE g.stretch IN (SELECT stretch FROM goodwill WHERE day = p_day - 86400)
+         AND NOT EXISTS (SELECT 1 FROM goodwill x WHERE x.account = g.account AND x.day = p_day)
+         AND NOT EXISTS (SELECT 1 FROM goodwill_notice n WHERE n.account = g.account AND n.stretch = g.stretch AND n.kind = 'end')
+       GROUP BY g.account, g.stretch
+       HAVING max(g.day) = p_day - 86400) r
+   WHERE r.email IS NOT NULL;
+$fn$;
+REVOKE ALL ON FUNCTION goodwill_ended(bigint) FROM PUBLIC, anon, authenticated;

@@ -66,7 +66,9 @@ ADMIN_EMAIL_SHA256 = "5a2087bbcb792ea743dd4e445fcef43ccb4818f37f5199981e3ec93d9e
 # any the webhook missed (sweepWhop in src/pay.ts). The webhook is fast; this
 # is what makes a payment certain to count even when a delivery never comes.
 [triggers]
-crons = ["*/10 * * * *"]
+# And once a day at 06:20 UTC, a day added to every paying member for each
+# quiet day of an international break or close season (src/goodwill.ts).
+crons = ["*/10 * * * *", "20 6 * * *"]
 
 # Outbound email through Cloudflare Email Service (src/mail.ts). Off until the
 # account is on Workers Paid and offside.win is onboarded under Compute, Email

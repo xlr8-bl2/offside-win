@@ -5994,6 +5994,9 @@ async function viewPricing() {
         whenever you like. Every day you have already paid for is kept: the new plan starts straight
         away, nothing is charged until your paid time runs out, and the plan you leave stops renewing.
         You never pay twice for the same day.</p>
+      <p><b>Quiet spells are on us.</b> When the big leagues stop for an international break or the close
+        season, there are fewer calls to make. So every paying member gets a day added for each quiet day,
+        automatically, and an email saying how many when the football is back.</p>
       <p><b>It starts when you pay.</b> At checkout you ask for access straight away, which ends the 14-day
         right to cancel for a change of mind. If anything of ours fails, you get it put right or your money back.
         <a href="#/legal/refunds">How refunds work</a>. Cancel a renewing plan in one tap;

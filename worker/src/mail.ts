@@ -531,3 +531,44 @@ export function noticeMail(action: string): Mail {
     ],
   });
 }
+
+/* --------------------------------------------------------- quiet days */
+
+/**
+ * The club game has stopped (an international break, the close season), so
+ * the membership stops counting down: a day added for every quiet day, done
+ * for them (goodwill.ts). Sent once, when it starts.
+ */
+export function goodwillStartMail({ until, whop }: { until: number | null; whop: boolean }): Mail {
+  return compose({
+    tag: 'goodwill-start',
+    subject: 'Quiet spell: a day added to your membership for every day of it',
+    preheader: 'Nothing to do. We will tell you the total when the football is back.',
+    heading: 'Your membership is on pause too.',
+    parts: [
+      { p: 'The big leagues have stopped for a few days. Fewer matches means fewer calls, and that is not what you paid for.' },
+      { p: `So for every quiet day, we add a day to your membership. Automatically, nothing to claim, nothing extra to pay${whop ? ', and your next payment moves back by the same' : ''}.` },
+      ...(until ? [{ facts: [['Added so far', '1 day'], [whop ? 'Next payment' : 'Now runs to', shortDate(until)]] as Array<[string, string]> } as Part] : []),
+      { p: 'We will email you the total when the football is back. The calls that are on carry on as normal in the meantime.' },
+      { button: 'See what is on', href: `${SITE}/today` },
+    ],
+  });
+}
+
+/** The quiet spell is over: how many days were added, and the new date. */
+export function goodwillEndMail({ days, until, whop }: { days: number; until: number | null; whop: boolean }): Mail {
+  const n = days === 1 ? 'a day' : `${days} days`;
+  const live = until !== null && until > Date.now() / 1000;
+  return compose({
+    tag: 'goodwill-end',
+    subject: `The football is back. We added ${n} to your membership`,
+    preheader: live ? `${whop ? 'Next payment' : 'Now runs to'} ${shortDate(until!)}.` : 'One for every quiet day.',
+    heading: `${n[0]!.toUpperCase()}${n.slice(1)} added.`,
+    parts: [
+      { p: `The quiet spell is over. We added ${n} to your membership, one for every day the big leagues were off.` },
+      ...(live ? [{ facts: [['Days added', String(days)], [whop ? 'Next payment' : 'Now runs to', shortDate(until!)]] as Array<[string, string]> } as Part] : []),
+      { p: 'Nothing to do. It happens by itself every break, and every close season.' },
+      { button: "See today's calls", href: `${SITE}/today` },
+    ],
+  });
+}
