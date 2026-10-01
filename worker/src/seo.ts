@@ -276,6 +276,8 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
     <h2>Our call</h2>
     ${callHTML}
     ${pass}
+    ${!hasCall && state === 'upcoming' && typeof f.preview === 'string' && findBannedInProse(f.preview).length === 0
+      ? `<h2>Preview</h2><p>${esc(f.preview)}</p>` : ''}
     ${scorers}
     ${facts.length ? `<h2>Form</h2><ul>${facts.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
     ${h2h ? `<h2>Head to head</h2><p>${esc(h2h)}</p>` : ''}

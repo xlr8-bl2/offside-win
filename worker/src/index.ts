@@ -28,6 +28,10 @@ import { cardImage, seoResponse, sitemap } from './seo.ts';
 import { bearer, jsonHeaders } from './http.ts';
 import { charge, checkout, confirm, payStatus, sweepWhop, renewal, webhook, type PayEnv } from './pay.ts';
 import { deleteAccount } from './account.ts';
+import { goodwill } from './goodwill.ts';
+
+/** The daily run that gives quiet days back; listed in wrangler.toml beside the sweep. */
+const GOODWILL_CRON = '20 6 * * *';
 import { authEmailHook, type HookEnv } from './authhook.ts';
 import { admin, type AdminEnv } from './admin.ts';
 import { fixtureChanges, liveList, liveMatch, type LiveEnv } from './live.ts';
@@ -117,7 +121,12 @@ async function passthrough(
 const worker = {
   // Every ten minutes: ask Whop for paid memberships and switch on any the
   // webhook did not. See sweepWhop in pay.ts.
-  async scheduled(_event: unknown, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<void> {
+  async scheduled(event: { cron?: string }, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<void> {
+    // Once a day, its own invocation: quiet days given back (goodwill.ts).
+    if (event?.cron === GOODWILL_CRON) {
+      ctx.waitUntil(goodwill(env).catch((err) => console.error('goodwill:', err instanceof Error ? err.message : String(err))));
+      return;
+    }
     ctx.waitUntil(sweepWhop(env));
   },
 

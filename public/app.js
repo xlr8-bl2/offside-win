@@ -2035,8 +2035,23 @@ function rowHTML(f) {
   const clubId = myClubId();
   const isClub = clubId && (Number(f.home_id) === clubId || Number(f.away_id) === clubId);
 
+  /*
+   * Which kind of call this is, at a glance: the one free call of the day, or
+   * a members' call. A member sees every call, and they all looked the same,
+   * so nothing said which one everybody else could see; a free reader saw the
+   * free call drawn exactly like a member's. Amber for free (the colour the
+   * free call wears on the front page), the accent for members (the colour of
+   * the lock), and only on calls still to be settled.
+   */
+  const kind = played ? null : f.free_call && pick ? 'free' : pick || f.locked ? 'members' : null;
+  const kindTag = kind === 'free'
+    ? '<span class="row-kind is-free">Free today</span>'
+    : kind === 'members' && pick
+      ? `<span class="row-kind is-members"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>Members</span>`
+      : '';
+
   return `
-  <a class="row is-${state.kind}${played ? ' is-played' : ''}${terse ? ' is-terse' : ''}${isClub ? ' is-club' : ''}" href="#/fixture/${encodeURIComponent(f.id)}"
+  <a class="row is-${state.kind}${played ? ' is-played' : ''}${terse ? ' is-terse' : ''}${isClub ? ' is-club' : ''}${kind ? ` is-${kind}` : ''}" href="#/fixture/${encodeURIComponent(f.id)}"
      aria-label="${esc(f.home)} versus ${esc(f.away)}">
     <div class="row-when">
       ${state.kind === 'upcoming'
@@ -2066,6 +2081,7 @@ function rowHTML(f) {
     </div>
 
     ${d ? `<div class="row-call">
+      ${kindTag}
       <div class="row-sel">${esc(d.name)}</div>
       <p class="row-wins">${
         played
@@ -3180,6 +3196,9 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
 
   return `
   <div class="verdict${landed ? ` settled ${landed}` : ''}${!played && isMember() && !isFreeFixture(fixture?.id) ? ' is-members' : ''}">
+    ${played || landed ? '' : isFreeFixture(fixture?.id) || fixture?.free_call
+      ? '<span class="row-kind is-free">Free call today: open to everyone</span>'
+      : `<span class="row-kind is-members"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>Members' call</span>`}
     <div class="verdict-head">
       <span class="sel">${esc(d.name)}</span>
       ${landed
@@ -4414,7 +4433,10 @@ async function viewFixture(id, params = new URLSearchParams()) {
             // Older pass notes were written for us ("the 58.1 needed against a
             // 109.1% margin"); the gate withholds those and the plain line
             // stands in.
-            : `<p class="narrative">${esc(cleanProse(f.pass) ?? 'Nothing here is worth a call. The bookmakers have it about right.')}</p>${
+            // A match with no call can still carry a written preview (the
+            // slate writes one with the day's spare allowance): the football
+            // first, then why there is no call.
+            : `${!played && cleanProse(f.preview) ? `<p class="narrative">${f._link(esc(cleanProse(f.preview)))}</p>` : ''}<p class="narrative${!played && cleanProse(f.preview) ? ' narrative-pass' : ''}">${esc(cleanProse(f.pass) ?? 'Nothing here is worth a call. The bookmakers have it about right.')}</p>${
               !played && f.read?.text ? `<div class="read-line"><small>Our read</small><b>${esc(f.read.text)}</b>
                   <p>What we think happens. It is a read, not a call: we would not bet it, so it has no price and it is not in our record.</p></div>` : ''}`}
         </div>
@@ -5972,6 +5994,9 @@ async function viewPricing() {
         whenever you like. Every day you have already paid for is kept: the new plan starts straight
         away, nothing is charged until your paid time runs out, and the plan you leave stops renewing.
         You never pay twice for the same day.</p>
+      <p><b>Quiet spells are on us.</b> When the big leagues stop for an international break or the close
+        season, there are fewer calls to make. So every paying member gets a day added for each quiet day,
+        automatically, and an email saying how many when the football is back.</p>
       <p><b>It starts when you pay.</b> At checkout you ask for access straight away, which ends the 14-day
         right to cancel for a change of mind. If anything of ours fails, you get it put right or your money back.
         <a href="#/legal/refunds">How refunds work</a>. Cancel a renewing plan in one tap;

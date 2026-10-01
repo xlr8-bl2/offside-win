@@ -181,6 +181,10 @@ function fnv(s: string): string {
 
 /** Long enough to outlive a fixture's build-up, short enough to expire. */
 const NARRATIVE_TTL = 14 * 86_400;
+/** How far ahead a match with no call gets a preview: today, then tomorrow. */
+const PREVIEW_AHEAD = 48 * 3600;
+/** Requests a day never spent on previews, so a late call always has one. */
+const PREVIEW_RESERVE = 60;
 
 /**
  * The call, in words a person would use.
@@ -308,6 +312,12 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
    * matches about to be read are the ones that get the writing.
    */
   const perRun = Number(process.env['GEMINI_PER_RUN'] || 12);
+  // Previews of matches with no call: a few a run, from what the calls leave.
+  const previewsPerRun = Number(process.env['GEMINI_PREVIEWS_PER_RUN'] || 6);
+  let previewAttempts = 0;
+  let previewsWritten = 0;
+  let previewsReused = 0;
+  const previewRejections: Record<string, number> = {};
   const from = new Date((now - config.slate.lookbackHours * 3600) * 1000).toISOString();
   const to = new Date((now + config.slate.horizonHours * 3600) * 1000).toISOString();
 
@@ -587,27 +597,8 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
       // rather than tidy: the free tier this runs on has had its quotas cut
       // sharply and without notice before, and the site has to keep publishing
       // when it happens -- in the old voice, with the run saying how often.
-      if (writer && !writerGaveUp) {
-        for (const v of confidentVerdicts) {
-          // Written once per call, not once per run.
-          const key = narrativeKey(analysis.fixture_id, v.candidate, teamNews(ctx.lineups));
-          // Stored as { text, why } now; older entries are a bare string and
-          // are rewritten, since they have no members' paragraph.
-          const cached = await kvGetJSON<string | { text: string; why: string | null }>(key);
-          if (cached && typeof cached === 'object' && cached.text) {
-            v.narrative = cached.text;
-            v.why = cached.why ?? null;
-            narrateReused++;
-            continue;
-          }
-
-          if (narrateAttempts >= perRun) break;
-          if (spent(budget, perDay, models, perModel)) {
-            writerGaveUp = budget.pausedUntil ? 'Google refused for quota; trying again in two hours' : `today's allowance of ${perDay} is spent`;
-            break;
-          }
-          narrateAttempts++;
-          const facts = pubFacts({
+      // The pub facts the writer works from, for a call or a preview.
+      const factsFor = () => pubFacts({
             home: analysis.home_team,
             away: analysis.away_team,
             ledger: factors.map(forStorage),
@@ -632,6 +623,27 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
             extras,
             recentThreats: recentThreats(),
           });
+      if (writer && !writerGaveUp) {
+        for (const v of confidentVerdicts) {
+          // Written once per call, not once per run.
+          const key = narrativeKey(analysis.fixture_id, v.candidate, teamNews(ctx.lineups));
+          // Stored as { text, why } now; older entries are a bare string and
+          // are rewritten, since they have no members' paragraph.
+          const cached = await kvGetJSON<string | { text: string; why: string | null }>(key);
+          if (cached && typeof cached === 'object' && cached.text) {
+            v.narrative = cached.text;
+            v.why = cached.why ?? null;
+            narrateReused++;
+            continue;
+          }
+
+          if (narrateAttempts >= perRun) break;
+          if (spent(budget, perDay, models, perModel)) {
+            writerGaveUp = budget.pausedUntil ? 'Google refused for quota; trying again in two hours' : `today's allowance of ${perDay} is spent`;
+            break;
+          }
+          narrateAttempts++;
+          const facts = factsFor();
           const result = await write({
             home: analysis.home_team,
             away: analysis.away_team,
@@ -683,6 +695,50 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
       // audiences want different things: the ledger wants everything the model
       // said so it can be marked, the page wants only the calls we stand behind.
       const publishedVerdicts = confidentVerdicts;
+
+      /*
+       * A preview for a match we passed on, from the day's spare allowance.
+       *
+       * The calls use a fraction of the free tier's requests (about twenty-five
+       * of two hundred on an ordinary day), so once they are written the rest
+       * goes on the matches with no call: written the same way, to the same
+       * rules, and free to everyone, because a match page with no call should
+       * still read like somebody who watches football wrote it.
+       *
+       * Calls always come first. A reserve of the allowance is never spent on
+       * previews, a run writes only a few, and only real competitions within
+       * the next two days get one. The candidates are in kick-off order, so
+       * today's matches are written before tomorrow's without being told.
+       */
+      let preview: string | null = null;
+      if (publishedVerdicts.length === 0 && !/postpon|cancel|abandon|suspend/i.test(String(event['status'] ?? ''))
+        && analysis.kickoff > now && analysis.kickoff - now < PREVIEW_AHEAD && leagueRank(analysis.league_id) <= 5) {
+        const key = `prev:${analysis.fixture_id}:${fnv(teamNews(ctx.lineups))}`;
+        const cached = await kvGetJSON<{ text: string }>(key);
+        if (cached?.text) {
+          preview = cached.text;
+          previewsReused++;
+        } else if (writer && !writerGaveUp && previewAttempts < previewsPerRun
+          && budget.used < perDay - PREVIEW_RESERVE && !spent(budget, perDay, models, perModel)) {
+          previewAttempts++;
+          const result = await write({
+            home: analysis.home_team,
+            away: analysis.away_team,
+            competition: ctx.league_name ?? 'this competition',
+            call: '',
+            facts: factsFor(),
+            previewOnly: true,
+          }, writer);
+          await kvSetJSON('gemini:budget', budget);
+          if (result.text) {
+            preview = result.text;
+            previewsWritten++;
+            await kvSetJSON(key, { text: result.text }, NARRATIVE_TTL);
+          } else {
+            for (const r of result.rejections) previewRejections[r] = (previewRejections[r] ?? 0) + 1;
+          }
+        }
+      }
 
       // No pass note on a match we have called. The value selector passes
       // independently of the confident calls, so 28 of 34 locked cards carried
@@ -895,6 +951,8 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
           set_aside: v.set_aside.map(forStorage),
         })),
         pass_reason: publishedVerdicts.length ? null : selection.passReason,
+        // Written for a match with no call (above); free, like the rest of it.
+        preview,
         external: analysis.external,
         computed_at: analysis.computed_at,
       };
@@ -1240,6 +1298,10 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
     );
   } else if (!rawWriter) {
     console.log('Narratives: no GEMINI_API_KEY, so the template grammar wrote them all.');
+  }
+  if (previewAttempts || previewsReused) {
+    console.log(`Previews of matches with no call: ${previewsReused} reused, ${previewsWritten}/${previewAttempts} written`
+      + (Object.keys(previewRejections).length ? ` (thrown away: ${Object.entries(previewRejections).map(([k, v]) => `${k} ${v}`).join(', ')})` : '') + '.');
   }
   if (Object.keys(narrateUnbacked).length) {
     console.log(`Narratives: numbers the drafts used that no fact carried: ${Object.entries(narrateUnbacked)

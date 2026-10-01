@@ -124,6 +124,9 @@ export function listOf(names) {
   return `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
 }
 
+/** The promise, said where the quiet is (worker/src/goodwill.ts keeps it). */
+const GIVEN_BACK = 'Members lose nothing: every paying member gets a day added for each quiet day, automatically.';
+
 const plural = (n, one, many) => `${n === 0 ? 'No' : n} ${n === 1 ? one : many}`;
 
 /** What the note says, separate from how it looks, so it can be tested. */
@@ -149,6 +152,7 @@ export function wordsFor(r) {
       text: [
         'Qualifiers and friendlies mean rotated squads, half-fit stars and form that tells you next to nothing. So we call fewer games, not worse ones.',
         [board, still].filter(Boolean).join(' '),
+        GIVEN_BACK,
       ],
       cta: { label: 'See what’s on', href: '#/board' },
     };
@@ -159,6 +163,7 @@ export function wordsFor(r) {
     text: [
       'Pre-season friendlies tell you less than they look like they do, so most of them get no call.',
       [board, still].filter(Boolean).join(' '),
+      GIVEN_BACK,
     ],
     cta: { label: 'See what’s on', href: '#/board' },
   };
