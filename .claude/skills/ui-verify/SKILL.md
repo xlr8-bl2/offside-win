@@ -36,7 +36,10 @@ once something rendered the page and measured it.
   missing pages, the menu, the offer popup, tab keys, titles, and the week's
   note (`season`, `seasonsizes`, `popupsizes`, `phantom`) with real touch
   swipes at phone sizes: neither card ever locks the page, a scroll takes it
-  down, and no panel scrolls into empty space. `BASE=` points it at another
+  down, and no panel scrolls into empty space. `offerbar` taps every part of
+  the offer bar; `moments` fakes El Clásico onto the board and checks the
+  big-moment card opens once, alone, and that nothing else interrupts the
+  same visit (js/lib/attention.js). `BASE=` points it at another
   server, as for check.mjs; `SHOTS=` is where the screenshots go.
 - The deployed copy is `dist/` (`node scripts/build-public.mjs`), minified and
   versioned. Check it, not only `public/`, after touching imports or the build:

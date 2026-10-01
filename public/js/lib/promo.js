@@ -29,6 +29,7 @@
  */
 
 import { scrollAway, moving } from './scrollaway.js';
+import { mayInterrupt, noteInterruption } from './attention.js';
 
 const KEY = 'ow.promo';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -85,6 +86,18 @@ function remember(field, id) {
   const m = memory();
   m[field] = [...new Set([...(m[field] ?? []), id])].slice(-40);
   try { localStorage.setItem(KEY, JSON.stringify(m)); } catch { /* private mode: shown again next visit */ }
+}
+
+/**
+ * The one second showing an offer gets: in its last day, to a reader who
+ * scrolled past it the first time rather than closing it, has not closed the
+ * bar either, and has not had a second showing already. Anyone who said no
+ * is not asked again.
+ */
+export function lastCallDue(p, mem, now = Date.now() / 1000) {
+  const has = (field) => (mem[field] ?? []).includes(p.id);
+  return Boolean(p.ends_at) && p.ends_at - now > 0 && p.ends_at - now < 86400
+    && has('seen') && has('soft') && !has('dismissed') && !has('closed') && !has('lastcall');
 }
 
 /**
@@ -324,8 +337,16 @@ export function showPopup(p, { previewing = false } = {}) {
     });
   }
 
-  const close = (instant = false) => {
+  /*
+   * How it went is remembered, because it decides whether the offer may ask
+   * once more on its last day: a reader who scrolled past it ("soft") might
+   * not have read it; one who closed it ("hard") has answered. Leaving the
+   * page or taking the deal is neither.
+   */
+  const close = (instant = false, how = 'nav') => {
     if (!root.isConnected) return;
+    if (!previewing && how === 'soft') remember('soft', p.id);
+    if (!previewing && how === 'hard') remember('dismissed', p.id);
     stopClock();
     stopAway();
     document.removeEventListener('keydown', onKey, true);
@@ -341,12 +362,12 @@ export function showPopup(p, { previewing = false } = {}) {
   open = { close };
   // The page behind is never locked: scrolling it takes the popup down and
   // the page moves under the same gesture. The bar still has the offer.
-  const stopAway = scrollAway(card, () => close());
+  const stopAway = scrollAway(card, () => close(false, 'soft'));
 
   // Focus stays inside while it is open; Escape and the scrim close it.
   const focusables = () => [...root.querySelectorAll('a[href], button')];
   function onKey(e) {
-    if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); close(false, 'hard'); return; }
     if (e.key !== 'Tab') return;
     const f = focusables();
     if (!f.length) return;
@@ -356,7 +377,7 @@ export function showPopup(p, { previewing = false } = {}) {
   }
   document.addEventListener('keydown', onKey, true);
   root.addEventListener('click', (e) => {
-    if (e.target.closest('[data-close]')) { close(); return; }
+    if (e.target.closest('[data-close]')) { close(false, 'hard'); return; }
     const cta = e.target.closest('[data-cta]');
     if (cta) {
       if (previewing) { e.preventDefault(); close(); return; }
@@ -379,7 +400,7 @@ function barHTML(p) {
   return `
     <div class="pb-inner">
       <p class="pb-text"><b>${esc(p.title)}</b>${lead ? `<span class="pb-lead">${esc(lead)}</span>` : ''}${p.kind === 'notice' && p.body ? `<span class="pb-note">${esc(p.body)}</span>` : ''}</p>
-      ${p.kind !== 'notice' ? `<span class="pb-clock" aria-label="Time left"></span><a class="pb-cta" href="${esc(checkoutHref(p))}">${esc(p.cta || 'Get it')}</a>` : ''}
+      ${p.kind !== 'notice' ? `<span class="pb-clock" aria-label="Time left"></span><button class="pb-cta" type="button" aria-haspopup="dialog">${p.kind === 'trial' ? 'See the free days' : 'See the deal'}</button>` : ''}
       <button class="pb-x" type="button" aria-label="Close">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
@@ -413,17 +434,16 @@ export function showBar(p, { anchor }) {
     bar.animate([{ transform: 'translateY(100%)' }, { transform: 'translateY(0)' }], { duration: 700, easing: EXPO, fill: 'both' });
     bar.querySelector('.pb-inner').animate([{ backgroundPosition: '-60% 0' }, { backgroundPosition: '160% 0' }], { duration: 1600, delay: 300, easing: 'cubic-bezier(0.65, 0, 0.35, 1)' });
   }
-  // The bar is the offer folded away: tapping its words opens it again, the
-  // whole of it, the way it first appeared. The button still goes straight
-  // to checkout.
-  const text = bar.querySelector('.pb-text');
-  if (text && p.kind !== 'notice') {
-    text.setAttribute('role', 'button');
-    text.setAttribute('tabindex', '0');
-    text.setAttribute('aria-label', `${p.title}: see the offer`);
-    text.classList.add('pb-open');
-    text.onclick = () => showPopup(p);
-    text.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showPopup(p); } };
+  // The bar is the offer folded away. A tap anywhere on it but the cross
+  // opens the whole offer, the way it first appeared; checkout is one more
+  // tap from there, on the popup's own button. The bar's button used to go
+  // straight to checkout, which is not what a reader tapping a bar expects.
+  if (p.kind !== 'notice') {
+    bar.classList.add('pb-opens');
+    bar.querySelector('.pb-inner').addEventListener('click', (e) => {
+      if (e.target.closest('.pb-x')) return;
+      showPopup(p);
+    });
   }
   bar.querySelector('.pb-x').onclick = () => {
     remember('closed', p.id);
@@ -491,8 +511,9 @@ export async function runPromos({ route, signedIn, member, returning = false, an
   }
 
   if (armed || NO_POPUP.has(route)) return;
-  const pop = mine.find((p) => p.kind !== 'notice' && !(mem.seen ?? []).includes(p.id));
+  const pop = mine.find((p) => p.kind !== 'notice' && (!(mem.seen ?? []).includes(p.id) || lastCallDue(p, mem)));
   if (!pop) return;
+  const lastCall = (mem.seen ?? []).includes(pop.id);
   armed = true;
   let fired = false;
   const fire = () => {
@@ -508,8 +529,13 @@ export async function runPromos({ route, signedIn, member, returning = false, an
     fired = true;
     removeEventListener('scroll', onScroll);
     const here = (location.hash.slice(2).split(/[/?]/)[0]) || 'home';
-    if (NO_POPUP.has(here) || document.querySelector('.ofr-root, #cookie-notice, #season-note')) { armed = false; return; }
-    remember('seen', pop.id);
+    if (NO_POPUP.has(here) || document.querySelector('.ofr-root, #cookie-notice, #season-note, #moment')) { armed = false; return; }
+    // The site's shared rules on interruptions (attention.js): one card a
+    // visit, two a day, and the offer only after twelve quiet hours. Turned
+    // down, it is not marked as seen and asks again on a later visit.
+    if (!mayInterrupt('offer')) return;
+    noteInterruption('offer');
+    remember(lastCall ? 'lastcall' : 'seen', pop.id);
     showPopup(pop);
   };
   const onScroll = () => {

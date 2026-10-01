@@ -17,6 +17,7 @@ import { LEGAL, SUPPORT_EMAIL, TERMS_VERSION, UPDATED as TERMS_DATE, legalHTML }
 import { mountPayment, openCheckout } from './js/lib/whop.js';
 import { absenceReason } from './js/lib/absence.js';
 import { enhanceSelects } from './js/lib/dropdown.js';
+import * as attention from './js/lib/attention.js';
 import { anchorClock, clockText, diffEvents, eachFixture, eventKey, fixtureIdOf, ingest, inPlayWindow, overlay, signature } from './js/lib/live.js';
 import { TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle, ukDay } from './js/lib/titles.js';
 import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, prepareGoogleRedirect, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, siteConfig, viewingAsFree } from './js/lib/auth.js';
@@ -7817,23 +7818,37 @@ async function scheduleSeason() {
   clearTimeout(seasonTimer);
   const name = parseHash().parts[0] || 'home';
   try {
-    const season = await import('./js/lib/season.js');
-    if (!SEASON_ROUTES.has(name)) { season.removeSeason(); return; }
+    const [season, moments] = await Promise.all([import('./js/lib/season.js'), import('./js/lib/moments.js')]);
+    if (!SEASON_ROUTES.has(name)) { season.removeSeason(); moments.removeMoment(); return; }
     const board = await getJSON('/api/board?hours=72', { quiet: true }).catch(() => null);
     const now = Date.now() / 1000;
-    const reading = await season.readSeason({
-      fixtures: board?.fixtures ?? [],
-      now,
-      nextTop: async () => {
-        const pl = await getJSON('/api/league/1', { quiet: true }).catch(() => null);
-        return (pl?.next ?? []).map((g) => Number(g.kickoff)).filter((k) => k > now).sort((a, b) => a - b)[0] ?? null;
-      },
-    });
-    const helpers = { crest, esc, kickoff: kickoffLabel, now };
+    const fixtures = board?.fixtures ?? [];
+    const [reading, moment] = await Promise.all([
+      season.readSeason({
+        fixtures,
+        now,
+        nextTop: async () => {
+          const pl = await getJSON('/api/league/1', { quiet: true }).catch(() => null);
+          return (pl?.next ?? []).map((g) => Number(g.kickoff)).filter((k) => k > now).sort((a, b) => a - b)[0] ?? null;
+        },
+      }),
+      moments.findMoment({
+        fixtures,
+        now,
+        // When a league last played: asked only of a big league on the board
+        // in the next two days, to tell a return from an ordinary weekend.
+        lastPlayed: async (id) => {
+          const l = await getJSON(`/api/league/${id}`, { quiet: true }).catch(() => null);
+          return (l?.last ?? []).map((g) => Number(g.kickoff)).filter((k) => k < now).sort((a, b) => b - a)[0] ?? null;
+        },
+      }).catch(() => null),
+    ]);
+    const helpers = { crest, esc, kickoff: kickoffLabel, clock: clockTime, now };
     // Already up: leave it. Seen already: the small chip, which opens it again.
-    if (document.getElementById('season-note')) return;
-    if (!reading) { season.removeSeason(); return; }
-    if (season.dismissed(reading.key)) { season.showChip(reading, helpers); return; }
+    if (document.getElementById('season-note') || document.getElementById('moment')) return;
+    const fresh = moment && !moments.seen(moment.key) ? moment : null;
+    if (!fresh && !reading) { season.removeSeason(); return; }
+    if (!fresh && season.dismissed(reading.key)) { season.showChip(reading, helpers); return; }
     const go = () => {
       if ((parseHash().parts[0] || 'home') !== name) return;
       if (document.getElementById('cookie-notice')) {
@@ -7852,7 +7867,16 @@ async function scheduleSeason() {
       // Mid-scroll: a card that lands under a moving thumb is swiped away
       // by that same thumb before anyone reads it. Wait for a pause.
       if (season.readerMoving()) { seasonTimer = setTimeout(go, 700); return; }
-      season.showSeason(reading, helpers);
+      // A big moment first, then the week's note; one card a visit between
+      // them and the offer (js/lib/attention.js). A note that loses out
+      // leaves its chip and opens on a later visit.
+      if (fresh && attention.mayInterrupt('moment')) {
+        attention.noteInterruption('moment');
+        moments.openMoment(fresh, helpers);
+        if (reading) season.showChip(reading, helpers);
+        return;
+      }
+      if (reading) season.showSeason(reading, helpers);
     };
     seasonTimer = setTimeout(go, 1400);
   } catch { /* a note about the calendar is never worth an error */ }
@@ -7927,7 +7951,7 @@ async function render(name, parts, params) {
     if (name === 'signin') return await viewSignin();
     if (name === 'account') return await viewAccount();
     // The owner's dashboard, loaded only when opened. js/admin.js.
-    if (name === 'admin') return await (await import('./js/admin.js')).viewAdmin(app, parts, params);
+    if (name === 'admin') return await (await import('./js/admin.js')).viewAdmin(app, parts, params, { crest, esc, clock: clockTime });
     if (name === 'legal' && parts[1]) return viewLegal(parts[1]);
     if (name === 'page' && parts[1]) return await viewServerPage(parts);
     if (name === 'home') return await viewHome();
