@@ -60,8 +60,8 @@ uniform float uP;      // and its tip, pulled in the same way
 
 const float ROUND = 0.014;  // every corner of the star is rounded: the tips
 const float FILLET = 0.06;  // and, more softly, the inside corners
-const float T = 0.038;      // the glass's thickness, as a share of the radius
-const float BEVEL = 0.016;  // the slab's edges are rounded over, not cut square
+const float T = 0.026;      // the glass's thickness, as a share of the radius
+const float BEVEL = 0.0115; // the slab's edges are rounded over, not cut square
 
 // One arm of the star, folded onto its right half: the kite between the
 // centre, the inner corner and the tip. Negative inside.
@@ -168,10 +168,22 @@ vec4 glass(vec3 x, float far) {
   // The reflection on the rounded edge.
   vec3 p = uRot * x;
   float glint = 0.55 + 0.45 * smoothstep(-0.3, 0.7, sin(dot(p, vec3(3.7, -2.9, 2.2))));
-  float edge = exp(-pow((abs(fr) - 0.6) / 0.17, 2.0)) * glint;
+  float edge = min(1.0, 1.25 * exp(-pow((abs(fr) - 0.62) / 0.14, 2.0)) * glint);
   vec3 hue = prismHue(p + 0.6 * (1.0 - abs(rd.z)));
-  if (far > 0.5) { c = mix(c, DIM, 0.35); a *= 0.5; edge *= 0.45; hue = mix(hue, PALE, 0.5); }
-  vec3 col = c * a;
+  // The gloss: a clear coat over the glass. A soft studio light off to the
+  // upper right shows as a sheen sliding across the faces as they turn, with
+  // a tighter highlight inside it, and every surface reflects more as it
+  // turns away from us.
+  vec3 V = vec3(0.0, 0.0, 1.0);
+  vec3 H = normalize(L + V);
+  float nh = max(dot(n, H), 0.0);
+  vec3 R = reflect(-V, n);
+  float sheen = smoothstep(0.55, 0.92, dot(R, normalize(vec3(0.75, 0.45, 0.5))));
+  float fres = pow(1.0 - max(dot(n, V), 0.0), 5.0);
+  float gloss = (pow(nh, 70.0) * 0.5 + pow(nh, 16.0) * 0.12 + sheen * 0.22 + fres * 0.35) * face;
+  if (far > 0.5) { c = mix(c, DIM, 0.35); a *= 0.5; edge *= 0.45; hue = mix(hue, PALE, 0.5); gloss *= 0.3; }
+  vec3 col = c * a + mix(PALE, vec3(1.0), 0.6) * gloss;
+  a = min(1.0, a + gloss * 0.5);
   col = mix(col, hue, edge);
   a = max(a, edge);
   return vec4(col, a);
