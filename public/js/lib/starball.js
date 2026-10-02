@@ -9,17 +9,19 @@
  * lays the point out flat around it and asks how far it is from a five-point
  * star there. The answer gives the panel, the seam and the glow along it.
  *
- * Only the stars are glass. The holes between them are empty, so the page
- * shows through them, and so do the stars on the far side, seen from behind.
+ * Only the stars are glass, and each is a solid slab with real thickness:
+ * the shader marches every pixel's view ray through the shell and finds the
+ * first slab it meets, on its broad face or on its side wall, so the walls
+ * show where they would (towards the silhouette, a star seen edge-on is a
+ * band of glass, not a line). The holes between the stars are empty: the
+ * page shows through them, and so do the stars on the far side.
  * The look, layer by layer:
- *   - the far side's stars, dimmer and bluer, through the holes and through
- *     the near stars' glass;
- *   - the near stars, glass slabs: royal blue, bright along the inside of
- *     their edges where the glass is seen through its thickness;
- *   - their outlines, a hairline of light whose colour shifts with the angle
- *     like oil on water (a thin-film cheat: a cosine palette);
- *   - a studio softbox reflected top left, a hard specular, and iridescence
- *     where the glass turns away.
+ *   - the far side's stars, dimmer, through the holes and the near glass;
+ *   - the near slabs: their faces lit from the right, dark on the left and
+ *     bright azure on the right; their walls translucent, lighter towards the
+ *     outer face;
+ *   - reflections on the cut edges, where face turns into wall: hairlines of
+ *     light, each stretch its own colour, split slightly as by a prism.
  *
  * A reader without WebGL, or who asked for less motion, gets one still frame
  * (the image the page shows first anyway, public/brand/starball.webp).
@@ -93,6 +95,42 @@ vec3 film(float x) {
   return 0.55 + 0.45 * cos(6.2831 * (x + vec3(0.0, 0.33, 0.67)));
 }
 
+// The slabs as a solid: inside where a point is between the two spheres and
+// inside a star. A conservative distance (the star's distance is in tangent
+// units, which run long away from the centre) so a march never steps
+// through a wall.
+const float T = 0.055;     // the glass's thickness, as a share of the radius
+float solid(vec3 x) {
+  float l = length(x);
+  return field(uRot * (x / l)).x * l * 0.7;
+}
+vec3 wallNormal(vec3 x) {
+  const float e = 0.0015;
+  float d = solid(x);
+  return normalize(vec3(solid(x + vec3(e, 0.0, 0.0)) - d, solid(x + vec3(0.0, e, 0.0)) - d, solid(x + vec3(0.0, 0.0, e)) - d));
+}
+
+// Down the view ray (straight into the screen) through one stretch of the
+// shell, from z0 to z1: the first point inside a slab. Returns the depth and
+// what was hit: 1 the slab's broad face (the ray met glass the moment it met
+// the shell), 2 its side wall, 0 nothing.
+vec2 march(vec2 xy, float z0, float z1) {
+  float z = z0;
+  for (int i = 0; i < 28; i++) {
+    float d = solid(vec3(xy, z));
+    if (d < 0.0) return vec2(z, i == 0 ? 1.0 : 2.0);
+    z -= max(d, 0.0012);
+    if (z < z1) break;
+  }
+  return vec2(0.0, 0.0);
+}
+
+vec3 prismHue(vec3 p) {
+  float phase = dot(p, vec3(2.3, 1.7, 2.9));
+  vec3 h = clamp(abs(fract(phase + vec3(0.0, 0.67, 0.33)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+  return mix(h, vec3(0.62, 1.0, 0.08), 0.3); // lean towards lime, as the original does
+}
+
 void main() {
   vec2 xy = vUv / uScale;
   float r = length(xy);
@@ -102,69 +140,89 @@ void main() {
   // barely lighter than it to a bright azure where the light falls.
   vec3 dim = vec3(0.012, 0.03, 0.50);
   vec3 azure = vec3(0.02, 0.36, 0.92);
-  vec3 pale = vec3(0.35, 0.58, 1.0);
-
-  float z = sqrt(max(0.0, 1.0 - r * r));
-  vec3 n = vec3(xy, z);    // the near side, facing us
-  vec3 nb = vec3(xy, -z);  // the far side, seen through the holes
-  float edgeOn = 1.0 - z;  // 0 facing us, 1 at the silhouette
+  vec3 pale = vec3(0.4, 0.62, 1.0);
   vec3 L = normalize(vec3(0.85, 0.2, 0.5)); // the light is off to the right
-  float lit = smoothstep(-0.15, 0.95, dot(n, L));
 
-  // The far side: the backs of the stars, through the holes and through the
-  // near glass. Barely lighter than the night, with pale hairline edges.
-  vec2 g = field(uRot * nb);
-  float inB = smoothstep(uPx, -uPx, g.x);
-  float lineB = exp(-pow(g.x / (uPx * 1.4 + 0.0025), 2.0));
-  vec3 back = mix(dim, azure, 0.15 + 0.35 * lit) * inB * 0.45 + pale * lineB * 0.45;
-  float backA = inB * 0.45 + lineB * 0.45;
+  float ri = 1.0 - T;
+  float zo = sqrt(max(0.0, 1.0 - r * r));
+  bool through = r < ri;                 // the ray crosses the hollow inside
+  float zi = through ? sqrt(ri * ri - r * r) : 0.0;
 
-  // The near side: glass slabs. The face takes the light from the right;
-  // the slab's thickness shows as a lighter band inside every edge, wider
-  // where the glass turns away (seen more side-on), closed by a second
-  // hairline where the back face's edge shows through.
-  vec2 f = field(uRot * n);
-  float inN = smoothstep(uPx, -uPx, f.x);
-  float depth = -f.x;
-  float band = 0.01 + 0.05 * pow(edgeOn, 1.4);
-  float side = smoothstep(band + uPx, band - uPx, depth) * inN;
-  float backEdge = exp(-pow((depth - band) / (uPx * 1.3 + 0.002), 2.0)) * inN;
-  vec3 face = mix(dim, azure, 0.06 + 0.94 * pow(lit, 1.4));
-  face += azure * 0.25 * pow(max(0.0, dot(n, L)), 4.0);      // the wash on the lit side
-  face += pale * 0.18 * pow(edgeOn, 3.0);                      // glass gets brighter edge-on
-  vec3 sideC = mix(face, pale, 0.2 + 0.25 * lit);
-  vec3 front = mix(face, sideC, side) + pale * backEdge * 0.35;
-  float frontA = inN * (0.82 + 0.12 * edgeOn);
+  // The near shell, then (through the hollow) the far one.
+  vec2 hn = march(xy, zo, through ? zi : -zo);
+  vec2 hf = through ? march(xy, -zi, -zo) : vec2(0.0);
 
-  // The cut edge: a hairline of light split as if through a prism. Each
-  // stretch of edge has its own colour, mostly lime and yellow with red,
-  // magenta and cyan between, and its own brightness, so the colour walks
-  // along the edges as the ball turns. A slight fringe either side.
-  vec3 pn = uRot * n;
-  float phase = dot(pn, vec3(2.3, 1.7, 2.9)) + 0.6 * edgeOn;
-  vec3 hue = clamp(abs(fract(phase + vec3(0.0, 0.67, 0.33)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
-  hue = mix(hue, vec3(0.62, 1.0, 0.08), 0.3);  // lean towards lime, as the original does
-  float w = uPx * 1.5 + 0.0022;
-  float fringe = uPx * 1.4 + 0.003 * edgeOn;
-  float lG = exp(-pow(f.x / w, 2.0));
-  float lR = exp(-pow((f.x - fringe) / w, 2.0));
-  float lB = exp(-pow((f.x + fringe) / w, 2.0));
-  float strength = (0.55 + 0.45 * smoothstep(-0.3, 0.7, sin(dot(pn, vec3(3.7, -2.9, 2.2))))) * min(1.0, 0.8 + 0.5 * edgeOn);
+  vec3 col = vec3(0.0);
+  float a = 0.0;
 
-  vec3 col = front * frontA + back * (1.0 - frontA);
-  float a = frontA + backA * (1.0 - frontA);
-  // The edge is painted, not added, so it keeps its colour instead of
-  // washing out to white: the fringes first, then the core over them.
-  float kR = lR * 0.45 * strength, kB = lB * 0.6 * strength, kG = lG * strength;
+  // The far side first: the backs of the stars, seen from inside the ball.
+  if (hf.y > 0.0) {
+    vec3 x = vec3(xy, hf.x);
+    vec3 nrm = hf.y > 1.5 ? wallNormal(x) : -normalize(x);
+    float lit = smoothstep(-0.3, 1.0, dot(-normalize(x), L));
+    vec3 c = mix(dim, azure, 0.1 + 0.3 * lit);
+    float fa = 0.42;
+    if (hf.y > 1.5) { c = mix(c, pale, 0.25); fa = 0.55; }
+    col = c * fa;
+    a = fa;
+  }
+
+  if (hn.y > 0.0) {
+    vec3 x = vec3(xy, hn.x);
+    vec3 n = normalize(x);
+    float lit = smoothstep(-0.15, 0.95, dot(n, L));
+    vec3 c;
+    float fa;
+    if (hn.y < 1.5) {
+      // The broad face: lit from the right, brighter edge-on.
+      c = mix(dim, azure, 0.06 + 0.94 * pow(lit, 1.4));
+      c += azure * 0.25 * pow(max(0.0, dot(n, L)), 4.0);
+      c += pale * 0.15 * pow(1.0 - n.z, 3.0);
+      fa = 0.8 + 0.12 * (1.0 - n.z);
+    } else {
+      // The side wall: the glass seen through its thickness, lighter and
+      // shaded by which way it faces.
+      vec3 w = wallNormal(x);
+      float wl = max(0.0, dot(w, L));
+      float h = clamp((length(x) - ri) / T, 0.0, 1.0); // 0 at the inner face, 1 at the outer
+      c = mix(azure * (0.5 + 0.5 * lit), pale, 0.04 + 0.22 * wl);
+      c *= 0.65 + 0.45 * h;
+      fa = 0.62 + 0.2 * h;
+    }
+    col = c * fa + col * (1.0 - fa);
+    a = fa + a * (1.0 - fa);
+  }
+
+  // The reflections: hairlines of light on the slabs' cut edges, where the
+  // face turns into the wall. The outer edge is where the ray meets the
+  // outer sphere at a star's outline; the inner edge is where a wall meets
+  // the inner face, seen only where the wall shows (towards the silhouette).
+  // Each stretch has its own colour, split slightly like light through a
+  // prism.
+  vec3 xo = vec3(xy, zo);
+  vec3 po = uRot * xo;
+  float fo = field(po).x;
+  float w = uPx * 1.3 + 0.0018;
+  float fringe = uPx * 1.3 + 0.0025 * (1.0 - zo);
+  float glint = (0.55 + 0.45 * smoothstep(-0.3, 0.7, sin(dot(po, vec3(3.7, -2.9, 2.2))))) * min(1.0, 0.8 + 0.5 * (1.0 - zo));
+  vec3 hue = prismHue(po + 0.6 * (1.0 - zo));
+  float kG = exp(-pow(fo / w, 2.0)) * glint;
+  float kR = exp(-pow((fo - fringe) / w, 2.0)) * glint * 0.45;
+  float kB = exp(-pow((fo + fringe) / w, 2.0)) * glint * 0.6;
+  if (hn.y > 1.5) {
+    // The inner edge of a wall the ray hit.
+    float k = exp(-pow((length(vec3(xy, hn.x)) - ri) / (uPx * 1.6 + 0.002), 2.0)) * glint * 0.85;
+    kG = max(kG, k);
+  }
   col = mix(col, vec3(1.0, 0.12, 0.38) * max(a, kR), kR);
   col = mix(col, vec3(0.08, 0.55, 1.0) * max(a, kB), kB);
   a = max(a, max(kR, kB));
   a = max(a, kG);
   col = mix(col, hue * a, kG);
-  // And the light it throws onto the glass around it.
-  float halo = exp(-abs(f.x) / (0.006 + 0.01 * edgeOn)) * 0.4 * strength * (1.0 - kG);
+  float halo = exp(-abs(fo) / (0.006 + 0.01 * (1.0 - zo))) * 0.35 * glint * (1.0 - kG);
   col += hue * halo;
   a = clamp(a + halo * 0.6, 0.0, 1.0);
+
   col = min(col, vec3(1.0));
   float disc = smoothstep(1.0, 1.0 - uPx * 2.0, r);
   gl_FragColor = vec4(min(col, vec3(a)) * disc, a * disc);
@@ -227,7 +285,7 @@ export function startBall(canvas, { still = false, speed = 0.12, t: t0 = 0 } = {
 
   const size = () => {
     const box = canvas.getBoundingClientRect();
-    const side = Math.min(1100, Math.round(Math.max(box.width, 1) * Math.min(devicePixelRatio || 1, 1.5)));
+    const side = Math.min(1100, Math.round(Math.max(box.width, 1) * Math.min(devicePixelRatio || 1, 1.25)));
     if (canvas.width !== side) { canvas.width = side; canvas.height = side; }
     gl.viewport(0, 0, side, side);
     gl.uniform1f(uScale, SCALE);
@@ -241,10 +299,13 @@ export function startBall(canvas, { still = false, speed = 0.12, t: t0 = 0 } = {
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   };
+  // Thirty frames a second is plenty for a slow sway, and halves the work
+  // of a shader that marches every pixel through the glass.
   const frame = (now) => {
     raf = 0;
     if (stopped) return;
-    if (last) t += Math.min(0.05, (now - last) / 1000) * speed;
+    if (last && now - last < 31) { raf = requestAnimationFrame(frame); return; }
+    if (last) t += Math.min(0.1, (now - last) / 1000) * speed;
     last = now;
     draw();
     if (onScreen && !document.hidden) raf = requestAnimationFrame(frame);
