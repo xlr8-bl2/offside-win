@@ -151,40 +151,61 @@ const vec3 PALE = vec3(0.4, 0.62, 1.0);
 // take the light from the right; the walls are lighter, translucent; and
 // where the rounded edge turns from face to wall it catches the light as a
 // thin reflection, each stretch its own colour, as glass edges do.
+// What the glass reflects: a small studio around the ball, fixed to the
+// camera so the reflections slide across the stars as the ball sways. A tall
+// light strip off to the right (the key light), a thin cool one to the upper
+// left, a broad light overhead, and a dim horizon. Lit from inside by the
+// same blue as everything else, so the reflections read as the night's.
+vec3 studio(vec3 R) {
+  float az = atan(R.x, R.z);
+  float up = R.y;
+  float key = exp(-pow((az - 1.05) / 0.15, 2.0)) * smoothstep(-0.35, 0.1, up) * (1.0 - smoothstep(0.6, 0.9, up));
+  float rim = exp(-pow((az + 0.75) / 0.05, 2.0)) * smoothstep(0.05, 0.45, up) * (1.0 - smoothstep(0.75, 0.95, up));
+  float top = smoothstep(0.7, 0.97, up);
+  float horizon = exp(-pow(up / 0.12, 2.0)) * smoothstep(-0.5, 1.2, R.x);
+  float low = exp(-pow((az - 0.35) / 0.09, 2.0)) * smoothstep(-0.9, -0.5, up) * (1.0 - smoothstep(-0.25, 0.0, up));
+  return vec3(0.92, 0.97, 1.0) * key * 1.6 + vec3(0.7, 0.85, 1.0) * rim * 1.1
+       + vec3(0.8, 0.9, 1.0) * top * 0.6 + vec3(0.55, 0.7, 1.0) * low * 0.7 + PALE * horizon * 0.45;
+}
+
+// The glass at a point: its colour (premultiplied) and cover. Clear glass is
+// mostly what it reflects: a light blue tint over whatever is behind it,
+// then the studio in its surface, stronger as the surface turns away (the
+// Fresnel effect). The walls hold more of the tint, being seen through more
+// glass. Where the rounded edge turns from face to wall it catches the light
+// as a thin coloured reflection, each stretch its own colour.
 vec4 glass(vec3 x, float far) {
   vec3 L = normalize(vec3(0.85, 0.2, 0.5));
+  vec3 V = vec3(0.0, 0.0, 1.0);
   vec3 n = normalAt(x);
   vec3 rd = normalize(x);
   float fr = dot(n, rd);                 // 1 outer face, 0 wall, -1 inner face
   float face = smoothstep(0.55, 0.92, abs(fr));
   float lit = smoothstep(-0.15, 0.95, dot(rd, L));
-  vec3 fc = mix(DIM, AZURE, 0.06 + 0.94 * pow(lit, 1.4));
-  fc += AZURE * 0.25 * pow(max(0.0, dot(rd, L)), 4.0);
-  fc += PALE * 0.15 * pow(1.0 - abs(rd.z), 3.0);
+  vec3 tint = mix(DIM, AZURE * 1.15, 0.12 + 0.88 * pow(lit, 1.2));
   float wl = max(0.0, dot(n, L));
-  vec3 wc = mix(AZURE * (0.5 + 0.5 * lit), PALE, 0.04 + 0.22 * wl);
-  vec3 c = mix(wc, fc, face);
-  float a = mix(0.7, 0.8 + 0.1 * (1.0 - abs(rd.z)), face);
-  // The reflection on the rounded edge.
+  vec3 wc = mix(AZURE * (0.55 + 0.45 * lit), PALE, 0.05 + 0.25 * wl);
+  vec3 c = mix(wc, tint, face);
+  float a = mix(0.55, 0.3 + 0.38 * pow(lit, 1.5), face); // clear where it's dark, glowing where the light comes through
+
+  // Reflections.
+  vec3 nv = dot(n, V) < 0.0 ? -n : n;    // the side facing us
+  vec3 R = reflect(-V, nv);
+  float fres = 0.08 + 0.92 * pow(1.0 - max(dot(nv, V), 0.0), 4.0);
+  vec3 refl = studio(R) * (0.45 + 0.55 * fres) + PALE * fres * 0.25;
+  float spec = pow(max(dot(nv, normalize(L + V)), 0.0), 120.0) * 0.6;
+  refl += vec3(1.0) * spec;
+
+  // The coloured edge.
   vec3 p = uRot * x;
   float glint = 0.55 + 0.45 * smoothstep(-0.3, 0.7, sin(dot(p, vec3(3.7, -2.9, 2.2))));
   float edge = min(1.0, 1.25 * exp(-pow((abs(fr) - 0.62) / 0.14, 2.0)) * glint);
   vec3 hue = prismHue(p + 0.6 * (1.0 - abs(rd.z)));
-  // The gloss: a clear coat over the glass. A soft studio light off to the
-  // upper right shows as a sheen sliding across the faces as they turn, with
-  // a tighter highlight inside it, and every surface reflects more as it
-  // turns away from us.
-  vec3 V = vec3(0.0, 0.0, 1.0);
-  vec3 H = normalize(L + V);
-  float nh = max(dot(n, H), 0.0);
-  vec3 R = reflect(-V, n);
-  float sheen = smoothstep(0.55, 0.92, dot(R, normalize(vec3(0.75, 0.45, 0.5))));
-  float fres = pow(1.0 - max(dot(n, V), 0.0), 5.0);
-  float gloss = (pow(nh, 70.0) * 0.5 + pow(nh, 16.0) * 0.12 + sheen * 0.22 + fres * 0.35) * face;
-  if (far > 0.5) { c = mix(c, DIM, 0.35); a *= 0.5; edge *= 0.45; hue = mix(hue, PALE, 0.5); gloss *= 0.3; }
-  vec3 col = c * a + mix(PALE, vec3(1.0), 0.6) * gloss;
-  a = min(1.0, a + gloss * 0.5);
-  col = mix(col, hue, edge);
+
+  if (far > 0.5) { c = mix(c, DIM, 0.3); a *= 0.6; refl *= 0.35; edge *= 0.45; hue = mix(hue, PALE, 0.5); }
+  vec3 col = c * a + refl;
+  a = min(1.0, a + dot(refl, vec3(0.3, 0.5, 0.2)) * 0.9);
+  col = mix(col, hue * max(a, edge), edge);
   a = max(a, edge);
   return vec4(col, a);
 }
