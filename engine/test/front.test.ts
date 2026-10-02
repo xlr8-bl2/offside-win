@@ -28,3 +28,9 @@ test('it never promises money, and says so where it matters', () => {
 test('no template tells: no middle dots, no arrows, no all-caps', () => {
   for (const t of all) assert.doesNotMatch(t, /·|→|\b[A-Z]{4,}\b/, t);
 });
+
+test('the front door sells the football, not the way out', () => {
+  // Cancelling is one tap and says so on the pricing, checkout and account
+  // pages, where a buyer reads the terms. The landing page is the pitch.
+  for (const t of all) assert.doesNotMatch(t, /cancel/i, t);
+});

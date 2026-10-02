@@ -18,6 +18,7 @@ import { mountPayment, openCheckout } from './js/lib/whop.js';
 import { absenceReason } from './js/lib/absence.js';
 import { enhanceSelects } from './js/lib/dropdown.js';
 import { LANDING_FAQ, LANDING_HEADLINE, LANDING_LEDE, LANDING_STEPS } from './js/lib/front.js';
+import { themeArt, themeOf, wakeArt } from './js/lib/comptheme.js';
 import * as attention from './js/lib/attention.js';
 import { anchorClock, clockText, diffEvents, eachFixture, eventKey, fixtureIdOf, ingest, inPlayWindow, overlay, signature } from './js/lib/live.js';
 import { TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle, ukDay } from './js/lib/titles.js';
@@ -1360,9 +1361,12 @@ function heroHTML(hero = null, venueIds = [], detail = null, free = null, row = 
           occasion && occasion.toLowerCase() !== String(hero.league ?? '').toLowerCase()
             ? `<span class="comp-occasion">${esc(occasion)}</span>` : ''}</p>` : '';
 
+  // A Champions League game gets the competition's night instead of the
+  // ground (comptheme.js).
+  const theme = themeOf(hero.league_id);
   return `
-  <section class="hero" data-shot="${queue.length ? 'yes' : 'none'}">
-    <div class="hero-media">${venueShot(queue, '', true)}</div>
+  <section class="hero${theme ? ` theme-${theme}` : ''}" data-shot="${queue.length ? 'yes' : 'none'}">
+    ${theme ? themeArt(theme) : `<div class="hero-media">${venueShot(queue, '', true)}</div>`}
     <div class="wrap hero-inner">
       <div class="hero-copy">
         <span class="timechip${isSoon(hero.kickoff) ? ' soon' : ''}">${esc(when)}</span>
@@ -2517,8 +2521,16 @@ async function viewLanding() {
       card.querySelectorAll('.ld-tk-crest').forEach((c, i) => c.animate([{ transform: `translateX(${i ? '' : '-'}160%) scale(1.4)`, opacity: 0, filter: 'blur(8px)' }, { transform: 'none', opacity: 1, filter: 'blur(0)' }], { duration: 700, delay: 520, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)', fill: 'both' }));
       card.querySelector('.ld-tk-seam')?.animate([{ opacity: 0 }, { opacity: 1, offset: 0.15 }, { opacity: 0.6 }], { duration: 900, delay: 760, fill: 'both' });
     }
+    // A Champions League free call brings the competition's night with it,
+    // in place of the ground.
+    const theme = themeOf(fx.league_id);
+    const ldHero = app.querySelector('.ld-hero');
+    if (theme && ldHero) {
+      ldHero.classList.add(`theme-${theme}`);
+      app.querySelector('.ld-bg')?.insertAdjacentHTML('afterbegin', themeArt(theme));
+    }
     // The ground it is played at, behind the whole hero.
-    const shot = app.querySelector('[data-ld="shot"]');
+    const shot = theme ? null : app.querySelector('[data-ld="shot"]');
     // The engine names a ground it found a photograph for (shot_venue_id);
     // then the match's own, then the rest of the board's. The browser works
     // down the list until one is a real photograph (venueShot).
@@ -2562,7 +2574,7 @@ async function viewLanding() {
   // The plans, as they are sold: the price here is the price charged.
   const BLURB = {
     matchday: 'Seven days of every call. Made for one big weekend.',
-    monthly: 'Thirty days, renews monthly. Cancel in one tap.',
+    monthly: 'Thirty days of every call, every big night.',
     quarter: 'Three months, the cheapest way in.',
   };
   const list = (Array.isArray(plans) ? plans : []).filter((p) => p && p.amount_minor).sort((a, b) => a.amount_minor - b.amount_minor);
@@ -4748,14 +4760,17 @@ async function viewFixture(id, params = new URLSearchParams()) {
   const hexOk = (c) => (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c : null);
   const homeC = hexOk(f.colors?.home);
   const awayC = hexOk(f.colors?.away);
-  const wash = homeC || awayC
+  // A competition with its own look (a Champions League night) takes the
+  // masthead instead of the ground and the clubs' colours.
+  const theme = themeOf(f.league_id);
+  const wash = !theme && (homeC || awayC)
     ? ` has-colors" style="--home-c:${homeC ?? 'transparent'};--away-c:${awayC ?? 'transparent'}`
     : '';
 
   if (nav !== navTicket) return;
   app.innerHTML = `
-  <section class="hero fx-top${wash}" data-shot="${f.venue_id ? 'yes' : 'none'}" data-fx="${esc(f.id)}">
-    <div class="hero-media">${venueShot(f.venue_id, '', true)}</div>
+  <section class="hero fx-top${theme ? ` theme-${theme}` : ''}${wash}" data-shot="${f.venue_id ? 'yes' : 'none'}" data-fx="${esc(f.id)}">
+    ${theme ? themeArt(theme) : `<div class="hero-media">${venueShot(f.venue_id, '', true)}</div>`}
     ${wash ? '<div class="fx-wash" aria-hidden="true"></div>' : ''}
     <div class="wrap hero-inner">
       ${backHTML('Back to the board')}
@@ -8658,6 +8673,9 @@ window.addEventListener('popstate', () => {
 window.addEventListener('hashchange', () => { routedFor = location.href; });
 
 renderRegion();
+// A competition's art (the Champions League star ball) starts itself
+// wherever a view puts it.
+wakeArt();
 
 // The live poll (liveTick): a look every five seconds at whether one is due,
 // which is every thirty while a match on the page is being played. Coming
