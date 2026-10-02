@@ -25,8 +25,8 @@ export const LANDING_FAQ = [
     'No, and nobody’s do. Every call we’ve made is on the results page with how it went, the misses included. If someone promises you winners, close the tab.'],
   ['What’s free?',
     'Every match preview, the full record, and one call a day: the one we’re surest of. Members get every call the moment it goes up, the bet slip, and the reasons behind all of them.'],
-  ['How do I cancel?',
-    'One tap on your account page. No form, no email, no “are you sure”. You keep what you paid for until it runs out.'],
+  ['Which games do you cover?',
+    'The Premier League, the Champions League and the rest of Europe’s big leagues, plus eighty-odd competitions behind them. Every game gets a preview. The ones worth backing get a call.'],
   ['Who is it for?',
     'Over-18s who watch a lot of football and want a straight opinion on it. If betting has stopped being fun, BeGambleAware.org is free and confidential.'],
 ];

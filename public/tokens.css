@@ -83,6 +83,16 @@
   /* A second note, for anything imminent rather than live. */
   --sodium:    #f5a524;
 
+  /* ----------------------------------------------------- competition looks */
+
+  /* A Champions League night, sampled from the competition's own covers:
+     a deep ultramarine, darker towards the words. Used only behind a UCL
+     game's masthead, never as the site's colour; the violet stays the
+     identity everywhere else. The ball's own colours live in its shader
+     (public/js/lib/starball.js). Ink on these is --chalk. */
+  --ucl-night:      #06036a;
+  --ucl-night-deep: #01014a;
+
   /* --------------------------------------------------------------- borders */
 
   /* Percentages of the ink rather than grey hexes, so they hold across every

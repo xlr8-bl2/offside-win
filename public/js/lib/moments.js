@@ -21,6 +21,7 @@
 
 import { namedFixture } from './occasion.js';
 import { scrollAway, moving } from './scrollaway.js';
+import { themeArt, themeOf } from './comptheme.js';
 
 /** Club competitions whose return is news, in the order they are said. */
 export const RETURNING = new Map([
@@ -365,11 +366,13 @@ function cardHTML(m, { crest = plainCrest, esc = plainEsc, clock, now }) {
         </div>
       </div>`;
   }
+  // A Champions League night is drawn in the competition's own look.
+  const theme = m.kind === 'ucl' ? themeOf(m.leagueId) : null;
   const words = (t) => t.split(/\s+/).map((wd, i) => `<span class="mo-w"><span style="--i:${i}">${esc(wd)}</span></span>`).join(' ');
   return `
     <div class="mo-scrim" data-mo-close></div>
-    <div class="mo-card" role="dialog" aria-modal="true" aria-labelledby="mo-title" tabindex="-1" data-kind="${esc(m.kind)}">
-      <div class="mo-glow" aria-hidden="true"><div class="mo-sweep"></div></div>
+    <div class="mo-card${theme ? ` theme-${theme}` : ''}" role="dialog" aria-modal="true" aria-labelledby="mo-title" tabindex="-1" data-kind="${esc(m.kind)}">
+      ${theme ? themeArt(theme) : '<div class="mo-glow" aria-hidden="true"><div class="mo-sweep"></div></div>'}
       ${x}
       <p class="mo-shout">${esc(w.shout)}</p>
       <div class="mo-head">${emblem(m, crest)}<h2 class="mo-title" id="mo-title">${words(w.title)}</h2></div>
