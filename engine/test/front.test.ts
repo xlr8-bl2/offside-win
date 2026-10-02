@@ -12,7 +12,7 @@ const { findBannedInProse } = await import('../src/vocabulary.ts');
 
 const all: string[] = [
   ...front.LANDING_HEADLINE, front.LANDING_LEDE,
-  ...front.LANDING_STEPS.flat(), ...front.LANDING_FAQ.flat(),
+  ...front.LANDING_STEPS.flat(), ...front.LANDING_GETS.flat(), ...front.LANDING_FAQ.flat(),
 ];
 
 test('the landing copy passes the vocabulary rule', () => {

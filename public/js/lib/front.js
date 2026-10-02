@@ -8,9 +8,17 @@
  * internal vocabulary. engine/test/front.test.ts runs it through the rule.
  */
 
-export const LANDING_HEADLINE = ['We call the big games.', 'Then we show our working.'];
+export const LANDING_HEADLINE = ['Football predictions', 'that show their working.'];
 
-export const LANDING_LEDE = 'One call on each match worth your time, with the reason in plain English: who’s missing, who’s flying, who needs the result. And every result stays on the record, the misses too.';
+export const LANDING_LEDE = 'Team news, form and what’s riding on it, read properly, then one call. The biggest game’s call is free every day, and every result stays on the record.';
+
+/** What every match page gives you: the landing page's benefits, in order. */
+export const LANDING_GETS = [
+  ['Team news that matters', 'Who’s out, who’s back, and whether it changes anything. A missing centre-back matters more than a missing third-choice keeper, and we say so.'],
+  ['Form you’d quote down the pub', 'The last six, home and away, clean sheets and goals. Nothing from a spreadsheet.'],
+  ['One call, or a pass', 'Only when we’d back it ourselves, with the reason in plain English. Most games get no call, and we tell you why.'],
+  ['Read again till kick-off', 'Line-ups, late injuries and the table get another look every fifteen minutes, right up to the whistle.'],
+];
 
 export const LANDING_STEPS = [
   ['Read the game.', 'Team news, who’s injured and who actually matters, form home and away, the table, what’s riding on it. Looked at again every fifteen minutes until kick-off.'],
