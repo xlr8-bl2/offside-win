@@ -7996,6 +7996,7 @@ function finishRoute(name, soft, keepY, backTo) {
     if (!soft) setReading(name);
     if (!soft) countView();
     if (!soft) schedulePromos();
+    if (!soft) attention.notePage();
     if (!soft) scheduleSeason();
     state.soft = false;
     liveTick();
@@ -8061,7 +8062,10 @@ async function scheduleSeason() {
   const name = parseHash().parts[0] || 'home';
   try {
     const [season, moments] = await Promise.all([import('./js/lib/season.js'), import('./js/lib/moments.js')]);
-    if (!SEASON_ROUTES.has(name)) { season.removeSeason(); moments.removeMoment(); return; }
+    // Never over the landing page (attention.js): a stranger's first look at
+    // the site stays clear, chip and all. The note waits for the board.
+    const landing = () => !!document.querySelector('.ld-hero');
+    if (!SEASON_ROUTES.has(name) || landing()) { season.removeSeason(); moments.removeMoment(); return; }
     const board = await getJSON('/api/board?hours=72', { quiet: true }).catch(() => null);
     const now = Date.now() / 1000;
     const fixtures = board?.fixtures ?? [];
@@ -8090,7 +8094,7 @@ async function scheduleSeason() {
     if (!fresh && !reading) { season.removeSeason(); return; }
     if (!fresh && season.dismissed(reading.key)) { season.showChip(reading, helpers); return; }
     const go = () => {
-      if ((parseHash().parts[0] || 'home') !== name) return;
+      if ((parseHash().parts[0] || 'home') !== name || landing()) return;
       if (document.getElementById('cookie-notice')) {
         if (!seasonWaiting) {
           seasonWaiting = true;
@@ -8107,6 +8111,9 @@ async function scheduleSeason() {
       // Mid-scroll: a card that lands under a moving thumb is swiped away
       // by that same thumb before anyone reads it. Wait for a pause.
       if (season.readerMoving()) { seasonTimer = setTimeout(go, 700); return; }
+      // Not in the first moments of a visit: a second page, or twenty
+      // seconds on the site, first.
+      if (!attention.settled()) { seasonTimer = setTimeout(go, 3000); return; }
       // A big moment first, then the week's note; one card a visit between
       // them and the offer (js/lib/attention.js). A note that loses out
       // leaves its chip and opens on a later visit.
