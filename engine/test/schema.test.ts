@@ -21,10 +21,10 @@ test('postgres schema declares tables', () => {
 //
 // Listing a table here is a decision, and the test below turns it into one that
 // cannot be undone by accident.
-const PRIVATE = new Set(['goodwill', 'goodwill_notice', 'payment', 'payment_method', 'page_view', 'profile', 'follow', 'entitlement_grant', 'purchase_consent', 'market_snapshot', 'admin_log', 'promo', 'former_member']);
+const PRIVATE = new Set(['pulled_notice', 'goodwill', 'goodwill_notice', 'payment', 'payment_method', 'page_view', 'profile', 'follow', 'entitlement_grant', 'purchase_consent', 'market_snapshot', 'admin_log', 'promo', 'former_member']);
 
 // Tables with paid content in them, readable only through a serving function.
-const SERVED = new Set(['fixture', 'pick', 'kv', 'slip', 'entitlement']);
+const SERVED = new Set(['fixture', 'pick', 'kv', 'slip', 'entitlement', 'pulled_call']);
 
 // The anon key is public. RLS plus a SELECT-only grant is the only thing
 // standing between it and write access, so a table added without both is a hole
@@ -121,14 +121,14 @@ test('migrate() sends whole statements, function bodies included', () => {
 // even a mistaken grant would run them as anon, which has no write privilege on
 // either table -- but "it would fail anyway" is not a reason to hand out the
 // call, so the absence of a grant is asserted instead.
-const PRIVATE_FUNCTIONS = new Set(['goodwill_lean', 'goodwill_credit', 'goodwill_whop_applied', 'goodwill_noted', 'goodwill_ended', 'record_payment', 'revoke_membership', 'record_entitlement', 'revoke_entitlement', 'delete_account_data', 'stop_entitlement_renewal']);
+const PRIVATE_FUNCTIONS = new Set(['pulled_claim', 'goodwill_lean', 'goodwill_credit', 'goodwill_whop_applied', 'goodwill_noted', 'goodwill_ended', 'record_payment', 'revoke_membership', 'record_entitlement', 'revoke_entitlement', 'delete_account_data', 'stop_entitlement_renewal']);
 
 // The Worker's read path. The serving functions over the paid tables run as
 // their owner, because those tables grant the public roles nothing -- so each
 // one IS the wall, and every one that returns calls must apply it. Anything
 // else runs as the caller: SECURITY DEFINER on a function that does not
 // filter is the one way a read-only surface becomes a data leak.
-const DEFINER = new Set(['get_promos', 'get_board', 'get_fixture', 'get_picks', 'get_model', 'get_hero', 'get_health', 'get_slip', 'get_plans', 'get_account', 'has_membership', 'free_fixture_id', 'get_league', 'get_record', 'record_view', 'get_player', 'save_profile', 'set_follow', 'search_games', 'record_consent', 'get_team', 'goodwill_credit', 'goodwill_whop_applied', 'goodwill_noted', 'goodwill_ended']);
+const DEFINER = new Set(['get_promos', 'get_board', 'get_fixture', 'get_picks', 'get_model', 'get_hero', 'get_health', 'get_slip', 'get_plans', 'get_account', 'has_membership', 'free_fixture_id', 'get_league', 'get_record', 'record_view', 'get_player', 'save_profile', 'set_follow', 'search_games', 'record_consent', 'get_team', 'goodwill_credit', 'goodwill_whop_applied', 'goodwill_noted', 'goodwill_ended', 'get_how_sure', 'set_call_alerts', 'pulled_claim']);
 const WALLED = new Set(['get_board', 'get_fixture', 'get_picks', 'get_slip', 'search_games', 'get_team']);
 // The owner's dashboard. Every admin_ function reads auth.users or the
 // payment tables, so it runs as its owner, and none of them may be callable

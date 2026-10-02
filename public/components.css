@@ -3585,6 +3585,73 @@
   .trap { grid-template-columns: minmax(0, 1fr); padding: var(--space-7) var(--space-5) var(--space-5); }
 }
 
+/* ======================================================== a pulled call
+ *
+ * A call taken down before kick-off. It sits at the top of the call panel,
+ * in the caution colour, because it is news about the call rather than the
+ * call: said once, plainly, then the panel carries on as it would.
+ */
+.pulled {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--terrace);
+}
+.pulled-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-3); margin: 0 0 var(--space-1); font-size: var(--text-sm); color: var(--chalk-3); }
+.pulled-tag { font-weight: var(--weight-bold); color: var(--warn); }
+.pulled-why { margin: 0; font-size: var(--text-md); line-height: var(--leading-normal); color: var(--chalk); }
+
+/* ================================================ when we say likely
+ *
+ * How sure we were against how often we were right (viewHowSure). Each
+ * group is a bar of ten calls: filled, in the landed colour, for how many in
+ * ten landed; a violet line, ours, where we said they would. The gaps between
+ * the ten are drawn over the fill so the bar reads as ten calls, not as a
+ * percentage meter.
+ */
+.sure .page-head { margin-bottom: var(--space-6); }
+.sure-head { margin: 0 0 var(--space-2); }
+.sure-bar {
+  position: relative;
+  height: 22px;
+  margin: var(--space-4) 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--terrace);
+  overflow: hidden;
+}
+.sure-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 2px), var(--pitch) calc(10% - 2px) 10%);
+  pointer-events: none;
+}
+.sure-fill { position: absolute; inset: 0 auto 0 0; background: var(--won); }
+.sure-said {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 3px;
+  margin-left: -1px;
+  border-radius: 2px;
+  background: var(--floodlight-hi);
+  z-index: 1;
+}
+.sure-key { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-5); margin: 0 0 var(--space-8); font-size: var(--text-sm); color: var(--chalk-3); }
+.sure-key span { display: inline-block; vertical-align: middle; }
+.sure-key .k-fill { width: 14px; height: 10px; margin-right: var(--space-1); border-radius: 2px; background: var(--won); }
+.sure-key .k-said { width: 3px; height: 14px; margin-right: var(--space-1); border-radius: 2px; background: var(--floodlight-hi); }
+.sure-bands { display: grid; gap: var(--space-7); margin: 0 0 var(--space-8); padding: 0; list-style: none; }
+.sure-bands li { padding-top: var(--space-5); border-top: var(--border) solid var(--rule); }
+.sure-q { margin: 0; font-family: var(--display); font-size: var(--text-xl); font-weight: var(--weight-bold); line-height: var(--leading-display); color: var(--chalk); }
+.sure-nums { margin: 0; font-size: var(--text-md); color: var(--chalk-2); }
+.sure-nums b { color: var(--chalk); }
+.sure-nums span { color: var(--chalk-3); }
+.sure-bands li.is-thin .sure-q { color: var(--chalk-2); }
+.sure-bands li.is-thin .sure-nums { margin-top: var(--space-2); }
+.sure-foot a, .record-link { color: var(--floodlight-hi); }
+
 /* ======================================================== the post-mortem
  *
  * Why it landed, or why it did not. The verdict reads as a sentence and the

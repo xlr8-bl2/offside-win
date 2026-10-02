@@ -339,6 +339,47 @@ ALTER TABLE pick ADD COLUMN IF NOT EXISTS postmortem_json text;
 -- settled call still carries its argument once the fixture's write-up is gone.
 ALTER TABLE pick ADD COLUMN IF NOT EXISTS why text;
 
+-- Calls taken down before kick-off (engine/src/pulled.ts). The withdrawal in
+-- the slate deleted the pick and kept nothing, so a member who had seen the
+-- call was never told it had gone, or why. Now the call, the reason in plain
+-- words and what replaced it are kept here, the Worker emails members who
+-- want to know (worker/src/pulled.ts), and the match page says so.
+-- `restored_at` is set if the same call comes back before kick-off.
+CREATE TABLE IF NOT EXISTS pulled_call (
+  id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  pick_id      bigint NOT NULL UNIQUE,
+  fixture_id   bigint NOT NULL,
+  kickoff      bigint NOT NULL,
+  home         text NOT NULL,
+  away         text NOT NULL,
+  market       text NOT NULL,
+  outcome      text NOT NULL,
+  line         double precision,
+  label        text NOT NULL,      -- the call in words, as the site names it
+  odds         double precision NOT NULL,
+  bookmaker    text,
+  reason       text NOT NULL,      -- why, without naming the call
+  replaced_by  text,               -- the new call in words, members only
+  published_at bigint NOT NULL,
+  pulled_at    bigint NOT NULL,
+  restored_at  bigint,
+  alerted_at   bigint
+);
+CREATE INDEX IF NOT EXISTS pulled_call_fixture ON pulled_call (fixture_id);
+ALTER TABLE pulled_call ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON pulled_call FROM anon, authenticated;
+
+-- Which member has been emailed about which pulled call, so a retry or a
+-- second Worker run never sends the same alert twice.
+CREATE TABLE IF NOT EXISTS pulled_notice (
+  pulled_id bigint NOT NULL,
+  email     text NOT NULL,
+  sent_at   bigint NOT NULL,
+  PRIMARY KEY (pulled_id, email)
+);
+ALTER TABLE pulled_notice ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON pulled_notice FROM anon, authenticated;
+
 -- The bet slip: the most likely calls on the board, combined to total odds
 -- between 2.00 and 3.00 (engine/src/slip.ts). Rebuilt each slate until its
 -- first leg kicks off, then frozen and graded like any call, so it has a
@@ -651,6 +692,9 @@ ALTER TABLE profile ADD COLUMN IF NOT EXISTS clock text NOT NULL DEFAULT '24';
 -- three to twenty of them, one per person whatever the capitals.
 ALTER TABLE profile ADD COLUMN IF NOT EXISTS username text;
 CREATE UNIQUE INDEX IF NOT EXISTS profile_username ON profile (lower(username)) WHERE username IS NOT NULL;
+-- An email when a call is pulled before kick-off. On unless switched off on
+-- the account page; a member with no profile row gets them too.
+ALTER TABLE profile ADD COLUMN IF NOT EXISTS call_alerts boolean NOT NULL DEFAULT true;
 
 -- The teams and competitions a reader follows. The label is kept so the
 -- account page can list a follow without a lookup, and so a team that drops
@@ -1018,7 +1062,7 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
            'profile', (SELECT json_build_object('display_name', display_name, 'odds_format', odds_format,
                                                 'avatar_style', avatar_style, 'avatar_color', avatar_color,
                                                 'club_id', club_id, 'club_name', club_name, 'clock', clock,
-                                                'username', username)
+                                                'username', username, 'call_alerts', call_alerts)
                        FROM profile WHERE user_id = auth.uid()),
            'follows', coalesce((
              SELECT json_agg(json_build_object('kind', kind, 'id', ref_id, 'label', label) ORDER BY created_at)
@@ -1407,6 +1451,18 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
            -- how it went. The pick table is the record; the page reads it.
            -- Same visibility rule as get_picks: settled calls are public, open
            -- ones need a membership.
+           -- Calls taken down before kick-off, newest first. Everyone sees that
+           -- one was pulled and why; what it was, and what replaced it, is for
+           -- members and the free call, like the call itself.
+           || jsonb_build_object('pulled', coalesce((
+                SELECT jsonb_agg(jsonb_build_object('pulled_at', pc.pulled_at, 'reason', pc.reason)
+                         || CASE WHEN has_membership() OR f.id = free_fixture_id()
+                                 THEN jsonb_build_object('label', pc.label, 'odds', pc.odds, 'bookmaker', pc.bookmaker,
+                                                         'replaced_by', pc.replaced_by)
+                                 ELSE '{}'::jsonb END
+                       ORDER BY pc.pulled_at DESC)
+                FROM pulled_call pc WHERE pc.fixture_id = f.id AND pc.restored_at IS NULL
+              ), '[]'::jsonb))
            || jsonb_build_object('published', coalesce((
                 SELECT jsonb_agg(jsonb_build_object(
                          'market', pk.market, 'outcome', pk.outcome, 'line', pk.line,
@@ -1540,6 +1596,32 @@ $fn$;
 CREATE OR REPLACE FUNCTION get_record()
 RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   SELECT coalesce((SELECT try_json(v) FROM kv WHERE k = 'record:engine'), json_build_object('rows', '[]'::json));
+$fn$;
+
+-- "When we say likely": every settled call we published, grouped by how sure
+-- we were when we made it (to the nearest tenth: about seven, eight or nine
+-- in ten) against how many landed. A half-win counts as landed and a half-loss
+-- as missed, as on the results page; refunds and voids are left out. Only
+-- settled calls, so nothing paid is in it.
+CREATE OR REPLACE FUNCTION get_how_sure()
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  WITH s AS (
+    SELECT model_prob AS p, result IN ('WON', 'HALF_WON') AS landed, kickoff
+      FROM pick
+     WHERE kind = 'CONFIDENT' AND settled_at IS NOT NULL
+       AND result IN ('WON', 'HALF_WON', 'LOST', 'HALF_LOST')
+       AND model_prob > 0 AND model_prob <= 1)
+  SELECT json_build_object(
+    'n', (SELECT count(*) FROM s),
+    'landed', (SELECT count(*) FILTER (WHERE landed) FROM s),
+    'said', (SELECT avg(p) FROM s),
+    'from', (SELECT min(kickoff) FROM s),
+    'to', (SELECT max(kickoff) FROM s),
+    'bands', coalesce((
+      SELECT json_agg(json_build_object('tenths', b.tenths, 'n', b.n, 'landed', b.landed, 'said', b.said) ORDER BY b.tenths DESC)
+        FROM (SELECT least(10, greatest(5, round(p * 10)::int)) AS tenths, count(*) AS n,
+                     count(*) FILTER (WHERE landed) AS landed, avg(p) AS said
+                FROM s GROUP BY 1) b), '[]'::json));
 $fn$;
 
 -- A competition's own page: the table, the top scorers, its games either side
@@ -2016,6 +2098,7 @@ GRANT EXECUTE ON FUNCTION get_plans() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION free_fixture_id() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_league(bigint) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_record() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_how_sure() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_player(bigint, bigint) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint), get_fixture(bigint), get_picks(integer, text),
   get_model(), get_hero(), get_health(), get_account(), has_membership(), try_json(text) TO authenticated;
@@ -2664,3 +2747,72 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
    WHERE r.email IS NOT NULL;
 $fn$;
 REVOKE ALL ON FUNCTION goodwill_ended(bigint) FROM PUBLIC, anon, authenticated;
+
+-- ---------------------------------------------------------- pulled calls
+
+-- The account page's switch for pulled-call emails. Signed in only; the
+-- caller's own profile, created if it is not there yet.
+CREATE OR REPLACE FUNCTION set_call_alerts(p_on boolean)
+RETURNS boolean LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE
+  me uuid := auth.uid();
+  now_s bigint := floor(extract(epoch FROM now()))::bigint;
+BEGIN
+  IF me IS NULL THEN RAISE EXCEPTION 'sign in first' USING ERRCODE = '28000'; END IF;
+  INSERT INTO profile (user_id, created_at, updated_at, call_alerts)
+  VALUES (me, now_s, now_s, coalesce(p_on, true))
+  ON CONFLICT (user_id) DO UPDATE SET call_alerts = coalesce(p_on, true), updated_at = now_s;
+  RETURN coalesce(p_on, true);
+END;
+$fn$;
+GRANT EXECUTE ON FUNCTION set_call_alerts(boolean) TO anon, authenticated;
+
+-- The Worker's alert run, in one step: the calls pulled in the last three
+-- hours that are still to kick off, not since restored and not yet handled;
+-- the members who want to hear about them; a notice for each pair, written
+-- before anything is sent; and the calls marked handled, so nobody joining
+-- later is emailed about an old pull. Returns one bundle per member, so each
+-- gets one email however many calls came down. At most once: a send that
+-- fails after this is not retried, which beats the same email twice.
+-- A member is anyone with a live card membership or a live Whop
+-- entitlement; the switch is on their profile, by account or, for Whop, by
+-- email.
+CREATE OR REPLACE FUNCTION pulled_claim()
+RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE
+  now_s bigint := floor(extract(epoch FROM now()))::bigint;
+  v json;
+BEGIN
+  WITH calls AS (
+    SELECT * FROM pulled_call
+     WHERE alerted_at IS NULL AND restored_at IS NULL
+       AND kickoff > now_s AND pulled_at > now_s - 3 * 3600
+     FOR UPDATE SKIP LOCKED),
+  members AS (
+    SELECT lower(u.email) AS email
+      FROM membership m JOIN auth.users u ON u.id = m.user_id
+      LEFT JOIN profile p ON p.user_id = m.user_id
+     WHERE m.expires_at > now_s AND u.email IS NOT NULL AND coalesce(p.call_alerts, true)
+    UNION
+    SELECT lower(e.email)
+      FROM entitlement e
+      LEFT JOIN auth.users u ON lower(u.email) = lower(e.email)
+      LEFT JOIN profile p ON p.user_id = u.id
+     WHERE e.status = 'active' AND e.expires_at > now_s AND coalesce(p.call_alerts, true)),
+  claimed AS (
+    INSERT INTO pulled_notice (pulled_id, email, sent_at)
+    SELECT c.id, m.email, now_s FROM calls c CROSS JOIN members m
+    ON CONFLICT DO NOTHING RETURNING pulled_id, email),
+  handled AS (
+    UPDATE pulled_call SET alerted_at = now_s WHERE id IN (SELECT id FROM calls) RETURNING id)
+  SELECT coalesce(json_agg(json_build_object('email', x.email, 'calls', x.calls)), '[]'::json) INTO v
+    FROM (SELECT cl.email, json_agg(json_build_object(
+                   'id', c.id, 'fixture_id', c.fixture_id, 'kickoff', c.kickoff, 'home', c.home, 'away', c.away,
+                   'label', c.label, 'odds', c.odds, 'bookmaker', c.bookmaker, 'reason', c.reason,
+                   'replaced_by', c.replaced_by) ORDER BY c.kickoff) AS calls
+            FROM claimed cl JOIN calls c ON c.id = cl.pulled_id
+           GROUP BY cl.email) x;
+  RETURN v;
+END;
+$fn$;
+REVOKE ALL ON FUNCTION pulled_claim() FROM PUBLIC, anon, authenticated;
