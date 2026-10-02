@@ -27,12 +27,23 @@ interface LivePick {
 }
 
 export async function runLive(rows: HistRow[]): Promise<void> {
+  // From the switch by default. The pg workflow's argument can move the start:
+  // "all" starts at the first settled call the results page shows (so the
+  // newest rule is set against every live result, the older engine's too), a
+  // date ("2026-09-20") starts there.
+  const arg = String(process.env.ARG ?? '').trim();
+  let from = SWITCH;
+  if (arg === 'all') {
+    const [first] = await select<{ k: number }>(`SELECT MIN(kickoff) AS k FROM pick WHERE kind = 'CONFIDENT' AND settled_at IS NOT NULL`, []);
+    if (first?.k) from = Number(first.k);
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(arg)) from = Math.floor(Date.parse(`${arg}T00:00:00Z`) / 1000);
+  console.log(`lab:live: from ${new Date(from * 1000).toISOString()}${from === SWITCH ? ' (the switch)' : ''}`);
   const live = await select<LivePick>(
     `SELECT fixture_id, kickoff, market, outcome, line, odds, opening_odds, model_prob, book_prob, result, created_at
        FROM pick WHERE kind = 'CONFIDENT' AND settled_at IS NOT NULL AND kickoff >= ? AND result IN ('WON', 'LOST', 'PUSH', 'HALF_WON', 'HALF_LOST', 'VOID')`,
-    [SWITCH],
+    [from],
   );
-  const period = rows.filter((r) => r.kickoff >= SWITCH);
+  const period = rows.filter((r) => r.kickoff >= from);
   const byId = new Map(period.map((r) => [r.id, r]));
   const cache = new Map(period.map((r) => [r.id, optionsFor(r, PROD.modelWeight)] as [number, Option[]]));
 
@@ -54,7 +65,7 @@ export async function runLive(rows: HistRow[]): Promise<void> {
     const w = g.filter((x) => x.won).length;
     const pnl = g.reduce((s, x) => s + (x.won ? x.odds - 1 : -1), 0);
     const odds = g.reduce((s, x) => s + x.odds, 0) / (g.length || 1);
-    console.log(`  ${label.padEnd(46)} ${String(g.length).padStart(4)} calls  ${pct(g.length ? w / g.length : 0).padStart(6)} landed  odds ${odds.toFixed(2)}  return ${pct(g.length ? pnl / g.length : 0).padStart(7)}`);
+    console.log(`  ${label.padEnd(46)} ${String(g.length).padStart(4)} calls  ${pct(g.length ? w / g.length : 0).padStart(6)} landed  odds ${odds.toFixed(2)}  return ${pct(g.length ? pnl / g.length : 0).padStart(7)}  £10 a call: ${pnl >= 0 ? '+' : '-'}£${Math.abs(pnl * 10).toFixed(2)}`);
   };
   const liveWon = (p: LivePick) => (p.result === 'WON' ? true : p.result === 'LOST' ? false : null);
   const labWon = (id: number, o: Option) => {
