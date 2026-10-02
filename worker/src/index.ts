@@ -29,6 +29,7 @@ import { bearer, jsonHeaders } from './http.ts';
 import { charge, checkout, confirm, payStatus, sweepWhop, renewal, webhook, type PayEnv } from './pay.ts';
 import { deleteAccount } from './account.ts';
 import { goodwill } from './goodwill.ts';
+import { pulledAlerts } from './pulled.ts';
 
 /** The daily run that gives quiet days back; listed in wrangler.toml beside the sweep. */
 const GOODWILL_CRON = '20 6 * * *';
@@ -128,6 +129,8 @@ const worker = {
       return;
     }
     ctx.waitUntil(sweepWhop(env));
+    // Calls pulled since the last run: tell the members (pulled.ts).
+    ctx.waitUntil(pulledAlerts(env).catch((err) => console.error('pulled:', err instanceof Error ? err.message : String(err))));
   },
 
   async fetch(request: Request, env: Env, ctx?: { waitUntil(p: Promise<unknown>): void }): Promise<Response> {
@@ -255,6 +258,7 @@ const worker = {
       if (path === '/api/hero') return await passthrough(env, 'get_hero', {});
       // The front page's record from the newest engine (lab/record.ts).
       if (path === '/api/record') return await passthrough(env, 'get_record', {});
+      if (path === '/api/how-sure') return await passthrough(env, 'get_how_sure', {});
       if (path === '/api/health') return await passthrough(env, 'get_health', {});
       // The bet slip. The caller's token goes with it: the legs of an open
       // slip are members-only, and get_slip decides that from the token.

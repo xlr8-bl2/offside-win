@@ -220,6 +220,7 @@ function apiReadsFor(hash) {
     case 'fixture': return id ? [`/api/fixture/${id}`] : [];
     case 'results': return ['/api/picks?limit=120&settled=true', '/api/picks?limit=20&settled=false'];
     case 'slip': return ['/api/slip'];
+    case 'how-sure': return ['/api/how-sure'];
     case 'pricing': return ['/api/plans', '/api/hero'];
     default: return [];
   }
@@ -4811,6 +4812,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
         ${liveCentreHTML(f, st)}
         <div class="panel">
           <p class="panel-head">${callHead}</p>
+          ${pulledHTML(f)}
           ${verdicts.length
             ? verdicts.map((v) => verdictHTML(v, f.home, f.away, f, { played, hg, ag })).join('')
               + (anyLocked ? lockedHTML(f) : '')
@@ -5004,6 +5006,105 @@ function bar(label, v) {
 
 // ---------------------------------------------------------------- results
 
+/*
+ * A call we took down before kick-off (engine/src/pulled.ts): when, and why,
+ * in plain words. What it was and what replaced it come only to members and
+ * on the free call (get_fixture); everyone else is told that it came down and
+ * why, which is the honest part.
+ */
+function pulledHTML(f) {
+  const list = (Array.isArray(f.pulled) ? f.pulled : []).filter((p) => p && cleanProse(p.reason));
+  if (!list.length) return '';
+  const today = new Date().toDateString();
+  const at = (t) => {
+    const d = new Date(Number(t) * 1000);
+    return d.toDateString() === today ? clockTime(d)
+      : `${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}, ${clockTime(d)}`;
+  };
+  return list.map((p) => {
+    const what = p.label ? `We’d been on ${p.label}${Number(p.odds) > 1 ? ` at ${oddsOf(Number(p.odds))}` : ''}. ` : '';
+    const swap = p.replaced_by ? ` We’ve switched to ${p.replaced_by}.` : '';
+    return `<div class="pulled">
+      <p class="pulled-head"><span class="pulled-tag">Call pulled</span><span>${esc(at(p.pulled_at))}</span></p>
+      <p class="pulled-why">${esc(what)}${esc(cleanProse(p.reason))}${esc(swap)}</p>
+    </div>`;
+  }).join('');
+}
+
+/*
+ * When we say likely, does it happen?
+ *
+ * Every settled call we published, grouped by how sure we were when we made
+ * it, to the nearest tenth (get_how_sure in schema.pg.sql), against how many
+ * landed. The point is honesty: nobody else in this trade shows it, and a
+ * site that is right about how right it is has earned the next call.
+ *
+ * Said in pub numbers, never percentages (offside-voice): "about eight in
+ * ten", "41 of 45". Each group is a bar of ten: filled for how many in ten
+ * landed, a line where we said they would. Groups too small to mean anything
+ * say so rather than drawing a confident-looking bar over three calls.
+ */
+const TENTHS = ['none', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+const SURE_MIN = 15;
+function sureWords(tenths) {
+  return tenths >= 10 ? 'as good as certain' : `about ${TENTHS[tenths]} in ten`;
+}
+function sureVerdict(n, rate, said) {
+  if (n < SURE_MIN) return 'Too few to say yet.';
+  const d = rate - said;
+  if (Math.abs(d) <= 0.04) return 'Bang on.';
+  if (d > 0.04) return 'Better than we said.';
+  return d <= -0.1 ? 'Well short. We were too sure of these.' : 'A little short of what we said.';
+}
+function sureBar(rate, said, label) {
+  const pc = (x) => `${Math.max(0, Math.min(1, Number(x) || 0)) * 100}%`;
+  return `<div class="sure-bar" role="img" aria-label="${esc(label)}">
+    <span class="sure-fill" style="width:${pc(rate)}"></span>
+    <span class="sure-said" style="left:${pc(said)}"></span>
+  </div>`;
+}
+
+async function viewHowSure() {
+  const nav = navTicket;
+  placeholder(skeletonHTML());
+  let d;
+  try { d = await getJSON('/api/how-sure'); } catch (err) { return errorState(err, nav); }
+  if (nav !== navTicket) return;
+  const n = Number(d?.n) || 0;
+  const landed = Number(d?.landed) || 0;
+  const said = Number(d?.said) || 0;
+  const bands = (Array.isArray(d?.bands) ? d.bands : []).filter((b) => Number(b.n) > 0);
+  const overallTenths = Math.round(said * 10);
+  const day = (t) => new Date(Number(t) * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+
+  app.innerHTML = `
+  <div class="wrap section sure">
+    <div class="page-head">
+      <h1 class="display xl">When we say likely, does it happen?</h1>
+      <p class="page-sub">Every call we’ve published and settled, grouped by how sure we were when we made it,
+        against how many landed. Misses counted, refunds left out.</p>
+    </div>
+    ${n === 0 ? '<p class="record-sub">Nothing has settled yet. This fills in as the first results come in.</p>' : `
+    <p class="figure-line sure-head">We said about ${esc(TENTHS[overallTenths] ?? overallTenths)} in ten would land. <b class="fig won">${landed} of ${n}</b> did.</p>
+    <p class="record-sub">${esc(sureVerdict(n, landed / n, said))}</p>
+    ${sureBar(landed / n, said, `All calls: we said about ${TENTHS[overallTenths] ?? overallTenths} in ten, ${landed} of ${n} landed`)}
+    <p class="sure-key"><span class="k-fill"></span>How many in ten landed <span class="k-said"></span>How many we said would</p>
+
+    <ol class="sure-bands">${bands.map((b) => {
+      const bn = Number(b.n); const bl = Number(b.landed); const bs = Number(b.said); const t = Number(b.tenths);
+      return `<li class="${bn < SURE_MIN ? 'is-thin' : ''}">
+        <h2 class="sure-q">When we said ${esc(sureWords(t))}</h2>
+        ${bn < SURE_MIN ? '' : sureBar(bl / bn, bs, `We said ${sureWords(t)}; ${bl} of ${bn} landed`)}
+        <p class="sure-nums"><b>${bl} of ${bn}</b> landed. <span>${esc(sureVerdict(bn, bl / bn, bs))}</span></p>
+      </li>`;
+    }).join('')}</ol>
+
+    <p class="record-sub sure-foot">Counted from ${esc(day(d.from))} to ${esc(day(d.to))}, and updated as each match finishes.
+      Every call, one by one, is on <a href="#/results">the results page</a>.</p>`}
+  </div>`;
+  smartQuotes(app);
+}
+
 async function viewResults() {
   // Which navigation this page belongs to: a newer one makes it stand down (see route).
   const nav = navTicket;
@@ -5159,6 +5260,7 @@ async function viewResults() {
            is what those odds already expect. Winning most is not the same as
            being ahead.`
         : 'These are short prices, so winning most of them is not the same as being ahead.'}</p>
+      <p class="record-sub"><a class="record-link" href="#/how-sure">When we say likely, does it happen? How sure we were, against how often we were right.</a></p>
       ${n > 0 && n < 100
         ? `<p class="record-note">That is ${n} results. It is not enough to tell a good run
              from a good model, and we will say so until it is.</p>`
@@ -7200,6 +7302,17 @@ async function viewAccount() {
       <span class="acct-note" id="clock-note" role="status"></span>
     </fieldset>
 
+    <fieldset class="acct-choice">
+      <legend>Pulled calls</legend>
+      <p class="acct-hint">An email when late news makes us take a call down before kick-off, with what it was and why. Members only.</p>
+      <div class="seg" role="radiogroup" aria-label="Pulled-call emails">
+        ${[['on', 'Email me'], ['off', 'No emails']].map(([k, label]) => `
+          <label class="seg-opt"><input type="radio" name="alerts" value="${k}"${(account.profile?.call_alerts !== false) === (k === 'on') ? ' checked' : ''}>
+            <span><b>${esc(label)}</b></span></label>`).join('')}
+      </div>
+      <span class="acct-note" id="alerts-note" role="status"></span>
+    </fieldset>
+
     <h2 class="acct-sub">Signing in</h2>
     <p class="acct-hint">Signing out does not touch your membership. Sign back in with the same email and it is still yours.</p>
     <div class="acct-actions">
@@ -7388,6 +7501,21 @@ async function viewAccount() {
         state.board = null;
       } catch (err) {
         note('clock-note', humaneError(err), true);
+      }
+    };
+  }
+
+  // Pulled-call emails: saved the moment it is picked, like the clock.
+  for (const r of app.querySelectorAll('input[name="alerts"]')) {
+    r.onchange = async () => {
+      note('alerts-note', 'Saving…');
+      try {
+        const on = await accountRpc('set_call_alerts', { p_on: r.value === 'on' });
+        account.profile = { ...(account.profile ?? {}), call_alerts: on };
+        if (state.account) state.account.profile = account.profile;
+        note('alerts-note', on ? 'Saved. We’ll email you when we pull a call.' : 'Saved. No emails when we pull a call.');
+      } catch (err) {
+        note('alerts-note', humaneError(err), true);
       }
     };
   }
@@ -8358,6 +8486,7 @@ async function render(name, parts, params) {
     if (name === 'leagues') return await viewLeagues();
     if (name === 'search') return await viewSearch(params);
     if (name === 'results') return await viewResults();
+    if (name === 'how-sure') return await viewHowSure();
     if (name === 'pricing') return await viewPricing();
     if (name === 'checkout') return await viewCheckout(params);
     if (name === 'slip') return await viewSlip();

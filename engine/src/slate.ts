@@ -8,6 +8,7 @@ import { RepetitionLedger, narrate, narrateConfident, narratePass } from './narr
 import { chooseHero, type HeroCandidate } from './feature.ts';
 import { chooseFreeCall } from './free.ts';
 import { chooseTrap, trapFor, type Trap } from './trap.ts';
+import { callName, pullReason, QUIET_IF_YOUNGER_S, type PullContext } from './pulled.ts';
 import { writeMissingReports } from './report.ts';
 import { fillCrestColors } from './images/crest.ts';
 import { fillVenues } from './context/venue.ts';
@@ -387,6 +388,8 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
   // The confident calls each fixture carries as of this run, for fixtures
   // that have not kicked off. See the withdrawal after the pick upsert.
   const standing = new Map<number, Array<{ market: string; outcome: string; line: number | null }>>();
+  // What each of those matches looks like now, for saying why a call came down.
+  const pullCtx = new Map<number, PullContext>();
   // The calls in the open bet slip. A posted slip does not change, so on its
   // matches the slate keeps the slip's call (at a fresh price) instead of
   // choosing again, and never takes it down.
@@ -1013,6 +1016,11 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
         const pin = pinned.get(analysis.fixture_id);
         if (pin && !slipLegDropped) keep.push(pin as (typeof keep)[number]);
         standing.set(analysis.fixture_id, keep);
+        pullCtx.set(analysis.fixture_id, {
+          home: analysis.home_team, away: analysis.away_team,
+          changes: ctx.lineups?.changes ?? null,
+          factors: factors.filter((f) => f.id.startsWith('availability.')),
+        });
       }
       for (const v of started ? [] : allVerdicts) {
         pickRows.push({
@@ -1213,8 +1221,11 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
    */
   let withdrawn = 0;
   for (const [fixtureId, keep] of standing) {
-    const rows = await dbSelect<{ id: number; market: string; outcome: string; line: number | null }>(
-      `SELECT id, market, outcome, line FROM pick
+    const rows = await dbSelect<{
+      id: number; market: string; outcome: string; line: number | null; kickoff: number;
+      odds: number; bookmaker: string | null; created_at: number; evidence_json: string | null;
+    }>(
+      `SELECT id, market, outcome, line, kickoff, odds, bookmaker, created_at, evidence_json FROM pick
        WHERE fixture_id = ? AND kind = 'CONFIDENT' AND settled_at IS NULL AND kickoff > ?`,
       [fixtureId, now],
     );
@@ -1222,11 +1233,42 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
       const kept = keep.some((k) => k.market === r.market && String(k.outcome) === String(r.outcome)
         && (k.line ?? null) === (r.line ?? null));
       if (kept) continue;
+      /*
+       * Kept, with the reason, before it goes (pulled.ts). The Worker emails
+       * members about it and the match page says so. A call that was only up
+       * for a few minutes is recorded but marked as already handled: that is
+       * the engine settling, not news anyone needs an email about.
+       */
+      const pc = pullCtx.get(fixtureId);
+      if (pc) {
+        const replaced = keep[0] ?? null;
+        await dbExec(
+          `INSERT INTO pulled_call (pick_id, fixture_id, kickoff, home, away, market, outcome, line, label, odds, bookmaker,
+                                    reason, replaced_by, published_at, pulled_at, alerted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (pick_id) DO NOTHING`,
+          [r.id, fixtureId, r.kickoff, pc.home, pc.away, r.market, r.outcome, r.line,
+            callName(r, pc.home, pc.away), r.odds, r.bookmaker,
+            pullReason(r, pc, replaced !== null),
+            replaced ? callName(replaced, pc.home, pc.away) : null,
+            r.created_at, now, now - Number(r.created_at) < QUIET_IF_YOUNGER_S ? now : null],
+        );
+      }
       await dbExec('DELETE FROM pick WHERE id = ?', [r.id]);
       withdrawn++;
     }
   }
   if (withdrawn) console.log(`  withdrew ${withdrawn} call${withdrawn === 1 ? '' : 's'} replaced before kick-off`);
+  // A call that came back before kick-off is no longer pulled.
+  await dbExec(
+    `UPDATE pulled_call SET restored_at = ?
+      WHERE restored_at IS NULL AND kickoff > ?
+        AND EXISTS (SELECT 1 FROM pick p
+                     WHERE p.fixture_id = pulled_call.fixture_id AND p.kind = 'CONFIDENT' AND p.settled_at IS NULL
+                       AND p.market = pulled_call.market AND p.outcome = pulled_call.outcome
+                       AND p.line IS NOT DISTINCT FROM pulled_call.line)`,
+    [now, now],
+  );
 
   // The bet slip follows the board until its first leg kicks off.
   const slip = await refreshSlip();

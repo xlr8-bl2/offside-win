@@ -572,3 +572,59 @@ export function goodwillEndMail({ days, until, whop }: { days: number; until: nu
     ],
   });
 }
+
+/* ------------------------------------------------------ pulled calls */
+
+export interface PulledMailCall {
+  home: string;
+  away: string;
+  kickoff: number;
+  /** The call in words, as the site names it. */
+  label: string;
+  odds: number;
+  bookmaker?: string | null;
+  /** Why, in the house voice (engine/src/pulled.ts). */
+  reason: string;
+  /** The call that replaced it, if one did. */
+  replaced_by?: string | null;
+  /** The match page. */
+  href: string;
+}
+
+const kickoffUk = (epoch: number) => new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/London', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+}).format(new Date(epoch * 1000)).replace(',', '');
+
+const NUMBER = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+
+/**
+ * We've taken a call down before kick-off: what it was, why, and what
+ * replaced it. Several in one email when a run of team news takes down more
+ * than one, so a busy Saturday is one message, not five.
+ */
+export function pulledMail(calls: PulledMailCall[]): Mail {
+  const one = calls.length === 1;
+  const first = calls[0]!;
+  const tie = (c: PulledMailCall) => `${c.home} v ${c.away}`;
+  const odds = (c: PulledMailCall) => (Number.isFinite(c.odds) && c.odds > 1 ? ` at odds of ${c.odds.toFixed(2)}` : '');
+  const parts: Part[] = [
+    { p: one
+      ? 'Late news changed our mind before kick-off, so we’re telling you straight away.'
+      : 'Late news changed our mind on these before kick-off, so we’re telling you straight away.' },
+  ];
+  for (const c of calls) {
+    parts.push({ facts: [['Match', tie(c)], ['Kick-off', kickoffUk(c.kickoff)], ['We were on', `${c.label}${odds(c)}`]] });
+    parts.push({ note: c.reason });
+    if (c.replaced_by) parts.push({ p: `We’ve switched to ${c.replaced_by}. It’s on the match page.` });
+    if (!one) parts.push({ html: `<p style="margin:-6px 0 26px;font:600 15px/1.4 ${SANS}"><a href="${esc(c.href)}" style="color:${C.violetHi};text-decoration:none">See ${esc(tie(c))}</a></p>` });
+  }
+  if (one) parts.push({ button: 'See the match', href: first.href });
+  parts.push({ p: 'You get these because you’re a member. You can turn them off on your account page.', small: true });
+  return compose({
+    tag: 'pulled',
+    subject: one ? `Call pulled: ${tie(first)}` : `${calls.length} calls pulled before kick-off`,
+    preheader: one ? first.reason : calls.map(tie).join(', '),
+    heading: one ? 'We’ve pulled a call.' : `We’ve pulled ${NUMBER[calls.length] ?? calls.length} calls.`,
+    parts,
+  });
+}

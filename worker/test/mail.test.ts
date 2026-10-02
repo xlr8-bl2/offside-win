@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, membershipMail,
-  renewalStoppedMail, renewedMail, type EmailBinding, type Mail,
+  pulledMail, renewalStoppedMail, renewedMail, type EmailBinding, type Mail,
 } from '../src/mail.ts';
 import { authEmailHook, hookSecret, verifyHook } from '../src/authhook.ts';
 
@@ -21,6 +21,8 @@ const every: Mail[] = [
   authMail({ action: 'magiclink', link: 'https://x.supabase.co/auth/v1/verify?token=a&type=magiclink' }),
   authMail({ action: 'signup', link: 'https://x.supabase.co/auth/v1/verify?token=a&type=signup' }),
   authMail({ action: 'reauthentication', link: null, code: '123456' }),
+  pulledMail([{ home: 'France', away: 'Belgium', kickoff: NOW + 7200, label: 'France to win', odds: 1.45, bookmaker: 'bet365',
+    reason: 'France have made five changes from the side expected. Mbappé doesn’t start.', href: 'https://offside.win/match/1/france-v-belgium' }]),
 ];
 
 /* ------------------------------------------------------------ the designs */
@@ -171,4 +173,26 @@ test('an unsigned call to the hook is refused before anything is sent', async ()
   const res = await authEmailHook(req, { SUPABASE_URL: 'https://abc.supabase.co', SUPABASE_SERVICE_KEY: SERVICE, EMAIL });
   assert.equal(res.status, 401);
   assert.equal(EMAIL.sent.length, 0);
+});
+
+/* --------------------------------------------------------- pulled calls */
+
+test('a pulled call says what it was, why, and what replaced it', () => {
+  const m = pulledMail([{ home: 'France', away: 'Belgium', kickoff: NOW + 7200, label: 'France to win', odds: 1.45,
+    reason: 'France have made five changes from the side expected.', replaced_by: 'Under 2.5 goals', href: 'https://offside.win/match/1/france-v-belgium' }]);
+  assert.equal(m.subject, 'Call pulled: France v Belgium');
+  assert.match(m.text, /We were on: France to win at odds of 1\.45/);
+  assert.match(m.text, /five changes/);
+  assert.match(m.text, /switched to Under 2\.5 goals/);
+  assert.match(m.text, /See the match: https:\/\/offside\.win\/match\/1\/france-v-belgium/);
+  assert.match(m.text, /turn them off on your account page/);
+  assert.match(m.text, /18\+/);
+});
+
+test('several pulled at once are one email', () => {
+  const c = (home: string) => ({ home, away: 'X', kickoff: NOW + 3600, label: `${home} to win`, odds: 1.3, reason: 'With the latest team news and prices, it’s no longer one we’d back.', href: `https://offside.win/match/1/${home}` });
+  const m = pulledMail([c('Ajax'), c('PSV'), c('Feyenoord')]);
+  assert.equal(m.subject, '3 calls pulled before kick-off');
+  assert.match(m.html, /We’ve pulled three calls\./);
+  for (const t of ['Ajax v X', 'PSV v X', 'Feyenoord v X']) assert.match(m.html, new RegExp(t));
 });
