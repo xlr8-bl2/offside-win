@@ -94,6 +94,14 @@ const commands: Record<string, () => Promise<unknown>> = {
    */
   async renew() {
     requireEnv({ provider: false });
+    // Card renewals here were built for Coinflow, which was set aside for
+    // Whop, and Whop renews its own memberships. With no Coinflow key there
+    // is nothing to charge with, so say so and stop, rather than fail the
+    // job every morning. Set the key and this runs as before.
+    if (!process.env['COINFLOW_API_KEY']) {
+      console.log('Renewals: no card processor set (COINFLOW_API_KEY). Whop renews its own memberships, so there is nothing to charge here.');
+      return { skipped: 'no card processor' };
+    }
     await ensureSchema();
     const report = await renewDue(coinflowCharger());
     console.log(
