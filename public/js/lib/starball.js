@@ -56,10 +56,10 @@ uniform float uPx;     // one pixel in ball units
 uniform vec2 uA;       // a star arm's inner corner, pulled in for the rounding
 uniform float uP;      // and its tip, pulled in the same way
 
-const float ROUND = 0.022;  // every corner of the star is rounded: the tips
-const float FILLET = 0.05;  // and, more softly, the inside corners
-const float T = 0.02;       // the glass's thickness, as a share of the radius
-const float BEVEL = 0.0085; // the slab's edges are rounded over, not cut square
+const float ROUND = 0.014;  // every corner of the star is rounded: the tips
+const float FILLET = 0.06;  // and, more softly, the inside corners
+const float T = 0.026;      // the glass's thickness, as a share of the radius
+const float BEVEL = 0.0115; // the slab's edges are rounded over, not cut square
 
 // One arm of the star, folded onto its right half: the kite between the
 // centre, the inner corner and the tip. Negative inside.
@@ -254,40 +254,30 @@ void main() {
   gl_FragColor = outc;
 }`;
 
-// The composition at rest, as on the competition's own artwork: one of the
-// gaps between stars faces us a little left of centre, with a star straight
-// above it.
+// The composition at rest, as on the competition's covers: a star a little
+// left of centre and above, facing us, one point reaching up and to the left.
 const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const REST = (() => {
-  const v0 = norm([-0.3, -0.05, 0.95]);
-  const up = [0.08, 1, 0];
+  const v0 = norm([-0.5, 0.16, 0.85]);
+  const up = [-0.42, 0.91, 0];
   const k = dot(up, v0);
   const w0 = norm([up[0] - v0[0] * k, up[1] - v0[1] * k, up[2] - v0[2] * k]);
   const x0 = cross3(v0, w0);
-  // A gap is the middle of three stars that all touch: one star and two of
-  // its neighbours that are neighbours of each other.
-  const [s0] = CENTRES;
-  const near = CENTRES.filter((o) => o !== s0).sort((p, q) => dot(q, s0) - dot(p, s0)).slice(0, 5);
-  const s1 = near[0];
-  const s2 = near.slice(1).sort((p, q) => dot(q, s1) - dot(p, s1))[0];
-  const c0 = norm([s0[0] + s1[0] + s2[0], s0[1] + s1[1] + s2[1], s0[2] + s1[2] + s2[2]]);
-  const kk = dot(s0, c0);
-  const a0 = norm([s0[0] - c0[0] * kk, s0[1] - c0[1] * kk, s0[2] - c0[2] * kk]);
-  const b0 = cross3(c0, a0);
+  const c0 = CENTRES[0], a0 = AIMS[0], b0 = cross3(c0, a0);
   // View to ball: [c0 a0 b0] times the transpose of [v0 w0 x0].
   return [0, 1, 2].map((i) => [0, 1, 2].map((j) => c0[i] * v0[j] + a0[i] * w0[j] + b0[i] * x0[j]));
 })();
 
 // One arm of a star, in the plane touching the ball at the star's centre
 // (tangent units): the tip straight up (neighbouring tips meet at 0.618),
-// the inner corners well out towards it (fat stars), 36 degrees either side. The
+// the inner corners at 0.42 of it, 36 degrees either side. The
 // shader rounds every corner by growing a smaller arm by ROUND, so the tip
 // and the inner corner are pulled in first: the arm's outer edge moves in by
 // ROUND and the growth puts it back where it was, now with a rounded tip.
-const ROUND = 0.022; // keep in step with ROUND in FRAG
+const ROUND = 0.014; // keep in step with ROUND in FRAG
 function armShape() {
-  const TIP = 0.63; // the rounded tip lands just short of 0.618, where the neighbour's meets it
-  const inner = 0.45 * TIP; // slim points, as on the competition's own ball
+  const TIP = 0.636; // the rounded tip lands just short of 0.618, where the neighbour's meets it
+  const inner = 0.42 * TIP;
   const a = [inner * Math.sin(Math.PI / 5), inner * Math.cos(Math.PI / 5)];
   const d = [-a[0], TIP - a[1]];
   const l = Math.hypot(d[0], d[1]);
