@@ -6,7 +6,8 @@ that set the first screen can be preloaded.
 | File | Face | Licence |
 |---|---|---|
 | `bigshoulders-latin.woff2`, `bigshoulders-latin-ext.woff2` | Big Shoulders Display, variable weight | SIL OFL 1.1 |
-| `geist-latin.woff2`, `geist-latin-ext.woff2` | Geist, variable weight | SIL OFL 1.1 |
+| `archivo-latin.woff2`, `archivo-latin-ext.woff2` | Archivo, variable weight 400-800 | SIL OFL 1.1 |
+| `offside-wordmark.woff2` | Offside Wordmark, derived from Geist | SIL OFL 1.1 |
 | `caveat-latin.woff2` | Caveat, variable weight | SIL OFL 1.1 |
 | `offside-figures-600/700/800.woff2` | Offside Figures, derived from Big Shoulders | SIL OFL 1.1 |
 
@@ -30,3 +31,13 @@ stand alone keep Big Shoulders' own figures.
 To rebuild it, instance and subset Big Shoulders with fontTools
 (`fontTools.varLib.instancer`, `fontTools.subset`), set each digit's advance
 to the maximum, and shift each outline by `(W - inkWidth) / 2 - xMin`.
+
+## Offside Wordmark
+
+The wordmark was drawn in Geist and keeps it; everything else reads in
+Archivo. So the wordmark does not cost a whole second family, Geist's Latin
+file is cut down to `a-z A-Z .` with fontTools (kern and liga kept, the
+weight axis kept) and renamed, as the OFL asks of a modified font. About
+ten kilobytes, preloaded from index.html so the name in the header never
+swaps. To rebuild it, subset Geist's Latin woff2 from Google Fonts with
+`fontTools.subset` to that text and set name IDs 1, 3, 4, 6, 16 and 21.

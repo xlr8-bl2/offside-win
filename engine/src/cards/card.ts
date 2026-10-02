@@ -46,8 +46,8 @@ function fontFaces(): string {
   faces ??= `
     @font-face { font-family: 'BS'; font-weight: 400 800; src: ${font('bigshoulders-latin.woff2')}; unicode-range: U+0000-00FF, U+2013, U+2019; }
     @font-face { font-family: 'BS'; font-weight: 400 800; src: ${font('bigshoulders-latin-ext.woff2')}; unicode-range: U+0100-02FF, U+1E00-1EFF; }
-    @font-face { font-family: 'Geist'; font-weight: 400 700; src: ${font('geist-latin.woff2')}; unicode-range: U+0000-00FF, U+2013, U+2019; }
-    @font-face { font-family: 'Geist'; font-weight: 400 700; src: ${font('geist-latin-ext.woff2')}; unicode-range: U+0100-02FF, U+1E00-1EFF; }
+    @font-face { font-family: 'Archivo'; font-weight: 400 800; src: ${font('archivo-latin.woff2')}; unicode-range: U+0000-00FF, U+2013, U+2019; }
+    @font-face { font-family: 'Archivo'; font-weight: 400 800; src: ${font('archivo-latin-ext.woff2')}; unicode-range: U+0100-02FF, U+1E00-1EFF; }
     @font-face { font-family: 'Fig'; font-weight: 800; src: ${font('offside-figures-800.woff2')}; unicode-range: U+0030-0039, U+003A, U+2013; }
     @font-face { font-family: 'Hand'; font-weight: 500 700; src: ${font('caveat-latin.woff2')}; }`;
   return faces;
@@ -86,7 +86,7 @@ export function cardHTML(f: CardFixture, crests: { home: string | null; away: st
   ${fontFaces()}
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width: 1200px; height: 630px; overflow: hidden; }
-  body { position: relative; background: #0a0a0c; color: #f4f6fa; font-family: Geist, sans-serif; }
+  body { position: relative; background: #0a0a0c; color: #f4f6fa; font-family: Archivo, sans-serif; }
   .wash { position: absolute; top: -40%; width: 70%; height: 180%; filter: blur(60px); opacity: .55; }
   .wash.home { left: -28%; background: radial-gradient(closest-side, ${home}, transparent); }
   .wash.away { right: -28%; background: radial-gradient(closest-side, ${away}, transparent); }

@@ -120,7 +120,7 @@
   /* ------------------------------------------------------------ typography */
 
   /*
-   * BIG SHOULDERS DISPLAY FOR THE SCOREBOARD, GEIST FOR THE UI.
+   * BIG SHOULDERS DISPLAY FOR THE SCOREBOARD, ARCHIVO FOR THE READING.
    *
    * Two wrong answers preceded this one and both were wrong the same way.
    * Bricolage Grotesque is an editorial display face, drawn for magazine
@@ -137,9 +137,16 @@
    * table. It carries weight 400-800 and no width axis, which it does not need
    * because narrow is what it already is.
    *
-   * Geist takes the UI. Inter is the most-defaulted typeface on the web and
-   * using it is a decision nobody made; Geist is cleaner in the small sizes
-   * this interface mostly lives at and its tabular figures are properly drawn.
+   * Archivo takes everything a reader reads. It was turned down above as the
+   * display face, rightly: as a headline it has no opinion. Under one that
+   * does, that is the job. Geist, here before it, read like a developer tool
+   * (the owner's call: "the font the actual text uses isn't really good").
+   * Archivo is a grotesque drawn for sport and news print: open, a little
+   * narrower than Geist so a phone line holds more of a sentence, with real
+   * tabular figures whose punctuation stays proportional. Schibsted Grotesk
+   * was tried and widens its full stops and commas under tnum, which this
+   * site switches on everywhere, so every sentence read "Bury , yet ."
+   * The wordmark keeps Geist (base.css, 'Offside Wordmark').
    */
   /*
    * The faces are self-hosted (public/fonts, declared at the top of
@@ -162,7 +169,7 @@
      standing alone keeps Big Shoulders' own proportional figures, which
      look better on their own ("11", not "1 1"). */
   --display-figures: 'Offside Figures', 'Big Shoulders Display', 'Big Shoulders Fallback', 'Arial Narrow', sans-serif;
-  --body:    Geist, 'Geist Fallback', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --body:    Archivo, 'Archivo Fallback', system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   /*
    * THE THIRD FACE IS THE BRAND.
@@ -248,7 +255,7 @@
 
   /*
    * FEATURES. Only ones the faces actually have (checked with fontTools):
-   * Geist carries kern, liga, tnum, pnum and frac; Big Shoulders kern and
+   * Archivo carries kern, liga, tnum, pnum and frac; Big Shoulders kern and
    * liga; Caveat calt, whose contextual alternates are what stop a run of
    * the same letter looking stamped.
    */
@@ -378,7 +385,6 @@
    the layout. Non-tabular figures make a live board jitter on every tick. */
 html {
   font-variant-numeric: lining-nums tabular-nums;
-  font-feature-settings: 'cv01' 1, 'ss03' 1;
 }
 
 /* A condensed cut from the display family, for anything that has to survive

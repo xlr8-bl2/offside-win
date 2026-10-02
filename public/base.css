@@ -47,20 +47,30 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
-  font-family: 'Geist';
+  font-family: 'Archivo';
   font-style: normal;
-  font-weight: 400 700;
+  font-weight: 400 800;
   font-display: swap;
-  src: url('/fonts/geist-latin-ext.woff2') format('woff2');
+  src: url('/fonts/archivo-latin-ext.woff2') format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 @font-face {
-  font-family: 'Geist';
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/archivo-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* The wordmark keeps the face it was drawn in: Geist, cut down to the
+   letters a wordmark can use and renamed as the OFL asks (public/fonts). */
+@font-face {
+  font-family: 'Offside Wordmark';
   font-style: normal;
   font-weight: 400 700;
   font-display: swap;
-  src: url('/fonts/geist-latin.woff2') format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  src: url('/fonts/offside-wordmark.woff2') format('woff2');
+  unicode-range: U+002E, U+0041-005A, U+0061-007A;
 }
 @font-face {
   font-family: 'Offside Figures';
@@ -101,11 +111,11 @@
   line-gap-override: 0%;
 }
 @font-face {
-  font-family: 'Geist Fallback';
+  font-family: 'Archivo Fallback';
   src: local('Arial'), local('Helvetica Neue'), local('Roboto'), local('DejaVu Sans');
-  size-adjust: 104%;
-  ascent-override: 96.6%;
-  descent-override: 28.4%;
+  size-adjust: 98.6%;
+  ascent-override: 89%;
+  descent-override: 21.3%;
   line-gap-override: 0%;
 }
 
@@ -354,7 +364,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .wordmark {
   display: inline-flex;
   align-items: baseline;
-  font-family: var(--body);
+  font-family: 'Offside Wordmark', var(--body);
   font-weight: var(--weight-bold);
   font-size: 1.5rem;
   line-height: 1;
@@ -1100,7 +1110,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
  * Punctuation hangs, so a paragraph that opens with a quote mark keeps its
  * left edge on the letters. Numbers in data are equal width everywhere,
  * through the figures font for the display face and the tnum feature for
- * Geist.
+ * Archivo.
  */
 h1, h2, h3, h4, .display, .freecall-sel, .row-sel, .verdict-head .sel { text-wrap: balance; }
 p, li, dd, figcaption, blockquote { text-wrap: pretty; hanging-punctuation: first allow-end last; }
