@@ -37,7 +37,7 @@ export async function render(which) {
 <meta name="description" content="${page.title} for Offside.win, which publishes football match analysis and a call on the biggest games.">
 <link rel="canonical" href="https://offside.win/${which}">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
-<link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/base.css">
 <link rel="stylesheet" href="/components.css">

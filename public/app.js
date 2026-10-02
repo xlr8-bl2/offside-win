@@ -8857,7 +8857,7 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
    */
   const faces = document.fonts?.load
     ? Promise.race([
-      Promise.all([document.fonts.load('700 1em "Big Shoulders Display"'), document.fonts.load('400 1em Geist')]),
+      Promise.all([document.fonts.load('700 1em "Big Shoulders Display"'), document.fonts.load('400 1em Archivo')]),
       new Promise((ok) => setTimeout(ok, 500)),
     ]).catch(() => {})
     : Promise.resolve();

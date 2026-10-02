@@ -47,7 +47,7 @@ saturated green, so it reads as gambling promo. It is semantic here and
 nothing else.
 
 **Superseded:** the paragraphs below describe Bricolage and Inter, which were
-replaced by Big Shoulders Display and Geist (see "Type, in practice" above and
+replaced by Big Shoulders Display and Archivo (see "Type, in practice" above and
 tokens.css). They stay for the reasoning about width and condensed cuts.
 
 **Two faces, and a width axis.** `Bricolage Grotesque` for display and for
@@ -102,12 +102,18 @@ with `style="stroke:var(--...)"`, never `stroke="var(--...)"`.
 ## Type, in practice
 
 - Fonts are self-hosted in `public/fonts` (see its README). No Google Fonts
-  link. Geist, Big Shoulders latin and the 800 figures cut are preloaded.
+  link. Archivo, the wordmark cut, Big Shoulders latin and the 800 figures
+  cut are preloaded.
+- **Reading face: Archivo.** Geist was the reading face until the owner
+  turned it down (October 2026). Before choosing another, check its `tnum`
+  in a browser on a paragraph: `html` sets `tabular-nums` everywhere, and
+  some faces (Schibsted Grotesk) widen full stops and commas under it.
+  The wordmark keeps Geist through `Offside Wordmark`, a renamed subset.
 - **Figures.** Big Shoulders has proportional digits and no `tnum`. Numbers
   in the display face that stack or tick use `--display-figures` (the
   Offside Figures cut, equal widths). The rule is at the end of
-  components.css so it wins. Geist has real `tnum`; tables use that.
-- Only ask for OpenType features the faces have: Geist kern, liga, tnum,
+  components.css so it wins. Archivo has real `tnum`; tables use that.
+- Only ask for OpenType features the faces have: Archivo kern, liga, tnum,
   pnum, frac; Big Shoulders kern, liga; Caveat calt. No small caps and no
   old-style figures exist in any of them, so do not ask for them.
 - Headings `text-wrap: balance`; paragraphs `pretty` with hanging
