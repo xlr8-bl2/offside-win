@@ -321,6 +321,9 @@ export const config = {
      * look like padding.
      */
     minOdds: num('CONF_MIN_ODDS', 1.13),
+    /** The production rule's ceiling on price (lab/tune.ts PROD maxOdds): past
+     *  3.5 a 78% read is the price disagreeing with us, not a call. */
+    maxOdds: num('CONF_MAX_ODDS', 3.5),
     /**
      * The floor for a fixture people came to the site for.
      *

@@ -376,6 +376,7 @@ export function confidentEligible(c: Candidate, floor = config.confident.floor, 
     c.model_prob >= floor + overclaim(MARKET_FAMILY[c.market], calibration) &&
     c.model_prob <= config.confident.ceiling &&
     c.odds >= config.confident.minOdds &&
+    c.odds <= config.confident.maxOdds &&
     (config.confident.minEv <= -1 || c.model_prob * c.odds - 1 >= config.confident.minEv) &&
     c.odds * c.book_prob <= config.confident.maxGap &&
     (c.books ?? 0) >= config.confident.minBooks &&

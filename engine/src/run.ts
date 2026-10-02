@@ -317,6 +317,15 @@ const commands: Record<string, () => Promise<unknown>> = {
     await runLive(await loadHistory());
   },
 
+  // The front page's record from the newest engine: the production rule
+  // replayed on the games already played, stored in kv (lab/record.ts).
+  async 'lab:record'() {
+    requireEnv({ provider: false });
+    const { loadHistory } = await import('./lab/run.ts');
+    const { runRecord } = await import('./lab/record.ts');
+    await runRecord(await loadHistory());
+  },
+
   // Every settled call beside what the match turned out to be, and the
   // argument behind each loss (lab/losses.ts).
   async 'lab:losses'() {

@@ -17,7 +17,7 @@ import { LEGAL, SUPPORT_EMAIL, TERMS_VERSION, UPDATED as TERMS_DATE, legalHTML }
 import { mountPayment, openCheckout } from './js/lib/whop.js';
 import { absenceReason } from './js/lib/absence.js';
 import { enhanceSelects } from './js/lib/dropdown.js';
-import { LANDING_FAQ, LANDING_HEADLINE, LANDING_LEDE, LANDING_STEPS } from './js/lib/front.js';
+import { LANDING_FAQ, LANDING_GETS, LANDING_HEADLINE, LANDING_LEDE } from './js/lib/front.js';
 import { themeArt, themeOf, wakeArt } from './js/lib/comptheme.js';
 import * as attention from './js/lib/attention.js';
 import { anchorClock, clockText, diffEvents, eachFixture, eventKey, fixtureIdOf, ingest, inPlayWindow, overlay, signature } from './js/lib/live.js';
@@ -2377,6 +2377,16 @@ function landingShout(now = new Date()) {
   return 'Football’s on. Let’s gooo.';
 }
 
+/*
+ * The landing page, built to what a landing page is for: one job (get a
+ * visitor to read today's free call; membership is the second step, never a
+ * competing first one), in the order that earns it. Say what it is, plainly,
+ * above the fold, with the proof beside the button; show the product; show
+ * what you get; show the receipts, misses included; price it; answer the
+ * doubts; ask again. Everything shown is real data from the board.
+ */
+const LANDING_COMPS = [[1, 'Premier League'], [7, 'Champions League'], [3, 'La Liga'], [4, 'Serie A'], [5, 'Bundesliga'], [6, 'Ligue 1']];
+
 function landingHTML() {
   return `
   <section class="ld-hero">
@@ -2392,20 +2402,29 @@ function landingHTML() {
         <h1 class="ld-h1"><span class="ld-l">${esc(LANDING_HEADLINE[0])}</span> <span class="ld-l ld-lit">${esc(LANDING_HEADLINE[1])}</span></h1>
         <p class="ld-lede">${esc(LANDING_LEDE)}</p>
         <div class="ld-actions">
-          <a class="btn btn-primary btn-lg ld-go" href="#/board" data-ld="free">See today’s free call</a>
-          <a class="btn btn-ghost btn-lg" href="#/pricing">Join from £3.49</a>
+          <a class="btn btn-primary btn-lg ld-go" href="#/board" data-ld="free">Get today’s free call</a>
+          <a class="ld-alt" href="#/pricing">or see membership, from £3.49</a>
         </div>
-        <p class="ld-small">18+. No guaranteed winners, because there’s no such thing.</p>
+        <div class="ld-proof" data-ld="proof"></div>
+        <p class="ld-small">The free call needs no sign-up. 18+. No guaranteed winners, because there’s no such thing.</p>
       </div>
       <aside class="ld-call" data-ld="call" aria-label="Today’s free call"><div class="ld-call-wait"></div></aside>
     </div>
   </section>
 
-  <section class="ld-strip" data-ld="strip" aria-label="The site in numbers"></section>
+  <section class="ld-comps" aria-label="Competitions we cover">
+    <div class="wrap ld-comps-in">
+      <p>Every big league, and eighty-odd more</p>
+      <ul>${LANDING_COMPS.map(([id, name]) => `<li><a href="#/league/${id}">${crest(name, 'sm', id, 'league')}<span>${esc(name)}</span></a></li>`).join('')}
+        <li><a class="ld-comps-all" href="#/leagues">All of them</a></li></ul>
+    </div>
+  </section>
 
   <section class="wrap ld-sec">
-    <h2 class="ld-h2">How it works</h2>
-    <ol class="ld-how">${LANDING_STEPS.map(([h, p], i) => `<li><span class="ld-node" aria-hidden="true">${i + 1}</span><b>${esc(h)}</b><p>${esc(p)}</p></li>`).join('')}</ol>
+    <h2 class="ld-h2">What’s on every match page</h2>
+    <p class="ld-sub">Free for every game we cover. Shown here on today’s free call.</p>
+    <ol class="ld-gets">${LANDING_GETS.map(([h, p], i) => `
+      <li><div class="ld-get-text"><h3>${esc(h)}</h3><p>${esc(p)}</p></div><div class="ld-get-show" data-ld="get-${i}"></div></li>`).join('')}</ol>
   </section>
 
   <section class="wrap ld-sec" data-ld="record"></section>
@@ -2418,10 +2437,10 @@ function landingHTML() {
 
   <section class="ld-end">
     <div class="wrap ld-end-in">
-      <h2 class="ld-h2">Your game’s probably on the board already.</h2>
+      <h2 class="ld-h2" data-ld="end-title">Your game’s probably on the board already.</h2>
       <div class="ld-actions">
-        <a class="btn btn-primary btn-lg" href="#/board">See today’s games</a>
-        <a class="btn btn-ghost btn-lg" href="#/pricing">Join from £3.49</a>
+        <a class="btn btn-primary btn-lg" href="#/board" data-ld="end-go">Get today’s free call</a>
+        <a class="ld-alt" href="#/pricing">or see membership, from £3.49</a>
       </div>
     </div>
   </section>`;
@@ -2435,10 +2454,14 @@ function landingHTML() {
  * it is left out, and what is left still has to pass the vocabulary rule.
  */
 function excerpt(text, max = 260) {
-  const sentences = String(text ?? '').match(/[^.!?]+[.!?]+(\s|$)/g) ?? [];
+  // A decimal point is not a full stop: hold it while splitting, so "at
+  // 1.14. This reads..." does not come out as "14. This reads...", and the
+  // sentence holding it is dropped below like any other price.
+  const held = String(text ?? '').replace(/(\d)\.(\d)/g, '$1\u2024$2');
+  const sentences = held.match(/[^.!?]+[.!?]+(\s|$)/g) ?? [];
   let out = '';
   for (const s of sentences) {
-    if (/\d\.\d|\bodds\b|\bback(ing)?\b/i.test(s)) continue;
+    if (/\d\u2024\d|\bodds\b|\bback(ing)?\b/i.test(s)) continue;
     if ((out + s).length > max && out) break;
     out += s;
   }
@@ -2466,7 +2489,7 @@ async function viewLanding() {
       { transform: 'none', opacity: 1, filter: 'blur(0)' }], { duration: 640, delay: 420, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'both' });
     app.querySelectorAll('.ld-l').forEach((l, i) => l.animate([{ transform: 'translateY(45%)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 900, delay: 620 + i * 160, easing: EXPO, fill: 'both' }));
     app.querySelector('.ld-lit')?.animate([{ backgroundPosition: '100% 0' }, { backgroundPosition: '0% 0' }], { duration: 1100, delay: 1150, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', fill: 'both' });
-    for (const [sel, d] of [['.ld-lede', 1000], ['.ld-actions', 1120], ['.ld-small', 1200]]) {
+    for (const [sel, d] of [['.ld-lede', 1000], ['.ld-actions', 1120], ['.ld-proof', 1180], ['.ld-small', 1240]]) {
       app.querySelector(`.ld-hero ${sel}`)?.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 700, delay: d, easing: EXPO, fill: 'both' });
     }
     app.querySelector('.ld-go')?.animate([{ boxShadow: '0 0 0 0 rgba(122, 90, 248, 0.7)' }, { boxShadow: '0 0 0 16px rgba(122, 90, 248, 0)' }], { duration: 1200, delay: 1700, iterations: 2, easing: 'ease-out' });
@@ -2474,12 +2497,28 @@ async function viewLanding() {
     app.querySelector('.ld-lit')?.style.setProperty('background-position', '0% 0');
   }
 
-  const [board, hero, picks, plans] = await Promise.all([
+  const [board, hero, livePicks, plans, rec] = await Promise.all([
     loadBoard().catch(() => null),
     getJSON('/api/hero').catch(() => null),
-    getJSON('/api/picks?limit=40&settled=true').then((r) => r.picks ?? []).catch(() => []),
+    getJSON('/api/picks?limit=60&settled=true').then((r) => r.picks ?? []).catch(() => []),
     getJSON('/api/plans').catch(() => []),
+    getJSON('/api/record').catch(() => null),
   ]);
+  // The record is the newest engine's (lab/record.ts): its calls on the games
+  // played before it went live, then the live engine's own from then on.
+  const liveFrom = Number(rec?.live_from) || 0;
+  const replayed = Array.isArray(rec?.rows) ? rec.rows.map((r) => {
+    const same = livePicks.find((x) => Number(x.fixture_id) === Number(r.fixture_id) && x.market === r.market
+      && String(x.outcome) === String(r.outcome) && (x.line ?? null) === (r.line ?? null));
+    return {
+      fixture_id: r.fixture_id, kickoff: r.kickoff, market: r.market, outcome: r.outcome, line: r.line, result: r.result,
+      home_team: r.home, away_team: r.away, home_team_id: r.home_id, away_team_id: r.away_id,
+      home_goals: r.home_goals, away_goals: r.away_goals, narrative: same?.narrative ?? null, why: same?.why ?? null,
+    };
+  }) : [];
+  const picks = replayed.length
+    ? [...livePicks.filter((x) => Number(x.kickoff) >= liveFrom), ...replayed].sort((a, b) => Number(b.kickoff) - Number(a.kickoff))
+    : livePicks;
   if (nav !== navTicket) return;
   const fixtures = board?.fixtures ?? [];
   const put = (key, html) => { const el = app.querySelector(`[data-ld="${key}"]`); if (el) { el.innerHTML = html; smartQuotes(el); } return el; };
@@ -2493,7 +2532,9 @@ async function viewLanding() {
   const why = excerpt((fx?.verdicts ?? []).map((v) => v.why ?? v.narrative).find(Boolean));
   const cta = app.querySelector('[data-ld="free"]');
   if (fx && why) {
-    if (cta) cta.setAttribute('href', `#/fixture/${encodeURIComponent(fx.id)}`);
+    for (const a of app.querySelectorAll('[data-ld="free"], [data-ld="end-go"]')) a.setAttribute('href', `#/fixture/${encodeURIComponent(fx.id)}`);
+    const endTitle = app.querySelector('[data-ld="end-title"]');
+    if (endTitle) endTitle.textContent = `Today’s free call is ${fx.home} v ${fx.away}.`;
     const hex = (c) => (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c : null);
     const hc = hex(fx.colors?.home) ?? '#5b4ad6';
     const ac = hex(fx.colors?.away) ?? '#c9334a';
@@ -2546,48 +2587,87 @@ async function viewLanding() {
   }
 
   // Three numbers, all of them real and all of them pub numbers.
+  // The record: the last forty settled calls, oldest first.
   const all = picks.filter((x) => x.result).slice(0, 40).reverse();
   const isW = (x) => x.result === 'WON' || x.result === 'HALF_WON';
   const isL = (x) => x.result === 'LOST' || x.result === 'HALF_LOST';
   const fw = all.filter(isW).length;
   const fl = all.filter(isL).length;
-  const comps = new Set(fixtures.map((f) => f.league).filter(Boolean)).size;
-  const facts = [
-    comps && [String(comps), comps === 1 ? 'competition on the board' : 'competitions on the board'],
-    fixtures.length && [String(fixtures.length), 'games read in the next three days'],
-    fw + fl && [`${fw} of ${fw + fl}`, 'of our last calls landed'],
-  ].filter(Boolean);
-  put('strip', `<div class="wrap ld-strip-in">${facts.map(([n, l]) => `<div><b>${esc(n)}</b><span>${esc(l)}</span></div>`).join('')}</div>`);
+  const chip = (x) => { const k = isW(x) ? 'w' : isL(x) ? 'l' : 'v'; return `<li class="ld-chip is-${k}" title="${esc(`${x.home_team ?? ''} v ${x.away_team ?? ''}`)}">${k.toUpperCase()}</li>`; };
 
-  // The record, as a form guide: oldest on the left, and the reds stay up.
+  // Proof beside the button: the record in one line and the last ten.
+  if (fw + fl) {
+    put('proof', `<ol class="ld-form ld-form-sm" aria-hidden="true">${all.slice(-10).map(chip).join('')}</ol>
+      <p><b>${fw} of our last ${fw + fl}</b> calls landed, misses counted. <a href="#/results">See the results</a></p>`);
+  } else app.querySelector('[data-ld="proof"]')?.remove();
+
+  // What's on every match page, shown on today's free call.
+  const side = (k) => (k === 'home' ? fx?.home : fx?.away);
+  const out = (fx?.players ?? []).filter((p) => p.status && p.status !== 'fit').slice(0, 3);
+  put('get-0', out.length
+    ? `<ul class="ld-news">${out.map((p) => `<li><b>${esc(p.name)}</b><span>${esc(p.team ?? side(p.side) ?? '')}</span><em>${esc(p.status === 'doubtful' ? 'Doubt' : 'Out')}</em></li>`).join('')}</ul>`
+    : `<p class="ld-show-note">${fx ? `Both squads checked for ${esc(fx.home)} v ${esc(fx.away)}: nobody important missing.` : 'Checked for every game we cover.'}</p>`);
+  const seq = (k) => String(fx?.form?.[k]?.sequence ?? '').slice(-6).split('').filter((c) => 'WDL'.includes(c));
+  put('get-1', fx && (seq('home').length || seq('away').length)
+    ? `<div class="ld-formrows">${['home', 'away'].map((k) => `<div>${crest(side(k), 'xs', fx[`${k}_id`])}<b>${esc(side(k))}</b>
+        <ol class="ld-form ld-form-sm" aria-label="${esc(`${side(k)}, last six, oldest first`)}">${seq(k).map((c) => `<li class="ld-chip is-${c === 'W' ? 'w' : c === 'L' ? 'l' : 'v'}">${c}</li>`).join('')}</ol></div>`).join('')}</div>`
+    : '<p class="ld-show-note">The last six for both sides, on every match page.</p>');
+  const called = fixtures.filter(hasCall).length;
+  put('get-2', fixtures.length
+    ? `<p class="ld-bignum"><b>${called}</b><span>of the ${fixtures.length} games on the board have a call right now. The rest get the reasons we passed.</span></p>`
+    : '');
+  const ago = fx?.computed_at ? Math.max(1, Math.round((Date.now() / 1000 - Number(fx.computed_at)) / 60)) : null;
+  put('get-3', ago && ago < 24 * 60
+    ? `<p class="ld-bignum"><b>${ago < 60 ? `${ago} min` : `${Math.round(ago / 60)} hr`}</b><span>since we last read ${esc(fx.home)} v ${esc(fx.away)}. Next look within fifteen minutes.</span></p>`
+    : '<p class="ld-show-note">Every fifteen minutes, right up to kick-off.</p>');
+  app.querySelectorAll('.ld-get-show').forEach((el) => { if (!el.innerHTML.trim()) el.remove(); });
+
+  // The receipts: the call, and how it finished. The latest three, and if
+  // none of them missed, the latest miss in place of the third, because a
+  // record that only shows wins is an advert. The write-up where the call
+  // has one, the call in words where it does not.
+  const said = picks.filter((x) => x.result && (isW(x) || isL(x)));
+  const shown = said.slice(0, 3);
+  if (shown.length === 3 && !shown.some(isL)) { const miss = said.find(isL); if (miss) shown[2] = miss; }
   if (all.length) {
     put('record', `
-      <div class="ld-sec-head"><h2 class="ld-h2">We keep score in public</h2>
+      <div class="ld-sec-head"><h2 class="ld-h2">The call, then the score.</h2>
         <a class="btn btn-ghost btn-sm" href="#/results">Every result</a></div>
-      <p class="ld-sub">Our last ${all.length} calls, oldest first: ${fw} landed, ${fl} missed. Every one stays on the results page, the misses too.</p>
-      <ol class="ld-form" aria-label="Form guide, oldest first">${all.map((x) => {
-        const k = isW(x) ? 'w' : isL(x) ? 'l' : 'v';
-        return `<li class="ld-chip is-${k}" title="${esc(`${x.home_team ?? ''} v ${x.away_team ?? ''}`)}">${k.toUpperCase()}</li>`;
-      }).join('')}</ol>`);
+      <p class="ld-sub">Our last ${all.length} calls: ${fw} landed, ${fl} missed. The misses stay in.</p>
+      <ol class="ld-form" aria-label="The last ${all.length} calls, oldest first">${all.map(chip).join('')}</ol>
+      ${shown.length ? `<ul class="ld-receipts">${shown.map((x) => `
+        <li class="${isW(x) ? 'is-w' : 'is-l'}">
+          <p class="ld-rc-top"><span class="ld-rc-tag">${isW(x) ? 'Landed' : 'Missed'}</span><span>${esc(new Date(Number(x.kickoff) * 1000).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }))}</span></p>
+          <p class="ld-rc-score">${crest(x.home_team, 'xs', x.home_team_id)}<b>${esc(x.home_team)}</b><span class="ld-rc-goals">${Number(x.home_goals)}–${Number(x.away_goals)}</span><b>${esc(x.away_team)}</b>${crest(x.away_team, 'xs', x.away_team_id)}</p>
+          ${(() => {
+            const text = excerpt(x.narrative ?? x.why, 200);
+            return text
+              ? `<p class="ld-rc-said"><span>What we said</span>${esc(text)}</p>`
+              : `<p class="ld-rc-said"><span>The call</span>${esc(market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team }).name)}</p>`;
+          })()}
+          <a href="#/fixture/${encodeURIComponent(x.fixture_id)}">The match</a>
+        </li>`).join('')}</ul>` : ''}`);
   } else app.querySelector('[data-ld="record"]')?.remove();
 
-  // The plans, as they are sold: the price here is the price charged.
-  const BLURB = {
-    matchday: 'Seven days of every call. Made for one big weekend.',
-    monthly: 'Thirty days of every call, every big night.',
-    quarter: 'Three months, the cheapest way in.',
+  // The plans, each with its own button. The matchday pass is one payment
+  // and stops by itself, which is worth saying where people decide.
+  const PLAN = {
+    matchday: ['One payment, seven days, and it stops by itself.', 'Get the matchday pass'],
+    monthly: ['Thirty days of every call, every big night.', 'Go monthly'],
+    quarter: ['Three months, the cheapest way in.', 'Get three months'],
   };
   const list = (Array.isArray(plans) ? plans : []).filter((p) => p && p.amount_minor).sort((a, b) => a.amount_minor - b.amount_minor);
   if (list.length) {
     put('plans', `
       <h2 class="ld-h2">Every call, from ${esc(money(list[0].amount_minor, list[0].currency))}</h2>
-      <p class="ld-sub">The previews and the record stay free whatever you do. Members get every call the moment it goes up, the bet slip, and the reasons behind all of them.</p>
+      <p class="ld-sub">The match pages, the free call and the record stay free whatever you do. Members get every call the moment it goes up, the bet slip, and the reasons behind all of them.</p>
       <ul class="ld-plans">${list.map((p) => `
-        <li><a href="#/checkout?plan=${encodeURIComponent(p.id)}">
+        <li>
           <b>${esc(p.name)}</b>
           <span class="ld-price">${esc(money(p.amount_minor, p.currency))}</span>
-          <span class="ld-blurb">${esc(BLURB[p.id] ?? `${p.days} days of every call.`)}${p.id === 'quarter' ? ` Works out at ${esc(money(Math.round(p.amount_minor / 3), p.currency))} a month.` : ''}</span>
-        </a></li>`).join('')}</ul>`);
+          <span class="ld-blurb">${esc(PLAN[p.id]?.[0] ?? `${p.days} days of every call.`)}${p.id === 'quarter' ? ` Works out at ${esc(money(Math.round(p.amount_minor / 3), p.currency))} a month.` : ''}</span>
+          <a class="btn ${p.id === 'monthly' ? 'btn-primary' : 'btn-ghost'}" href="#/checkout?plan=${encodeURIComponent(p.id)}">${esc(PLAN[p.id]?.[1] ?? `Get ${p.name}`)}</a>
+        </li>`).join('')}</ul>`);
   } else app.querySelector('[data-ld="plans"]')?.remove();
   tickCountdowns();
 }
