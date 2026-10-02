@@ -1257,8 +1257,9 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
     await kvSetJSON('trap:history', next);
     console.log(`  trap: ${trap.team} (${trap.home} v ${trap.away}), ${trap.reasons.length} reason${trap.reasons.length === 1 ? '' : 's'}`);
   } else {
-    // Leave a trap that has kicked off where it is for the page to let go of;
-    // nothing new to put up.
+    // Nothing worth naming: take down whatever was up, rather than leave a
+    // trap the engine no longer stands behind on the front page.
+    if (wasTrap) await kvSetJSON('trap:today', null);
     console.log(`  trap: none (${traps.length} candidate${traps.length === 1 ? '' : 's'})`);
   }
 

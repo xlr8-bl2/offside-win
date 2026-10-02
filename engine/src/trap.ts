@@ -32,6 +32,15 @@ const CHANGES_AT = 3;
 const DRIFT_AT = 1.06;
 /** How far ahead a trap can be: today's and tonight's games. */
 export const WINDOW_S = 36 * 3600;
+/**
+ * A gap wider than this is not a trap, it is the model missing something.
+ * The first live trap was Brazil away at India in a friendly, with the model
+ * a whole class below the bookies on Brazil: no ratings worth the name for
+ * either side, not an insight.
+ */
+export const GAP_MAX = 0.2;
+/** Friendlies and anything below the covered leagues: prices there mean little. */
+export const RANK_MAX = 6;
 
 export interface TrapInput {
   fixture_id: number;
@@ -80,6 +89,53 @@ function prob(m: Map<Outcome, number> | undefined, o: Outcome): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
+const ev = (f: Factor | undefined, k: string): unknown => (f?.evidence ?? {})[k];
+
+/**
+ * What in the football cuts against the favourite, as a supporter would say
+ * it, from the evidence the engine gathered. Nothing here is the engine's
+ * prose, and each line only appears when it is a reason to doubt them.
+ */
+export function footballAgainst(factors: Factor[], side: 'home' | 'away', team: string, against: string): string[] {
+  const other = side === 'home' ? 'away' : 'home';
+  const by = (id: string) => factors.find((f) => f.id === id && f.state === 'COMPUTED');
+  const out: string[] = [];
+
+  // Who they're missing, when it is someone who matters. The engine names a
+  // player only when they are a real loss to how the side plays.
+  const abs = by(`availability.${side}.absences`);
+  const loss = /, and (.+?) (?:is a real loss|are real losses)\.$/.exec(abs?.note ?? '');
+  if (loss) out.push(`${team} are without ${loss[1]}.`);
+
+  // Their form, where it does not look like a favourite's.
+  const seq = (id: string) => String(ev(by(id), 'sequence') ?? '').replace(/[^WDL]/g, '').slice(-6);
+  const mine = seq(`form.${side}`);
+  if (mine.length >= 5) {
+    const wins = [...mine].filter((c) => c === 'W').length;
+    const lostRun = /L+$/.exec(mine)?.[0].length ?? 0;
+    if (lostRun >= 2) out.push(`${team} have lost their last ${say(lostRun)}.`);
+    else if (wins <= 2) out.push(`${team} have won ${say(wins)} of their last ${say(mine.length)}.`);
+  }
+
+  // The other lot's, where they're coming in hot.
+  const theirs = seq(`form.${other}`);
+  if (theirs.length >= 5) {
+    const unbeaten = /[WD]+$/.exec(theirs)?.[0].length ?? 0;
+    const wins = [...theirs].filter((c) => c === 'W').length;
+    if (unbeaten >= 5) out.push(`${against} are unbeaten in ${say(unbeaten)}.`);
+    else if (wins >= 4) out.push(`${against} have won ${say(wins)} of their last ${say(theirs.length)}.`);
+  }
+
+  // A new manager on the other side, early enough for the lift to be real.
+  const bounce = by(`manager.${other}.bounce`);
+  const games = Number(ev(bounce, 'matches_in_charge'));
+  if (bounce && Number.isFinite(games) && games >= 1 && games <= 5) {
+    out.push(`${against} have a new manager, ${say(games)} game${games === 1 ? '' : 's'} in, and sides usually lift for one.`);
+  }
+
+  return out.filter((r) => findBannedInProse(r).length === 0);
+}
+
 /** The trap on one match, or null when there is not one worth naming. */
 export function trapFor(i: TrapInput): Trap | null {
   const book = i.book.find((b) => b.market === '1x2');
@@ -91,15 +147,18 @@ export function trapFor(i: TrapInput): Trap | null {
   const outcome: Outcome = side === 'home' ? 'HOME' : 'AWAY';
   const theirs = side === 'home' ? ph : pa;
   if (theirs < FAVOURITE_AT) return null;
+  if (i.rank > RANK_MAX) return null;
 
   // A members' call on the result of this match: say nothing about it.
   if (i.calls.some((c) => sideBacked(c.market, String(c.outcome)) !== null)) return null;
 
   const team = side === 'home' ? i.home : i.away;
   const against = side === 'home' ? i.away : i.home;
-  const other = side === 'home' ? 'away' : 'home';
   const ours = prob(i.model.find((m) => m.market === '1x2')?.probs, outcome);
-  const gap = ours === null ? 0 : theirs - ours;
+  const raw = ours === null ? 0 : theirs - ours;
+  // Too wide to believe: the model has no real read on one of these sides.
+  if (raw > GAP_MAX) return null;
+  const gap = raw;
 
   const reasons: string[] = [];
 
@@ -120,25 +179,20 @@ export function trapFor(i: TrapInput): Trap | null {
     || (openFair !== null && openFair - theirs >= 0.03);
   if (drifting) reasons.push(`The bookies have been pushing ${team} out since the first prices went up.`);
 
-  // The football: the factors that pull against them, in the engine's own
-  // notes where those read as a supporter would say them.
-  const against_ = i.factors
-    .filter((f) => f.state === 'COMPUTED' && f.note && f.adjustments.some((a) => a.channel === 'goals'
-      && ((a.side === side && a.multiplier < 1) || (a.side === other && a.multiplier > 1))))
-    .sort((a, b) => b.strength - a.strength);
-  for (const f of against_) {
-    if (reasons.length >= 3) break;
-    const note = f.note.trim();
-    if (findBannedInProse(note).length) continue;
-    if (reasons.includes(note)) continue;
-    reasons.push(note);
-  }
+  // The football, said our way. The engine's notes were used as they stood
+  // at first, and the first live trap read "The new-manager bounce window is
+  // live but reverts by around game six" and "Brazil are without 1 player,
+  // none of them central to how the side plays" -- one in the engine's own
+  // vocabulary and one an argument for the favourite. These are written from
+  // the evidence instead, and only say something that cuts against them.
+  reasons.push(...footballAgainst(i.factors, side, team, against));
 
   // It has to be ours to say: we rate them lower, or the side is not the one
   // that was priced. A favourite we agree with is not a trap however many
   // little things pull against it.
   const ourCase = gap >= GAP_AT || (ch !== null && ch.n >= ROTATED_AT) || (drifting && gap > 0);
-  if (!ourCase || reasons.length === 0) return null;
+  // One thin reason is not a trap. A rotated side is, on its own.
+  if (!ourCase || reasons.length < (ch !== null && ch.n >= ROTATED_AT ? 1 : 2)) return null;
 
   const score = gap * 20 + reasons.length + (rotated ? 1 : 0) + (drifting ? 0.5 : 0) + theirs - i.rank * 0.4;
   return {
