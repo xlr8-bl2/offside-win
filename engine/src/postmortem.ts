@@ -56,6 +56,8 @@ export interface PostMortem {
   closing_odds: number | null;
   /** The verdict, in words. */
   line: string;
+  /** What decided it, from the match report (decidedBy), once there is one. */
+  decided?: string[];
 }
 
 export interface PostMortemInput {
@@ -271,4 +273,120 @@ export function swingLine(pm: PostMortem): string | null {
   return pm.landed === 'missed'
     ? `${goals[0]!.toUpperCase()}${goals.slice(1)} away from landing.`
     : `${goals[0]!.toUpperCase()}${goals.slice(1)} of cushion.`;
+}
+
+/* ------------------------------------------------- what decided it */
+
+/**
+ * What decided it, from what actually happened in the match.
+ *
+ * The verdict above judges the call against the score and the shape we
+ * published. This adds the moments a supporter would name walking out of the
+ * ground, read straight off the match report and nothing else: the late goal
+ * that flipped how the call settled, a sending-off, and a side that battered
+ * the other and still did not get the result we called for it. All of it is
+ * on the record of the match; none of it grades the reasoning, which is the
+ * line the rest of this file holds.
+ *
+ * At most two, most decisive first. An empty list when the report says
+ * nothing that settles anything, which is most matches.
+ */
+export interface DecidedEvent {
+  t: string;
+  minute: number | null;
+  added?: number | null;
+  side: 'home' | 'away' | null;
+  player?: string | null;
+  kind?: string | null;
+  card?: string | null;
+}
+export interface DecidedSide { shots?: number | null; on_target?: number | null; big_chances?: number | null }
+
+export interface DecidedInput {
+  market: MarketCode;
+  outcome: Outcome;
+  line: number | null;
+  homeGoals: number;
+  awayGoals: number;
+  home: string;
+  away: string;
+  events: DecidedEvent[];
+  stats?: { home?: DecidedSide | null; away?: DecidedSide | null } | null;
+}
+
+export function ordinal(n: number): string {
+  const v = n % 100;
+  const s = v >= 11 && v <= 13 ? 'th' : n % 10 === 1 ? 'st' : n % 10 === 2 ? 'nd' : n % 10 === 3 ? 'rd' : 'th';
+  return `${n}${s}`;
+}
+
+/** The side a result call backs, where it backs one. */
+function backedSide(market: MarketCode, outcome: Outcome): 'home' | 'away' | null {
+  const o = String(outcome);
+  if (market === '1x2' || market === 'draw_no_bet' || market === 'asian_handicap' || market === 'european_handicap') {
+    return o === 'HOME' ? 'home' : o === 'AWAY' ? 'away' : null;
+  }
+  if (market === 'double_chance') return o === '1X' ? 'home' : o === 'X2' ? 'away' : null;
+  return null;
+}
+
+export function decidedBy(input: DecidedInput): string[] {
+  const { market, outcome, line, home, away } = input;
+  if (!GOAL_SETTLED.has(market)) return [];
+  const grade = (h: number, a: number) =>
+    settleSelection(market, outcome, line, 2, { homeGoals: h, awayGoals: a, homeCorners: null, awayCorners: null, reds: null })?.result;
+  const final = grade(input.homeGoals, input.awayGoals);
+  if (!final) return [];
+  const landed = final === 'WON' || final === 'HALF_WON';
+  const missed = final === 'LOST' || final === 'HALF_LOST';
+  const name = (s: 'home' | 'away' | null) => (s === 'home' ? home : s === 'away' ? away : 'somebody');
+  const at = (e: DecidedEvent) => (e.minute ?? 0) + (e.added ?? 0) / 100;
+  const out: string[] = [];
+
+  // The goal that settled it: the last one after which the call's grade
+  // changed, if it came late enough to be the story.
+  const goals = input.events.filter((e) => e.t === 'goal' && (e.side === 'home' || e.side === 'away')).sort((a, b) => at(a) - at(b));
+  // Only when the report has every goal: a partial feed would name the wrong one.
+  if (goals.length === input.homeGoals + input.awayGoals) {
+    let h = 0, a = 0, last: DecidedEvent | null = null;
+    let prev = grade(0, 0);
+    for (const g of goals) {
+      if (g.side === 'home') h++; else a++;
+      const now = grade(h, a);
+      if (now !== prev) last = g;
+      prev = now;
+    }
+    if (last && (last.minute ?? 0) >= 80 && (landed || missed)) {
+      const kind = String(last.kind ?? '').toLowerCase();
+      const own = kind.includes('own');
+      const pen = kind.includes('pen');
+      const who = own ? `an own goal` : last.player ? `${last.player}’s ${pen ? 'penalty' : 'goal'}` : `a ${name(last.side)} ${pen ? 'penalty' : 'goal'}`;
+      const when = last.added ? 'in stoppage time' : `in the ${ordinal(last.minute ?? 90)} minute`;
+      out.push(landed ? `Got over the line with ${who} ${when}.` : `Undone by ${who} ${when}.`);
+    }
+  }
+
+  // A sending-off, while there was still a game to play.
+  const red = input.events
+    .filter((e) => e.t === 'card' && (e.card === 'red' || e.card === 'second_yellow') && (e.side === 'home' || e.side === 'away'))
+    .sort((x, y) => at(x) - at(y))[0];
+  if (red && (red.minute ?? 0) < 85) out.push(`${name(red.side)} were down to ten from the ${ordinal(red.minute ?? 0)} minute.`);
+
+  // The side we backed had the game and not the result.
+  const side = backedSide(market, outcome);
+  const st = input.stats;
+  if (missed && side && st?.home && st?.away) {
+    const mine = Number(st[side]?.shots ?? NaN);
+    const theirs = Number(st[side === 'home' ? 'away' : 'home']?.shots ?? NaN);
+    if (Number.isFinite(mine) && Number.isFinite(theirs) && mine >= 2 * theirs && mine - theirs >= 8) {
+      out.push(`${name(side)} had ${mine} shots to ${theirs} and still couldn’t get it done.`);
+    }
+  }
+  // Goals we called for and the chances were there.
+  if (missed && (market.startsWith('over_under') || market === 'btts') && /over|yes/i.test(String(outcome)) && st?.home && st?.away) {
+    const shots = Number(st.home?.shots ?? 0) + Number(st.away?.shots ?? 0);
+    const goalsIn = input.homeGoals + input.awayGoals;
+    if (shots >= 25) out.push(`${shots} shots between them and only ${goalsIn === 0 ? 'no goals' : goalsIn === 1 ? 'one goal' : `${goalsIn} goals`}.`);
+  }
+  return out.slice(0, 2);
 }

@@ -19,6 +19,7 @@ import { absenceReason } from './js/lib/absence.js';
 import { enhanceSelects } from './js/lib/dropdown.js';
 import { LANDING_FAQ, LANDING_GETS, LANDING_HEADLINE, LANDING_LEDE } from './js/lib/front.js';
 import { themeArt, themeOf, wakeArt } from './js/lib/comptheme.js';
+import { sweat } from './js/lib/sweat.js';
 import * as attention from './js/lib/attention.js';
 import { anchorClock, clockText, diffEvents, eachFixture, eventKey, fixtureIdOf, ingest, inPlayWindow, overlay, signature } from './js/lib/live.js';
 import { TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle, ukDay } from './js/lib/titles.js';
@@ -897,24 +898,25 @@ function skeletonHTML(kind = 'page') {
 }
 
 /**
- * How a call is doing while the match is on.
+ * How a call is doing while the match is on: the sweat (js/lib/sweat.js).
  *
- * The same grader the board runs on a finished match, run on the running
- * score: a call that would land if the whistle went now is "on track", one
- * that would not is "not yet". Neither is a verdict -- a match is not over at
- * the hour -- so the words say so, and "not yet" is amber, the colour of a
- * thing still pending, rather than the red of a loss. Markets the score cannot
- * grade (corners, cards, a level handicap) get nothing.
+ * What has to happen now, in the words you'd use watching it -- already in,
+ * needs a goal, one goal against and it's gone -- and how it looks from here,
+ * from the score, the clock and our expected goals. Never a number. Markets
+ * the score cannot grade (corners, cards) get nothing.
  */
 function liveTrack(pick, f) {
   if (!pick || !f || matchState(f).kind !== 'live') return null;
   const ls = Array.isArray(f.live_score) && f.live_score.length === 2 ? f.live_score : null;
   if (!ls) return null;
-  const r = didItLand({ market: pick.market, outcome: pick.outcome, line: pick.line, homeGoals: ls[0], awayGoals: ls[1] });
-  if (r !== 'won' && r !== 'lost') return null;
-  return { on: r === 'won', score: `${ls[0]}–${ls[1]}` };
+  const rates = Array.isArray(f.lambda) ? f.lambda
+    : Number.isFinite(Number(f.lambda_home)) ? [f.lambda_home, f.lambda_away] : null;
+  return sweat({
+    market: pick.market, outcome: pick.outcome, line: pick.line, score: ls,
+    minute: f.live_minute ?? null, status: f.status, rates, who: { home: f.home, away: f.away },
+  });
 }
-const trackHTML = (t) => (t ? `<span class="track ${t.on ? 'on' : 'off'}"><i></i>${t.on ? 'On track' : 'Not yet'}</span>` : '');
+const trackHTML = (t) => (t ? `<span class="track ${t.tone}" title="${esc(t.need)}"><i></i>${esc(t.headline)}</span>` : '');
 
 async function loadBoard({ fresh = false } = {}) {
   state.board = await getJSON(`/api/board?hours=${state.hours}`, { fresh });
@@ -1663,7 +1665,7 @@ function tickerHTML(fixtures, recent) {
     const sc = Array.isArray(f.live_score) ? f.live_score : null;
     const t = liveTrack(f.top_pick, f);
     items.push({ tone: 'live', href: `#/fixture/${f.id}`,
-      text: `${t ? (t.on ? 'On track: ' : 'Not yet: ') : ''}${f.home} ${sc ? `${sc[0]}–${sc[1]}` : 'v'} ${f.away}` });
+      text: `${t ? `${t.headline}: ` : ''}${f.home} ${sc ? `${sc[0]}–${sc[1]}` : 'v'} ${f.away}` });
   }
   const today = new Date().toDateString();
   for (const x of (recent ?? []).filter((r) => new Date(r.kickoff * 1000).toDateString() === today).slice(0, 8)) {
@@ -2369,6 +2371,41 @@ async function viewHome() {
 }
 
 
+/*
+ * The trap of the day (engine/src/trap.ts): a favourite everyone is on and we
+ * wouldn't touch, with the reasons. Free, on the front page and the members'
+ * home, and priceless on purpose: it is a warning, not a call, and the pages
+ * it sits on carry no odds. The slate leaves it off any match where we have a
+ * members' call on the result.
+ */
+function trapHTML(t, { on = 'landing' } = {}) {
+  if (!t || !t.fixture_id || !(Number(t.kickoff) > Date.now() / 1000)) return '';
+  const reasons = (Array.isArray(t.reasons) ? t.reasons : []).map((r) => cleanProse(r)).filter(Boolean).slice(0, 3);
+  if (!reasons.length) return '';
+  const where = t.side === 'home' ? `at home to ${t.against}` : `away at ${t.against}`;
+  const teamId = t.side === 'home' ? t.home_id : t.away_id;
+  return `
+    ${on === 'landing' ? `<div class="ld-sec-head"><h2 class="ld-h2">One to leave alone</h2></div>
+    <p class="ld-sub">The trap of the day: a favourite everyone’s on that we wouldn’t touch. Free, every day.</p>`
+      : '<div class="section-head"><div><h2 class="display">One to leave alone</h2></div></div>'}
+    <article class="trap">
+      <div class="trap-tape" aria-hidden="true"></div>
+      <div class="trap-who">
+        ${crest(t.team, 'xl', teamId)}
+        <div>
+          <p class="trap-label">Trap of the day</p>
+          <p class="trap-team">${esc(t.team)}</p>
+          <p class="trap-tie"><span>${esc(where)}</span>${t.league ? `<span>${esc(t.league)}</span>` : ''}<span>${esc(kickoffLabel(t.kickoff))}</span></p>
+        </div>
+      </div>
+      <div class="trap-body">
+        <p class="trap-head">Everyone’s on ${esc(t.team)}. We wouldn’t be.</p>
+        <ul class="trap-why">${reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
+        <p class="trap-foot"><a href="#/fixture/${encodeURIComponent(t.fixture_id)}">Read the match</a><span>A warning, not a call.</span></p>
+      </div>
+    </article>`;
+}
+
 /** The shout over the headline, for the day it is. */
 function landingShout(now = new Date()) {
   const d = now.getDay();
@@ -2419,6 +2456,8 @@ function landingHTML() {
         <li><a class="ld-comps-all" href="#/leagues">All of them</a></li></ul>
     </div>
   </section>
+
+  <section class="wrap ld-sec" data-ld="trap"></section>
 
   <section class="wrap ld-sec">
     <h2 class="ld-h2">What’s on every match page</h2>
@@ -2514,6 +2553,7 @@ async function viewLanding() {
       fixture_id: r.fixture_id, kickoff: r.kickoff, market: r.market, outcome: r.outcome, line: r.line, result: r.result,
       home_team: r.home, away_team: r.away, home_team_id: r.home_id, away_team_id: r.away_id,
       home_goals: r.home_goals, away_goals: r.away_goals, narrative: same?.narrative ?? null, why: same?.why ?? null,
+      postmortem_json: same?.postmortem_json ?? r.postmortem ?? null,
     };
   }) : [];
   const picks = replayed.length
@@ -2522,6 +2562,11 @@ async function viewLanding() {
   if (nav !== navTicket) return;
   const fixtures = board?.fixtures ?? [];
   const put = (key, html) => { const el = app.querySelector(`[data-ld="${key}"]`); if (el) { el.innerHTML = html; smartQuotes(el); } return el; };
+
+  // The trap of the day, where there is one.
+  const trap = trapHTML(hero?.trap);
+  if (trap) put('trap', trap);
+  else app.querySelector('[data-ld="trap"]')?.remove();
 
   // Today's free call: the match and the reasoning, linked. No pick, no price.
   const freeId = hero?.free_fixture_id ?? fixtures.find((f) => f.free_call)?.id ?? null;
@@ -2645,6 +2690,10 @@ async function viewLanding() {
               ? `<p class="ld-rc-said"><span>What we said</span>${esc(text)}</p>`
               : `<p class="ld-rc-said"><span>The call</span>${esc(market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team }).name)}</p>`;
           })()}
+          ${(() => {
+            const went = wentLine(x);
+            return went ? `<p class="ld-rc-went"><span>How it went</span>${esc(went)}</p>` : '';
+          })()}
           <a href="#/fixture/${encodeURIComponent(x.fixture_id)}">The match</a>
         </li>`).join('')}</ul>` : ''}`);
   } else app.querySelector('[data-ld="record"]')?.remove();
@@ -2745,6 +2794,7 @@ async function viewDashboard() {
     `<div data-live="today">${todayStripHTML(fixtures, recent)}</div>` +
     `<div data-live="mine">${yourGamesHTML(fixtures)}</div>` +
     `<div data-live="rail">${nextRailHTML(rail())}</div>` +
+    ((t) => (t ? `<div class="wrap section dense">${t}</div>` : ''))(trapHTML(state.hero?.trap, { on: 'home' })) +
     `<div class="wrap section dense">
        <div class="with-side">
          <div class="stack" style="gap:var(--space-9)">
@@ -3543,8 +3593,8 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
     ${landed
       ? `<p class="wins">${esc(story ?? d.wins)}</p>`
       : `<p class="wins">${esc(d.wins)}</p>`}
-    ${track ? `<p class="track-line">${trackHTML(track)} It is ${esc(track.score)} as things stand${
-        track.on ? ', which is what we need.' : ', so this one still has work to do.'}</p>` : ''}
+    ${landed && v.record?.postmortem ? postMortemHTML({ postmortem_json: v.record.postmortem }) : ''}
+    ${track ? `<p class="track-line">${trackHTML(track)}<span>${esc(track.need)} It’s ${esc(track.score)}. ${esc(track.time)}</span></p>` : ''}
     ${prose ? `<p class="narrative">${link(esc(prose))}</p>` : ''}
     ${why ? `<div class="why"><p class="why-head">Why this call</p><p>${link(esc(why))}</p></div>` : ''}
     ${played && (prose || why) ? `<p class="aside">Written before kick-off, and left as it was.</p>` : ''}
@@ -5386,11 +5436,34 @@ function postMortemHTML(x) {
       : `odds moved from ${showOdds(pm.opening_odds)} to ${showOdds(pm.closing_odds)} by kick-off`);
   }
 
+  // What decided it, from the match report once there is one: the late goal
+  // that flipped it, a sending-off, a side that battered the other and lost.
+  // Settle adds it after the report is fetched, so a call settled in the last
+  // hour may not carry it yet, and most matches have nothing to add.
+  const decided = Array.isArray(pm.decided) ? pm.decided.filter((d) => typeof d === 'string' && d) : [];
+
   return `
   <div class="pm is-${esc(pm.landed)}">
     <p class="pm-line">${esc(String(pm.line).replace('One goal in it. Right, but there was nothing spare.', 'One goal the other way and it was gone. Right, with nothing to spare.'))}</p>
+    ${decided.length ? `<p class="pm-decided">${decided.map((d) => esc(d)).join(' ')}</p>` : ''}
     ${facts.length ? `<p class="pm-facts">${facts.map((f) => `<span>${esc(f)}</span>`).join('')}</p>` : ''}
   </div>`;
+}
+
+/**
+ * How it went, in one or two sentences, for a page with no room for the whole
+ * post-mortem: what decided it where the match report says, the verdict where
+ * it does not. The front door carries no prices, so a verdict that leans on
+ * how the odds moved is left for the results page.
+ */
+function wentLine(x) {
+  let pm = null;
+  try { pm = typeof x.postmortem_json === 'string' ? JSON.parse(x.postmortem_json) : x.postmortem_json; } catch { pm = null; }
+  if (!pm) return null;
+  const decided = (Array.isArray(pm.decided) ? pm.decided : []).map((d) => cleanProse(d)).filter(Boolean);
+  if (decided.length) return decided.join(' ');
+  const line = cleanProse(pm.line);
+  return line && !/\b(?:market|price|odds)\b/i.test(line) ? line : null;
 }
 
 const RESULT_TONE = {
