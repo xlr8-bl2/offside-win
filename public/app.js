@@ -5032,36 +5032,29 @@ function pulledHTML(f) {
 }
 
 /*
- * When we say likely, does it happen?
+ * When we're confident, are we right?
  *
  * Every settled call we published, grouped by how sure we were when we made
  * it, to the nearest tenth (get_how_sure in schema.pg.sql), against how many
- * landed. The point is honesty: nobody else in this trade shows it, and a
- * site that is right about how right it is has earned the next call.
+ * landed. The point is honesty: nobody else in this trade shows it.
  *
- * Said in pub numbers, never percentages (offside-voice): "about eight in
- * ten", "41 of 45". Each group is a bar of ten: filled for how many in ten
- * landed, a line where we said they would. Groups too small to mean anything
- * say so rather than drawing a confident-looking bar over three calls.
+ * The first version drew a bar of ten per group with a marker for what we
+ * said, and the owner read it and "didn't get it at all". So it now leads
+ * with one worked example in sentences -- our most common kind of call: how
+ * many we made, how many should land if we are honest, how many did -- and
+ * then the same three counts for every level, as a plain table. Counts a
+ * reader can check on their fingers, never percentages (offside-voice).
  */
 const TENTHS = ['none', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 const SURE_MIN = 15;
-function sureWords(tenths) {
-  return tenths >= 10 ? 'as good as certain' : `about ${TENTHS[tenths]} in ten`;
-}
-function sureVerdict(n, rate, said) {
-  if (n < SURE_MIN) return 'Too few to say yet.';
-  const d = rate - said;
-  if (Math.abs(d) <= 0.04) return 'Bang on.';
-  if (d > 0.04) return 'Better than we said.';
-  return d <= -0.1 ? 'Well short. We were too sure of these.' : 'A little short of what we said.';
-}
-function sureBar(rate, said, label) {
-  const pc = (x) => `${Math.max(0, Math.min(1, Number(x) || 0)) * 100}%`;
-  return `<div class="sure-bar" role="img" aria-label="${esc(label)}">
-    <span class="sure-fill" style="width:${pc(rate)}"></span>
-    <span class="sure-said" style="left:${pc(said)}"></span>
-  </div>`;
+const sureWords = (tenths) => (tenths >= 10 ? 'as good as certain' : `${TENTHS[tenths]} in ten`);
+/** How it went, short: for the table. */
+function sureShort(n, landed, expected) {
+  if (n < SURE_MIN) return 'Too few to judge yet';
+  const d = (landed - expected) / n;
+  if (Math.abs(d) <= 0.04) return 'Bang on';
+  if (d > 0) return 'Better than we said';
+  return d <= -0.1 ? 'Well short' : 'A little short';
 }
 
 async function viewHowSure() {
@@ -5070,37 +5063,60 @@ async function viewHowSure() {
   let d;
   try { d = await getJSON('/api/how-sure'); } catch (err) { return errorState(err, nav); }
   if (nav !== navTicket) return;
+  const bands = (Array.isArray(d?.bands) ? d.bands : [])
+    .map((b) => ({ tenths: Number(b.tenths), n: Number(b.n), landed: Number(b.landed), said: Number(b.said) }))
+    .filter((b) => b.n > 0);
+  const expect = (b) => Math.round(b.n * b.said);
   const n = Number(d?.n) || 0;
-  const landed = Number(d?.landed) || 0;
-  const said = Number(d?.said) || 0;
-  const bands = (Array.isArray(d?.bands) ? d.bands : []).filter((b) => Number(b.n) > 0);
-  const overallTenths = Math.round(said * 10);
+  const all = { n, landed: Number(d?.landed) || 0, said: Number(d?.said) || 0 };
   const day = (t) => new Date(Number(t) * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+
+  // The worked example: the level we use most.
+  const ex = [...bands].sort((a, b) => b.n - a.n)[0] ?? null;
+  const exWords = ex ? sureWords(ex.tenths) : '';
+  const exExpect = ex ? expect(ex) : 0;
+  const exVerdict = !ex ? '' : (() => {
+    const v = sureShort(ex.n, ex.landed, exExpect);
+    if (v === 'Bang on') return `Bang on. When we say ${exWords}, we mean it.`;
+    if (v === 'Better than we said') return `Better than we said. When we say ${exWords}, it has come in even more often.`;
+    const got = Math.round((ex.landed / ex.n) * 10);
+    return `${v}. When we say ${exWords}, it has been nearer ${TENTHS[got] ?? got} in ten, and we would rather show you that than hide it.`;
+  })();
 
   app.innerHTML = `
   <div class="wrap section sure">
     <div class="page-head">
-      <h1 class="display xl">When we say likely, does it happen?</h1>
-      <p class="page-sub">Every call we’ve published and settled, grouped by how sure we were when we made it,
-        against how many landed. Misses counted, refunds left out.</p>
+      <h1 class="display xl">When we’re confident, are we right?</h1>
+      <p class="page-sub">Every call we make comes with how sure we are about it. If we say a call lands eight times in ten,
+        then out of every ten calls like that, about eight should land. This page checks that against every call we’ve made, misses included.</p>
     </div>
-    ${n === 0 ? '<p class="record-sub">Nothing has settled yet. This fills in as the first results come in.</p>' : `
-    <p class="figure-line sure-head">We said about ${esc(TENTHS[overallTenths] ?? overallTenths)} in ten would land. <b class="fig won">${landed} of ${n}</b> did.</p>
-    <p class="record-sub">${esc(sureVerdict(n, landed / n, said))}</p>
-    ${sureBar(landed / n, said, `All calls: we said about ${TENTHS[overallTenths] ?? overallTenths} in ten, ${landed} of ${n} landed`)}
-    <p class="sure-key"><span class="k-fill"></span>How many in ten landed <span class="k-said"></span>How many we said would</p>
+    ${!ex ? '<p class="record-sub">Nothing has settled yet. This fills in as the first results come in.</p>' : `
+    <section class="sure-eg" aria-label="An example">
+      <p class="sure-eg-lead">Take our most common kind of call.</p>
+      <ol class="sure-steps">
+        <li><b>${ex.n}</b><span>times we rated a call about ${esc(exWords)}.</span></li>
+        <li><b>${exExpect}</b><span>is about ${esc(exWords)} of ${ex.n}. That’s how many should land if we’re honest.</span></li>
+        <li class="is-did"><b>${ex.landed}</b><span>actually landed.</span></li>
+      </ol>
+      <p class="sure-eg-verdict">${esc(exVerdict)}</p>
+    </section>
 
-    <ol class="sure-bands">${bands.map((b) => {
-      const bn = Number(b.n); const bl = Number(b.landed); const bs = Number(b.said); const t = Number(b.tenths);
-      return `<li class="${bn < SURE_MIN ? 'is-thin' : ''}">
-        <h2 class="sure-q">When we said ${esc(sureWords(t))}</h2>
-        ${bn < SURE_MIN ? '' : sureBar(bl / bn, bs, `We said ${sureWords(t)}; ${bl} of ${bn} landed`)}
-        <p class="sure-nums"><b>${bl} of ${bn}</b> landed. <span>${esc(sureVerdict(bn, bl / bn, bs))}</span></p>
-      </li>`;
-    }).join('')}</ol>
-
-    <p class="record-sub sure-foot">Counted from ${esc(day(d.from))} to ${esc(day(d.to))}, and updated as each match finishes.
-      Every call, one by one, is on <a href="#/results">the results page</a>.</p>`}
+    <h2 class="sure-h2">Every level, every call</h2>
+    <div class="sure-wrap">
+      <table class="tbl sure-tbl">
+        <thead><tr><th>We rated it</th><th class="num">Calls</th><th class="num">Should land</th><th class="num">Landed</th></tr></thead>
+        <tbody>
+          ${bands.map((b) => `<tr>
+            <td>About ${esc(sureWords(b.tenths))}<small>${esc(sureShort(b.n, b.landed, expect(b)))}</small></td>
+            <td class="num">${b.n}</td><td class="num">${b.n < SURE_MIN ? '–' : expect(b)}</td><td class="num"><b>${b.landed}</b></td>
+          </tr>`).join('')}
+          <tr class="sure-total"><td>All calls<small>${esc(sureShort(all.n, all.landed, Math.round(all.n * all.said)))}</small></td>
+            <td class="num">${all.n}</td><td class="num">${Math.round(all.n * all.said)}</td><td class="num"><b>${all.landed}</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="record-sub sure-foot">“Should land” is what we expected when we made the calls. Calls from ${esc(day(d.from))} to ${esc(day(d.to))},
+      updated as each match finishes. Refunds are left out. Every call, one by one, is on <a href="#/results">the results page</a>.</p>`}
   </div>`;
   smartQuotes(app);
 }
@@ -5260,7 +5276,7 @@ async function viewResults() {
            is what those odds already expect. Winning most is not the same as
            being ahead.`
         : 'These are short prices, so winning most of them is not the same as being ahead.'}</p>
-      <p class="record-sub"><a class="record-link" href="#/how-sure">When we say likely, does it happen? How sure we were, against how often we were right.</a></p>
+      <p class="record-sub"><a class="record-link" href="#/how-sure">When we’re confident, are we right? See how often our calls land against how sure we were.</a></p>
       ${n > 0 && n < 100
         ? `<p class="record-note">That is ${n} results. It is not enough to tell a good run
              from a good model, and we will say so until it is.</p>`
