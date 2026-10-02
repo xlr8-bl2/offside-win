@@ -26,6 +26,7 @@
     "lab:losses": "npm -w engine run lab:losses",
     "lab:slices": "npm -w engine run lab:slices",
     "lab:live": "npm -w engine run lab:live",
+    "lab:record": "npm -w engine run lab:record",
     "lab:calib": "npm -w engine run lab:calib",
     "lab:leans": "npm -w engine run lab:leans",
     "poster:preview": "npm -w engine run poster:preview",

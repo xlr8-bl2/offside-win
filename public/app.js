@@ -2497,12 +2497,28 @@ async function viewLanding() {
     app.querySelector('.ld-lit')?.style.setProperty('background-position', '0% 0');
   }
 
-  const [board, hero, picks, plans] = await Promise.all([
+  const [board, hero, livePicks, plans, rec] = await Promise.all([
     loadBoard().catch(() => null),
     getJSON('/api/hero').catch(() => null),
-    getJSON('/api/picks?limit=40&settled=true').then((r) => r.picks ?? []).catch(() => []),
+    getJSON('/api/picks?limit=60&settled=true').then((r) => r.picks ?? []).catch(() => []),
     getJSON('/api/plans').catch(() => []),
+    getJSON('/api/record').catch(() => null),
   ]);
+  // The record is the newest engine's (lab/record.ts): its calls on the games
+  // played before it went live, then the live engine's own from then on.
+  const liveFrom = Number(rec?.live_from) || 0;
+  const replayed = Array.isArray(rec?.rows) ? rec.rows.map((r) => {
+    const same = livePicks.find((x) => Number(x.fixture_id) === Number(r.fixture_id) && x.market === r.market
+      && String(x.outcome) === String(r.outcome) && (x.line ?? null) === (r.line ?? null));
+    return {
+      fixture_id: r.fixture_id, kickoff: r.kickoff, market: r.market, outcome: r.outcome, line: r.line, result: r.result,
+      home_team: r.home, away_team: r.away, home_team_id: r.home_id, away_team_id: r.away_id,
+      home_goals: r.home_goals, away_goals: r.away_goals, narrative: same?.narrative ?? null, why: same?.why ?? null,
+    };
+  }) : [];
+  const picks = replayed.length
+    ? [...livePicks.filter((x) => Number(x.kickoff) >= liveFrom), ...replayed].sort((a, b) => Number(b.kickoff) - Number(a.kickoff))
+    : livePicks;
   if (nav !== navTicket) return;
   const fixtures = board?.fixtures ?? [];
   const put = (key, html) => { const el = app.querySelector(`[data-ld="${key}"]`); if (el) { el.innerHTML = html; smartQuotes(el); } return el; };
@@ -2582,7 +2598,7 @@ async function viewLanding() {
   // Proof beside the button: the record in one line and the last ten.
   if (fw + fl) {
     put('proof', `<ol class="ld-form ld-form-sm" aria-hidden="true">${all.slice(-10).map(chip).join('')}</ol>
-      <p><b>${fw} of our last ${fw + fl}</b> calls landed. <a href="#/results">Every one is on the record.</a></p>`);
+      <p><b>${fw} of our last ${fw + fl}</b> calls landed, misses counted. <a href="#/results">See the results</a></p>`);
   } else app.querySelector('[data-ld="proof"]')?.remove();
 
   // What's on every match page, shown on today's free call.
@@ -2606,25 +2622,30 @@ async function viewLanding() {
     : '<p class="ld-show-note">Every fifteen minutes, right up to kick-off.</p>');
   app.querySelectorAll('.ld-get-show').forEach((el) => { if (!el.innerHTML.trim()) el.remove(); });
 
-  // The receipts: what we said before kick-off, and how it finished. The
-  // latest three with a write-up, and if none of them missed, the latest
-  // miss in place of the third, because a record that only shows wins is
-  // an advert.
-  const said = picks.filter((x) => x.result && (isW(x) || isL(x)) && excerpt(x.narrative ?? x.why, 200));
+  // The receipts: the call, and how it finished. The latest three, and if
+  // none of them missed, the latest miss in place of the third, because a
+  // record that only shows wins is an advert. The write-up where the call
+  // has one, the call in words where it does not.
+  const said = picks.filter((x) => x.result && (isW(x) || isL(x)));
   const shown = said.slice(0, 3);
   if (shown.length === 3 && !shown.some(isL)) { const miss = said.find(isL); if (miss) shown[2] = miss; }
   if (all.length) {
     put('record', `
-      <div class="ld-sec-head"><h2 class="ld-h2">Said before <span class="nowrap">kick-off</span>. Checked after.</h2>
+      <div class="ld-sec-head"><h2 class="ld-h2">The call, then the score.</h2>
         <a class="btn btn-ghost btn-sm" href="#/results">Every result</a></div>
-      <p class="ld-sub">Our last ${all.length} calls: ${fw} landed, ${fl} missed. Every one stays on the results page, the misses too.</p>
+      <p class="ld-sub">Our last ${all.length} calls: ${fw} landed, ${fl} missed. The misses stay in.</p>
       <ol class="ld-form" aria-label="The last ${all.length} calls, oldest first">${all.map(chip).join('')}</ol>
       ${shown.length ? `<ul class="ld-receipts">${shown.map((x) => `
         <li class="${isW(x) ? 'is-w' : 'is-l'}">
           <p class="ld-rc-top"><span class="ld-rc-tag">${isW(x) ? 'Landed' : 'Missed'}</span><span>${esc(new Date(Number(x.kickoff) * 1000).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }))}</span></p>
           <p class="ld-rc-score">${crest(x.home_team, 'xs', x.home_team_id)}<b>${esc(x.home_team)}</b><span class="ld-rc-goals">${Number(x.home_goals)}–${Number(x.away_goals)}</span><b>${esc(x.away_team)}</b>${crest(x.away_team, 'xs', x.away_team_id)}</p>
-          <p class="ld-rc-said"><span>What we said</span>${esc(excerpt(x.narrative ?? x.why, 200))}</p>
-          <a href="#/fixture/${encodeURIComponent(x.fixture_id)}">The whole call</a>
+          ${(() => {
+            const text = excerpt(x.narrative ?? x.why, 200);
+            return text
+              ? `<p class="ld-rc-said"><span>What we said</span>${esc(text)}</p>`
+              : `<p class="ld-rc-said"><span>The call</span>${esc(market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team }).name)}</p>`;
+          })()}
+          <a href="#/fixture/${encodeURIComponent(x.fixture_id)}">The match</a>
         </li>`).join('')}</ul>` : ''}`);
   } else app.querySelector('[data-ld="record"]')?.remove();
 

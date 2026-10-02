@@ -1525,6 +1525,15 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
   ) h;
 $fn$;
 
+-- The front page's record from the newest engine (engine/src/lab/record.ts):
+-- the production rule replayed on the games already played, up to
+-- `live_from`, after which the page takes the live engine's settled calls.
+-- Every fixture in it has finished, so nothing paid is in it.
+CREATE OR REPLACE FUNCTION get_record()
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  SELECT coalesce((SELECT try_json(v) FROM kv WHERE k = 'record:engine'), json_build_object('rows', '[]'::json));
+$fn$;
+
 -- A competition's own page: the table, the top scorers, its games either side
 -- of today, and how our calls in it have gone. The table and the scorers are
 -- kept in kv (league:<id>:standings and :scorers) by the slate and by
@@ -1998,6 +2007,7 @@ GRANT EXECUTE ON FUNCTION slip_legs(text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_plans() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION free_fixture_id() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_league(bigint) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_record() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_player(bigint, bigint) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_board(bigint, bigint, bigint), get_fixture(bigint), get_picks(integer, text),
   get_model(), get_hero(), get_health(), get_account(), has_membership(), try_json(text) TO authenticated;

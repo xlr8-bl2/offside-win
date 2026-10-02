@@ -18,6 +18,7 @@
     "lab:losses": "tsx src/run.ts lab:losses",
     "lab:slices": "tsx src/run.ts lab:slices",
     "lab:live": "tsx src/run.ts lab:live",
+    "lab:record": "tsx src/run.ts lab:record",
     "lab:calib": "tsx src/run.ts lab:calib",
     "settle": "tsx src/run.ts settle",
     "grant": "tsx src/run.ts grant",
