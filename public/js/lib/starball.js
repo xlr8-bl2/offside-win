@@ -55,29 +55,44 @@ uniform vec3 uU[12];
 uniform mat3 uRot;
 uniform float uScale;  // ball radius in clip units
 uniform float uPx;     // one pixel in ball units
+uniform vec2 uA;       // a star arm's inner corner, pulled in for the rounding
+uniform float uP;      // and its tip, pulled in the same way
 
-const float TIP = 0.6;     // tan of a star's point: the tips nearly meet at 0.618
-const float INNER = 0.42; // inner corners, as a share of the points
-const float ROUND = 0.014; // the glass is cut, then its points are softened
+const float ROUND = 0.014;  // every corner of the star is rounded: the tips
+const float FILLET = 0.06;  // and, more softly, the inside corners
+const float T = 0.038;      // the glass's thickness, as a share of the radius
+const float BEVEL = 0.016;  // the slab's edges are rounded over, not cut square
 
-// A five-point star, its first point up the y axis (after Inigo Quilez).
-float star(vec2 p, float r, float rf) {
-  const vec2 k1 = vec2(0.809016994375, -0.587785252292);
-  const vec2 k2 = vec2(-k1.x, k1.y);
-  p.x = abs(p.x);
-  p -= 2.0 * max(dot(k1, p), 0.0) * k1;
-  p -= 2.0 * max(dot(k2, p), 0.0) * k2;
-  p.x = abs(p.x);
-  p.y -= r;
-  vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, 1.0);
-  float h = clamp(dot(p, ba) / dot(ba, ba), 0.0, r);
-  return length(p - ba * h) * sign(p.y * ba.x - p.x * ba.y);
+// One arm of the star, folded onto its right half: the kite between the
+// centre, the inner corner and the tip. Negative inside.
+float arm(vec2 q) {
+  vec2 a = uA;
+  vec2 tip = vec2(0.0, uP);
+  vec2 ca = clamp(dot(q, a) / dot(a, a), 0.0, 1.0) * a;
+  vec2 at = a + clamp(dot(q - a, tip - a) / dot(tip - a, tip - a), 0.0, 1.0) * (tip - a);
+  float d = min(length(q - ca), length(q - at));
+  bool inside = a.x * q.y - a.y * q.x > 0.0 && (tip.x - a.x) * (q.y - a.y) - (tip.y - a.y) * (q.x - a.x) > 0.0;
+  return inside ? -d : d;
 }
 
-// Distance to the nearest star's edge (negative inside), and how far into
-// the star the point is (0 at the edge, 1 at the centre).
-vec2 field(vec3 p) {
-  float best = -2.0; int k = 0;
+// A five-point star, its first point up the y axis, with every corner
+// rounded: the arm nearest the point and its neighbour are blended (which
+// fillets the inside corner between them), then the whole is grown by ROUND
+// (which rounds the tips; uA and uP were pulled in to make room).
+float star(vec2 q) {
+  const float SECTOR = 1.2566370614; // 72 degrees
+  float ang = atan(q.x, q.y);
+  float b = abs(ang - SECTOR * floor(ang / SECTOR + 0.5));
+  float l = length(q);
+  float d1 = arm(l * vec2(sin(b), cos(b)));
+  float d2 = arm(l * vec2(sin(SECTOR - b), cos(SECTOR - b)));
+  float h = max(FILLET - abs(d1 - d2), 0.0) / FILLET;
+  return min(d1, d2) - h * h * FILLET * 0.25 - ROUND;
+}
+
+// Distance (in tangent units) to the edge of the nearest star.
+float field(vec3 p) {
+  float best = -2.0;
   vec3 c = uC[0]; vec3 u = uU[0];
   for (int i = 0; i < 12; i++) {
     float d = dot(p, uC[i]);
@@ -85,44 +100,38 @@ vec2 field(vec3 p) {
   }
   vec3 v = cross(c, u);
   vec3 t = p / best - c; // gnomonic: great circles stay straight
-  vec2 q = vec2(dot(t, v), dot(t, u));
-  float d = star(q, TIP - ROUND, INNER) - ROUND;
-  return vec2(d, clamp(1.0 - length(q) / TIP, 0.0, 1.0));
+  return star(vec2(dot(t, v), dot(t, u)));
 }
 
-vec3 film(float x) {
-  // Oil on water: the hue walks round the wheel as x changes.
-  return 0.55 + 0.45 * cos(6.2831 * (x + vec3(0.0, 0.33, 0.67)));
-}
-
-// The slabs as a solid: inside where a point is between the two spheres and
-// inside a star. A conservative distance (the star's distance is in tangent
-// units, which run long away from the centre) so a march never steps
-// through a wall.
-const float T = 0.055;     // the glass's thickness, as a share of the radius
+// The slabs as a solid: a star's outline, as thick as the glass, its edges
+// rounded over like a rounded box (in the plane of "across the edge" and
+// "through the glass"). Conservative, so a march never steps through it.
 float solid(vec3 x) {
   float l = length(x);
-  return field(uRot * (x / l)).x * l * 0.7;
+  float across = field(uRot * (x / l)) * l * 0.7;
+  float through = abs(l - (1.0 - 0.5 * T)) - 0.5 * T;
+  vec2 q = vec2(across, through) + BEVEL;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - BEVEL;
 }
-vec3 wallNormal(vec3 x) {
-  const float e = 0.0015;
-  float d = solid(x);
-  return normalize(vec3(solid(x + vec3(e, 0.0, 0.0)) - d, solid(x + vec3(0.0, e, 0.0)) - d, solid(x + vec3(0.0, 0.0, e)) - d));
+vec3 normalAt(vec3 x) {
+  const vec2 e = vec2(0.0012, 0.0);
+  return normalize(vec3(solid(x + e.xyy) - solid(x - e.xyy), solid(x + e.yxy) - solid(x - e.yxy), solid(x + e.yyx) - solid(x - e.yyx)));
 }
 
 // Down the view ray (straight into the screen) through one stretch of the
-// shell, from z0 to z1: the first point inside a slab. Returns the depth and
-// what was hit: 1 the slab's broad face (the ray met glass the moment it met
-// the shell), 2 its side wall, 0 nothing.
+// shell, from z0 to z1. Returns where it met glass (or came closest) and how
+// far away it stayed: 0 for a hit, a little for a ray that grazes an edge
+// (softened into the edge rather than stepped), more for a clean miss.
 vec2 march(vec2 xy, float z0, float z1) {
-  float z = z0;
-  for (int i = 0; i < 28; i++) {
+  float z = z0, bz = z0, bd = 1e3;
+  for (int i = 0; i < 32; i++) {
     float d = solid(vec3(xy, z));
-    if (d < 0.0) return vec2(z, i == 0 ? 1.0 : 2.0);
-    z -= max(d, 0.0012);
+    if (d < bd) { bd = d; bz = z; }
+    if (d < 0.0004) return vec2(z, 0.0);
+    z -= max(d, 0.001);
     if (z < z1) break;
   }
-  return vec2(0.0, 0.0);
+  return vec2(bz, bd);
 }
 
 vec3 prismHue(vec3 p) {
@@ -131,101 +140,68 @@ vec3 prismHue(vec3 p) {
   return mix(h, vec3(0.62, 1.0, 0.08), 0.3); // lean towards lime, as the original does
 }
 
+// Sampled from the competition's own night: the page is a deep ultramarine
+// (the hero's background, not drawn here); the glass runs from a blue barely
+// lighter than it to a bright azure where the light falls.
+const vec3 DIM = vec3(0.012, 0.03, 0.50);
+const vec3 AZURE = vec3(0.02, 0.36, 0.92);
+const vec3 PALE = vec3(0.4, 0.62, 1.0);
+
+// The glass at a point: its colour (premultiplied) and cover. The broad faces
+// take the light from the right; the walls are lighter, translucent; and
+// where the rounded edge turns from face to wall it catches the light as a
+// thin reflection, each stretch its own colour, as glass edges do.
+vec4 glass(vec3 x, float far) {
+  vec3 L = normalize(vec3(0.85, 0.2, 0.5));
+  vec3 n = normalAt(x);
+  vec3 rd = normalize(x);
+  float fr = dot(n, rd);                 // 1 outer face, 0 wall, -1 inner face
+  float face = smoothstep(0.55, 0.92, abs(fr));
+  float lit = smoothstep(-0.15, 0.95, dot(rd, L));
+  vec3 fc = mix(DIM, AZURE, 0.06 + 0.94 * pow(lit, 1.4));
+  fc += AZURE * 0.25 * pow(max(0.0, dot(rd, L)), 4.0);
+  fc += PALE * 0.15 * pow(1.0 - abs(rd.z), 3.0);
+  float wl = max(0.0, dot(n, L));
+  vec3 wc = mix(AZURE * (0.5 + 0.5 * lit), PALE, 0.04 + 0.22 * wl);
+  vec3 c = mix(wc, fc, face);
+  float a = mix(0.7, 0.8 + 0.1 * (1.0 - abs(rd.z)), face);
+  // The reflection on the rounded edge.
+  vec3 p = uRot * x;
+  float glint = 0.55 + 0.45 * smoothstep(-0.3, 0.7, sin(dot(p, vec3(3.7, -2.9, 2.2))));
+  float edge = exp(-pow((abs(fr) - 0.6) / 0.17, 2.0)) * glint;
+  vec3 hue = prismHue(p + 0.6 * (1.0 - abs(rd.z)));
+  if (far > 0.5) { c = mix(c, DIM, 0.35); a *= 0.5; edge *= 0.45; hue = mix(hue, PALE, 0.5); }
+  vec3 col = c * a;
+  col = mix(col, hue, edge);
+  a = max(a, edge);
+  return vec4(col, a);
+}
+
 void main() {
   vec2 xy = vUv / uScale;
   float r = length(xy);
   if (r > 1.0) { gl_FragColor = vec4(0.0); return; }
-  // Sampled from the competition's own night: the page is a deep ultramarine
-  // (the hero's background, not drawn here); the glass runs from a blue
-  // barely lighter than it to a bright azure where the light falls.
-  vec3 dim = vec3(0.012, 0.03, 0.50);
-  vec3 azure = vec3(0.02, 0.36, 0.92);
-  vec3 pale = vec3(0.4, 0.62, 1.0);
-  vec3 L = normalize(vec3(0.85, 0.2, 0.5)); // the light is off to the right
-
   float ri = 1.0 - T;
-  float zo = sqrt(max(0.0, 1.0 - r * r));
+  float zo = sqrt(1.0 - r * r);
   bool through = r < ri;                 // the ray crosses the hollow inside
   float zi = through ? sqrt(ri * ri - r * r) : 0.0;
+  float aa = uPx * 1.2;
 
-  // The near shell, then (through the hollow) the far one.
-  vec2 hn = march(xy, zo, through ? zi : -zo);
-  vec2 hf = through ? march(xy, -zi, -zo) : vec2(0.0);
-
-  vec3 col = vec3(0.0);
-  float a = 0.0;
-
-  // The far side first: the backs of the stars, seen from inside the ball.
-  if (hf.y > 0.0) {
-    vec3 x = vec3(xy, hf.x);
-    vec3 nrm = hf.y > 1.5 ? wallNormal(x) : -normalize(x);
-    float lit = smoothstep(-0.3, 1.0, dot(-normalize(x), L));
-    vec3 c = mix(dim, azure, 0.1 + 0.3 * lit);
-    float fa = 0.42;
-    if (hf.y > 1.5) { c = mix(c, pale, 0.25); fa = 0.55; }
-    col = c * fa;
-    a = fa;
+  vec4 outc = vec4(0.0);
+  if (through) {
+    // The far side first: the backs of the stars, seen from inside the ball.
+    vec2 hf = march(xy, -zi + 0.002, -zo);
+    float cover = 1.0 - smoothstep(0.0, aa, hf.y);
+    if (cover > 0.0) outc = glass(vec3(xy, hf.x), 1.0) * cover;
   }
-
-  if (hn.y > 0.0) {
-    vec3 x = vec3(xy, hn.x);
-    vec3 n = normalize(x);
-    float lit = smoothstep(-0.15, 0.95, dot(n, L));
-    vec3 c;
-    float fa;
-    if (hn.y < 1.5) {
-      // The broad face: lit from the right, brighter edge-on.
-      c = mix(dim, azure, 0.06 + 0.94 * pow(lit, 1.4));
-      c += azure * 0.25 * pow(max(0.0, dot(n, L)), 4.0);
-      c += pale * 0.15 * pow(1.0 - n.z, 3.0);
-      fa = 0.8 + 0.12 * (1.0 - n.z);
-    } else {
-      // The side wall: the glass seen through its thickness, lighter and
-      // shaded by which way it faces.
-      vec3 w = wallNormal(x);
-      float wl = max(0.0, dot(w, L));
-      float h = clamp((length(x) - ri) / T, 0.0, 1.0); // 0 at the inner face, 1 at the outer
-      c = mix(azure * (0.5 + 0.5 * lit), pale, 0.04 + 0.22 * wl);
-      c *= 0.65 + 0.45 * h;
-      fa = 0.62 + 0.2 * h;
-    }
-    col = c * fa + col * (1.0 - fa);
-    a = fa + a * (1.0 - fa);
+  vec2 hn = march(xy, zo + 0.002, through ? zi : -zo);
+  float cover = 1.0 - smoothstep(0.0, aa, hn.y);
+  if (cover > 0.0) {
+    vec4 g = glass(vec3(xy, hn.x), 0.0) * cover;
+    outc = g + outc * (1.0 - g.a);
   }
-
-  // The reflections: hairlines of light on the slabs' cut edges, where the
-  // face turns into the wall. The outer edge is where the ray meets the
-  // outer sphere at a star's outline; the inner edge is where a wall meets
-  // the inner face, seen only where the wall shows (towards the silhouette).
-  // Each stretch has its own colour, split slightly like light through a
-  // prism.
-  vec3 xo = vec3(xy, zo);
-  vec3 po = uRot * xo;
-  float fo = field(po).x;
-  float w = uPx * 1.3 + 0.0018;
-  float fringe = uPx * 1.3 + 0.0025 * (1.0 - zo);
-  float glint = (0.55 + 0.45 * smoothstep(-0.3, 0.7, sin(dot(po, vec3(3.7, -2.9, 2.2))))) * min(1.0, 0.8 + 0.5 * (1.0 - zo));
-  vec3 hue = prismHue(po + 0.6 * (1.0 - zo));
-  float kG = exp(-pow(fo / w, 2.0)) * glint;
-  float kR = exp(-pow((fo - fringe) / w, 2.0)) * glint * 0.45;
-  float kB = exp(-pow((fo + fringe) / w, 2.0)) * glint * 0.6;
-  if (hn.y > 1.5) {
-    // The inner edge of a wall the ray hit.
-    float k = exp(-pow((length(vec3(xy, hn.x)) - ri) / (uPx * 1.6 + 0.002), 2.0)) * glint * 0.85;
-    kG = max(kG, k);
-  }
-  col = mix(col, vec3(1.0, 0.12, 0.38) * max(a, kR), kR);
-  col = mix(col, vec3(0.08, 0.55, 1.0) * max(a, kB), kB);
-  a = max(a, max(kR, kB));
-  a = max(a, kG);
-  col = mix(col, hue * a, kG);
-  float halo = exp(-abs(fo) / (0.006 + 0.01 * (1.0 - zo))) * 0.35 * glint * (1.0 - kG);
-  col += hue * halo;
-  a = clamp(a + halo * 0.6, 0.0, 1.0);
-
-  col = min(col, vec3(1.0));
-  float disc = smoothstep(1.0, 1.0 - uPx * 2.0, r);
-  gl_FragColor = vec4(min(col, vec3(a)) * disc, a * disc);
+  outc.rgb = min(outc.rgb, vec3(outc.a));
+  gl_FragColor = outc;
 }`;
 
 // The composition at rest, as on the competition's covers: a star a little
@@ -241,6 +217,25 @@ const REST = (() => {
   // View to ball: [c0 a0 b0] times the transpose of [v0 w0 x0].
   return [0, 1, 2].map((i) => [0, 1, 2].map((j) => c0[i] * v0[j] + a0[i] * w0[j] + b0[i] * x0[j]));
 })();
+
+// One arm of a star, in the plane touching the ball at the star's centre
+// (tangent units): the tip straight up (neighbouring tips meet at 0.618),
+// the inner corners at 0.42 of it, 36 degrees either side. The
+// shader rounds every corner by growing a smaller arm by ROUND, so the tip
+// and the inner corner are pulled in first: the arm's outer edge moves in by
+// ROUND and the growth puts it back where it was, now with a rounded tip.
+const ROUND = 0.014; // keep in step with ROUND in FRAG
+function armShape() {
+  const TIP = 0.636; // the rounded tip lands just short of 0.618, where the neighbour's meets it
+  const inner = 0.42 * TIP;
+  const a = [inner * Math.sin(Math.PI / 5), inner * Math.cos(Math.PI / 5)];
+  const d = [-a[0], TIP - a[1]];
+  const l = Math.hypot(d[0], d[1]);
+  const out = [d[1] / l, -d[0] / l]; // the edge's outward normal
+  const p = a[1] + (-ROUND + a[0] * out[0]) / out[1];
+  const t = 1 - ROUND / (a[0] * out[0] + a[1] * out[1]);
+  return { a: [a[0] * t, a[1] * t], p };
+}
 
 function rotation(t) {
   // The ball sways rather than spins, so the composition holds: a slow turn
@@ -281,6 +276,9 @@ export function startBall(canvas, { still = false, speed = 0.12, t: t0 = 0 } = {
   const uRot = gl.getUniformLocation(prog, 'uRot');
   const uScale = gl.getUniformLocation(prog, 'uScale');
   const uPx = gl.getUniformLocation(prog, 'uPx');
+  const arm = armShape();
+  gl.uniform2f(gl.getUniformLocation(prog, 'uA'), arm.a[0], arm.a[1]);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uP'), arm.p);
   const SCALE = 0.985; // a hair of room for the edge's antialiasing
 
   const size = () => {
