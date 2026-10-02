@@ -92,6 +92,7 @@
      (public/js/lib/starball.js). Ink on these is --chalk. */
   --ucl-night:      #06036a;
   --ucl-night-deep: #01014a;
+  --ucl-glow:       #0a14b8; /* the bright blue behind the ball, as in the artwork */
 
   /* --------------------------------------------------------------- borders */
 

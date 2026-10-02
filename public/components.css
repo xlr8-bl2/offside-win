@@ -5847,7 +5847,7 @@ html.dd-locked, html.dd-locked body { overflow: hidden; }
   pointer-events: none;
 }
 .comp-art-ucl {
-  background: radial-gradient(90% 120% at 85% 50%, var(--ucl-night), var(--ucl-night-deep) 75%);
+  background: radial-gradient(70% 100% at 82% 45%, var(--ucl-glow), var(--ucl-night) 55%, var(--ucl-night-deep) 90%);
 }
 /* The ball. A still paints at once; the live canvas fades in over it. */
 .starball {

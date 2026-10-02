@@ -1,25 +1,24 @@
 /**
- * The star ball, in 3D: a glass ball whose panels are stars, lit like a
- * studio product shot and turning slowly. Drawn by a fragment shader, so it
- * is one quad and no textures.
+ * The star ball, in 3D, after the competition's own artwork: a clear glass
+ * bubble holding twelve glass stars, turning slowly. Drawn by a fragment
+ * shader, so it is one quad and no textures.
  *
  * The geometry is the real ball's: twelve stars centred on the corners of an
  * icosahedron, each star's five points aimed at its five neighbours so the
- * tips meet. For any point on the ball the shader finds the nearest centre,
- * lays the point out flat around it and asks how far it is from a five-point
- * star there. The answer gives the panel, the seam and the glow along it.
+ * tips meet, which leaves a five-sided gap between each three stars. Every
+ * corner is rounded. The stars are slabs of thin glass with rounded edges:
+ * the shader marches each pixel's view ray through the shell to the first
+ * slab it meets, on its face or its side, so the glass has real thickness
+ * where it turns away from us. The gaps are empty: through them, the far
+ * stars show from inside the ball, dark.
  *
- * Only the stars are glass. The holes between them are empty, so the page
- * shows through them, and so do the stars on the far side, seen from behind.
  * The look, layer by layer:
- *   - the far side's stars, dimmer and bluer, through the holes and through
- *     the near stars' glass;
- *   - the near stars, glass slabs: royal blue, bright along the inside of
- *     their edges where the glass is seen through its thickness;
- *   - their outlines, a hairline of light whose colour shifts with the angle
- *     like oil on water (a thin-film cheat: a cosine palette);
- *   - a studio softbox reflected top left, a hard specular, and iridescence
- *     where the glass turns away.
+ *   - the far stars, dark, through the gaps;
+ *   - the near stars, clear blue glass, lighter where the light falls;
+ *   - every star's outline, a crisp line a pixel or two wide, its colour
+ *     walking through lime and gold, pink and cyan along the edge;
+ *   - the bubble: a broad sheen from a window off to the upper right that
+ *     slides across the ball as it sways, and a thin light at the rim.
  *
  * A reader without WebGL, or who asked for less motion, gets one still frame
  * (the image the page shows first anyway, public/brand/starball.webp).
@@ -46,36 +45,52 @@ const AIMS = CENTRES.map((c) => {
 const VERT = `attribute vec2 a; varying vec2 vUv;
 void main() { vUv = a; gl_Position = vec4(a, 0.0, 1.0); }`;
 
-export const FRAG = `precision highp float;
+export const FRAG = `#extension GL_OES_standard_derivatives : enable
+precision highp float;
 varying vec2 vUv;
 uniform vec3 uC[12];
 uniform vec3 uU[12];
 uniform mat3 uRot;
 uniform float uScale;  // ball radius in clip units
 uniform float uPx;     // one pixel in ball units
+uniform vec2 uA;       // a star arm's inner corner, pulled in for the rounding
+uniform float uP;      // and its tip, pulled in the same way
 
-const float TIP = 0.6;     // tan of a star's point: the tips nearly meet at 0.618
-const float INNER = 0.42; // inner corners, as a share of the points
-const float ROUND = 0.014; // the glass is cut, then its points are softened
+const float ROUND = 0.014;  // every corner of the star is rounded: the tips
+const float FILLET = 0.06;  // and, more softly, the inside corners
+const float T = 0.026;      // the glass's thickness, as a share of the radius
+const float BEVEL = 0.0115; // the slab's edges are rounded over, not cut square
 
-// A five-point star, its first point up the y axis (after Inigo Quilez).
-float star(vec2 p, float r, float rf) {
-  const vec2 k1 = vec2(0.809016994375, -0.587785252292);
-  const vec2 k2 = vec2(-k1.x, k1.y);
-  p.x = abs(p.x);
-  p -= 2.0 * max(dot(k1, p), 0.0) * k1;
-  p -= 2.0 * max(dot(k2, p), 0.0) * k2;
-  p.x = abs(p.x);
-  p.y -= r;
-  vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, 1.0);
-  float h = clamp(dot(p, ba) / dot(ba, ba), 0.0, r);
-  return length(p - ba * h) * sign(p.y * ba.x - p.x * ba.y);
+// One arm of the star, folded onto its right half: the kite between the
+// centre, the inner corner and the tip. Negative inside.
+float arm(vec2 q) {
+  vec2 a = uA;
+  vec2 tip = vec2(0.0, uP);
+  vec2 ca = clamp(dot(q, a) / dot(a, a), 0.0, 1.0) * a;
+  vec2 at = a + clamp(dot(q - a, tip - a) / dot(tip - a, tip - a), 0.0, 1.0) * (tip - a);
+  float d = min(length(q - ca), length(q - at));
+  bool inside = a.x * q.y - a.y * q.x > 0.0 && (tip.x - a.x) * (q.y - a.y) - (tip.y - a.y) * (q.x - a.x) > 0.0;
+  return inside ? -d : d;
 }
 
-// Distance to the nearest star's edge (negative inside), and how far into
-// the star the point is (0 at the edge, 1 at the centre).
-vec2 field(vec3 p) {
-  float best = -2.0; int k = 0;
+// A five-point star, its first point up the y axis, with every corner
+// rounded: the arm nearest the point and its neighbour are blended (which
+// fillets the inside corner between them), then the whole is grown by ROUND
+// (which rounds the tips; uA and uP were pulled in to make room).
+float star(vec2 q) {
+  const float SECTOR = 1.2566370614; // 72 degrees
+  float ang = atan(q.x, q.y);
+  float b = abs(ang - SECTOR * floor(ang / SECTOR + 0.5));
+  float l = length(q);
+  float d1 = arm(l * vec2(sin(b), cos(b)));
+  float d2 = arm(l * vec2(sin(SECTOR - b), cos(SECTOR - b)));
+  float h = max(FILLET - abs(d1 - d2), 0.0) / FILLET;
+  return min(d1, d2) - h * h * FILLET * 0.25 - ROUND;
+}
+
+// Distance (in tangent units) to the edge of the nearest star.
+float field(vec3 p) {
+  float best = -2.0;
   vec3 c = uC[0]; vec3 u = uU[0];
   for (int i = 0; i < 12; i++) {
     float d = dot(p, uC[i]);
@@ -83,91 +98,160 @@ vec2 field(vec3 p) {
   }
   vec3 v = cross(c, u);
   vec3 t = p / best - c; // gnomonic: great circles stay straight
-  vec2 q = vec2(dot(t, v), dot(t, u));
-  float d = star(q, TIP - ROUND, INNER) - ROUND;
-  return vec2(d, clamp(1.0 - length(q) / TIP, 0.0, 1.0));
+  return star(vec2(dot(t, v), dot(t, u)));
 }
 
-vec3 film(float x) {
-  // Oil on water: the hue walks round the wheel as x changes.
-  return 0.55 + 0.45 * cos(6.2831 * (x + vec3(0.0, 0.33, 0.67)));
+// The slabs as a solid: a star's outline, as thick as the glass, its edges
+// rounded over like a rounded box (in the plane of "across the edge" and
+// "through the glass"). Conservative, so a march never steps through it.
+float solid(vec3 x) {
+  float l = length(x);
+  float across = field(uRot * (x / l)) * l * 0.7;
+  float through = abs(l - (1.0 - 0.5 * T)) - 0.5 * T;
+  vec2 q = vec2(across, through) + BEVEL;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - BEVEL;
+}
+vec3 normalAt(vec3 x) {
+  const vec2 e = vec2(0.0012, 0.0);
+  return normalize(vec3(solid(x + e.xyy) - solid(x - e.xyy), solid(x + e.yxy) - solid(x - e.yxy), solid(x + e.yyx) - solid(x - e.yyx)));
+}
+
+// Down the view ray (straight into the screen) through one stretch of the
+// shell, from z0 to z1. Returns where it met glass (or came closest) and how
+// far away it stayed: 0 for a hit, a little for a ray that grazes an edge
+// (softened into the edge rather than stepped), more for a clean miss.
+vec2 march(vec2 xy, float z0, float z1) {
+  float z = z0, bz = z0, bd = 1e3;
+  for (int i = 0; i < 32; i++) {
+    float d = solid(vec3(xy, z));
+    if (d < bd) { bd = d; bz = z; }
+    if (d < 0.0004) return vec2(z, 0.0);
+    z -= max(d, 0.001);
+    if (z < z1) break;
+  }
+  return vec2(bz, bd);
+}
+
+vec3 prismHue(vec3 p) {
+  float phase = dot(p, vec3(2.3, 1.7, 2.9));
+  vec3 h = clamp(abs(fract(phase + vec3(0.0, 0.67, 0.33)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+  return mix(h, vec3(0.62, 1.0, 0.08), 0.3); // lean towards lime, as the original does
+}
+
+// Sampled from the competition's own artwork. The page behind is a deep,
+// bright ultramarine (the hero's background, not drawn here). The near stars
+// are clear blue glass, lighter than the gaps; through the gaps the far
+// stars show from inside the ball, dark.
+const vec3 INK = vec3(0.0, 0.012, 0.42);
+const vec3 GLASS = vec3(0.02, 0.08, 0.66);
+const vec3 BRIGHT = vec3(0.06, 0.26, 0.96);
+const vec3 PALE = vec3(0.4, 0.62, 1.0);
+
+// What the glass reflects: one broad soft window off to the upper right,
+// fixed to the camera, so a wide diagonal sheen slides across the ball as it
+// sways, and a dim fill from below.
+vec3 studio(vec3 R) {
+  vec3 w = normalize(vec3(0.62, 0.55, 0.56));
+  float window = smoothstep(0.55, 0.93, dot(R, w));
+  float fill = smoothstep(0.75, 1.0, dot(R, normalize(vec3(-0.3, -0.8, 0.5))));
+  return vec3(0.55, 0.72, 1.0) * window * 0.42 + PALE * fill * 0.12;
+}
+
+// One star's glass at a point: its colour (premultiplied) and cover. Its cut
+// edge, rounded over, catches the light as a crisp coloured line all the way
+// round: lime and gold, pink and magenta, cyan, changing along the edge.
+vec4 glass(vec3 x, float far) {
+  vec3 L = normalize(vec3(0.75, 0.35, 0.55));
+  vec3 V = vec3(0.0, 0.0, 1.0);
+  vec3 n = normalAt(x);
+  vec3 rd = normalize(x);
+  float fr = dot(n, rd);                 // 1 outer face, 0 wall, -1 inner face
+  float face = smoothstep(0.55, 0.92, abs(fr));
+  float lit = smoothstep(-0.3, 1.0, dot(rd, L));
+
+  vec3 p = uRot * x;
+  float glint = 0.8 + 0.2 * smoothstep(-0.3, 0.7, sin(dot(p, vec3(3.7, -2.9, 2.2))));
+  float edge = min(1.0, 1.4 * exp(-pow((abs(fr) - 0.6) / 0.16, 2.0)) * glint);
+  vec3 hue = prismHue(p + 0.6 * (1.0 - abs(rd.z)));
+
+  if (far > 0.5) {
+    // The far side, seen from inside: dark tinted glass with pale edges.
+    float a = 0.72;
+    vec3 col = INK * a;
+    float e = edge * 0.3;
+    col = mix(col, mix(hue, PALE, 0.6) * max(a, e), e);
+    return vec4(col, a);
+  }
+  vec3 c = mix(GLASS, BRIGHT, pow(lit, 1.3));
+  c = mix(mix(BRIGHT, PALE, 0.3), c, face);          // the thin walls, lighter
+  float a = mix(0.62, 0.5, face);
+  vec3 nv = dot(n, V) < 0.0 ? -n : n;
+  float fres = 0.06 + 0.94 * pow(1.0 - max(dot(nv, V), 0.0), 4.0);
+  vec3 refl = studio(reflect(-V, nv)) * (0.5 + 0.5 * fres) + PALE * fres * 0.18;
+  vec3 col = c * a + refl;
+  a = min(1.0, a + dot(refl, vec3(0.3, 0.5, 0.2)) * 0.8);
+  col = mix(col, hue * max(a, edge), edge);
+  a = max(a, edge);
+  return vec4(col, a);
 }
 
 void main() {
   vec2 xy = vUv / uScale;
   float r = length(xy);
-  if (r > 1.0) { gl_FragColor = vec4(0.0); return; }
-  // Sampled from the competition's own night: the page is a deep ultramarine
-  // (the hero's background, not drawn here); the glass runs from a blue
-  // barely lighter than it to a bright azure where the light falls.
-  vec3 dim = vec3(0.012, 0.03, 0.50);
-  vec3 azure = vec3(0.02, 0.36, 0.92);
-  vec3 pale = vec3(0.35, 0.58, 1.0);
+  // A faint glow around the whole ball, as if it sat in its own light.
+  if (r > 1.0) {
+    float halo = exp(-(r - 1.0) * 22.0) * 0.18;
+    gl_FragColor = vec4(PALE * halo, halo);
+    return;
+  }
+  float ri = 1.0 - T;
+  float zo = sqrt(1.0 - r * r);
+  bool through = r < ri;                 // the ray crosses the hollow inside
+  float zi = through ? sqrt(ri * ri - r * r) : 0.0;
+  float aa = uPx * 1.2;
 
-  float z = sqrt(max(0.0, 1.0 - r * r));
-  vec3 n = vec3(xy, z);    // the near side, facing us
-  vec3 nb = vec3(xy, -z);  // the far side, seen through the holes
-  float edgeOn = 1.0 - z;  // 0 facing us, 1 at the silhouette
-  vec3 L = normalize(vec3(0.85, 0.2, 0.5)); // the light is off to the right
-  float lit = smoothstep(-0.15, 0.95, dot(n, L));
+  vec4 outc = vec4(0.0);
+  if (through) {
+    // The far side first: the backs of the stars, seen from inside the ball.
+    vec2 hf = march(xy, -zi + 0.002, -zo);
+    float cover = 1.0 - smoothstep(0.0, aa, hf.y);
+    if (cover > 0.0) outc = glass(vec3(xy, hf.x), 1.0) * cover;
+  }
+  vec2 hn = march(xy, zo + 0.002, through ? zi : -zo);
+  float cover = 1.0 - smoothstep(0.0, aa, hn.y);
+  if (cover > 0.0) {
+    vec4 g = glass(vec3(xy, hn.x), 0.0) * cover;
+    outc = g + outc * (1.0 - g.a);
+  }
+  // The outlines: every star's edge, a crisp coloured line a pixel or two
+  // wide whatever the angle (measured on screen, so it stays thin even where
+  // the sphere turns away), bright on the near stars, faint on the far ones.
+  vec3 po = uRot * vec3(xy, zo);
+  float fo = field(po);
+  float lo = 1.0 - smoothstep(0.6, 1.6, abs(fo) / max(fwidth(fo), 1e-5));
+  if (through) {
+    vec3 pb = uRot * vec3(xy, -zo);
+    float fb = field(pb);
+    float lb = (1.0 - smoothstep(0.5, 1.4, abs(fb) / max(fwidth(fb), 1e-5))) * 0.35;
+    outc.rgb = mix(outc.rgb, mix(prismHue(pb), PALE, 0.55) * max(outc.a, lb), lb);
+    outc.a = max(outc.a, lb);
+  }
+  float glo = 0.85 + 0.15 * sin(dot(po, vec3(3.7, -2.9, 2.2)));
+  lo *= glo;
+  outc.rgb = mix(outc.rgb, prismHue(po + 0.5 * (1.0 - zo)) * max(outc.a, lo), lo);
+  outc.a = max(outc.a, lo);
 
-  // The far side: the backs of the stars, through the holes and through the
-  // near glass. Barely lighter than the night, with pale hairline edges.
-  vec2 g = field(uRot * nb);
-  float inB = smoothstep(uPx, -uPx, g.x);
-  float lineB = exp(-pow(g.x / (uPx * 1.4 + 0.0025), 2.0));
-  vec3 back = mix(dim, azure, 0.15 + 0.35 * lit) * inB * 0.45 + pale * lineB * 0.45;
-  float backA = inB * 0.45 + lineB * 0.45;
-
-  // The near side: glass slabs. The face takes the light from the right;
-  // the slab's thickness shows as a lighter band inside every edge, wider
-  // where the glass turns away (seen more side-on), closed by a second
-  // hairline where the back face's edge shows through.
-  vec2 f = field(uRot * n);
-  float inN = smoothstep(uPx, -uPx, f.x);
-  float depth = -f.x;
-  float band = 0.01 + 0.05 * pow(edgeOn, 1.4);
-  float side = smoothstep(band + uPx, band - uPx, depth) * inN;
-  float backEdge = exp(-pow((depth - band) / (uPx * 1.3 + 0.002), 2.0)) * inN;
-  vec3 face = mix(dim, azure, 0.06 + 0.94 * pow(lit, 1.4));
-  face += azure * 0.25 * pow(max(0.0, dot(n, L)), 4.0);      // the wash on the lit side
-  face += pale * 0.18 * pow(edgeOn, 3.0);                      // glass gets brighter edge-on
-  vec3 sideC = mix(face, pale, 0.2 + 0.25 * lit);
-  vec3 front = mix(face, sideC, side) + pale * backEdge * 0.35;
-  float frontA = inN * (0.82 + 0.12 * edgeOn);
-
-  // The cut edge: a hairline of light split as if through a prism. Each
-  // stretch of edge has its own colour, mostly lime and yellow with red,
-  // magenta and cyan between, and its own brightness, so the colour walks
-  // along the edges as the ball turns. A slight fringe either side.
-  vec3 pn = uRot * n;
-  float phase = dot(pn, vec3(2.3, 1.7, 2.9)) + 0.6 * edgeOn;
-  vec3 hue = clamp(abs(fract(phase + vec3(0.0, 0.67, 0.33)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
-  hue = mix(hue, vec3(0.62, 1.0, 0.08), 0.3);  // lean towards lime, as the original does
-  float w = uPx * 1.5 + 0.0022;
-  float fringe = uPx * 1.4 + 0.003 * edgeOn;
-  float lG = exp(-pow(f.x / w, 2.0));
-  float lR = exp(-pow((f.x - fringe) / w, 2.0));
-  float lB = exp(-pow((f.x + fringe) / w, 2.0));
-  float strength = (0.55 + 0.45 * smoothstep(-0.3, 0.7, sin(dot(pn, vec3(3.7, -2.9, 2.2))))) * min(1.0, 0.8 + 0.5 * edgeOn);
-
-  vec3 col = front * frontA + back * (1.0 - frontA);
-  float a = frontA + backA * (1.0 - frontA);
-  // The edge is painted, not added, so it keeps its colour instead of
-  // washing out to white: the fringes first, then the core over them.
-  float kR = lR * 0.45 * strength, kB = lB * 0.6 * strength, kG = lG * strength;
-  col = mix(col, vec3(1.0, 0.12, 0.38) * max(a, kR), kR);
-  col = mix(col, vec3(0.08, 0.55, 1.0) * max(a, kB), kB);
-  a = max(a, max(kR, kB));
-  a = max(a, kG);
-  col = mix(col, hue * a, kG);
-  // And the light it throws onto the glass around it.
-  float halo = exp(-abs(f.x) / (0.006 + 0.01 * edgeOn)) * 0.4 * strength * (1.0 - kG);
-  col += hue * halo;
-  a = clamp(a + halo * 0.6, 0.0, 1.0);
-  col = min(col, vec3(1.0));
-  float disc = smoothstep(1.0, 1.0 - uPx * 2.0, r);
-  gl_FragColor = vec4(min(col, vec3(a)) * disc, a * disc);
+  // The whole is held in a clear bubble: no colour of its own, only the
+  // window's sheen across it (crossing the gaps too) and a thin light where
+  // it turns away at the silhouette.
+  vec3 ns = vec3(xy, zo);
+  float fs = pow(1.0 - zo, 3.0);
+  vec3 bubble = studio(reflect(vec3(0.0, 0.0, -1.0), ns)) * 0.55 + PALE * fs * 0.3;
+  bubble += PALE * exp(-pow((1.0 - r) / (uPx * 2.0 + 0.004), 2.0)) * 0.4;
+  float ba = min(1.0, dot(bubble, vec3(0.3, 0.5, 0.2)));
+  outc = vec4(bubble, ba) + outc * (1.0 - ba);
+  outc.rgb = min(outc.rgb, vec3(outc.a));
+  gl_FragColor = outc;
 }`;
 
 // The composition at rest, as on the competition's covers: a star a little
@@ -183,6 +267,25 @@ const REST = (() => {
   // View to ball: [c0 a0 b0] times the transpose of [v0 w0 x0].
   return [0, 1, 2].map((i) => [0, 1, 2].map((j) => c0[i] * v0[j] + a0[i] * w0[j] + b0[i] * x0[j]));
 })();
+
+// One arm of a star, in the plane touching the ball at the star's centre
+// (tangent units): the tip straight up (neighbouring tips meet at 0.618),
+// the inner corners at 0.42 of it, 36 degrees either side. The
+// shader rounds every corner by growing a smaller arm by ROUND, so the tip
+// and the inner corner are pulled in first: the arm's outer edge moves in by
+// ROUND and the growth puts it back where it was, now with a rounded tip.
+const ROUND = 0.014; // keep in step with ROUND in FRAG
+function armShape() {
+  const TIP = 0.636; // the rounded tip lands just short of 0.618, where the neighbour's meets it
+  const inner = 0.42 * TIP;
+  const a = [inner * Math.sin(Math.PI / 5), inner * Math.cos(Math.PI / 5)];
+  const d = [-a[0], TIP - a[1]];
+  const l = Math.hypot(d[0], d[1]);
+  const out = [d[1] / l, -d[0] / l]; // the edge's outward normal
+  const p = a[1] + (-ROUND + a[0] * out[0]) / out[1];
+  const t = 1 - ROUND / (a[0] * out[0] + a[1] * out[1]);
+  return { a: [a[0] * t, a[1] * t], p };
+}
 
 function rotation(t) {
   // The ball sways rather than spins, so the composition holds: a slow turn
@@ -201,12 +304,17 @@ function rotation(t) {
  * and stops if `still`; otherwise turns while on screen and the tab is
  * visible. Returns null when WebGL is not available.
  */
-export function startBall(canvas, { still = false, speed = 0.12, t: t0 = 0 } = {}) {
+export function startBall(canvas, { still = false, speed = 0.12, t: t0 = 0, frag = FRAG } = {}) {
   const gl = canvas.getContext('webgl', { premultipliedAlpha: true, alpha: true, antialias: false });
   if (!gl) return null;
+  // Outlines are measured on screen (fwidth). Without the extension that
+  // provides it, a pixel's width in the star's own units stands in.
+  if (!gl.getExtension('OES_standard_derivatives')) {
+    frag = frag.replace(/^#extension[^\n]*\n/, '').replace(/fwidth\(([a-z]+)\)/g, 'uPx');
+  }
   const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return gl.getShaderParameter(s, gl.COMPILE_STATUS) ? s : null; };
   const vs = sh(gl.VERTEX_SHADER, VERT);
-  const fs = sh(gl.FRAGMENT_SHADER, FRAG);
+  const fs = sh(gl.FRAGMENT_SHADER, frag);
   if (!vs || !fs) return null;
   const prog = gl.createProgram();
   gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
@@ -223,11 +331,14 @@ export function startBall(canvas, { still = false, speed = 0.12, t: t0 = 0 } = {
   const uRot = gl.getUniformLocation(prog, 'uRot');
   const uScale = gl.getUniformLocation(prog, 'uScale');
   const uPx = gl.getUniformLocation(prog, 'uPx');
-  const SCALE = 0.985; // a hair of room for the edge's antialiasing
+  const arm = armShape();
+  gl.uniform2f(gl.getUniformLocation(prog, 'uA'), arm.a[0], arm.a[1]);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uP'), arm.p);
+  const SCALE = 0.93; // room for the glow around the ball
 
   const size = () => {
     const box = canvas.getBoundingClientRect();
-    const side = Math.min(1100, Math.round(Math.max(box.width, 1) * Math.min(devicePixelRatio || 1, 1.5)));
+    const side = Math.min(1100, Math.round(Math.max(box.width, 1) * Math.min(devicePixelRatio || 1, 1.25)));
     if (canvas.width !== side) { canvas.width = side; canvas.height = side; }
     gl.viewport(0, 0, side, side);
     gl.uniform1f(uScale, SCALE);
@@ -241,10 +352,13 @@ export function startBall(canvas, { still = false, speed = 0.12, t: t0 = 0 } = {
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   };
+  // Thirty frames a second is plenty for a slow sway, and halves the work
+  // of a shader that marches every pixel through the glass.
   const frame = (now) => {
     raf = 0;
     if (stopped) return;
-    if (last) t += Math.min(0.05, (now - last) / 1000) * speed;
+    if (last && now - last < 31) { raf = requestAnimationFrame(frame); return; }
+    if (last) t += Math.min(0.1, (now - last) / 1000) * speed;
     last = now;
     draw();
     if (onScreen && !document.hidden) raf = requestAnimationFrame(frame);
