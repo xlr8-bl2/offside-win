@@ -21,7 +21,18 @@
  *     week's note, then the offer. The one that loses is not marked as seen,
  *     so it gets its turn on a later visit if it still matters then.
  *
- * Memory is a handful of timestamps in localStorage. Nothing is sent anywhere.
+ *   - Never over the landing page. It is a stranger's first look at the
+ *     site, and a card over it hides the one thing it has to say. The week's
+ *     note and the big moments wait for the board and the match pages, where
+ *     they explain what the reader is looking at.
+ *   - Not before the reader has settled: a second page, or twenty seconds on
+ *     the site. A card in the first few seconds of a visit is a wall.
+ *   - No offer popup on a first visit at all. The bar along the foot carries
+ *     the offer; the popup can ask from the second visit, once they have
+ *     looked round.
+ *
+ * Memory is a handful of timestamps in localStorage and one record of the
+ * visit in sessionStorage. Nothing is sent anywhere.
  */
 
 const KEY = 'ow.attention';
@@ -62,4 +73,48 @@ export function noteInterruption(kind, { now = Date.now(), store = defaultStore(
   const log = read(store).filter((e) => now - e.at < 7 * 24 * HOUR);
   log.push({ kind, at: now });
   try { store.setItem(KEY, JSON.stringify(log.slice(-20))); } catch { /* shown again sooner, no harm */ }
+}
+
+/* ------------------------------------------------------------- the visit */
+
+const VISIT = 'ow.visit';
+const VISITS = 'ow.visits';
+const defaultSession = () => {
+  try { return globalThis.sessionStorage ?? null; } catch { return null; }
+};
+function visit(session) {
+  try { const v = JSON.parse(session?.getItem(VISIT) ?? 'null'); return v && Number.isFinite(v.start) ? v : null; } catch { return null; }
+}
+
+/**
+ * A page of this visit has been drawn. The first one of a visit also counts
+ * the visit itself (a visit is a browser session: a tab, until it closes).
+ */
+export function notePage({ now = Date.now(), session = defaultSession(), store = defaultStore() } = {}) {
+  if (!session) return;
+  const v = visit(session);
+  if (!v) {
+    try { store?.setItem(VISITS, String(visits(store) + 1)); } catch { /* counted next time */ }
+  }
+  const next = v ? { ...v, pages: (v.pages ?? 0) + 1 } : { start: now, pages: 1 };
+  try { session.setItem(VISIT, JSON.stringify(next)); } catch { /* treated as settled */ }
+}
+
+/** How many visits this browser has made, this one included. */
+export function visits(store = defaultStore()) {
+  try { return Math.max(0, Number(store?.getItem(VISITS)) || 0); } catch { return 0; }
+}
+
+/** The reader's first visit: no offer popup, the bar is enough. */
+export const firstVisit = (store = defaultStore()) => visits(store) <= 1;
+
+/**
+ * Whether the reader has settled into this visit: a second page, or `ms` on
+ * the site. Without a record of the visit (no storage) they count as settled,
+ * so the site can still speak.
+ */
+export function settled({ now = Date.now(), session = defaultSession(), ms = 20e3 } = {}) {
+  const v = visit(session);
+  if (!v) return true;
+  return (v.pages ?? 1) >= 2 || now - v.start >= ms;
 }

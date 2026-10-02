@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 // @ts-expect-error plain ES module from the site
 const { findMoment, wordsFor } = await import('../../public/js/lib/moments.js');
 // @ts-expect-error plain ES module from the site
-const { mayInterrupt, noteInterruption, GAP } = await import('../../public/js/lib/attention.js');
+const { mayInterrupt, noteInterruption, GAP, notePage, settled, firstVisit, visits } = await import('../../public/js/lib/attention.js');
 // @ts-expect-error plain ES module from the site
 const { lastCallDue } = await import('../../public/js/lib/promo.js');
 const { findBannedInProse } = await import('../src/vocabulary.ts');
@@ -224,6 +224,28 @@ test('never more than two cards a day', () => {
 test('with no storage, football may speak and offers may not', () => {
   assert.equal(mayInterrupt('moment', { now: T, store: null }), true);
   assert.equal(mayInterrupt('offer', { now: T, store: null }), false);
+});
+
+test('a visit settles after a second page or twenty seconds, not before', () => {
+  const session = store();
+  const local = store();
+  notePage({ now: T, session, store: local });
+  assert.equal(settled({ now: T + 5e3, session }), false, 'first seconds of a first page');
+  assert.equal(settled({ now: T + 21e3, session }), true, 'twenty seconds in');
+  notePage({ now: T + 6e3, session, store: local });
+  assert.equal(settled({ now: T + 7e3, session }), true, 'a second page');
+});
+
+test('the first visit is counted once, however many pages it has', () => {
+  const local = store();
+  const s1 = store();
+  notePage({ now: T, session: s1, store: local });
+  notePage({ now: T + 1e3, session: s1, store: local });
+  assert.equal(visits(local), 1);
+  assert.equal(firstVisit(local), true, 'no offer popup on a first visit');
+  notePage({ now: T + 86400e3, session: store(), store: local });
+  assert.equal(visits(local), 2);
+  assert.equal(firstVisit(local), false);
 });
 
 /* ------------------------------------------------- the offer's last call */

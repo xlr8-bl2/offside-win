@@ -29,7 +29,7 @@
  */
 
 import { scrollAway, moving } from './scrollaway.js';
-import { mayInterrupt, noteInterruption } from './attention.js';
+import { firstVisit, mayInterrupt, noteInterruption, settled } from './attention.js';
 
 const KEY = 'ow.promo';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -427,6 +427,9 @@ export function showBar(p, { anchor }) {
   const clock = bar.querySelector('.pb-clock');
   if (clock) mountClock(clock, p.ends_at, { compact: true, onEnd: gone });
   document.body.append(bar);
+  // One thing at a time along the foot of the screen: with the offer bar up,
+  // the week's chip stands down (season.js checks for the bar as well).
+  document.getElementById('season-chip')?.remove();
   room();
   addEventListener('resize', room);
   if (!reduced()) {
@@ -530,6 +533,11 @@ export async function runPromos({ route, signedIn, member, returning = false, an
     removeEventListener('scroll', onScroll);
     const here = (location.hash.slice(2).split(/[/?]/)[0]) || 'home';
     if (NO_POPUP.has(here) || document.querySelector('.ofr-root, #cookie-notice, #season-note, #moment')) { armed = false; return; }
+    // Never over the landing page, never on a first visit (the bar carries
+    // the offer), and not until the reader has settled in (attention.js).
+    // Turned down here, it is not marked as seen and asks on a later page.
+    if (document.querySelector('.ld-hero') || firstVisit()) { armed = false; return; }
+    if (!settled({ ms: 30e3 })) { fired = false; setTimeout(fire, 4000); return; }
     // The site's shared rules on interruptions (attention.js): one card a
     // visit, two a day, and the offer only after twelve quiet hours. Turned
     // down, it is not marked as seen and asks again on a later visit.

@@ -39,7 +39,7 @@ once something rendered the page and measured it.
   down, and no panel scrolls into empty space. `offerbar` taps every part of
   the offer bar; `moments` fakes El Clásico onto the board and checks the
   big-moment card opens once, alone, and that nothing else interrupts the
-  same visit (js/lib/attention.js). `BASE=` points it at another
+  same visit (js/lib/attention.js). `quiet` checks a first visit gets nothing over the landing page and no offer popup at all; scenarios that want a card pass `settled: true` to `fresh()`. `BASE=` points it at another
   server, as for check.mjs; `SHOTS=` is where the screenshots go.
 - The deployed copy is `dist/` (`node scripts/build-public.mjs`), minified and
   versioned. Check it, not only `public/`, after touching imports or the build:

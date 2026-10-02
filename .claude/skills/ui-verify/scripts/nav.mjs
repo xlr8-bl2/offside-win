@@ -34,7 +34,7 @@ const report = (name, ok, detail) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `: ${detail}` : ''}`);
 };
 
-async function fresh(width = 390, { slow = 0, height = 800, touch = false } = {}) {
+async function fresh(width = 390, { slow = 0, height = 800, touch = false, settled = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, ...(touch ? { hasTouch: true, isMobile: true, deviceScaleFactor: 2 } : {}) });
   const page = await ctx.newPage();
   const errors = [];
@@ -47,6 +47,10 @@ async function fresh(width = 390, { slow = 0, height = 800, touch = false } = {}
   // The week's note (an international break) too, for the same reason; it
   // has its own scenario below.
   await page.addInitScript((ids) => { try { localStorage.setItem('ow.consent', 'declined'); localStorage.setItem('ow.promo', JSON.stringify({ seen: ids, closed: ids })); localStorage.setItem('ow.season', '["*"]'); localStorage.setItem('ow.moments', '["*"]'); } catch {} }, promoIds);
+  // A returning reader who has looked round (js/lib/attention.js): popups
+  // wait for a second page or twenty seconds, and the offer popup for a
+  // second visit. Scenarios that want a card to open start from here.
+  if (settled) await page.addInitScript(() => { try { sessionStorage.setItem('ow.visit', JSON.stringify({ start: Date.now() - 60000, pages: 3 })); localStorage.setItem('ow.visits', '3'); } catch {} });
   return { ctx, page, errors };
 }
 const settle = (page, ms = 2500) => page.waitForTimeout(ms);
@@ -234,7 +238,7 @@ const scenarios = {
   /** The offer popup waits while the reader is typing, and goes when they move page. */
   async popup() {
     if (!promoIds.length) { report('popup: no offer is running, nothing to check', true); return; }
-    const { ctx, page } = await fresh(390);
+    const { ctx, page } = await fresh(390, { settled: true });
     // This one wants the popup, so the offers are not marked as seen.
     await page.addInitScript(() => { try { localStorage.setItem('ow.promo', JSON.stringify({ seen: [], closed: [] })); } catch {} });
     await page.goto(`${BASE}/#/search`, { waitUntil: 'load' });
@@ -299,9 +303,9 @@ const scenarios = {
       };
     });
 
-    const { ctx, page, errors } = await fresh(390, { height: 844, touch: true });
+    const { ctx, page, errors } = await fresh(390, { height: 844, touch: true, settled: true });
     await notes(page);
-    await page.goto(`${BASE}/#/home`, { waitUntil: 'load' });
+    await page.goto(`${BASE}/#/board`, { waitUntil: 'load' });
     const opened = await page.waitForSelector('#season-note', { timeout: 8000 }).then(() => true, () => false);
     if (!opened) { report('season: no break, close season or tournament on now, nothing to check', true); await ctx.close(); return; }
     await settle(page, 2600);
@@ -330,9 +334,9 @@ const scenarios = {
     }
 
     // A wheel (a laptop) does the same.
-    const desk = await fresh(1280, { height: 800 });
+    const desk = await fresh(1280, { height: 800, settled: true });
     await notes(desk.page);
-    await desk.page.goto(`${BASE}/#/home`, { waitUntil: 'load' });
+    await desk.page.goto(`${BASE}/#/board`, { waitUntil: 'load' });
     if (await desk.page.waitForSelector('#season-note', { timeout: 8000 }).then(() => true, () => false)) {
       await settle(desk.page, 2600);
       const d0 = await state(desk.page);
@@ -368,9 +372,9 @@ const scenarios = {
     await desk.ctx.close();
 
     // Opening under a moving thumb gets it swiped away unread, so it waits.
-    const busy = await fresh(390, { height: 844, touch: true });
+    const busy = await fresh(390, { height: 844, touch: true, settled: true });
     await busy.page.addInitScript(() => { try { localStorage.removeItem('ow.season'); } catch {} });
-    await busy.page.goto(`${BASE}/#/home`, { waitUntil: 'load' });
+    await busy.page.goto(`${BASE}/#/board`, { waitUntil: 'load' });
     await busy.page.waitForTimeout(600);
     let seenWhileMoving = false;
     const until = Date.now() + 4000;
@@ -394,9 +398,9 @@ const scenarios = {
   /** The note at every phone size: the card fits or scrolls itself, the chip clears the offer bar. */
   async seasonsizes() {
     for (const [w, h] of [[320, 568], [360, 640], [375, 667], [390, 844], [414, 896], [768, 1024], [1440, 900]]) {
-      const { ctx, page, errors } = await fresh(w, { height: h, touch: w < 700 });
+      const { ctx, page, errors } = await fresh(w, { height: h, touch: w < 700, settled: true });
       await page.addInitScript(() => { try { localStorage.removeItem('ow.season'); localStorage.removeItem('ow.promo'); } catch {} });
-      await page.goto(`${BASE}/#/home`, { waitUntil: 'load' });
+      await page.goto(`${BASE}/#/board`, { waitUntil: 'load' });
       if (!(await page.waitForSelector('#season-note', { timeout: 8000 }).then(() => true, () => false))) { report(`seasonsizes ${w}x${h}: no note on now`, true); await ctx.close(); continue; }
       await settle(page, 2800);
       const m = await page.evaluate(() => {
@@ -434,7 +438,9 @@ const scenarios = {
         const hit = (a, b) => a && b && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
         return { chip: chip && { top: Math.round(chip.top), bottom: Math.round(chip.bottom), right: Math.round(chip.right) }, bar: bar && { top: Math.round(bar.top) }, overlap: !!hit(chip, bar), vh: innerHeight, vw: innerWidth };
       });
-      report(`seasonsizes ${w}x${h}: the chip is on screen and clear of the offer bar`, c.chip && !c.overlap && c.chip.bottom <= c.vh && c.chip.right <= c.vw, JSON.stringify(c));
+      // One thing at a time along the foot: with the offer bar up the chip
+      // stands down; without it, the chip is on screen.
+      report(`seasonsizes ${w}x${h}: the chip and the offer bar never share the foot of the screen`, c.bar ? !c.chip : (c.chip && c.chip.bottom <= c.vh && c.chip.right <= c.vw), JSON.stringify(c));
       report(`seasonsizes ${w}x${h}: no errors`, !errors.length, errors.join(' | '));
       await ctx.close();
     }
@@ -555,7 +561,7 @@ const scenarios = {
    * with El Clásico tomorrow so this runs on any day.
    */
   async moments() {
-    const { ctx, page, errors } = await fresh(390, { height: 844, touch: true });
+    const { ctx, page, errors } = await fresh(390, { height: 844, touch: true, settled: true });
     await page.addInitScript((ids) => {
       try {
         if (!sessionStorage.getItem('nav.mo')) { localStorage.removeItem('ow.moments'); localStorage.removeItem('ow.season'); localStorage.removeItem('ow.attention'); localStorage.setItem('ow.promo', JSON.stringify({ seen: [], closed: [] })); sessionStorage.setItem('nav.mo', '1'); }
@@ -568,7 +574,7 @@ const scenarios = {
       body.fixtures = [{ id: 990001, home: 'Real Madrid', away: 'FC Barcelona', home_id: 57, away_id: 44, league: 'La Liga', league_id: 3, kickoff: now + 20 * 3600, status: 'notstarted', locked: true, colors: { home: '#febe10', away: '#a50044' } }, ...(body.fixtures ?? [])];
       await route.fulfill({ response: res, json: body });
     });
-    await page.goto(`${BASE}/#/home`, { waitUntil: 'load' });
+    await page.goto(`${BASE}/#/board`, { waitUntil: 'load' });
     const opened = await page.waitForSelector('#moment', { timeout: 9000 }).then(() => true, () => false);
     await settle(page, 2600);
     const m = await page.evaluate(() => {
@@ -630,6 +636,32 @@ const scenarios = {
       report(`landing ${w}: a question opens its answer`, await page.evaluate(() => document.querySelector('.ld-faq details')?.open === true));
       await ctx.close();
     }
+  },
+
+  /**
+   * A first visit is quiet (js/lib/attention.js): nothing opens over the
+   * landing page, nothing in the first moments of a visit, and no offer
+   * popup on a first visit at all, even with a break note and an offer due.
+   */
+  async quiet() {
+    const { ctx, page, errors } = await fresh(390, { height: 844, touch: true });
+    await page.addInitScript(() => { try { if (!sessionStorage.getItem('nav.q')) { localStorage.removeItem('ow.season'); localStorage.removeItem('ow.moments'); localStorage.removeItem('ow.attention'); localStorage.removeItem('ow.visits'); localStorage.setItem('ow.promo', JSON.stringify({ seen: [], closed: [] })); sessionStorage.setItem('nav.q', '1'); } } catch {} });
+    const open = () => page.evaluate(() => ({ note: !!document.getElementById('season-note'), moment: !!document.getElementById('moment'), offer: !!document.querySelector('.ofr-root'), chip: !!document.getElementById('season-chip') }));
+    await page.goto(`${BASE}/`, { waitUntil: 'load' });
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight * 0.5));
+    await settle(page, 9000);
+    const onLanding = await open();
+    report('quiet: nothing opens over the landing page on a first visit', !onLanding.note && !onLanding.moment && !onLanding.offer && !onLanding.chip, JSON.stringify(onLanding));
+    // Straight to the board: a second page, so settled; the break note (if
+    // there is one this week) may open now, but the offer popup never does.
+    await page.evaluate(() => { location.hash = '#/board'; });
+    await settle(page, 12000);
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight * 0.5));
+    await settle(page, 8000);
+    const onBoard = await open();
+    report('quiet: no offer popup on a first visit, whatever else is due', !onBoard.offer, JSON.stringify(onBoard));
+    report('quiet: no errors', !errors.length, errors.join(' | '));
+    await ctx.close();
   },
 
   /** The phone menu holds the page still behind it and keeps the keyboard inside. */

@@ -300,7 +300,8 @@ const hideChip = (key) => { try { localStorage.setItem(HIDE_KEY, JSON.stringify(
 /** The small reminder left behind once the note is closed: tap it and the note comes back. */
 export function showChip(r, helpers) {
   const old = document.getElementById('season-chip');
-  if (!r || chipHidden(r.key) || off()) { old?.remove(); return; }
+  // One thing at a time along the foot of the screen: the offer bar wins.
+  if (!r || chipHidden(r.key) || off() || document.getElementById('promo-bar')) { old?.remove(); return; }
   helpersNow = helpers;
   const el = old ?? document.createElement('div');
   el.id = 'season-chip';
