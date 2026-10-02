@@ -88,6 +88,24 @@ export async function runRecord(rows: HistRow[]): Promise<void> {
     }
   }
 
+  // And for the rest, which never sat on the board long enough to leave a
+  // name behind, the provider still has the event (as lab/losses.ts asks it).
+  const missing = ids.filter((id) => !names.has(id));
+  if (missing.length) {
+    const { bsdOrNull } = await import('../bsd.ts');
+    for (const id of missing) {
+      const e = await bsdOrNull<Record<string, unknown>>(`/api/v2/events/${id}/`).catch(() => null);
+      if (!e || !e['home_team'] || !e['away_team']) continue;
+      const num = (x: unknown) => (x !== null && x !== undefined && Number.isFinite(Number(x)) ? Number(x) : null);
+      names.set(id, {
+        home: String(e['home_team']), away: String(e['away_team']),
+        home_id: num(e['home_team_id']), away_id: num(e['away_team_id']),
+        league_id: num(e['league_id']) ?? picks.find((p) => p.row.id === id)?.row.league_id ?? null,
+      });
+    }
+    console.log(`  names from the provider for ${missing.filter((id) => names.has(id)).length} of ${missing.length} games the board had let go of`);
+  }
+
   const out: RecordRow[] = [];
   for (const { row, o } of picks) {
     const n = names.get(row.id);
