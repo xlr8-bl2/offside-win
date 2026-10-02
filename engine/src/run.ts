@@ -320,7 +320,7 @@ const commands: Record<string, () => Promise<unknown>> = {
   // The front page's record from the newest engine: the production rule
   // replayed on the games already played, stored in kv (lab/record.ts).
   async 'lab:record'() {
-    requireEnv({ provider: false });
+    requireEnv();
     const { loadHistory } = await import('./lab/run.ts');
     const { runRecord } = await import('./lab/record.ts');
     await runRecord(await loadHistory());
