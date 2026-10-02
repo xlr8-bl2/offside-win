@@ -1,6 +1,6 @@
 import { settleSlips } from './slip.ts';
 import { bsdOrNull, num } from './bsd.ts';
-import { postMortem } from './postmortem.ts';
+import { decidedBy, postMortem, type DecidedEvent, type DecidedSide } from './postmortem.ts';
 import { isQuarterLine } from './price.ts';
 import { writeMissingReports } from './report.ts';
 import { exec, insertMany, kvSetJSON, select } from './store.ts';
@@ -168,6 +168,8 @@ export interface SettleReport {
   /** Settled picks whose mark no longer matched the final score. */
   regraded: number;
   slips?: number;
+  /** Settled calls given what decided them, once their match report existed. */
+  decided?: number;
 }
 
 /**
@@ -382,6 +384,45 @@ export async function backfillPostMortems(limit = 400): Promise<number> {
   return done;
 }
 
+/**
+ * What decided it, added to each settled call's post-mortem once its match
+ * report exists (postmortem.ts decidedBy). Settlement runs before the report
+ * is fetched, so this is its own pass, after writeMissingReports. A call is
+ * done once it carries `decided`, an empty list included.
+ */
+export async function enrichPostMortems(limit = 300): Promise<number> {
+  const rows = await select<{
+    id: number; market: MarketCode; outcome: Outcome; line: number | null; postmortem_json: string;
+    home_team: string; away_team: string; home_goals: number; away_goals: number; report_json: string;
+  }>(
+    `SELECT p.id, p.market, p.outcome, p.line, p.postmortem_json,
+            f.home_team, f.away_team, f.home_goals, f.away_goals, f.report_json
+       FROM pick p JOIN fixture f ON f.id = p.fixture_id
+      WHERE p.settled_at IS NOT NULL AND p.postmortem_json IS NOT NULL
+        AND p.postmortem_json NOT LIKE '%"decided"%'
+        AND f.report_json IS NOT NULL AND f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
+      ORDER BY p.kickoff DESC LIMIT ?`,
+    [limit],
+  );
+  let done = 0;
+  for (const r of rows) {
+    let pm: Record<string, unknown>;
+    let rep: { events?: DecidedEvent[]; stats?: { home?: DecidedSide; away?: DecidedSide } | null };
+    try { pm = JSON.parse(r.postmortem_json); rep = JSON.parse(r.report_json); } catch { continue; }
+    pm['decided'] = decidedBy({
+      market: r.market, outcome: r.outcome, line: r.line === null ? null : Number(r.line),
+      homeGoals: Number(r.home_goals), awayGoals: Number(r.away_goals),
+      home: r.home_team, away: r.away_team,
+      events: Array.isArray(rep.events) ? rep.events : [],
+      stats: rep.stats ?? null,
+    });
+    await exec('UPDATE pick SET postmortem_json = ? WHERE id = ?', [JSON.stringify(pm), r.id]);
+    done++;
+  }
+  if (done) console.log(`Added what decided it to ${done} post-mortem${done === 1 ? '' : 's'}.`);
+  return done;
+}
+
 /** How long after kick-off a match with no final result is given up on. */
 const STALE_AFTER = 72 * 3600;
 
@@ -420,6 +461,7 @@ export async function runSettle(): Promise<SettleReport> {
     report.slips = await settleSlips();
     report.backfilled = await backfillPostMortems();
     report.reports = await writeMissingReports({ sinceDays: 7, limit: 60 });
+    report.decided = await enrichPostMortems();
     await kvSetJSON('settle:last_run', { at: now, ...report });
     return report;
   }
@@ -595,6 +637,7 @@ export async function runSettle(): Promise<SettleReport> {
   // Reports for whatever finished outside the slate's window, most recent
   // first, a page's worth per hour.
   report.reports = await writeMissingReports({ sinceDays: 7, limit: 60 });
+  report.decided = await enrichPostMortems();
   await refreshCalibration();
   await kvSetJSON('settle:last_run', { at: now, ...report });
 

@@ -3189,7 +3189,7 @@
 
 /* The receipts: what we said, and the score that answered it. */
 .ld-receipts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-5); margin: var(--space-8) 0 0; padding: 0; list-style: none; }
-.ld-receipts li { display: grid; grid-template-rows: auto auto 1fr auto; gap: var(--space-4); padding: var(--space-6); border: var(--border) solid var(--rule); border-top: 3px solid var(--won); border-radius: var(--radius-lg); background: var(--stand); }
+.ld-receipts li { display: grid; grid-template-rows: auto auto 1fr; gap: var(--space-4); padding: var(--space-6); border: var(--border) solid var(--rule); border-top: 3px solid var(--won); border-radius: var(--radius-lg); background: var(--stand); }
 .ld-receipts li.is-l { border-top-color: var(--lost); }
 .ld-rc-top { display: flex; justify-content: space-between; gap: var(--space-3); margin: 0; font-size: var(--text-sm); color: var(--chalk-3); }
 .ld-rc-tag { font-weight: var(--weight-bold); color: var(--won); }
@@ -3200,6 +3200,8 @@
 .ld-rc-goals { padding: 0 var(--space-2); font-family: var(--display-figures); font-size: var(--text-xl); font-weight: var(--weight-black); font-variant-numeric: tabular-nums; color: var(--chalk); }
 .ld-rc-said { margin: 0; font-size: var(--text-md); line-height: var(--leading-read); color: var(--chalk-2); }
 .ld-rc-said span { display: block; margin-bottom: var(--space-1); font-size: var(--text-xs); font-weight: var(--weight-bold); color: var(--chalk-3); }
+.ld-rc-went { margin: 0; font-size: var(--text-sm); line-height: var(--leading-normal); color: var(--chalk); }
+.ld-rc-went span { display: block; margin-bottom: var(--space-1); font-size: var(--text-xs); font-weight: var(--weight-bold); color: var(--chalk-3); }
 .ld-receipts a { font-size: var(--text-sm); font-weight: var(--weight-bold); color: var(--floodlight-hi); }
 
 @media (max-width: 900px) {
@@ -3532,6 +3534,57 @@
 .board-toggle button:hover { color: var(--chalk-2); border-bottom-color: var(--rule-firm); }
 .board-toggle button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
+/* ===================================================== the trap of the day
+ *
+ * A warning, not a call, so it wears the caution colour rather than the
+ * accent the calls use: one band of tape across the top and nothing else
+ * loud. The favourite's crest and name on the left, because the name is the
+ * point; the reasons on the right, in the order the engine rates them.
+ */
+.trap {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  align-items: start;
+  gap: var(--space-6) var(--space-8);
+  padding: var(--space-8) var(--space-7) var(--space-7);
+  overflow: hidden;
+  border: var(--border) solid var(--rule);
+  border-radius: var(--radius-lg);
+  background: var(--stand);
+}
+.trap-tape {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 8px;
+  background: repeating-linear-gradient(-45deg, var(--warn) 0 10px, var(--pitch) 10px 20px);
+}
+.trap-who { display: flex; align-items: center; gap: var(--space-5); min-width: 0; }
+.trap-who .crest { flex: none; }
+.trap-who > div { min-width: 0; }
+.trap-label { margin: 0 0 var(--space-1); font-size: var(--text-xs); font-weight: var(--weight-bold); color: var(--warn); }
+.trap-team {
+  margin: 0;
+  font-family: var(--display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  font-variation-settings: 'wdth' var(--condensed);
+  line-height: var(--leading-display);
+  color: var(--chalk);
+  overflow-wrap: anywhere;
+}
+.trap-tie { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: var(--space-2) 0 0; font-size: var(--text-sm); color: var(--chalk-3); }
+.trap-head { margin: 0 0 var(--space-3); font-size: var(--text-lg); font-weight: var(--weight-bold); color: var(--chalk); }
+.trap-why { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.trap-why li { position: relative; padding-left: var(--space-5); font-size: var(--text-md); line-height: var(--leading-normal); color: var(--chalk-2); }
+.trap-why li::before { content: ''; position: absolute; left: 0; top: 0.7em; width: 8px; height: 2px; background: var(--warn); }
+.trap-foot { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2) var(--space-4); margin: var(--space-5) 0 0; font-size: var(--text-sm); }
+.trap-foot a { font-weight: var(--weight-bold); color: var(--floodlight-hi); }
+.trap-foot span { color: var(--chalk-3); }
+@media (max-width: 720px) {
+  .trap { grid-template-columns: minmax(0, 1fr); padding: var(--space-7) var(--space-5) var(--space-5); }
+}
+
 /* ======================================================== the post-mortem
  *
  * Why it landed, or why it did not. The verdict reads as a sentence and the
@@ -3550,6 +3603,12 @@
   font-size: var(--text-sm);
   line-height: var(--leading-normal);
   color: var(--chalk-2);
+}
+.pm-decided {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--chalk);
 }
 .pm-facts {
   display: flex;
@@ -4068,6 +4127,10 @@
 .track i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; animation: ping 2.6s var(--ease-in-out) infinite; }
 .track.on  { color: var(--won);    background: color-mix(in srgb, var(--won) 14%, transparent); }
 .track.off { color: var(--sodium); background: color-mix(in srgb, var(--sodium) 14%, transparent); }
+/* Settled before the whistle: no further goal can change it. */
+.track.won  { color: var(--won);  background: color-mix(in srgb, var(--won) 22%, transparent); }
+.track.won i, .track.lost i { animation: none; }
+.track.lost { color: var(--lost); background: color-mix(in srgb, var(--lost) 14%, transparent); }
 .row-price .track { justify-self: end; }
 .track-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin: var(--space-3) 0 0; font-size: var(--text-sm); color: var(--chalk-2); }
 .side-meta .track { margin-left: auto; }

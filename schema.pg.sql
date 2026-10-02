@@ -1514,6 +1514,14 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
   SELECT (
     CASE WHEN jsonb_typeof(h.hero) = 'object' THEN h.hero ELSE '{}'::jsonb END
     || jsonb_build_object('free_fixture_id', free_fixture_id())
+    -- The trap of the day (engine/src/trap.ts): a favourite we'd leave alone.
+    -- Free and priceless by design, so it rides along here for everyone, and
+    -- only while its match is still to kick off.
+    || jsonb_build_object('trap', (
+         SELECT t FROM (SELECT try_json(v)::jsonb AS t FROM kv WHERE k = 'trap:today') x
+          WHERE jsonb_typeof(t) = 'object'
+            AND (t->>'kickoff') ~ '^[0-9]+$'
+            AND (t->>'kickoff')::bigint > floor(extract(epoch FROM now()))))
   )::json
   FROM (
     SELECT coalesce(

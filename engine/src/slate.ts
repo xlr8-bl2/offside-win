@@ -7,6 +7,7 @@ import { checkComparisonEntitlement, gatherFixture, parseScorers } from './conte
 import { RepetitionLedger, narrate, narrateConfident, narratePass } from './narrate/compose.ts';
 import { chooseHero, type HeroCandidate } from './feature.ts';
 import { chooseFreeCall } from './free.ts';
+import { chooseTrap, trapFor, type Trap } from './trap.ts';
 import { writeMissingReports } from './report.ts';
 import { fillCrestColors } from './images/crest.ts';
 import { fillVenues } from './context/venue.ts';
@@ -415,6 +416,7 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
     if (inc && k !== undefined) mix.add(DayMix.dayOf(k), bucketOf(inc));
   }
   const heroCandidates: HeroCandidate[] = [];
+  const traps: Trap[] = [];
 
   // The grounds on this slate, named once each after the loop.
   const venueIds = new Set<number>();
@@ -1080,6 +1082,18 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
         called: confidentVerdicts.length > 0,
       });
 
+      // The favourite we'd leave alone, if this match has one (trap.ts).
+      const trap = trapFor({
+        fixture_id: analysis.fixture_id, kickoff: analysis.kickoff,
+        league: ctx.league_name ?? '', league_id: analysis.league_id, rank: leagueRank(analysis.league_id),
+        home: analysis.home_team, away: analysis.away_team,
+        home_id: analysis.home_team_id, away_id: analysis.away_team_id,
+        book: analysis.book, model: analysis.model, factors,
+        changes: ctx.lineups?.changes ?? null,
+        calls: confidentVerdicts.map((v) => ({ market: v.candidate.market, outcome: String(v.candidate.outcome) })),
+      });
+      if (trap) traps.push(trap);
+
       report.analysed++;
       if (allVerdicts.length > 0) report.picks += allVerdicts.length;
       report.confident += confidentVerdicts.length;
@@ -1229,6 +1243,23 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
     // No called fixture ahead: clear it, rather than leave yesterday's match
     // leading the front page. The page has a masthead for this case.
     await kvSetJSON('hero:today', null);
+  }
+
+  // The trap of the day: free, on the front page, no price on it.
+  const wasTrap = await kvGetJSON<Trap>('trap:today').catch(() => null);
+  const trap = chooseTrap(traps, now, wasTrap?.fixture_id ?? null);
+  if (trap) {
+    await kvSetJSON('trap:today', { ...trap, made_at: now });
+    // Kept so the traps can be marked against the results one day, the way
+    // the calls are. The latest reading of each match wins.
+    const log = (await kvGetJSON<Array<Trap & { made_at: number }>>('trap:history').catch(() => null)) ?? [];
+    const next = [{ ...trap, made_at: now }, ...log.filter((t) => t.fixture_id !== trap.fixture_id)].slice(0, 120);
+    await kvSetJSON('trap:history', next);
+    console.log(`  trap: ${trap.team} (${trap.home} v ${trap.away}), ${trap.reasons.length} reason${trap.reasons.length === 1 ? '' : 's'}`);
+  } else {
+    // Leave a trap that has kicked off where it is for the page to let go of;
+    // nothing new to put up.
+    console.log(`  trap: none (${traps.length} candidate${traps.length === 1 ? '' : 's'})`);
   }
 
   // The one call a day everyone can read: the strongest open call, not the

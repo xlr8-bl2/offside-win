@@ -153,3 +153,97 @@ test('no verdict uses the private vocabulary', async () => {
   assert.ok(seen.size >= 6, `only ${seen.size} distinct verdicts`);
   for (const line of seen) assert.equal(findBanned(line), null, `banned term in: ${line}`);
 });
+
+/*
+ * What decided it: only what the match report says, and nothing when the
+ * report is short. A late goal named from a partial feed would be the wrong
+ * goal, so that case returns nothing rather than guessing.
+ */
+import { decidedBy, ordinal, type DecidedEvent } from '../src/postmortem.ts';
+
+const goal = (minute: number, side: 'home' | 'away', player: string | null = null, kind: string | null = null, added: number | null = null): DecidedEvent =>
+  ({ t: 'goal', minute, added, side, player, kind });
+const card = (minute: number, side: 'home' | 'away', c: 'red' | 'second_yellow' | 'yellow'): DecidedEvent =>
+  ({ t: 'card', minute, side, card: c });
+const base = { home: 'Bury', away: 'Bromsgrove', line: null, events: [] as DecidedEvent[], stats: null };
+
+test('ordinal', () => {
+  assert.deepEqual([1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 88, 90, 101, 111].map(ordinal),
+    ['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '23rd', '88th', '90th', '101st', '111th']);
+});
+
+test('a late winner that landed it is named', () => {
+  const out = decidedBy({ ...base, market: '1x2', outcome: 'HOME', homeGoals: 2, awayGoals: 1,
+    events: [goal(10, 'home', 'Ade'), goal(30, 'away', 'Bo'), goal(87, 'home', 'Cee')] });
+  assert.deepEqual(out, ['Got over the line with Cee’s goal in the 87th minute.']);
+});
+
+test('a late equaliser that undid it, in stoppage time, as a penalty', () => {
+  const out = decidedBy({ ...base, market: '1x2', outcome: 'HOME', homeGoals: 1, awayGoals: 1,
+    events: [goal(20, 'home', 'Ade'), goal(90, 'away', 'Bo', 'penalty', 4)] });
+  assert.deepEqual(out, ['Undone by Bo’s penalty in stoppage time.']);
+});
+
+test('an own goal is called an own goal, not the defender’s goal', () => {
+  const out = decidedBy({ ...base, market: 'over_under_25', outcome: 'over', line: 2.5, homeGoals: 2, awayGoals: 1,
+    events: [goal(5, 'home'), goal(40, 'away'), goal(84, 'home', 'Dee', 'own goal')] });
+  assert.deepEqual(out, ['Got over the line with an own goal in the 84th minute.']);
+});
+
+test('an early decider is not the story', () => {
+  const out = decidedBy({ ...base, market: '1x2', outcome: 'HOME', homeGoals: 1, awayGoals: 0, events: [goal(12, 'home', 'Ade')] });
+  assert.deepEqual(out, []);
+});
+
+test('a late goal that changed nothing is not named', () => {
+  // 3-0 at 89: the call was already in at 1-0.
+  const out = decidedBy({ ...base, market: '1x2', outcome: 'HOME', homeGoals: 3, awayGoals: 0,
+    events: [goal(10, 'home'), goal(50, 'home'), goal(89, 'home', 'Ee')] });
+  assert.deepEqual(out, []);
+});
+
+test('a partial feed names no goal', () => {
+  // Two goals in the score, one in the report.
+  const out = decidedBy({ ...base, market: '1x2', outcome: 'HOME', homeGoals: 2, awayGoals: 0, events: [goal(88, 'home', 'Ade')] });
+  assert.deepEqual(out, []);
+});
+
+test('a sending-off with a game left to play', () => {
+  const out = decidedBy({ ...base, market: '1x2', outcome: 'AWAY', homeGoals: 2, awayGoals: 0,
+    events: [goal(50, 'home'), goal(60, 'home'), card(33, 'away', 'second_yellow'), card(70, 'home', 'red')] });
+  assert.deepEqual(out, ['Bromsgrove were down to ten from the 33rd minute.']);
+  // In the last five minutes it decided nothing.
+  assert.deepEqual(decidedBy({ ...base, market: '1x2', outcome: 'AWAY', homeGoals: 1, awayGoals: 0,
+    events: [goal(50, 'home'), card(88, 'away', 'red')] }), []);
+});
+
+test('the side we backed battered them and lost', () => {
+  const stats = { home: { shots: 24 }, away: { shots: 6 } };
+  assert.deepEqual(decidedBy({ ...base, market: '1x2', outcome: 'HOME', homeGoals: 0, awayGoals: 1, events: [goal(30, 'away')], stats }),
+    ['Bury had 24 shots to 6 and still couldn’t get it done.']);
+  // Not when it landed, and not when the gap is small.
+  assert.deepEqual(decidedBy({ ...base, market: '1x2', outcome: 'HOME', homeGoals: 1, awayGoals: 0, events: [goal(30, 'home')], stats }), []);
+  assert.deepEqual(decidedBy({ ...base, market: '1x2', outcome: 'HOME', homeGoals: 0, awayGoals: 1, events: [goal(30, 'away')],
+    stats: { home: { shots: 12 }, away: { shots: 6 } } }), []);
+});
+
+test('goals called for, chances everywhere, none went in', () => {
+  const out = decidedBy({ ...base, market: 'over_under_25', outcome: 'over', line: 2.5, homeGoals: 1, awayGoals: 0,
+    events: [goal(30, 'home')], stats: { home: { shots: 17 }, away: { shots: 11 } } });
+  assert.deepEqual(out, ['28 shots between them and only one goal.']);
+});
+
+test('at most two lines, and every line passes the vocabulary gate', async () => {
+  const { findBannedInProse } = await import('../src/vocabulary.ts');
+  const out = decidedBy({ ...base, market: '1x2', outcome: 'HOME', homeGoals: 1, awayGoals: 1,
+    events: [goal(20, 'home', 'Ade'), card(25, 'away', 'red'), goal(89, 'away', 'Bo')],
+    stats: { home: { shots: 30 }, away: { shots: 3 } } });
+  assert.equal(out.length, 2);
+  assert.equal(out[0], 'Undone by Bo’s goal in the 89th minute.');
+  for (const l of out) assert.deepEqual(findBannedInProse(l), []);
+});
+
+test('markets the score cannot grade get nothing', () => {
+  assert.deepEqual(decidedBy({ ...base, market: 'corners_over_under' as never, outcome: 'over', line: 9.5, homeGoals: 2, awayGoals: 1,
+    events: [goal(88, 'home', 'Ade')] }), []);
+});

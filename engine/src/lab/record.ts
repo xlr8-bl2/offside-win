@@ -15,6 +15,7 @@
  * now. Nothing paid is in it: every fixture here has finished.
  */
 
+import { decidedBy, postMortem, type DecidedEvent, type DecidedSide, type PostMortem } from '../postmortem.ts';
 import { kvSetJSON, select } from '../store.ts';
 import { chooseDay, grade, optionsFor, type HistRow, type Option } from './markets.ts';
 import { PROD } from './tune.ts';
@@ -35,6 +36,8 @@ export interface RecordRow {
   outcome: string;
   line: number | null;
   result: string;
+  /** How it went, as the results page says it of a live call (postmortem.ts). */
+  postmortem: PostMortem | null;
 }
 
 export async function runRecord(rows: HistRow[]): Promise<void> {
@@ -57,15 +60,17 @@ export async function runRecord(rows: HistRow[]): Promise<void> {
   // because the board keeps a week and most of these have left it.
   const ids = picks.map((p) => p.row.id);
   const names = new Map<number, { home: string; away: string; home_id: number | null; away_id: number | null; league_id: number | null }>();
+  // The match report, where the board still holds one, for what decided it.
+  const reports = new Map<number, { events?: DecidedEvent[]; stats?: { home?: DecidedSide; away?: DecidedSide } | null }>();
   for (let i = 0; i < ids.length; i += 400) {
     const chunk = ids.slice(i, i + 400);
-    const got = await select<{ id: number; league_id: number | null; home: string | null; away: string | null; home_id: number | null; away_id: number | null; bundle_json: string | null }>(
+    const got = await select<{ id: number; league_id: number | null; home: string | null; away: string | null; home_id: number | null; away_id: number | null; bundle_json: string | null; report_json: string | null }>(
       `SELECT x.id,
               coalesce(f.league_id, m.league_id, s.league_id) AS league_id,
               coalesce(f.home_team, th.name, sh.home_team) AS home,
               coalesce(f.away_team, ta.name, sh.away_team) AS away,
               m.home_team_id AS home_id, m.away_team_id AS away_id,
-              f.bundle_json
+              f.bundle_json, f.report_json
          FROM (SELECT unnest(?::bigint[]) AS id) x
          LEFT JOIN fixture f ON f.id = x.id
          LEFT JOIN match m ON m.id = x.id
@@ -77,6 +82,7 @@ export async function runRecord(rows: HistRow[]): Promise<void> {
     );
     const num = (x: unknown) => (x !== null && x !== undefined && Number.isFinite(Number(x)) ? Number(x) : null);
     for (const g of got) {
+      if (g.report_json) { try { reports.set(Number(g.id), JSON.parse(g.report_json)); } catch { /* no report, no lines */ } }
       if (!g.home || !g.away) continue;
       let b: Record<string, unknown> = {};
       try { b = g.bundle_json ? JSON.parse(g.bundle_json) : {}; } catch { /* the ids from match do */ }
@@ -111,11 +117,21 @@ export async function runRecord(rows: HistRow[]): Promise<void> {
     const n = names.get(row.id);
     const g = grade(row, o);
     if (!n || !g) continue;
+    const at = { market: o.market, outcome: o.outcome, line: o.line, homeGoals: row.score[0], awayGoals: row.score[1] };
+    const pm: PostMortem | null = (() => {
+      try {
+        const p = postMortem({ ...at, result: g.result,
+          expectedHome: row.lambda?.[0] ?? null, expectedAway: row.lambda?.[1] ?? null });
+        const rep = reports.get(row.id);
+        if (rep) p.decided = decidedBy({ ...at, home: n.home, away: n.away, events: Array.isArray(rep.events) ? rep.events : [], stats: rep.stats ?? null });
+        return p;
+      } catch { return null; }
+    })();
     out.push({
       fixture_id: row.id, kickoff: row.kickoff, league_id: n.league_id,
       home: n.home, away: n.away, home_id: n.home_id, away_id: n.away_id,
       home_goals: row.score[0], away_goals: row.score[1],
-      market: o.market, outcome: String(o.outcome), line: o.line, result: g.result,
+      market: o.market, outcome: String(o.outcome), line: o.line, result: g.result, postmortem: pm,
     });
   }
   out.sort((a, b) => b.kickoff - a.kickoff);
