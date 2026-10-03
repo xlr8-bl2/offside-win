@@ -227,7 +227,12 @@ for (const [name, a] of Object.entries(ART)) {
   await tab.waitForFunction(() => window.__done === true, null, { timeout: 60000 }).catch(() => {});
   if (errs.length) console.log(name, errs.slice(0, 3));
   await tab.waitForTimeout(200);
-  await tab.screenshot({ path: join(OUT, `${name}.png`), clip: { x: 0, y: 0, width: a.w, height: a.h }, omitBackground: true });
+  // The heroes are solid pictures, so JPEG: a sixth of the PNG's weight, which
+  // matters in an inbox. The feature cards keep PNG for their see-through
+  // corners, where the object breaks out of the card.
+  const clip = { x: 0, y: 0, width: a.w, height: a.h };
+  if (name.startsWith('hero-')) await tab.screenshot({ path: join(OUT, `${name}.jpg`), clip, type: 'jpeg', quality: 86 });
+  else await tab.screenshot({ path: join(OUT, `${name}.png`), clip, omitBackground: true });
   console.log('art', name);
   await tab.close();
 }

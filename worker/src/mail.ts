@@ -242,7 +242,7 @@ interface Frame {
 export interface Look {
   /** Said along the ticker, twice. No ticker without it. */
   ticker?: string;
-  /** public/brand/mail/<hero>.png, 600 x 560. */
+  /** public/brand/mail/<hero>.jpg, 600 wide (scripts/mail-art.mjs). */
   hero: string;
   /** The card's first line, under the hero. The hero's headline is enough without it. */
   lead?: string;
@@ -289,7 +289,7 @@ function lookBody(f: Frame, look: Look, linkRow: string, foot: string): string {
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.pitch}"><tr><td align="center" style="padding:0 0 36px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px">
 ${ticker ? `<tr><td style="background:${C.violet};padding:9px 12px;font:800 11px/1.3 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#ffffff;text-align:center">${ticker}</td></tr>` : ''}
-<tr><td style="font-size:0;line-height:0;background:#1a1145"><a href="${SITE}" style="text-decoration:none"><img src="${SITE}/brand/mail/${esc(look.hero)}.png" width="600" alt="${esc(f.heading)}" style="display:block;width:100%;max-width:600px;height:auto;border:0;background:#1a1145;color:${C.chalk};font:800 40px/1.1 ${DISPLAY}"></a></td></tr>
+<tr><td style="font-size:0;line-height:0;background:#1a1145"><a href="${SITE}" style="text-decoration:none"><img src="${SITE}/brand/mail/${esc(look.hero)}.jpg" width="600" alt="${esc(f.heading)}" style="display:block;width:100%;max-width:600px;height:auto;border:0;background:#1a1145;color:${C.chalk};font:800 40px/1.1 ${DISPLAY}"></a></td></tr>
 <tr><td align="center" style="background:${C.pitch}">
 <table role="presentation" width="93.33%" cellpadding="0" cellspacing="0" style="width:93.33%;background:${C.stand};border:1px solid ${C.line};border-top:0;border-radius:0 0 26px 26px">
 <tr><td class="pad" align="center" style="padding:4px 30px 30px;text-align:center">
