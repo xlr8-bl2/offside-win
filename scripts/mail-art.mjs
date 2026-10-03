@@ -9,8 +9,9 @@
  * at angles round a big centred headline, with a rounded card overlapping the
  * hero; Candy Creams' coloured feature cards with the product breaking out of
  * them; NYCFC's crest-v-crest matchday lockup; Little Crafts' one giant
- * silhouette as the whole stage. Our products are our own: a football (the
- * site's 3D ball shader), a call card, the bet slip, a member's pass.
+ * silhouette as the whole stage. Our products are our own: a football
+ * (rendered in Blender, scripts/mail/ball.py), a call card, the bet slip, a
+ * member's pass.
  *
  *   node scripts/mail-art.mjs            # everything, 2x for sharp phones
  *   node scripts/mail-art.mjs hero-joined
@@ -24,10 +25,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const font = (f) => `url(data:font/woff2;base64,${readFileSync(join(root, 'public/fonts', f)).toString('base64')}) format('woff2')`;
 const OUT = join(root, 'public/brand/mail');
 
-// The ball: the site's shader, inlined, since a page set from a string
-// cannot import a module from disk.
-const BALL_JS = readFileSync(join(root, 'public/js/lib/starball.js'), 'utf8').replace(/^export /gm, '')
-  + '\n' + readFileSync(join(root, 'scripts/mail/football.js'), 'utf8').replace(/^export /gm, '');
+// The ball: a real one, rendered in Blender (scripts/mail/ball.py), with a
+// transparent background. Run that first.
+const BALL = `data:image/png;base64,${readFileSync(join(OUT, 'ball.png')).toString('base64')}`;
 
 const CSS = `
 @font-face { font-family: W; src: ${font('offside-wordmark.woff2')}; }
@@ -68,7 +68,7 @@ body { background: transparent; }
 .pass .wm span { color: rgba(255,255,255,.75); }
 .pass .m { position: absolute; left: 16px; bottom: 14px; font: 800 30px/1 D; }
 .pass .chip { position: absolute; right: 16px; bottom: 18px; width: 30px; height: 22px; border-radius: 5px; background: linear-gradient(135deg, #ffe1a1, #f5a524); }
-canvas.ball { position: absolute; display: block; }
+
 `;
 
 const callCard = ({ crest = '#c8102e', tag = 'ARS', who = 'Arsenal v Liverpool', pick = 'Arsenal to win', odds = '1.85', book = 'at bet365' } = {}) => `
@@ -89,23 +89,20 @@ const ART = {
    * floating round it at angles, the bottom edge cut by the top of the card
    * that overlaps it (drawn here, so it overlaps in every mail app).
    */
-  'hero-joined': { w: 600, h: 560, ball: { x: -30, y: 392, s: 176, t: 0.7 }, html: `
+  'hero-joined': { w: 600, h: 560, html: `
     <div class="art" style="width:600px;height:560px;background:
       radial-gradient(70% 55% at 50% 38%, #4a33c8 0%, #2a1a7a 45%, #120c34 80%, #0b0818 100%)">
-      <svg style="position:absolute;left:300px;top:250px;width:1000px;height:1000px;margin:-500px 0 0 -500px;opacity:.16" viewBox="0 0 100 100">
-        ${Array.from({ length: 14 }, (_, i) => `<circle cx="50" cy="50" r="${8 + i * 3.2}" fill="none" stroke="#d9ceff" stroke-width=".22"/>`).join('')}
-      </svg>
       <div class="wm" style="position:absolute;left:0;right:0;top:34px;text-align:center">offside<i></i><span>win</span></div>
-      <div class="float" style="left:-44px;top:92px;transform:rotate(-14deg) scale(.8);transform-origin:0 0">${passCard()}</div>
-      <div class="float" style="right:-52px;top:78px;transform:rotate(10deg) scale(.8);transform-origin:100% 0">${callCard()}</div>
-      <div class="float" style="right:-40px;top:404px;transform:rotate(-8deg) scale(.78);transform-origin:100% 0">${slipCard()}</div>
-      <div style="position:absolute;left:0;right:0;top:206px;text-align:center">
-        <div class="d" style="font-size:132px">You’re in.</div>
-        <div style="display:inline-block;margin-top:22px;padding:11px 22px;border:2.5px solid #f4f6fa;border-radius:999px;font:600 21px/1 B;color:#f4f6fa;background:rgba(11,8,24,.25)">Every call. Every reason.</div>
+      <div class="float" style="left:26px;top:86px;transform:rotate(-11deg) scale(.7);transform-origin:0 0">${passCard()}</div>
+      <div class="float" style="right:24px;top:72px;transform:rotate(9deg) scale(.7);transform-origin:100% 0">${callCard()}</div>
+      <img class="float" src="${BALL}" style="left:18px;top:366px;width:170px;height:170px;transform:rotate(-8deg)">
+      <div class="float" style="right:30px;top:376px;transform:rotate(-7deg) scale(.6);transform-origin:100% 0">${slipCard()}</div>
+      <div style="position:absolute;left:0;right:0;top:196px;text-align:center">
+        <div class="d" style="font-size:128px">You’re in.</div>
+        <div style="display:inline-block;margin-top:20px;padding:11px 22px;border:2.5px solid #f4f6fa;border-radius:999px;font:600 21px/1 B;color:#f4f6fa;background:rgba(11,8,24,.25)">Every call. Every reason.</div>
       </div>
     </div>` ,
-    // The top of the card that overlaps the hero, over everything, the
-    // ball included.
+    // The top of the card that overlaps the hero.
     over: `<div style="position:absolute;left:20px;right:20px;top:528px;height:80px;border-radius:26px 26px 0 0;background:#16171b;border:1px solid #2a2d34;border-bottom:0;box-shadow:0 -10px 30px rgba(5,3,18,.45);z-index:5"></div>` },
 
   /* Candy Creams' feature cards: the colour, the object breaking out, the words. */
@@ -148,13 +145,11 @@ const browser = await chromium.launch({
 for (const [name, a] of Object.entries(ART)) {
   if (only.length && !only.includes(name)) continue;
   const tab = await browser.newPage({ viewport: { width: a.w, height: a.h }, deviceScaleFactor: 2 });
-  const ball = a.ball ? `<canvas class="ball float" id="ball" style="left:${a.ball.x}px;top:${a.ball.y}px;width:${a.ball.s}px;height:${a.ball.s}px"></canvas>` : '';
   await tab.setContent(`<!doctype html><html><head><style>${CSS}</style></head><body>
-    <div style="position:relative;width:${a.w}px;height:${a.h}px;overflow:hidden">${a.html}${ball}${a.over ?? ''}</div>
-    <script type="module">${BALL_JS}
-      const c = document.getElementById('ball');
-      if (c) startBall(c, { still: true, t: ${a.ball?.t ?? 0}, frag: FOOTBALL });
+    <div style="position:relative;width:${a.w}px;height:${a.h}px;overflow:hidden">${a.html}${a.over ?? ''}</div>
+    <script type="module">
       await document.fonts.ready;
+      await Promise.all([...document.images].map((i) => i.decode().catch(() => {})));
       window.__done = true;
     </script></body></html>`);
   const errs = [];
