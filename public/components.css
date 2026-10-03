@@ -2635,6 +2635,11 @@
   min-width: 0;
   font-size: 36cqi;
   line-height: 0.78;
+  /* The fill is a gradient clipped to the text, and it paints only inside
+     the box: with the line set this tight, the top of the figure sat above
+     the box and was cut off flat. Room above it, taken back with the margin. */
+  padding-top: 0.16em;
+  margin-top: -0.16em;
   text-align: left;
   letter-spacing: var(--tracking-num);
   background: linear-gradient(180deg, #ffffff 35%, #b9a6ff);
@@ -3017,6 +3022,117 @@
   .mo-kicker { font-size: var(--text-3xl); }
 }
 @media print { .mo-root { display: none !important; } }
+
+/* --- return: a league back, as the break note's poster with the light back
+   on. The poster runs to the card's edges (its margins undo the card's
+   padding, repeated at each size the padding changes). */
+.mo-card[data-poster] { background: var(--stand); container-type: inline-size; }
+.mo-poster {
+  position: relative;
+  height: calc(62cqi + 2 * var(--space-8));
+  margin: calc(-1 * var(--space-8)) calc(-1 * var(--space-8)) var(--space-5);
+  overflow: hidden;
+  background: radial-gradient(140% 110% at 70% 40%, #120d27, #050409 70%);
+}
+.mo-mark {
+  position: absolute;
+  z-index: 1;
+  right: calc(var(--space-8) + 2cqi);
+  bottom: 5%;
+  height: 84%;
+  aspect-ratio: 196 / 372;
+}
+/* No transform here: the entrance animates it, and would undo it. */
+.mo-mark[data-shape="logo"] { height: auto; width: 36cqi; aspect-ratio: 1; top: 50%; bottom: auto; margin-top: -16cqi; }
+/* The light, back on: the break's small hard disc grown big and bright. */
+.mo-mark::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 32%;
+  width: 138%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0, #f4f0ff 34%, #cdbfff 58%, #a088ff calc(68% - 1px), rgba(122, 90, 248, 0.3) 68.5%, rgba(122, 90, 248, 0.08) 82%, rgba(122, 90, 248, 0) 100%);
+}
+.mo-mark[data-shape="logo"]::before { top: 50%; width: 136%; }
+.mo-mark::after {
+  content: '';
+  position: absolute;
+  left: -14%;
+  right: -14%;
+  bottom: -1px;
+  height: 2px;
+  background: radial-gradient(closest-side, rgba(226, 216, 255, 0.9), rgba(122, 90, 248, 0.3) 70%, transparent);
+}
+.mo-mark[data-shape="logo"]::after { display: none; }
+.mo-mark i {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #040308;
+  -webkit-mask: center / contain no-repeat;
+  mask: center / contain no-repeat;
+}
+.mo-poster-text {
+  position: absolute;
+  z-index: 2;
+  top: var(--space-8);
+  bottom: 7%;
+  left: var(--space-8);
+  right: calc(var(--space-8) + 44cqi);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.mo-card[data-poster] .mo-title { font-size: clamp(1.9rem, 10.5cqi, 3.2rem); line-height: var(--leading-display); }
+.mo-card[data-poster] .mo-x { background: rgba(5, 5, 8, 0.45); }
+.mo-card[data-poster] .mo-lead {
+  margin: 0 0 var(--space-4);
+  font-size: calc(var(--text-read) * 1.125);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-snug);
+  color: var(--chalk);
+}
+.mo-card[data-poster] .mo-calls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--chalk-2);
+}
+.mo-card[data-poster] .mo-calls::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--floodlight-hi);
+  box-shadow: 0 0 8px rgba(158, 134, 255, 0.7);
+}
+/* The way out stays in reach: a long card scrolls under its buttons. */
+.mo-card[data-poster] .mo-actions {
+  position: sticky;
+  bottom: calc(-1 * var(--space-7));
+  z-index: 3;
+  margin: var(--space-4) calc(-1 * var(--space-8)) calc(-1 * var(--space-7));
+  padding: var(--space-5) var(--space-8) var(--space-7);
+  background: linear-gradient(to bottom, rgba(22, 23, 27, 0), var(--stand) 30%);
+}
+@media (max-width: 520px) {
+  .mo-card[data-poster] .mo-actions {
+    bottom: calc(-1 * var(--space-6));
+    margin: var(--space-4) calc(-1 * var(--space-6)) calc(-1 * var(--space-6));
+    padding: var(--space-5) var(--space-6) var(--space-6);
+  }
+  .mo-poster { height: calc(66cqi + 2 * var(--space-6)); margin: calc(-1 * var(--space-8)) calc(-1 * var(--space-6)) var(--space-5); }
+  .mo-mark { right: calc(var(--space-6) + 2cqi); }
+  .mo-poster-text { left: var(--space-6); right: calc(var(--space-6) + 44cqi); top: var(--space-7); }
+}
 
 /* --- ucl: the night. The scene is one still, three by two, the stadium's
    skyline at about two thirds of the way down; the starball, the shout and
