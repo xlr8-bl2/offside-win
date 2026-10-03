@@ -1,0 +1,12 @@
+import { chromium } from 'playwright';
+const [out, qs = ''] = process.argv.slice(2);
+const P = new URLSearchParams(qs); const W = Number(P.get('w') || 1080), H = Number(P.get('h') || 1080);
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const p = await b.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: Number(P.get('dpr') || 1) });
+const errs = []; p.on('pageerror', (e) => errs.push(e.message)); p.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
+const t0 = Date.now();
+await p.goto(`http://127.0.0.1:8799/hero.html?${qs}`);
+await p.waitForFunction(() => window.__done === true, null, { timeout: 180000 });
+await p.locator('#stage').screenshot({ path: out });
+console.log('rendered in', Date.now() - t0, 'ms', errs.slice(0, 3));
+await b.close();

@@ -1,0 +1,224 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face { font-family: 'Offside Wordmark'; font-weight: 100 900; src: url('fonts/offside-wordmark.woff2') format('woff2'); }
+@font-face { font-family: 'Big Shoulders Display'; font-weight: 100 900; src: url('fonts/bigshoulders-latin.woff2') format('woff2'); }
+@font-face { font-family: 'Archivo'; font-weight: 100 900; src: url('fonts/archivo-latin.woff2') format('woff2'); }
+html, body { margin: 0; background: #000; }
+#stage { position: relative; overflow: hidden; }
+#stage canvas { display: block; }
+#scene { position: absolute; inset: 0; }
+.ball-wrap { position: absolute; left: 50%; transform: translateX(-50%); }
+.ball-wrap::before { content: ''; position: absolute; inset: -35%; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(150,120,255,.38), rgba(110,80,255,.12) 55%, rgba(110,80,255,0)); }
+#ball { position: relative; width: 100%; height: 100%; }
+.title { position: absolute; left: 0; right: 0; text-align: center; color: #f7f4ed; }
+.wordmark { font-family: 'Offside Wordmark', sans-serif; font-weight: 700; letter-spacing: -0.05em; line-height: 1;
+  display: inline-flex; align-items: baseline; }
+.wm-ball { display: inline-block; width: .24em; height: .24em; margin: 0 .05em 0 .07em; border-radius: 50%; background: #9e86ff; }
+.wm-tld { color: #b9b3c9; }
+.head { font-family: 'Big Shoulders Display', sans-serif; font-weight: 800; text-transform: none; line-height: .9; letter-spacing: .005em; }
+</style>
+<script type="importmap">{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}</script>
+</head><body>
+<div id="stage"><div id="scene"></div><div class="ball-wrap"><canvas id="ball"></canvas></div><div class="title"></div></div>
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { startBall } from './starball.js';
+
+const P = new URLSearchParams(location.search);
+const num = (k, d) => (P.has(k) ? Number(P.get(k)) : d);
+const W = num('w', 1080), H = num('h', 1080);
+const stage = document.getElementById('stage');
+stage.style.width = W + 'px'; stage.style.height = H + 'px';
+
+// ------------------------------------------------------------------ the type
+const S = Math.min(W, H);
+const ballSize = num('ball', 0.27) * S;
+const wrap = document.querySelector('.ball-wrap');
+wrap.style.width = wrap.style.height = ballSize + 'px';
+wrap.style.top = num('by', 0.06) * H + 'px';
+const title = document.querySelector('.title');
+title.style.top = num('by', 0.06) * H + ballSize + num('gap', 0.025) * S + 'px';
+const head = P.get('head') ?? 'The Champions League is back';
+title.innerHTML = `<div class="wordmark" style="font-size:${num('wm', 0.05) * S}px">offside<span class="wm-ball"></span><span class="wm-tld">win</span></div>`
+  + (head ? `<div class="head" style="font-size:${num('hs', 0.105) * S}px;margin:${0.03 * S}px auto 0;max-width:${num('hw', 0.8) * W}px">${head}</div>` : '');
+
+// ------------------------------------------------------------------ the scene
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(W, H);
+renderer.setPixelRatio(1);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = num('exp', 0.95);
+document.getElementById('scene').appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(num('fov', 40), W / H, 1, 5000);
+camera.position.set(num('cx', 0), num('cy', 88), num('cz', 175));
+camera.lookAt(0, num('ty', 108), num('tz', 0));
+
+// The night: a screen-space gradient, deep at the top, a violet haze where
+// the dome meets the sky, a scatter of faint stars, and a vignette.
+{
+  const mat = new THREE.ShaderMaterial({
+    depthWrite: false, depthTest: false,
+    uniforms: { uRes: { value: new THREE.Vector2(W, H) }, uHaze: { value: num('haze', 0.36) } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+    fragmentShader: `varying vec2 vUv; uniform vec2 uRes; uniform float uHaze;
+      float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+      void main(){
+        float y = vUv.y;
+        vec3 top = vec3(0.010,0.008,0.055);
+        vec3 mid = vec3(0.045,0.022,0.190);
+        vec3 low = vec3(0.150,0.080,0.500);
+        vec3 c = mix(low, mid, smoothstep(uHaze - 0.04, uHaze + 0.16, y));
+        c = mix(c, top, smoothstep(uHaze + 0.14, 0.95, y));
+        // A soft bloom of light behind where the ball floats.
+        vec2 q = (vUv - vec2(0.5, 0.80)) * vec2(uRes.x / uRes.y, 1.0);
+        c += vec3(0.20,0.13,0.55) * exp(-dot(q, q) * 9.0) * 0.55;
+        // Stars: a few, small, faint.
+        vec2 g = floor(gl_FragCoord.xy / 3.0);
+        float s = h21(g);
+        float tw = step(0.9975, s) * (0.35 + 0.65 * h21(g + 7.0)) * smoothstep(uHaze, uHaze + 0.25, y);
+        c += vec3(0.85,0.82,1.0) * tw * 0.75;
+        // Vignette.
+        vec2 v = vUv - 0.5;
+        c *= 1.0 - 0.55 * pow(length(v * vec2(1.1, 1.0)) * 1.25, 2.4);
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  });
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+  quad.frustumCulled = false; quad.renderOrder = -1; quad.name = 'sky';
+  scene.add(quad);
+}
+
+// The dome: the ball's own pattern of twelve five-point stars, clad over a
+// shallow dome, seen close. Stars lit white from inside, their seams dark,
+// the gaps deep violet, and the skyline edge of the roof glowing.
+{
+  const PHI = (1 + Math.sqrt(5)) / 2;
+  const norm = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const CENTRES = [
+    [0, 1, PHI], [0, -1, PHI], [0, 1, -PHI], [0, -1, -PHI],
+    [1, PHI, 0], [-1, PHI, 0], [1, -PHI, 0], [-1, -PHI, 0],
+    [PHI, 0, 1], [-PHI, 0, 1], [PHI, 0, -1], [-PHI, 0, -1],
+  ].map(norm);
+  const AIMS = CENTRES.map((c) => {
+    const near = CENTRES.filter((o) => o !== c).sort((p, q) => dot(q, c) - dot(p, c))[0];
+    const d = dot(near, c);
+    return norm([near[0] - c[0] * d, near[1] - c[1] * d, near[2] - c[2] * d]);
+  });
+  const ROUND = 0.014;
+  const TIP = 0.636, inner = 0.42 * TIP;
+  const aa = [inner * Math.sin(Math.PI / 5), inner * Math.cos(Math.PI / 5)];
+  const dd = [-aa[0], TIP - aa[1]], ll = Math.hypot(dd[0], dd[1]);
+  const out = [dd[1] / ll, -dd[0] / ll];
+  const pP = aa[1] + (-ROUND + aa[0] * out[0]) / out[1];
+  const tt = 1 - ROUND / (aa[0] * out[0] + aa[1] * out[1]);
+  const uA = [aa[0] * tt, aa[1] * tt];
+
+  // A whole star on the crown, its point towards the camera, then a spin.
+  const q1 = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(...CENTRES[4]), new THREE.Vector3(0, 1, 0));
+  const q2 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), num('spin', 0.0));
+  const q3 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), num('tilt', 0.0));
+  const q = q3.multiply(q2).multiply(q1);
+  const turn = new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(q).invert());
+
+  const RX = num('rx', 150), RY = num('ry', 100), RZ = num('rz', 150);
+  const domeMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uC: { value: CENTRES.map((c) => new THREE.Vector3(...c)) },
+      uU: { value: AIMS.map((c) => new THREE.Vector3(...c)) },
+      uA: { value: new THREE.Vector2(...uA) },
+      uP: { value: pP },
+      uTurn: { value: turn },
+      uSeam: { value: num('seam', 1.0) }, uLit: { value: num('lit', 1.0) }, uRim: { value: num('rim', 1.0) },
+    },
+    vertexShader: `
+      varying vec3 vP; varying vec3 vN; varying vec3 vV; varying vec3 vW;
+      void main(){
+        vP = normalize(position);
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vW = wp.xyz;
+        vN = normalize(position / vec3(${RX}.0, ${RY}.0, ${RZ}.0));
+        vV = normalize(cameraPosition - wp.xyz);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }`,
+    fragmentShader: `
+      uniform vec3 uC[12]; uniform vec3 uU[12]; uniform vec2 uA; uniform float uP; uniform mat3 uTurn; uniform float uSeam; uniform float uLit; uniform float uRim;
+      varying vec3 vP; varying vec3 vN; varying vec3 vV; varying vec3 vW;
+      const float ROUND = 0.014; const float FILLET = 0.06;
+      float arm(vec2 q) {
+        vec2 a = uA; vec2 tip = vec2(0.0, uP);
+        vec2 ca = clamp(dot(q, a) / dot(a, a), 0.0, 1.0) * a;
+        vec2 at = a + clamp(dot(q - a, tip - a) / dot(tip - a, tip - a), 0.0, 1.0) * (tip - a);
+        float d = min(length(q - ca), length(q - at));
+        bool inside = a.x * q.y - a.y * q.x > 0.0 && (tip.x - a.x) * (q.y - a.y) - (tip.y - a.y) * (q.x - a.x) > 0.0;
+        return inside ? -d : d;
+      }
+      float star(vec2 q) {
+        const float SECTOR = 1.2566370614;
+        float ang = atan(q.x, q.y);
+        float b = abs(ang - SECTOR * floor(ang / SECTOR + 0.5));
+        float l = length(q);
+        float d1 = arm(l * vec2(sin(b), cos(b)));
+        float d2 = arm(l * vec2(sin(SECTOR - b), cos(SECTOR - b)));
+        float h = max(FILLET - abs(d1 - d2), 0.0) / FILLET;
+        return min(d1, d2) - h * h * FILLET * 0.25 - ROUND;
+      }
+      float field(vec3 p, out vec2 local) {
+        float best = -2.0; vec3 c = uC[0]; vec3 u = uU[0];
+        for (int i = 0; i < 12; i++) { float d = dot(p, uC[i]); if (d > best) { best = d; c = uC[i]; u = uU[i]; } }
+        vec3 v = cross(c, u); vec3 t = p / best - c;
+        local = vec2(dot(t, v), dot(t, u));
+        return star(local);
+      }
+      void main(){
+        vec2 local;
+        float f = field(uTurn * vP, local);
+        float w = max(fwidth(f), 1e-5);
+        float inStar = 1.0 - smoothstep(-w, w, f);
+        // Each star is a panel of light: brightest in the middle, with a
+        // bright edge just inside its outline, like the lit roof in the photo.
+        float core = exp(-dot(local, local) * 9.0);
+        float lip = exp(-pow(max(-f, 0.0) / (0.018 + 2.0 * w), 2.0));
+        float seam = 1.0 - smoothstep(0.0, 1.6 * w + 0.006 * uSeam, abs(f));
+        vec3 N = normalize(vN);
+        float facing = clamp(dot(N, normalize(vV)), 0.0, 1.0);
+        float up = clamp(vP.y, 0.0, 1.0);
+        vec3 starC = vec3(0.42,0.36,0.86) * (0.35 + 0.45 * core) + vec3(0.92,0.9,1.0) * lip * 0.55;
+        starC *= (0.55 + 0.45 * up) * uLit;
+        // The gaps: deep violet, a little lighter low down, faintly glowing.
+        vec3 gapC = mix(vec3(0.03,0.015,0.13), vec3(0.10,0.05,0.36), smoothstep(0.9, 0.2, up));
+        vec3 c = mix(gapC, starC, inStar);
+        c = mix(c, vec3(0.015,0.008,0.05), seam * 0.9);
+        // The skyline edge of the roof: a thin hot rim where it turns away.
+        float rim = pow(1.0 - facing, 5.0);
+        c += vec3(0.62,0.52,1.0) * rim * uRim;
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  });
+  domeMat.extensions = { derivatives: true };
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(1, 256, 128, 0, Math.PI * 2, 0, Math.PI * 0.5), domeMat);
+  dome.scale.set(RX, RY, RZ);
+  dome.name = 'roof';
+  scene.add(dome);
+}
+
+const HIDE = (P.get('hide') || '').split(',');
+scene.traverse((o) => { if (o.name && HIDE.includes(o.name)) o.visible = false; });
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(W, H), num('bloom', 0.55), 0.6, num('thr', 0.55)));
+composer.addPass(new OutputPass());
+composer.render();
+
+// ------------------------------------------------------------------ the ball
+startBall(document.getElementById('ball'), { still: true, t: num('t', 1.3) });
+await document.fonts.ready;
+requestAnimationFrame(() => { window.__done = true; });
+</script></body></html>
