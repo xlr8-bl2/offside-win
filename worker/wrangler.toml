@@ -70,10 +70,10 @@ ADMIN_EMAIL_SHA256 = "5a2087bbcb792ea743dd4e445fcef43ccb4818f37f5199981e3ec93d9e
 # quiet day of an international break or close season (src/goodwill.ts).
 crons = ["*/10 * * * *", "20 6 * * *"]
 
-# Outbound email through Cloudflare Email Service (src/mail.ts). Off until the
-# account is on Workers Paid and offside.win is onboarded under Compute, Email
-# Service, Email Sending; a binding the plan does not allow would fail the
-# deploy. Until then mail goes through Brevo, and mail.ts falls back to Brevo
-# whenever Cloudflare refuses, so switching this on leaves no gap.
-# [[send_email]]
-# name = "EMAIL"
+# Outbound email through Cloudflare Email Service (src/mail.ts). On since the
+# account moved to Workers Paid. Sending also needs offside.win onboarded under
+# Compute, Email Service, Email Sending; until it is, Cloudflare refuses each
+# message (E_SENDER_NOT_VERIFIED in the logs) and mail.ts sends it through
+# Brevo instead, so nothing is lost either way.
+[[send_email]]
+name = "EMAIL"
