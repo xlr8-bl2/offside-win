@@ -13,7 +13,7 @@
 
 export const SITE_NAME = 'Offside.win';
 export const HOME_TITLE = "Offside.win: football predictions for today's biggest games";
-export const HOME_DESCRIPTION = "Football predictions for today's biggest games across 88 competitions: our call on every match, the reason behind it, team news, and every result, the misses included.";
+export const HOME_DESCRIPTION = "Football predictions for today's biggest games across more than 80 competitions: our call on every match, the reason behind it, team news, and every result, the misses included.";
 
 /** A page's title with the name after it; the front page has its own. */
 export const fullTitle = (t) => (t ? `${t} | ${SITE_NAME}` : HOME_TITLE);

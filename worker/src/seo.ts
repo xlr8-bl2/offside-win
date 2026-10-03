@@ -540,7 +540,14 @@ export async function homePage(env: SeoEnv, site: string): Promise<Page> {
  */
 export async function leaguesPage(env: SeoEnv, site: string): Promise<Page> {
   const now = Math.floor(Date.now() / 1000);
-  const b = await read<Rec>(env, 'get_board', { p_from: now - 5 * 86400, p_to: now + 10 * 86400 });
+  const [b, covered] = await Promise.all([
+    read<Rec>(env, 'get_board', { p_from: now - 5 * 86400, p_to: now + 10 * 86400 }),
+    // Every competition, not only this fortnight's: during a break the
+    // fortnight's list is a handful, and the rest had no link a crawler
+    // could follow.
+    read<Rec[]>(env, 'get_leagues', {}).catch(() => null),
+  ]);
+  const every: Rec[] = Array.isArray(covered) ? covered.filter((l) => l?.id && l?.name) : [];
   const fixtures: Rec[] = Array.isArray(b?.fixtures) ? b!.fixtures : [];
   const leagues = new Map<number, { name: string; n: number }>();
   for (const f of fixtures) {
@@ -561,6 +568,8 @@ export async function leaguesPage(env: SeoEnv, site: string): Promise<Page> {
       <p>Fixtures, results, the table and our call on every match. <a href="/today">Today's board</a> has every match on right now.</p>
       ${list.length ? `<h2>Playing this fortnight</h2><ul class="seo-list">${list.map(([id, l]) =>
         `<li><a href="${esc(leaguePath(id, l.name))}">${esc(l.name)}</a>, ${esc(word(l.n))} ${l.n === 1 ? 'match' : 'matches'}</li>`).join('')}</ul>` : ''}
+      ${every.length ? `<h2>Every competition we cover</h2><ul class="seo-list">${every.map((l) =>
+        `<li><a href="${esc(leaguePath(Number(l.id), String(l.name)))}">${esc(String(l.name))}</a>${l.country ? `, ${esc(String(l.country))}` : ''}</li>`).join('')}</ul>` : ''}
     </article>`,
     jsonLd: [c.ld],
   };
