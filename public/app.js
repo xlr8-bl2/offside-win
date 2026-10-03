@@ -2510,8 +2510,17 @@ function excerpt(text, max = 260) {
 async function viewLanding() {
   const nav = navTicket;
   document.body.dataset.page = 'landing';
-  app.innerHTML = landingHTML();
-  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  /*
+   * Drawn once. A page opened from the saved copy is fetched again behind it
+   * and, when anything has changed, routed again (softRefresh); that used to
+   * rebuild the landing page from nothing and play the intro a second time,
+   * so it looked as if it had loaded twice. When the landing page is already
+   * on screen, the sections below are filled in again in place and nothing
+   * animates.
+   */
+  const again = !!app.querySelector('.ld-hero');
+  if (!again) app.innerHTML = landingHTML();
+  if (!again && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
     /*
      * One entrance, at the top: the shout slams on, the headline rises and
      * the second line fills with light from left to right. Nothing below the
@@ -2603,7 +2612,7 @@ async function viewLanding() {
         <a class="ld-call-go" href="#/fixture/${encodeURIComponent(fx.id)}">Read the whole call, free</a>
       </div>`);
     const card = app.querySelector('.ld-call');
-    if (card && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (card && !again && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
       // The ticket is handed over: in on a tilt, and the two sides of the
       // band slam together behind the crests.
       card.animate([{ opacity: 0, transform: 'translateY(30px) rotate(3deg) scale(0.96)' }, { opacity: 1, transform: 'rotate(-1deg)', offset: 0.7 }, { opacity: 1, transform: 'none' }], { duration: 1000, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
@@ -2616,7 +2625,7 @@ async function viewLanding() {
     // in place of the ground.
     const theme = themeOf(fx.league_id);
     const ldHero = app.querySelector('.ld-hero');
-    if (theme && ldHero) {
+    if (theme && ldHero && !ldHero.classList.contains(`theme-${theme}`)) {
       ldHero.classList.add(`theme-${theme}`);
       app.querySelector('.ld-bg')?.insertAdjacentHTML('afterbegin', themeArt(theme));
     }
@@ -2629,7 +2638,7 @@ async function viewLanding() {
     // Not on a phone: a 200KB photograph shown at under half strength behind
     // a dark scrim, with up to a dozen fallbacks tried in turn, was most of
     // what the landing page downloaded and drew there.
-    if (shot && venues.length && matchMedia('(min-width: 900px)').matches) {
+    if (shot && !shot.querySelector('img') && venues.length && matchMedia('(min-width: 900px)').matches) {
       shot.innerHTML = venueShot(venues.slice(0, 4), 'ld-shot-img', true);
       const img = shot.querySelector('img');
       img?.addEventListener('load', () => img.classList.add('is-in'), { once: true });

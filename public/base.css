@@ -1170,3 +1170,11 @@ main#app { min-height: calc(100dvh - var(--header-h) - env(safe-area-inset-top, 
   main#app.page-in { animation: page-in 160ms var(--ease-out); }
 }
 @keyframes page-in { from { opacity: 0.4; } }
+
+/* The words the server puts in the page (worker/src/seo.ts) are for search
+   engines and for browsers without the app. Where the app runs (html.js, set
+   in the head before the first paint) they stay out of sight and the loading
+   skeleton shows until the app draws the page. They used to show first and
+   then be replaced, which read as the page loading twice. */
+html.js #app > .seo { display: none; }
+html:not(.js) #app > [aria-busy] { display: none; }

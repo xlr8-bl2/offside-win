@@ -85,7 +85,8 @@ test('the shell gets this page\'s head and first screen, escaped', () => {
   assert.match(html, /<title>A &lt;b&gt; v B \| Offside.win<\/title>/);
   assert.match(html, /content="d &quot;q&quot;"/);
   assert.match(html, /<link rel="canonical" href="https:\/\/offside.win\/x">/);
-  assert.match(html, /<main id="app"><p>hi<\/p><\/main>/);
+  // The loading skeleton is kept, with the page's words after it.
+  assert.match(html, /<main id="app"><div class="skeleton"><\/div><p>hi<\/p><\/main>/);
   assert.doesNotMatch(html, /<\/script>"/, 'a closing tag inside structured data ends the script');
 });
 

@@ -19,6 +19,11 @@
      file before the Worker runs, so the move happens here, before anything
      else loads. The API still answers on every address, for webhooks. -->
 <script>if (/\.workers\.dev$|^www\./.test(location.hostname)) location.replace('https://offside.win' + location.pathname + location.search + location.hash);</script>
+<!-- The app is running: the words the server put in the page for search
+     engines stay hidden and the loading skeleton shows until the app draws
+     the real page (base.css). If it has not drawn anything in eight seconds,
+     the words come back, so a page that fails to start is still readable. -->
+<script>document.documentElement.classList.add('js');setTimeout(function () { if (document.querySelector('#app > .seo')) document.documentElement.classList.remove('js'); }, 8000);</script>
 <meta property="og:site_name" content="Offside.win">
 <meta property="og:locale" content="en_GB">
 <meta property="og:title" content="Offside.win: football predictions for today&#39;s biggest games">
