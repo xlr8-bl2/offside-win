@@ -2582,7 +2582,11 @@ async function viewLanding() {
   const detail = freeId ? await getJSON(`/api/fixture/${freeId}`).catch(() => null) : null;
   if (nav !== navTicket) return;
   const fx = detail?.fixture ?? detail ?? freeRow;
-  const why = excerpt((fx?.verdicts ?? []).map((v) => v.why ?? v.narrative).find(Boolean));
+  // The write-up's reasoning, or the record's when the two have come apart
+  // (a slate pass cut off between rewriting the one and settling the other):
+  // the call is still up, so the front page still shows it.
+  const why = excerpt((fx?.verdicts ?? []).map((v) => v.why ?? v.narrative).find(Boolean))
+    || excerpt((fx?.published ?? []).map((p) => p.why ?? p.narrative).find(Boolean));
   const cta = app.querySelector('[data-ld="free"]');
   if (fx && why) {
     for (const a of app.querySelectorAll('[data-ld="free"], [data-ld="end-go"]')) a.setAttribute('href', `#/fixture/${encodeURIComponent(fx.id)}`);
