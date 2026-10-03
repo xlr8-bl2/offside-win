@@ -2613,7 +2613,9 @@
  *           meet in the middle, the name goes up a letter at a time;
  *   return  the centre circle the break note counted down inside gets its
  *           ball back, and the fixtures come in on a vidiprinter;
- *   ucl     a ring of stars, and the night's games on the vidiprinter.
+ *   ucl     the starball floats over a violet night, a stadium roof clad
+ *           in its stars glows under it, and the night's games come up on
+ *           the vidiprinter.
  */
 .mo-root {
   position: fixed;
@@ -2875,6 +2877,43 @@
   .mo-kicker { font-size: var(--text-3xl); }
 }
 @media print { .mo-root { display: none !important; } }
+
+/* --- ucl: the night. The scene is one still, three by two, the stadium's
+   skyline at about two thirds of the way down; the starball, the shout and
+   the title stack in the sky above it, sized off the card's width so they
+   keep clear of the skyline at every size. The scene fades into the card at
+   its foot and the reading starts over the faded roof. */
+.mo-card[data-kind="ucl"] {
+  padding: 0;
+  background: var(--stand);
+  container-type: inline-size;
+}
+.mo-night { position: relative; aspect-ratio: 3 / 2; overflow: hidden; text-align: center; }
+.mo-night-sky { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 100%; }
+.mo-night::after {
+  content: '';
+  position: absolute;
+  inset: 66% 0 0;
+  background: linear-gradient(to bottom, rgba(22, 23, 27, 0), rgba(22, 23, 27, 0.55) 55%, var(--stand));
+  pointer-events: none;
+}
+.mo-night-top {
+  position: absolute;
+  inset: 4.5cqi var(--space-6) auto;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.mo-night-ball { position: relative; display: grid; place-items: center; width: 20cqi; aspect-ratio: 1; margin-bottom: 2.4cqi; }
+.mo-night-ball .mo-logo { width: 100%; height: 100%; filter: drop-shadow(0 0 3cqi rgba(158, 134, 255, 0.55)); }
+.mo-night-ball .mo-ripple { inset: 0; width: auto; height: auto; margin: 0; left: 0; top: 0; border-color: rgba(244, 246, 250, 0.8); }
+.mo-night .mo-shout { margin: 0 0 0.8cqi; font-size: clamp(0.95rem, 4cqi, 1.25rem); transform-origin: 50% 60%; }
+.mo-night .mo-title { font-size: clamp(1.5rem, 7.2cqi, 2.25rem); }
+.mo-night-body { position: relative; z-index: 1; margin-top: -5cqi; padding: 0 var(--space-8) var(--space-7); }
+@media (max-width: 520px) {
+  .mo-night-body { padding: 0 var(--space-6) var(--space-6); }
+}
 
 /* ========================================================= the landing page
  *

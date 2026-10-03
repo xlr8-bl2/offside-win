@@ -11,8 +11,9 @@
  *     League after an international break, or on the first weekend of a
  *     season. The centre circle the break note counted down inside gets its
  *     ball back, and the fixtures come up on a vidiprinter.
- *   - a Champions League night: a ring of stars, and the night's games on the
- *     vidiprinter.
+ *   - a Champions League night: the competition's starball floats over a
+ *     violet night, a dome clad in its stars glowing underneath, and the
+ *     night's games come up on the vidiprinter.
  *
  * One at a time, in that order, each shown once, and only when the site's
  * shared rules on interruptions (attention.js) say this visit has room. It
@@ -21,7 +22,6 @@
 
 import { namedFixture } from './occasion.js';
 import { scrollAway, moving } from './scrollaway.js';
-import { themeArt, themeOf } from './comptheme.js';
 
 /** Club competitions whose return is news, in the order they are said. */
 export const RETURNING = new Map([
@@ -366,17 +366,23 @@ function cardHTML(m, { crest = plainCrest, esc = plainEsc, clock, now }) {
         </div>
       </div>`;
   }
-  // A Champions League night is drawn in the competition's own look.
-  const theme = m.kind === 'ucl' ? themeOf(m.leagueId) : null;
+  if (m.kind === 'ucl') return nightHTML(m, w, { esc, clock, now, x, actions });
   const words = (t) => t.split(/\s+/).map((wd, i) => `<span class="mo-w"><span style="--i:${i}">${esc(wd)}</span></span>`).join(' ');
   return `
     <div class="mo-scrim" data-mo-close></div>
-    <div class="mo-card${theme ? ` theme-${theme}` : ''}" role="dialog" aria-modal="true" aria-labelledby="mo-title" tabindex="-1" data-kind="${esc(m.kind)}">
-      ${theme ? themeArt(theme) : '<div class="mo-glow" aria-hidden="true"><div class="mo-sweep"></div></div>'}
+    <div class="mo-card" role="dialog" aria-modal="true" aria-labelledby="mo-title" tabindex="-1" data-kind="${esc(m.kind)}">
+      <div class="mo-glow" aria-hidden="true"><div class="mo-sweep"></div></div>
       ${x}
       <p class="mo-shout">${esc(w.shout)}</p>
       <div class="mo-head">${emblem(m, crest)}<h2 class="mo-title" id="mo-title">${words(w.title)}</h2></div>
-      <p class="mo-lead">${esc(w.lead)}</p>
+      ${body(m, w, { esc, clock, now })}
+      ${actions}
+    </div>`;
+}
+
+/** The lead, the takes, how many are called, and the games on the vidiprinter. */
+function body(m, w, { esc, clock, now }) {
+  return `<p class="mo-lead">${esc(w.lead)}</p>
       ${w.takes.length ? `<ul class="mo-takes">${w.takes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
       ${w.calls ? `<p class="mo-calls">${esc(w.calls)}</p>` : ''}
       <ol class="mo-vidi">${m.games.map((g) => {
@@ -385,8 +391,35 @@ function cardHTML(m, { crest = plainCrest, esc = plainEsc, clock, now }) {
           <span class="visually-hidden">${esc(text)}, ${esc(shortWhen(g.kickoff, now, clock))}${g.call === 'open' || g.call === 'members' ? ', we have a call on it' : ''}</span>
           <span class="mo-type" aria-hidden="true" data-text="${esc(text)}">${esc(text)}</span>
           <time aria-hidden="true">${g.call === 'open' || g.call === 'members' ? '<i class="mo-called" title="We have a call on this"></i>' : ''}${esc(shortWhen(g.kickoff, now, clock))}</time></a></li>`;
-      }).join('')}</ol>
+      }).join('')}</ol>`;
+}
+
+/*
+ * A Champions League night, drawn after the competition's own artwork: its
+ * starball floating over a violet night, and under it a stadium roof clad in
+ * the same stars, its skyline glowing. The scene is one still
+ * (/brand/ucl-night.webp, rendered by scripts/hero); the starball is the
+ * competition's logo, the one the site shows beside its name everywhere,
+ * traced and filled white for the dark (/brand/ucl-emblem.svg).
+ */
+function nightHTML(m, w, { esc, clock, now, x, actions }) {
+  const words = (t) => t.split(/\s+/).map((wd, i) => `<span class="mo-w"><span style="--i:${i}">${esc(wd)}</span></span>`).join(' ');
+  return `
+    <div class="mo-scrim" data-mo-close></div>
+    <div class="mo-card" role="dialog" aria-modal="true" aria-labelledby="mo-title" tabindex="-1" data-kind="ucl">
+      <div class="mo-night">
+        <img class="mo-night-sky" src="/brand/ucl-night.webp" alt="" aria-hidden="true" decoding="async">
+        <div class="mo-night-top">
+          <div class="mo-night-ball" aria-hidden="true"><span class="mo-ripple"></span><img class="mo-logo" src="/brand/ucl-emblem.svg" alt="" decoding="async"></div>
+          <p class="mo-shout">${esc(w.shout)}</p>
+          <h2 class="mo-title" id="mo-title">${words(w.title)}</h2>
+        </div>
+      </div>
+      ${x}
+      <div class="mo-night-body">
+      ${body(m, w, { esc, clock, now })}
       ${actions}
+      </div>
     </div>`;
 }
 
@@ -523,7 +556,10 @@ function animate(root, m) {
       { transform: 'none', opacity: 1 }], { duration: 950, delay: 820, easing: 'ease-in-out' });
     go(ripple, [{ transform: 'scale(0.6)', opacity: 0.9 }, { transform: 'scale(2.4)', opacity: 0 }], { duration: 1000, delay: 1330, easing: EXPO, iterations: 2 });
   } else {
-    // The starball spins in out of the dark and lands with a pulse of light.
+    // The night comes up: the stadium rises a touch into place and its
+    // skyline brightens, then the starball spins in out of the dark and
+    // lands with a pulse of light.
+    go(root.querySelector('.mo-night-sky'), [{ transform: 'translateY(18px) scale(1.08)', filter: 'brightness(0.4)' }, { transform: 'none', filter: 'none' }], { duration: 1500, delay: 120, easing: EXPO });
     go(logo, [
       { transform: 'rotate(-220deg) scale(0.2)', opacity: 0, filter: 'blur(6px)' },
       { opacity: 1, offset: 0.35 },
