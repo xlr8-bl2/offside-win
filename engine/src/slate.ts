@@ -26,6 +26,7 @@ import { bucketOf, buildCandidates, confidentEligible, DayMix, driversFor, floor
 import { consensusMarkets } from './consensus.ts';
 import { readOf } from './read.ts';
 import { snapshotOf } from './odds.ts';
+import { pushRuleFor } from './price.ts';
 import { dbStats, exec as dbExec, insertMany, kvGetJSON, kvSetJSON, pickConflictTarget, select as dbSelect } from './store.ts';
 import type { CalibrationRow } from './select.ts';
 import { MARKET_FAMILY, type Candidate, type Factor, type MarketFamily } from './types.ts';
@@ -398,6 +399,27 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
     console.log('Fresh: every call still to kick off is chosen again, and a slip not yet under way is rebuilt.');
   }
   const pinned = await openSlipLegs();
+  // The stored call behind each slip leg still to kick off: a leg is held
+  // even when its market drops out of the feed, and the write-up then has
+  // nothing fresh to describe it with (see `held` below).
+  const legRows = new Map<number, {
+    market: string; outcome: string; line: number | null; odds: number; bookmaker: string | null;
+    model_prob: number; book_prob: number; edge: number; shrunk_edge: number; kelly: number | null; confidence: number;
+  }>();
+  if (pinned.size) {
+    for (const r of await dbSelect<{
+      fixture_id: number; market: string; outcome: string; line: number | null; odds: number; bookmaker: string | null;
+      model_prob: number; book_prob: number; edge: number; shrunk_edge: number; kelly: number | null; confidence: number;
+    }>(
+      `SELECT fixture_id, market, outcome, line, odds, bookmaker, model_prob, book_prob, edge, shrunk_edge, kelly, confidence
+         FROM pick WHERE kind = 'CONFIDENT' AND settled_at IS NULL AND kickoff > ?`,
+      [now],
+    )) {
+      const leg = pinned.get(Number(r.fixture_id));
+      if (leg && leg.market === r.market && String(leg.outcome) === String(r.outcome)
+        && (leg.line ?? null) === (r.line === null ? null : Number(r.line))) legRows.set(Number(r.fixture_id), r);
+    }
+  }
   // The calls standing on fixtures still to kick off, and the day's market
   // mix they make, so this run keeps what still holds and varies the rest.
   const incumbents = new Map<number, { market: string; outcome: string; line: number | null }>();
@@ -544,9 +566,28 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
           : slipLeg && theirCands.some((c) => matchesPin(slipLeg)(c) && confidentEligible(c, floor, calibration))
             ? slipLeg : undefined;
         if (slipLeg && !pin && theirCands.some(matchesPin(slipLeg))) slipLegDropped = true;
+        /*
+         * A leg held while its market has gone quiet (no book prices it now)
+         * stays in the record -- see the withdrawal, which keeps it -- so the
+         * write-up says it too, from the call as it was stored. Without this
+         * Ebbsfleet v Sholing (3 October 2026), a leg and the day's free call,
+         * carried its call in the record and "Nothing to take" on the board,
+         * and the free call dropped off the front page.
+         */
+        const row = slipLeg && !pin && !slipLegDropped ? legRows.get(analysis.fixture_id) : undefined;
+        const held: Candidate | undefined = row ? {
+          market: row.market as Candidate['market'], outcome: row.outcome as Candidate['outcome'],
+          line: row.line === null ? null : Number(row.line),
+          push: row.line !== null && row.market === 'asian_handicap' ? pushRuleFor(Number(row.line)) : null,
+          model_prob: Number(row.model_prob), book_prob: Number(row.book_prob), edge: Number(row.edge),
+          shrunk_edge: Number(row.shrunk_edge), odds: Number(row.odds), bookmaker: row.bookmaker ?? '',
+          prices: row.bookmaker ? [{ slug: '', book: row.bookmaker, odds: Number(row.odds) }] : [],
+          kelly: Number(row.kelly ?? 0), confidence: Number(row.confidence),
+          family: MARKET_FAMILY[row.market as keyof typeof MARKET_FAMILY],
+        } : undefined;
         const chosen = pin
           ? theirCands.filter(matchesPin(pin)).slice(0, 1)
-          : (() => {
+          : held ? [held] : (() => {
             // A call backing a side that has been rotated (several expected
             // starters out of the confirmed eleven) is set aside: the price
             // may well have been made before the sheet was out (context/xi.ts).
