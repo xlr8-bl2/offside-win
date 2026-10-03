@@ -3741,6 +3741,14 @@
 /* The competitions we have nothing in still belong on the page -- it is a
    list of what is on, not a list of what we fancied -- but they recede. */
 .lg-list.muted .lg-name { color: var(--chalk-2); font-weight: var(--weight-normal); }
+/* The competitions page: two lists under tabs, and a finder over the full
+   one. A row is a grid, so the finder's [hidden] needs saying outright. */
+.lg-tabs { margin-bottom: var(--space-6); }
+.lg-find { margin-bottom: var(--space-6); }
+.lg[hidden], .lg-group[hidden] { display: none; }
+.lg-off .lg-name { color: var(--chalk-2); font-weight: var(--weight-normal); }
+/* The full list is read, not scanned: a long name wraps rather than losing its end. */
+#lg-all .lg-name { white-space: normal; overflow-wrap: anywhere; }
 
 /*
  * On a touch screen, 34px is a miss waiting to happen.
