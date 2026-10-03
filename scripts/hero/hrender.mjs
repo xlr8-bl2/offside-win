@@ -7,6 +7,6 @@ const errs = []; p.on('pageerror', (e) => errs.push(e.message)); p.on('console',
 const t0 = Date.now();
 await p.goto(`http://127.0.0.1:8799/hero.html?${qs}`);
 await p.waitForFunction(() => window.__done === true, null, { timeout: 180000 });
-await p.locator('#stage').screenshot({ path: out });
+await p.locator('#stage').screenshot(out.endsWith('.jpg') ? { path: out, type: 'jpeg', quality: 86 } : { path: out });
 console.log('rendered in', Date.now() - t0, 'ms', errs.slice(0, 3));
 await b.close();

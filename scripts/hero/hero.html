@@ -10,7 +10,7 @@ html, body { margin: 0; background: #000; }
 #scene { position: absolute; inset: 0; }
 .ball-wrap { position: absolute; left: 50%; transform: translateX(-50%); }
 .ball-wrap::before { content: ''; position: absolute; inset: -35%; border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(150,120,255,.38), rgba(110,80,255,.12) 55%, rgba(110,80,255,0)); }
+  background: radial-gradient(closest-side, rgba(150,120,255,.22), rgba(110,80,255,.07) 60%, rgba(110,80,255,0)); }
 #ball { position: relative; width: 100%; height: 100%; }
 .title { position: absolute; left: 0; right: 0; text-align: center; color: #f7f4ed; }
 .wordmark { font-family: 'Offside Wordmark', sans-serif; font-weight: 700; letter-spacing: -0.05em; line-height: 1;
@@ -21,14 +21,14 @@ html, body { margin: 0; background: #000; }
 </style>
 <script type="importmap">{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}</script>
 </head><body>
-<div id="stage"><div id="scene"></div><div class="ball-wrap"><canvas id="ball"></canvas></div><div class="title"></div></div>
+<div id="stage"><div id="scene"></div><div class="ball-wrap"><img id="logo" src="ucl-trace.svg" alt="" style="position:relative;width:100%;height:100%;display:block"></div><div class="title"></div><div id="card"></div></div>
 <script type="module">
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { startBall } from './starball.js';
+import { startBall, FRAG } from './starball.js';
 
 const P = new URLSearchParams(location.search);
 const num = (k, d) => (P.has(k) ? Number(P.get(k)) : d);
@@ -218,7 +218,101 @@ composer.addPass(new OutputPass());
 composer.render();
 
 // ------------------------------------------------------------------ the ball
-startBall(document.getElementById('ball'), { still: true, t: num('t', 1.3) });
+// The emblem: the star ball drawn flat, as a logo is. White stars with a
+// clean gap between them, the night showing through, greying a touch
+// towards the edge so it still reads as round.
+const LOGO = FRAG.slice(0, FRAG.indexOf('// The slabs as a solid')) + `
+// The same star, but measured inside only to its outer edge: the ball's
+// own arm() also counts the fold from the centre to the inner corner, which
+// is invisible in glass and draws a hairline on a flat fill.
+float armL(vec2 q) {
+  vec2 a = vec2(${(num('li', 0.3) * 0.636 * Math.sin(Math.PI / 5)).toFixed(5)}, ${(num('li', 0.3) * 0.636 * Math.cos(Math.PI / 5)).toFixed(5)});
+  vec2 tip = vec2(0.0, ${num('ltip', 0.62).toFixed(4)});
+  vec2 ca = clamp(dot(q, a) / dot(a, a), 0.0, 1.0) * a;
+  vec2 at = a + clamp(dot(q - a, tip - a) / dot(tip - a, tip - a), 0.0, 1.0) * (tip - a);
+  bool inside = a.x * q.y - a.y * q.x > 0.0 && (tip.x - a.x) * (q.y - a.y) - (tip.y - a.y) * (q.x - a.x) > 0.0;
+  return inside ? -length(q - at) : min(length(q - ca), length(q - at));
+}
+float starL(vec2 q) {
+  const float SECTOR = 1.2566370614;
+  float ang = atan(q.x, q.y);
+  float b = abs(ang - SECTOR * floor(ang / SECTOR + 0.5));
+  float l = length(q);
+  float d1 = armL(l * vec2(sin(b), cos(b)));
+  float d2 = armL(l * vec2(sin(SECTOR - b), cos(SECTOR - b)));
+  float m = (d1 < 0.0 || d2 < 0.0) ? min(d1, d2) : min(d1, d2);
+  float h = max(FILLET - abs(d1 - d2), 0.0) / FILLET;
+  return m - h * h * FILLET * 0.12 - 0.004;
+}
+float fieldL(vec3 p) {
+  float best = -2.0; vec3 c = uC[0]; vec3 u = uU[0];
+  for (int i = 0; i < 12; i++) { float d = dot(p, uC[i]); if (d > best) { best = d; c = uC[i]; u = uU[i]; } }
+  vec3 v = cross(c, u); vec3 t = p / best - c;
+  return starL(vec2(dot(t, v), dot(t, u)));
+}
+// Which star a direction belongs to, and how square that star faces us.
+float fieldC(vec3 p, out float facing) {
+  float best = -2.0; vec3 c = uC[0]; vec3 u = uU[0];
+  for (int i = 0; i < 12; i++) { float d = dot(p, uC[i]); if (d > best) { best = d; c = uC[i]; u = uU[i]; } }
+  facing = c.z;
+  vec3 v = cross(c, u); vec3 t = p / best - c;
+  return starL(vec2(dot(t, v), dot(t, u)));
+}
+void main() {
+  // The logo's drawing, not an orthographic sphere: the angle from the middle
+  // grows evenly with the distance on the page, so the stars at the edge are
+  // not squashed flat. Stars that face us at all are drawn whole, their
+  // outer points reaching past the round; the rest are cut on the round.
+  vec2 xy = vUv / uScale * ${num('lk', 1.12).toFixed(3)};
+  float rho = length(xy);
+  // Equal-area: the middle star big, the stars round the edge pressed thin
+  // and swept along it, as the logo draws them.
+  float lq = rho * ${num('lt', 1.5).toFixed(3)} * 0.5;
+  if (lq >= 1.0) { gl_FragColor = vec4(0.0); return; }
+  float th = 2.0 * asin(lq);
+  if (th > 3.0) { gl_FragColor = vec4(0.0); return; }
+  vec2 dir = rho > 1e-5 ? xy / rho : vec2(0.0);
+  vec3 n = vec3(dir * sin(th), cos(th));
+  float ya = ${num('yaw', -0.1).toFixed(3)}, pa = ${num('pitch', 0.08).toFixed(3)}, ro = ${num('roll', 0.16).toFixed(3)};
+  n = vec3(n.x * cos(ro) - n.y * sin(ro), n.x * sin(ro) + n.y * cos(ro), n.z);
+  n = vec3(n.x * cos(ya) + n.z * sin(ya), n.y, -n.x * sin(ya) + n.z * cos(ya));
+  n = vec3(n.x, n.y * cos(pa) - n.z * sin(pa), n.y * sin(pa) + n.z * cos(pa));
+  vec3 c = uC[0], u = uU[0], v = cross(c, u);
+  mat3 B = mat3(-v, u, c);
+  vec3 p = B * n;
+  float facing;
+  float f = fieldC(p, facing);
+  // facing is in the ball's frame; bring the centre back to the page.
+  float w = clamp(fwidth(f), 1e-5, uPx * 3.0);
+  float g = ${num('gapw', -0.006).toFixed(4)};
+  float st = 1.0 - smoothstep(-g - w, -g + w, f);
+  // Find the owning star's centre on the page.
+  float best = -2.0; vec3 cc = uC[0];
+  for (int i = 0; i < 12; i++) { float d = dot(p, uC[i]); if (d > best) { best = d; cc = uC[i]; } }
+  vec3 cv = vec3(dot(cc, -v), dot(cc, u), dot(cc, c));          // B^T * cc
+  cv = vec3(cv.x, cv.y * cos(pa) + cv.z * sin(pa), -cv.y * sin(pa) + cv.z * cos(pa));
+  cv = vec3(cv.x * cos(ya) - cv.z * sin(ya), cv.y, cv.x * sin(ya) + cv.z * cos(ya));
+  float cth = acos(clamp(cv.z, -1.0, 1.0));
+  float limit = ${num('lc', 1.25).toFixed(3)};
+  float keep = cth < ${num('lw', 1.2).toFixed(3)} ? 1.0 : 1.0 - smoothstep(limit - uPx * 2.0, limit, th);
+  float a = st * keep;
+  float shade = mix(0.82, 1.0, smoothstep(1.6, 0.0, th));
+  gl_FragColor = vec4(vec3(shade, shade * 0.985, shade * 1.0) * a, a);
+}`;
+await document.getElementById('logo').decode();
+// The top of the email's card, drawn into the picture so the card seems to
+// sit over the stadium in every mail app (an overlap made with negative
+// margins falls apart in Outlook and some of Gmail).
+if (P.has('card')) {
+  const k = W / 600;                         // pixels per email pixel
+  const top = H - num('card', 44) * k;
+  const fade = document.createElement('div');
+  fade.style.cssText = `position:absolute;left:0;right:0;bottom:0;height:${num('fadeh', 150) * k}px;background:linear-gradient(to bottom, rgba(10,10,12,0), ${P.get('pitch') || '#0a0a0c'} 92%)`;
+  stage.appendChild(fade);
+  const card = document.getElementById('card');
+  card.style.cssText = `position:absolute;left:${24 * k}px;right:${24 * k}px;top:${top}px;bottom:-${40 * k}px;background:${P.get('cardbg') || '#16171b'};border:${k}px solid ${P.get('cardline') || '#2a2d34'};border-radius:${16 * k}px;box-shadow:0 -${10 * k}px ${40 * k}px rgba(0,0,0,.45)`;
+  stage.appendChild(card);
+}
 await document.fonts.ready;
 requestAnimationFrame(() => { window.__done = true; });
 </script></body></html>

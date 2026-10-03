@@ -222,6 +222,59 @@ interface Frame {
   links?: boolean;
   /** The gambling line. Off for mail about the account itself. */
   gamble?: boolean;
+  /**
+   * A picture across the top, with the heading set into it (scripts/hero).
+   * The top of the card is drawn into its foot, 4% in from each side, so the
+   * card seems to sit over the picture in every mail app: an overlap made
+   * with negative margins falls apart in Outlook and parts of Gmail.
+   */
+  hero?: { src: string; width: number; height: number };
+}
+
+/** The frame's body without a picture: the wordmark, then the card. */
+function plainBody(f: Frame, linkRow: string, foot: string): string {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.pitch}"><tr><td align="center" style="padding:28px 0 36px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
+<tr><td class="pad" style="padding:0 30px 18px">
+<a href="${SITE}" style="text-decoration:none;font:700 24px/1 ${SANS};letter-spacing:-1px;color:${C.chalk}">offside<span style="display:inline-block;width:6px;height:6px;margin:0 2px 0 2px;border-radius:3px;background:${C.violetHi};vertical-align:baseline"></span><span style="color:${C.chalk3}">win</span></a>
+</td></tr>
+<tr><td class="card" style="background:${C.stand};border:1px solid ${C.line};border-radius:16px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tr><td style="height:3px;line-height:3px;font-size:0;background:${C.violet};border-radius:16px 16px 0 0">&nbsp;</td></tr>
+<tr><td class="pad" style="padding:34px 30px 12px">
+<h1 class="h1" style="margin:0 0 22px;font:800 40px/1 ${DISPLAY};letter-spacing:.005em;color:${C.chalk}">${esc(f.heading)}</h1>
+${f.parts.map(part).join('\n')}
+${linkRow}
+</td></tr>
+<tr><td class="pad" style="padding:22px 30px 28px">
+<p style="margin:0;padding-top:20px;border-top:1px solid ${C.line};font:12px/1.6 ${SANS};color:${C.chalk3}">${foot}</p>
+</td></tr>
+</table></td></tr>
+<tr><td class="pad" style="padding:18px 30px 0;font:12px/1.5 ${SANS};color:${C.chalk3}">Offside.win &nbsp; <a href="${SITE}" style="color:${C.chalk3}">offside.win</a></td></tr>
+</table></td></tr></table>`;
+}
+
+/**
+ * The frame's body under a picture. The card is 92% of the width, matching
+ * the card top drawn into the picture at every size the picture is shown.
+ */
+function heroBody(f: Frame, linkRow: string, foot: string): string {
+  const h = f.hero!;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.pitch}"><tr><td align="center" style="padding:0 0 36px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px">
+<tr><td style="font-size:0;line-height:0"><a href="${SITE}" style="text-decoration:none"><img src="${esc(h.src)}" width="600" height="${Math.round(600 * h.height / h.width)}" alt="${esc(f.heading)}" style="display:block;width:100%;max-width:600px;height:auto;border:0;background:#2a1a6e;color:${C.chalk};font:800 32px/1.2 ${DISPLAY}"></a></td></tr>
+<tr><td align="center">
+<table role="presentation" width="92%" cellpadding="0" cellspacing="0" style="width:92%;background:${C.stand};border:1px solid ${C.line};border-top:0;border-radius:0 0 16px 16px">
+<tr><td class="pad" style="padding:6px 28px 12px">
+${f.parts.map(part).join('\n')}
+${linkRow}
+</td></tr>
+<tr><td class="pad" style="padding:22px 28px 28px">
+<p style="margin:0;padding-top:20px;border-top:1px solid ${C.line};font:12px/1.6 ${SANS};color:${C.chalk3}">${foot}</p>
+</td></tr>
+</table></td></tr>
+<tr><td style="padding:18px 6% 0;font:12px/1.5 ${SANS};color:${C.chalk3}">Offside.win &nbsp; <a href="${SITE}" style="color:${C.chalk3}">offside.win</a></td></tr>
+</table></td></tr></table>`;
 }
 
 function compose(f: Frame): Mail {
@@ -243,25 +296,8 @@ function compose(f: Frame): Mail {
 </head>
 <body style="margin:0;padding:0;background:${C.pitch};-webkit-text-size-adjust:100%">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:${C.pitch}">${esc(f.preheader)}&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.pitch}"><tr><td align="center" style="padding:28px 0 36px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
-<tr><td class="pad" style="padding:0 30px 18px">
-<a href="${SITE}" style="text-decoration:none;font:700 24px/1 ${SANS};letter-spacing:-1px;color:${C.chalk}">offside<span style="display:inline-block;width:6px;height:6px;margin:0 2px 0 2px;border-radius:3px;background:${C.violetHi};vertical-align:baseline"></span><span style="color:${C.chalk3}">win</span></a>
-</td></tr>
-<tr><td class="card" style="background:${C.stand};border:1px solid ${C.line};border-radius:16px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-<tr><td style="height:3px;line-height:3px;font-size:0;background:${C.violet};border-radius:16px 16px 0 0">&nbsp;</td></tr>
-<tr><td class="pad" style="padding:34px 30px 12px">
-<h1 class="h1" style="margin:0 0 22px;font:800 40px/1 ${DISPLAY};letter-spacing:.005em;color:${C.chalk}">${esc(f.heading)}</h1>
-${f.parts.map(part).join('\n')}
-${linkRow}
-</td></tr>
-<tr><td class="pad" style="padding:22px 30px 28px">
-<p style="margin:0;padding-top:20px;border-top:1px solid ${C.line};font:12px/1.6 ${SANS};color:${C.chalk3}">${foot}</p>
-</td></tr>
-</table></td></tr>
-<tr><td class="pad" style="padding:18px 30px 0;font:12px/1.5 ${SANS};color:${C.chalk3}">Offside.win &nbsp; <a href="${SITE}" style="color:${C.chalk3}">offside.win</a></td></tr>
-</table></td></tr></table></body></html>`;
+${f.hero ? heroBody(f, linkRow, foot) : plainBody(f, linkRow, foot)}
+</body></html>`;
 
   const text = [
     f.heading, '',
@@ -310,7 +346,8 @@ export function membershipMail({ plan, until, consent }: MembershipMailInput): M
     tag: 'membership',
     subject: renews ? `You're in: your ${name.toLowerCase()} is on` : `You're in: your ${name.toLowerCase()} runs to ${shortDate(until)}`,
     preheader: renews ? `Everything is open. It renews on ${shortDate(until)} unless you stop it.` : `Everything is open until ${when}.`,
-    heading: "You're in.",
+    heading: 'You’re in.',
+    hero: { src: `${SITE}/brand/mail/hero-in.jpg`, width: 1200, height: 1140 },
     parts,
   });
 }
