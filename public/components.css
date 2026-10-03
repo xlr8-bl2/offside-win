@@ -2567,7 +2567,11 @@
   height: calc(74cqi + 2 * var(--space-8));
   margin: calc(-1 * var(--space-9)) calc(-1 * var(--space-8)) var(--space-5);
   overflow: hidden;
-  background: radial-gradient(140% 110% at 70% 40%, #0d0a1c, #050409 70%);
+  /* Not black: a deep violet that lifts behind the trophy, so the black of
+     the silhouette stands off it from the crown to the foot. */
+  background:
+    radial-gradient(46% 78% at 76% 58%, #2c1f66 0%, #1a1240 42%, rgba(12, 9, 28, 0) 100%),
+    radial-gradient(140% 110% at 70% 40%, #120e26, #06050b 72%);
 }
 /* The trophy, a cut-out in black (traced from a photograph of the real one,
    with our own ribbons; /brand/pl-trophy.svg). One small, hard light behind
@@ -2585,8 +2589,8 @@
   content: '';
   position: absolute;
   left: 50%;
-  top: 28%;
-  width: 98%;
+  top: 29%;
+  width: 108%;
   aspect-ratio: 1;
   transform: translate(-50%, -50%);
   border-radius: 50%;
@@ -2602,7 +2606,8 @@
   right: -14%;
   bottom: -1px;
   height: 2px;
-  background: radial-gradient(closest-side, rgba(226, 216, 255, 0.9), rgba(122, 90, 248, 0.3) 70%, transparent);
+  background: radial-gradient(closest-side, rgba(236, 228, 255, 1), rgba(158, 134, 255, 0.45) 70%, transparent);
+  box-shadow: 0 0 18px 4px rgba(122, 90, 248, 0.35);
 }
 .sn-trophy i {
   position: relative;
@@ -2629,7 +2634,9 @@
   padding: 0;
   font-size: clamp(1.5rem, 7.4cqi, 2.4rem);
 }
-.sn-card[data-poster] .sn-count { display: block; min-height: 0; margin: auto 0 0; }
+/* The count sits centred in the space under the title, level with the
+   body of the trophy, not dropped to the floor. */
+.sn-card[data-poster] .sn-count { display: block; min-height: 0; margin: auto 0; padding-top: var(--space-5); }
 .sn-card[data-poster] .sn-count b {
   display: block;
   min-width: 0;
@@ -2641,12 +2648,18 @@
   padding-top: 0.16em;
   margin-top: -0.16em;
   text-align: left;
+  /* The display face's own figures, set at their natural widths: the
+     tabular ones left a gap after a 1 as wide as an 8. */
+  font-family: var(--display);
+  font-variant-numeric: proportional-nums;
   letter-spacing: var(--tracking-num);
   background: linear-gradient(180deg, #ffffff 35%, #b9a6ff);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
+.sn-card[data-poster] .sn-count b[data-digits="1"] { font-size: 44cqi; }
+.sn-card[data-poster] .sn-count b[data-digits="3"] { font-size: 27cqi; }
 .sn-card[data-poster] .sn-count span {
   display: block;
   max-width: 18ch;
@@ -3032,7 +3045,9 @@
   height: calc(62cqi + 2 * var(--space-8));
   margin: calc(-1 * var(--space-8)) calc(-1 * var(--space-8)) var(--space-5);
   overflow: hidden;
-  background: radial-gradient(140% 110% at 70% 40%, #120d27, #050409 70%);
+  background:
+    radial-gradient(46% 78% at 76% 58%, #2c1f66 0%, #1a1240 42%, rgba(12, 9, 28, 0) 100%),
+    radial-gradient(140% 110% at 70% 40%, #120e26, #06050b 72%);
 }
 .mo-mark {
   position: absolute;

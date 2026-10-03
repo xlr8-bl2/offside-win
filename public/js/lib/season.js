@@ -273,7 +273,7 @@ function gapHTML(r, w, { esc, now }) {
   const c = countdownWords(r.days);
   const count = !c ? ''
     : c.n !== null
-      ? `<p class="sn-count"><b data-to="${c.n}">${c.n}</b><span>${esc(c.text)}</span></p>`
+      ? `<p class="sn-count"><b data-to="${c.n}" data-digits="${String(c.n).length}">${c.n}</b><span>${esc(c.text)}</span></p>`
       : `<p class="sn-count sn-count-words"><span>${esc(c.text)}</span></p>`;
   const [why, board, promise] = w.text;
   return `
