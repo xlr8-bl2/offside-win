@@ -53,6 +53,9 @@ uniform vec3 uU[12];
 uniform mat3 uRot;
 uniform float uScale;  // ball radius in clip units
 uniform float uPx;     // one pixel in ball units
+// How many canvas pixels the outlines were drawn across when the ball was
+// tuned (at 1.25x): drawn denser now, the lines keep their width on screen.
+uniform float uW;
 uniform vec2 uA;       // a star arm's inner corner, pulled in for the rounding
 uniform float uP;      // and its tip, pulled in the same way
 
@@ -228,11 +231,11 @@ void main() {
   // the sphere turns away), bright on the near stars, faint on the far ones.
   vec3 po = uRot * vec3(xy, zo);
   float fo = field(po);
-  float lo = 1.0 - smoothstep(0.6, 1.6, abs(fo) / max(fwidth(fo), 1e-5));
+  float lo = 1.0 - smoothstep(0.6 * uW, 1.6 * uW, abs(fo) / max(fwidth(fo), 1e-5));
   if (through) {
     vec3 pb = uRot * vec3(xy, -zo);
     float fb = field(pb);
-    float lb = (1.0 - smoothstep(0.5, 1.4, abs(fb) / max(fwidth(fb), 1e-5))) * 0.35;
+    float lb = (1.0 - smoothstep(0.5 * uW, 1.4 * uW, abs(fb) / max(fwidth(fb), 1e-5))) * 0.35;
     outc.rgb = mix(outc.rgb, mix(prismHue(pb), PALE, 0.55) * max(outc.a, lb), lb);
     outc.a = max(outc.a, lb);
   }
@@ -331,18 +334,31 @@ export function startBall(canvas, { still = false, speed = 0.12, t: t0 = 0, frag
   const uRot = gl.getUniformLocation(prog, 'uRot');
   const uScale = gl.getUniformLocation(prog, 'uScale');
   const uPx = gl.getUniformLocation(prog, 'uPx');
+  const uW = gl.getUniformLocation(prog, 'uW');
   const arm = armShape();
   gl.uniform2f(gl.getUniformLocation(prog, 'uA'), arm.a[0], arm.a[1]);
   gl.uniform1f(gl.getUniformLocation(prog, 'uP'), arm.p);
   const SCALE = 0.93; // room for the glow around the ball
 
+  /*
+   * Drawn at the screen's own density, so the edges stay crisp on a phone.
+   * It was capped at 1.25 to spare the GPU, and on a 3x iPhone every pixel of
+   * the ball was stretched over two and a half of the screen's: stepped
+   * edges. Pinch-zoom counts too (visualViewport.scale), or zooming in on the
+   * ball showed the same steps. The cost is kept in hand by `quality`, which
+   * steps down while frames come too slowly and back up when there is room.
+   */
+  let quality = 1;
   const size = () => {
     const box = canvas.getBoundingClientRect();
-    const side = Math.min(1100, Math.round(Math.max(box.width, 1) * Math.min(devicePixelRatio || 1, 1.25)));
+    const zoom = Math.max(1, (typeof visualViewport !== 'undefined' && visualViewport?.scale) || 1);
+    const density = Math.min(3, (devicePixelRatio || 1) * zoom) * quality;
+    const side = Math.min(2048, Math.max(64, Math.round(Math.max(box.width, 1) * density)));
     if (canvas.width !== side) { canvas.width = side; canvas.height = side; }
     gl.viewport(0, 0, side, side);
     gl.uniform1f(uScale, SCALE);
     gl.uniform1f(uPx, 2 / (side * SCALE));
+    gl.uniform1f(uW, Math.max(1, side / (Math.max(box.width, 1) * 1.25)));
   };
   let t = t0, last = 0, raf = 0, onScreen = true, stopped = false;
   const draw = () => {
@@ -354,20 +370,32 @@ export function startBall(canvas, { still = false, speed = 0.12, t: t0 = 0, frag
   };
   // Thirty frames a second is plenty for a slow sway, and halves the work
   // of a shader that marches every pixel through the glass.
+  let slow = 0, quick = 0;
   const frame = (now) => {
     raf = 0;
     if (stopped) return;
     if (last && now - last < 31) { raf = requestAnimationFrame(frame); return; }
-    if (last) t += Math.min(0.1, (now - last) / 1000) * speed;
+    if (last) {
+      t += Math.min(0.1, (now - last) / 1000) * speed;
+      // Frames arriving well short of thirty a second mean the shader is too
+      // big for this device: draw it smaller. Steady quick ones let it grow
+      // back. Never below half the screen's density.
+      const gap = now - last;
+      if (gap > 48) { quick = 0; if (++slow >= 6 && quality > 0.5) { quality = Math.max(0.5, quality - 0.15); slow = 0; } }
+      else if (gap < 38) { slow = 0; if (++quick >= 90 && quality < 1) { quality = Math.min(1, quality + 0.1); quick = 0; } }
+    }
     last = now;
     draw();
     if (onScreen && !document.hidden) raf = requestAnimationFrame(frame);
     else last = 0;
   };
   const wake = () => { if (!raf && !still && !stopped && onScreen && !document.hidden) raf = requestAnimationFrame(frame); };
+  // A pinch-zoom on a still ball redraws it at the new size.
+  const rezoom = () => { if (still && !stopped) draw(); else wake(); };
+  if (typeof visualViewport !== 'undefined') visualViewport?.addEventListener('resize', rezoom);
   draw();
   canvas.classList.add('is-live');
-  if (still) return () => { stopped = true; };
+  if (still) return () => { stopped = true; visualViewport?.removeEventListener('resize', rezoom); };
   const io = typeof IntersectionObserver === 'function'
     ? new IntersectionObserver(([e]) => { onScreen = e.isIntersecting; wake(); }) : null;
   io?.observe(canvas);
@@ -378,5 +406,6 @@ export function startBall(canvas, { still = false, speed = 0.12, t: t0 = 0, frag
     if (raf) cancelAnimationFrame(raf);
     io?.disconnect();
     document.removeEventListener('visibilitychange', wake);
+    if (typeof visualViewport !== 'undefined') visualViewport?.removeEventListener('resize', rezoom);
   };
 }
