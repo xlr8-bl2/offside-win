@@ -1435,8 +1435,68 @@ export async function pruneBoard(): Promise<void> {
        AND NOT EXISTS (SELECT 1 FROM pick p WHERE p.fixture_id = fixture.id AND p.kind = 'CONFIDENT')`,
     [cutoff],
   );
+  await restoreCalledFixtures();
   // Deleted accounts' fingerprints go after the six years the privacy policy gives them.
   if (config.dbBackend === 'postgres') await dbExec('DELETE FROM former_member WHERE at < ?', [Math.floor(Date.now() / 1000) - 6 * 365 * 86400]);
+}
+
+/**
+ * Called matches deleted before pruneBoard started keeping them, put back.
+ *
+ * The schema restores what the match and schedule tables still name, but
+ * most of the deleted ones -- friendlies, national sides, smaller leagues --
+ * were never in either, and their names now live only with the provider (as
+ * lab/record.ts found). A few per pass, newest first, so the backlog clears
+ * in an hour or two without the provider noticing. A match the provider
+ * cannot name is remembered and not asked about again.
+ */
+export async function restoreCalledFixtures(perPass = 12): Promise<number> {
+  if (config.dbBackend !== 'postgres') return 0;
+  const skip = new Set<number>(((await kvGetJSON<number[]>('restore:unnamed')) ?? []).map(Number));
+  const gone = await dbSelect<{ fixture_id: number; kickoff: number }>(
+    `SELECT p.fixture_id, max(p.kickoff) AS kickoff FROM pick p
+      WHERE p.kind = 'CONFIDENT' AND p.settled_at IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM fixture f WHERE f.id = p.fixture_id)
+      GROUP BY p.fixture_id ORDER BY max(p.kickoff) DESC`,
+    [],
+  );
+  const todo = gone.filter((g) => !skip.has(Number(g.fixture_id))).slice(0, perPass);
+  let put = 0;
+  for (const g of todo) {
+    const id = Number(g.fixture_id);
+    const e = await bsdOrNull<Record<string, unknown>>(`/api/v2/events/${id}/`).catch(() => null);
+    const home = str(e?.['home_team']);
+    const away = str(e?.['away_team']);
+    const leagueId = num(e?.['league_id']);
+    if (!e || !home || !away || leagueId === undefined) { skip.add(id); continue; }
+    const [snap] = await dbSelect<{ home_goals: number; away_goals: number }>(
+      'SELECT home_goals, away_goals FROM market_snapshot WHERE fixture_id = ?', [id]);
+    const hg = snap?.home_goals ?? num(e['home_score']) ?? null;
+    const ag = snap?.away_goals ?? num(e['away_score']) ?? null;
+    const [lg] = await dbSelect<{ name: string }>('SELECT name FROM league WHERE id = ?', [leagueId]);
+    const homeId = num(e['home_team_id']) ?? null;
+    const awayId = num(e['away_team_id']) ?? null;
+    const kickoff = Number(g.kickoff);
+    const card = JSON.stringify({
+      id, league_id: leagueId, league: lg?.name ?? null, kickoff, home, away,
+      home_id: homeId, away_id: awayId, verdicts: [], markets: [], restored: true,
+    });
+    await dbExec(
+      `INSERT INTO fixture (id, league_id, kickoff, home_team, away_team, status, provisional,
+                            board_json, bundle_json, board_free_json, bundle_free_json, computed_at,
+                            home_goals, away_goals, home_team_id, away_team_id, rank)
+       VALUES (?, ?, ?, ?, ?, 'finished', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, 9)
+       ON CONFLICT (id) DO NOTHING`,
+      [id, leagueId, kickoff, home, away, card, card, card, card, Math.floor(Date.now() / 1000),
+        hg, ag, homeId, awayId],
+    );
+    put++;
+  }
+  if (todo.length) {
+    await kvSetJSON('restore:unnamed', [...skip]);
+    console.log(`  put back ${put} called match${put === 1 ? '' : 'es'} the board had let go of (${gone.length - put - skip.size} still to look up)`);
+  }
+  return put;
 }
 
 /** Copy finished fixtures' snapshots older than `before` into market_snapshot. */
