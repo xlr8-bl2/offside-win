@@ -647,7 +647,7 @@ function crest(name, size = 'md', id = null, type = 'team') {
   if (id === null || id === undefined || !Number.isFinite(Number(id))) {
     return `<span class="crest crest-${size} noimg" style="${vars}" aria-hidden="true"><i>${esc(text)}</i></span>`;
   }
-  return `<span class="crest crest-${size}${type === 'player' ? ' crest-player' : ''}" style="${vars}" aria-hidden="true"
+  return `<span class="crest crest-${size}${type === 'player' ? ' crest-player' : type === 'league' ? ' crest-league' : ''}" style="${vars}" aria-hidden="true"
     ><img src="${IMG_BASE}/${esc(type)}/${encodeURIComponent(id)}/" alt="" loading="lazy" decoding="async"
       onerror="this.closest('.crest').classList.add('noimg');this.remove()"
     ><i>${esc(text)}</i></span>`;
