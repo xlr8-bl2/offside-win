@@ -4806,7 +4806,9 @@ async function viewFixture(id, params = new URLSearchParams()) {
   // decide how they are set.
   const meta = [
     kickoffLabel(f.kickoff),
-    ...String(f.round_label || f.league || '').split(/\s*·\s*/).filter(Boolean),
+    // The competition is named once, by its link below; a match with no
+    // round label used to fall back to the league here and say it twice.
+    ...String(f.round_label || '').split(/\s*·\s*/).filter((x) => x && x !== f.league),
     f.venue?.name ? (f.neutral ? `${f.venue.name} (neutral)` : f.venue.name) : f.neutral ? 'neutral ground' : null,
   ].filter(Boolean);
 

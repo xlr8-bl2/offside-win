@@ -1425,7 +1425,16 @@ export async function firstVenuePhoto(ids: Array<number | null | undefined>, fet
 export async function pruneBoard(): Promise<void> {
   const cutoff = Math.floor(Date.now() / 1000) - 7 * 86400;
   await archiveSnapshots(cutoff);
-  await dbSelect('DELETE FROM fixture WHERE kickoff < ?', [cutoff]);
+  // A match with a published call stays, for good. The call is in the record
+  // forever, and the record links to the match: deleting it left the results
+  // page showing "? v ?" with no score and a match link that said "not found"
+  // for every call more than a week old. Every other reader of this table
+  // asks for a window of dates, so old rows kept here reach nothing else.
+  await dbSelect(
+    `DELETE FROM fixture WHERE kickoff < ?
+       AND NOT EXISTS (SELECT 1 FROM pick p WHERE p.fixture_id = fixture.id AND p.kind = 'CONFIDENT')`,
+    [cutoff],
+  );
   // Deleted accounts' fingerprints go after the six years the privacy policy gives them.
   if (config.dbBackend === 'postgres') await dbExec('DELETE FROM former_member WHERE at < ?', [Math.floor(Date.now() / 1000) - 6 * 365 * 86400]);
 }
@@ -1453,6 +1462,10 @@ export async function archiveSnapshots(before: number): Promise<void> {
        CROSS JOIN LATERAL (SELECT try_json(f.report_json)::jsonb AS j) r
       WHERE f.kickoff < $1 AND f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
         AND jsonb_typeof(b.j->'markets') = 'array'
+        -- Matches kept for their call (pruneBoard) are archived once, not
+        -- read again on every pass.
+        AND NOT EXISTS (SELECT 1 FROM market_snapshot s WHERE s.fixture_id = f.id
+                          AND s.snapshot NOT LIKE '%"source":"backfill"%')
      -- A backfilled row (the market only) gives way to the board's own,
      -- which carries our model's view too.
      ON CONFLICT (fixture_id) DO UPDATE SET snapshot = EXCLUDED.snapshot, archived_at = EXCLUDED.archived_at

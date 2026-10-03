@@ -2816,3 +2816,48 @@ BEGIN
 END;
 $fn$;
 REVOKE ALL ON FUNCTION pulled_claim() FROM PUBLIC, anon, authenticated;
+
+-- Every published call keeps its match page.
+--
+-- The slate deleted every fixture a week after kick-off while the calls on
+-- them stay in the record for good, so the older half of the results page
+-- showed "? v ?" with no score and its match links said "not found". The
+-- slate now keeps any fixture with a published call (slate.ts, pruneBoard);
+-- this puts back the ones already gone, from what survives them: the match,
+-- team and league tables, the schedule and the archived snapshot. The
+-- analysis went with the old row, so the page carries the teams, the score
+-- and the call. Only missing rows are written: run again, it does nothing.
+INSERT INTO fixture (id, league_id, kickoff, home_team, away_team, status, provisional,
+                     board_json, bundle_json, board_free_json, bundle_free_json, computed_at,
+                     home_goals, away_goals, home_team_id, away_team_id, rank)
+SELECT g.id, g.league_id, g.kickoff, g.home, g.away, 'finished', 0,
+       c.card, c.card, c.card, c.card, floor(extract(epoch FROM now()))::bigint,
+       g.hg, g.ag, g.home_id, g.away_id, 9
+FROM (
+  SELECT DISTINCT ON (p.fixture_id)
+         p.fixture_id AS id,
+         coalesce(m.league_id, s.league_id, ms.league_id) AS league_id,
+         coalesce(m.kickoff, s.kickoff, ms.kickoff, p.kickoff) AS kickoff,
+         coalesce(th.name, s.home_team) AS home,
+         coalesce(ta.name, s.away_team) AS away,
+         coalesce(m.home_team_id, s.home_team_id) AS home_id,
+         coalesce(m.away_team_id, s.away_team_id) AS away_id,
+         coalesce(ms.home_goals, m.home_goals) AS hg,
+         coalesce(ms.away_goals, m.away_goals) AS ag
+    FROM pick p
+    LEFT JOIN match m ON m.id = p.fixture_id
+    LEFT JOIN schedule s ON s.id = p.fixture_id
+    LEFT JOIN market_snapshot ms ON ms.fixture_id = p.fixture_id
+    LEFT JOIN team th ON th.id = m.home_team_id
+    LEFT JOIN team ta ON ta.id = m.away_team_id
+   WHERE p.kind = 'CONFIDENT' AND p.settled_at IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM fixture f WHERE f.id = p.fixture_id)
+   ORDER BY p.fixture_id
+) g
+LEFT JOIN league l ON l.id = g.league_id
+CROSS JOIN LATERAL (SELECT jsonb_build_object(
+    'id', g.id, 'league_id', g.league_id, 'league', l.name, 'kickoff', g.kickoff,
+    'home', g.home, 'away', g.away, 'home_id', g.home_id, 'away_id', g.away_id,
+    'verdicts', '[]'::jsonb, 'markets', '[]'::jsonb, 'restored', true)::text AS card) c
+WHERE g.league_id IS NOT NULL AND g.home IS NOT NULL AND g.away IS NOT NULL
+ON CONFLICT (id) DO NOTHING;
