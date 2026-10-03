@@ -403,6 +403,73 @@ export function membershipMail({ plan, until, consent }: MembershipMailInput): M
   });
 }
 
+export interface ReceiptInput {
+  /** The payment's own id, from the processor: the receipt number is made from it. */
+  paymentId: string;
+  /** When it was paid, epoch seconds. */
+  at: number;
+  plan: string;
+  amountMinor: number;
+  currency: string;
+  /** When the paid period runs to, epoch seconds, if known. */
+  until?: number | null;
+}
+
+/**
+ * Our receipt number for a payment: OW- and eight characters, the same every
+ * time for the same payment, so a resent receipt carries the same number and
+ * support can find it. FNV-1a over the processor's id, in base 36.
+ */
+export function receiptNumber(paymentId: string): string {
+  // Two FNV-1a passes (forwards and backwards) for 64 bits, written in an
+  // alphabet with no look-alikes (no 0/O, no 1/I/L), so it reads out cleanly.
+  const ABC = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+  let h = 0x811c9dc5, g = 0x2f6b9a31;
+  for (let i = 0; i < paymentId.length; i++) { h ^= paymentId.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  for (let i = paymentId.length - 1; i >= 0; i--) { g ^= paymentId.charCodeAt(i); g = Math.imul(g, 0x01000193) >>> 0; }
+  let out = '';
+  for (let i = 0; i < 8; i++) {
+    const src = i < 4 ? h : g;
+    out += ABC[(src >>> ((i % 4) * 8)) % ABC.length];
+  }
+  return `OW-${out}`;
+}
+
+const money = (minor: number, currency: string) => new Intl.NumberFormat('en-GB', {
+  style: 'currency', currency: /^[A-Z]{3}$/.test(currency) ? currency : 'GBP',
+}).format(minor / 100);
+
+/**
+ * The receipt: ours, for every payment, sent as soon as the payment lands.
+ * What was bought, what it cost, when, and the number to quote; the record a
+ * buyer keeps, so it says nothing about who processed the card.
+ */
+export function receiptMail({ paymentId, at, plan, amountMinor, currency, until }: ReceiptInput): Mail {
+  const name = planName(plan);
+  const no = receiptNumber(paymentId);
+  const paid = money(amountMinor, currency);
+  const facts: Array<[string, string]> = [
+    ['Receipt', no],
+    ['Date', shortDate(at)],
+    ['For', name],
+    ...(until ? [['Covers', `To ${shortDate(until)}`] as [string, string]] : []),
+    ['Paid', paid],
+  ];
+  return compose({
+    tag: 'receipt',
+    subject: `Your receipt from Offside.win, ${no}`,
+    preheader: `${paid} for your ${name.toLowerCase()}. Keep this one.`,
+    heading: 'Paid.',
+    look: { ticker: 'Your receipt', hero: 'hero-receipt', lead: `${paid}, paid.` },
+    parts: [
+      { p: `Thanks. This is your receipt for your ${name.toLowerCase()}. Keep it for your records.` },
+      { facts },
+      { p: `Seller: Offside.win, offside.win. Questions about this payment? Reply to this email and quote ${no}.`, small: true },
+      { button: 'Open your account', href: `${SITE}/#/account` },
+    ],
+  });
+}
+
 /** A renewing membership took its next payment. */
 export function renewedMail({ plan, until }: { plan: string; until: number }): Mail {
   const name = planName(plan);
@@ -415,7 +482,7 @@ export function renewedMail({ plan, until }: { plan: string; until: number }): M
     parts: [
       { p: `Your ${name.toLowerCase()} renewed, so nothing changes: every call stays open to you.` },
       { facts: [['Plan', name], ['Paid to', shortDate(until)], ['Next renewal', shortDate(until)]] },
-      { p: 'Whop, who take the payment, send the receipt for the money itself. Want it to stop? One tap on your account page, and you keep the time you have paid for.' },
+      { p: 'Your receipt comes in its own email. Want it to stop renewing? One tap on your account page, and you keep the time you have paid for.' },
       { button: 'Open your account', href: `${SITE}/#/account` },
     ],
   });
@@ -495,7 +562,7 @@ export function accountDeletedMail({ stoppedRenewal }: { stoppedRenewal: boolean
     gamble: false,
     parts: [
       { p: 'Your sign-in, profile, follows and membership are gone. This email address can no longer sign in to Offside.win.' },
-      ...(stoppedRenewal ? [{ p: 'Your membership with Whop was stopped first, so nothing more will be charged.' } as Part] : []),
+      ...(stoppedRenewal ? [{ p: 'Your renewal was stopped first, so nothing more will be charged.' } as Part] : []),
       { p: 'Payment records stay, because tax law requires it. Nothing else of yours is kept.', small: true },
       { p: 'You can make a new account with this address whenever you like. It starts from scratch.', small: true },
     ],

@@ -12,7 +12,7 @@
  * this file is a mistake against the whole database.
  */
 
-import { accessEndedMail, membershipMail, renewalStoppedMail, renewedMail, sendMail, type MailEnv } from './mail.ts';
+import { accessEndedMail, membershipMail, receiptMail, renewalStoppedMail, renewedMail, sendMail, type MailEnv } from './mail.ts';
 import { createCheckoutLink, parseWebhook, type CoinflowConfig } from './coinflow.ts';
 import { verifyWebhook } from './webhook.ts';
 import { sha256Hex } from './admin.ts';
@@ -645,6 +645,15 @@ async function handleWhop(raw: string, via: string, env: PayEnv): Promise<Respon
     p_user: event.userId,
   });
   if (out && out.applied === false) console.error('whop: not applied —', out.reason, event.email);
+  // Our own receipt, once per payment: the ledger applies each payment id
+  // once, however often the delivery is retried, so a retry sends nothing.
+  if (event.kind === 'paid' && out?.applied && event.paymentId && event.amountMinor !== null && event.amountMinor > 0) {
+    const sent = await sendMail(env, event.email, receiptMail({
+      paymentId: event.paymentId, at: Math.floor(Date.now() / 1000), plan: planId,
+      amountMinor: event.amountMinor, currency: event.currency ?? 'GBP', until: event.periodEnd,
+    }));
+    console.log('mail: receipt', sent ? 'sent' : 'not sent');
+  }
   return json({ ok: true, via: verdict.via, ...(out ?? {}) });
 }
 

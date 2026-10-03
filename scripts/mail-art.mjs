@@ -157,6 +157,7 @@ function stage({ head, pill, bright = false, h = 620 }) {
 // Each email has its own things round it, picked for what it says.
 const ART = {
   'hero-joined': hero({ head: 'You’re in.', pill: 'Every call. Every reason.', objects: [['pass', 'tl', 170], ['call', 'tr', 170], ['ball', 'bl'], ['slip', 'br', 150]] }),
+  'hero-receipt': hero({ head: 'Paid.', pill: 'Your receipt, from us.', size: 168, objects: [['pass', 'tl', 170], ['envelope', 'tr', 140], ['ball', 'br', 150]] }),
   'hero-renewed': hero({ head: 'Still in.', pill: 'Same price. Same calls.', size: 140, objects: [['stopwatch', 'tl', 140], ['call', 'tr', 170], ['ball', 'br', 160]] }),
   'hero-free': hero({ head: 'On us.', pill: 'Free days. No card.', size: 156, top: 214, objects: [['gift', 'tl', 140], ['ball', 'tr', 120], ['ball', 'bl', 110], ['gift', 'br', 120]] }),
   'hero-stopped': hero({ head: 'Renewal<br>stopped.', pill: 'Nothing more to pay.', size: 100, top: 186, objects: [['stopwatch', 'tr', 150], ['pass', 'tl', 160]] }),

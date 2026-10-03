@@ -23,7 +23,7 @@
  */
 
 import type { PayEnv } from './pay.ts';
-import { accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, goodwillEndMail, goodwillStartMail, membershipMail, renewalStoppedMail, renewedMail, sendMail } from './mail.ts';
+import { accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, goodwillEndMail, goodwillStartMail, membershipMail, receiptMail, renewalStoppedMail, renewedMail, sendMail } from './mail.ts';
 
 export interface AdminEnv extends PayEnv {
   /** Comma-separated SHA-256 hex digests of the owner's lower-cased email. */
@@ -158,6 +158,7 @@ export async function admin(request: Request, env: AdminEnv, jwt: string | null,
       authMail({ action: 'signup', link }),
       membershipMail({ plan: 'monthly', until, consent: { at: now, terms: '2026-09-27' } }),
       membershipMail({ plan: 'matchday', until: now + 86400 }),
+      receiptMail({ paymentId: 'pay_test_owner', at: now, plan: 'monthly', amountMinor: 900, currency: 'GBP', until }),
       renewedMail({ plan: 'monthly', until }),
       renewalStoppedMail({ plan: 'monthly', until }),
       freeTimeMail({ days: 7, until: now + 7 * 86400 }),
