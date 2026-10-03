@@ -240,12 +240,12 @@ interface Frame {
 }
 
 export interface Look {
-  /** Said along the ticker, repeated to fill it. */
-  ticker: string;
+  /** Said along the ticker, twice. No ticker without it. */
+  ticker?: string;
   /** public/brand/mail/<hero>.png, 600 x 560. */
   hero: string;
-  /** The card's first line, under the hero. */
-  lead: string;
+  /** The card's first line, under the hero. The hero's headline is enough without it. */
+  lead?: string;
   /** Feature cards under the card, public/brand/mail/feature-<name>.png. */
   features?: Array<{ name: string; alt: string; href: string }>;
   /** Small print kept under the features rather than in the card. */
@@ -284,16 +284,16 @@ ${linkRow}
 function lookBody(f: Frame, look: Look, linkRow: string, foot: string): string {
   // Twice, and allowed to wrap: a line that will not wrap sets the email's
   // width, and widened it past a phone's screen.
-  const ticker = [esc(look.ticker), esc(look.ticker)].join(' &nbsp;&bull;&nbsp; ');
+  const ticker = look.ticker ? [esc(look.ticker), esc(look.ticker)].join(' &nbsp;&bull;&nbsp; ') : '';
   const features = (look.features ?? []).map((x) => `<tr><td align="center" style="padding:0 0 18px"><a href="${esc(x.href)}" style="text-decoration:none"><img src="${SITE}/brand/mail/feature-${esc(x.name)}.png" width="560" alt="${esc(x.alt)}" style="display:block;width:100%;max-width:560px;height:auto;border:0;color:${C.chalk};font:600 16px/1.4 ${SANS}"></a></td></tr>`).join('');
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.pitch}"><tr><td align="center" style="padding:0 0 36px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px">
-<tr><td style="background:${C.violet};padding:9px 12px;font:800 11px/1.3 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#ffffff;text-align:center">${ticker}</td></tr>
-<tr><td style="font-size:0;line-height:0;background:#1a1145"><a href="${SITE}" style="text-decoration:none"><img src="${SITE}/brand/mail/${esc(look.hero)}.png" width="600" height="560" alt="${esc(f.heading)}" style="display:block;width:100%;max-width:600px;height:auto;border:0;background:#1a1145;color:${C.chalk};font:800 40px/1.1 ${DISPLAY}"></a></td></tr>
+${ticker ? `<tr><td style="background:${C.violet};padding:9px 12px;font:800 11px/1.3 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#ffffff;text-align:center">${ticker}</td></tr>` : ''}
+<tr><td style="font-size:0;line-height:0;background:#1a1145"><a href="${SITE}" style="text-decoration:none"><img src="${SITE}/brand/mail/${esc(look.hero)}.png" width="600" alt="${esc(f.heading)}" style="display:block;width:100%;max-width:600px;height:auto;border:0;background:#1a1145;color:${C.chalk};font:800 40px/1.1 ${DISPLAY}"></a></td></tr>
 <tr><td align="center" style="background:${C.pitch}">
 <table role="presentation" width="93.33%" cellpadding="0" cellspacing="0" style="width:93.33%;background:${C.stand};border:1px solid ${C.line};border-top:0;border-radius:0 0 26px 26px">
 <tr><td class="pad" align="center" style="padding:4px 30px 30px;text-align:center">
-<h1 style="margin:0 0 14px;font:800 30px/1.08 ${DISPLAY};color:${C.chalk}">${esc(look.lead)}</h1>
+${look.lead ? `<h1 style="margin:0 0 14px;font:800 30px/1.08 ${DISPLAY};color:${C.chalk}">${esc(look.lead)}</h1>` : '<div style="height:10px;line-height:10px;font-size:0">&nbsp;</div>'}
 ${f.parts.map(part).join('\n').replace(/<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 26px">/g, '<table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:6px auto 26px">')}
 </td></tr>
 </table></td></tr>
@@ -332,7 +332,7 @@ ${f.look ? lookBody(f, f.look, linkRow, foot) : plainBody(f, linkRow, foot)}
 
   const text = [
     f.heading, '',
-    ...(f.look ? [f.look.lead, ''] : []),
+    ...(f.look?.lead ? [f.look.lead, ''] : []),
     ...f.parts.map(plain).filter(Boolean).flatMap((t) => [t, '']),
     ...(f.look?.after ?? []).map(plain).filter(Boolean).flatMap((t) => [t, '']),
     ...(links ? [`Your account: ${SITE}/#/account`, `Terms: ${SITE}/terms`, ''] : []),
@@ -344,6 +344,13 @@ ${f.look ? lookBody(f, f.look, linkRow, foot) : plainBody(f, linkRow, foot)}
 }
 
 /* --------------------------------------------------------- the messages */
+
+/** What a membership opens, as the coloured cards under the joining emails. */
+const FEATURES: NonNullable<Look['features']> = [
+  { name: 'calls', alt: 'Every call, and why: the pick, the odds, the bookmaker, and the reasons in plain football.', href: `${SITE}/#/board` },
+  { name: 'slip', alt: 'The slip, built for you: our surest calls of the day, put together.', href: `${SITE}/#/board` },
+  { name: 'alerts', alt: 'Told the minute it changes: team news turns a call, we pull it and email you.', href: `${SITE}/#/account` },
+];
 
 export interface MembershipMailInput {
   plan: string;
@@ -390,11 +397,7 @@ export function membershipMail({ plan, until, consent }: MembershipMailInput): M
       ticker: 'Every call is open',
       hero: 'hero-joined',
       lead: `Your ${name.toLowerCase()} is on.`,
-      features: [
-        { name: 'calls', alt: 'Every call, and why: the pick, the odds, the bookmaker, and the reasons in plain football.', href: `${SITE}/#/board` },
-        { name: 'slip', alt: 'The slip, built for you: our surest calls of the day, put together.', href: `${SITE}/#/board` },
-        { name: 'alerts', alt: 'Told the minute it changes: team news turns a call, we pull it and email you.', href: `${SITE}/#/account` },
-      ],
+      features: FEATURES,
       after,
     },
   });
@@ -408,6 +411,7 @@ export function renewedMail({ plan, until }: { plan: string; until: number }): M
     subject: `Renewed: you're in until ${shortDate(until)}`,
     preheader: 'Your membership renewed. Nothing to do.',
     heading: 'Renewed. Still in.',
+    look: { ticker: 'Renewed', hero: 'hero-renewed', lead: `Your ${name.toLowerCase()} renewed.` },
     parts: [
       { p: `Your ${name.toLowerCase()} renewed, so nothing changes: every call stays open to you.` },
       { facts: [['Plan', name], ['Paid to', shortDate(until)], ['Next renewal', shortDate(until)]] },
@@ -427,6 +431,7 @@ export function renewalStoppedMail({ plan, until }: { plan?: string | null; unti
     subject: until ? `Renewal stopped. You're in until ${shortDate(until)}` : 'Renewal stopped',
     preheader: 'Nothing more will be charged.',
     heading: 'Renewal stopped.',
+    look: { ticker: 'Nothing more to pay', hero: 'hero-stopped' },
     parts: [
       { p: until
         ? `Done. Nothing more will be charged, and everything stays open to you until ${longDate(until)}. After that the site goes back to the free view.`
@@ -450,6 +455,7 @@ export function accessEndedMail({ reason }: { reason: 'refund' | 'chargeback' | 
     subject: 'Your membership has ended',
     preheader: 'The free view stays open to you.',
     heading: 'Membership ended.',
+    look: { hero: 'hero-ended' },
     parts: [
       { p: why },
       { p: 'Your account stays, and so does everything free: the day’s free call, every match page and the full results record, losses included.' },
@@ -467,6 +473,7 @@ export function freeTimeMail({ days, until }: { days: number; until: number }): 
     subject: `${span[0]!.toUpperCase()}${span.slice(1)} on us`,
     preheader: `Everything is open until ${shortDate(until)}. Nothing to pay.`,
     heading: `${span[0]!.toUpperCase()}${span.slice(1)} on us.`,
+    look: { ticker: 'Free time on us', hero: 'hero-free', lead: `${span[0]!.toUpperCase()}${span.slice(1)} on us.`, features: FEATURES },
     parts: [
       { p: `Every call, every leg of the bet slip and the reasons behind each one are open to you until ${longDate(until)}.` },
       { facts: [['Open until', shortDate(until)], ['Cost', 'Nothing'], ['Renews', 'No']] },
@@ -483,6 +490,7 @@ export function accountDeletedMail({ stoppedRenewal }: { stoppedRenewal: boolean
     subject: 'Your Offside.win account is deleted',
     preheader: 'Your sign-in and your details are gone.',
     heading: 'Account deleted.',
+    look: { hero: 'hero-deleted' },
     links: false,
     gamble: false,
     parts: [
@@ -521,6 +529,7 @@ export function authMail({ action, link, code, newEmail }: { action: AuthAction;
       subject: `Your Offside.win code: ${code ?? ''}`.trim(),
       preheader: 'Type this code where you were asked for it.',
       heading: 'Your code.',
+      look: { hero: 'hero-code' },
       parts: [
         { p: 'Type this where Offside.win asked for it.' },
         { code: code ?? '' },
@@ -534,6 +543,7 @@ export function authMail({ action, link, code, newEmail }: { action: AuthAction;
       subject: 'Confirm your email for Offside.win',
       preheader: 'One tap and your account is ready.',
       heading: 'One tap and you’re set.',
+      look: { hero: 'hero-confirm' },
       parts: [
         { p: 'Confirm this is your email and your Offside.win account is ready. You’ll be signed in straight away.' },
         { button: 'Confirm and sign in', href: link },
@@ -547,6 +557,7 @@ export function authMail({ action, link, code, newEmail }: { action: AuthAction;
       subject: 'You’ve been invited to Offside.win',
       preheader: 'Tap to accept and sign in.',
       heading: 'You’re invited.',
+      look: { hero: 'hero-invite' },
       parts: [
         { p: 'An Offside.win account has been set up for this email. Tap to accept it and sign in.' },
         { button: 'Accept and sign in', href: link },
@@ -560,6 +571,7 @@ export function authMail({ action, link, code, newEmail }: { action: AuthAction;
       subject: 'Confirm your new email for Offside.win',
       preheader: 'Tap to move your account to this address.',
       heading: 'Confirm your new email.',
+      look: { hero: 'hero-confirm', lead: 'Confirm your new email.' },
       parts: [
         { p: 'Tap to move your Offside.win account to this address. Until you do, nothing changes.' },
         { button: 'Confirm new email', href: link },
@@ -573,6 +585,7 @@ export function authMail({ action, link, code, newEmail }: { action: AuthAction;
       subject: 'Your Offside.win email is changing',
       preheader: newEmail ? `To ${newEmail}. Tap to confirm.` : 'Tap to confirm.',
       heading: 'Your email is changing.',
+      look: { hero: 'hero-account', lead: 'Your email is changing.' },
       parts: [
         { p: newEmail
           ? `Someone asked to move your Offside.win account to ${newEmail}. If that was you, confirm it here too.`
@@ -589,6 +602,7 @@ export function authMail({ action, link, code, newEmail }: { action: AuthAction;
     subject: 'Your sign-in link for Offside.win',
     preheader: 'Tap to sign in. The link works once.',
     heading: 'Tap to sign in.',
+    look: { hero: 'hero-signin' },
     parts: [
       { p: 'Here’s your link to Offside.win. No password, nothing to remember.' },
       { button: 'Sign in to Offside.win', href: link },
@@ -610,6 +624,7 @@ export function noticeMail(action: string): Mail {
     subject: 'A change to your Offside.win account',
     preheader: 'If this was you, there is nothing to do.',
     heading: 'Your account changed.',
+    look: { hero: 'hero-account' },
     parts: [
       { p: what[action] ?? 'A sign-in setting on your Offside.win account was changed.' },
       { p: 'If this was you, there is nothing to do. If it wasn’t, reply to this email straight away.' },
@@ -630,6 +645,7 @@ export function goodwillStartMail({ until, whop }: { until: number | null; whop:
     subject: 'Quiet spell: a day added to your membership for every day of it',
     preheader: 'Nothing to do. We will tell you the total when the football is back.',
     heading: 'Your membership is on pause too.',
+    look: { ticker: 'Quiet days, given back', hero: 'hero-quiet', lead: 'Your membership is on pause too.' },
     parts: [
       { p: 'The big leagues have stopped for a few days. Fewer matches means fewer calls, and that is not what you paid for.' },
       { p: `So for every quiet day, we add a day to your membership. Automatically, nothing to claim, nothing extra to pay${whop ? ', and your next payment moves back by the same' : ''}.` },
@@ -649,6 +665,7 @@ export function goodwillEndMail({ days, until, whop }: { days: number; until: nu
     subject: `The football is back. We added ${n} to your membership`,
     preheader: live ? `${whop ? 'Next payment' : 'Now runs to'} ${shortDate(until!)}.` : 'One for every quiet day.',
     heading: `${n[0]!.toUpperCase()}${n.slice(1)} added.`,
+    look: { ticker: 'The football is back', hero: 'hero-back', lead: `${n[0]!.toUpperCase()}${n.slice(1)} added.` },
     parts: [
       { p: `The quiet spell is over. We added ${n} to your membership, one for every day the big leagues were off.` },
       ...(live ? [{ facts: [['Days added', String(days)], [whop ? 'Next payment' : 'Now runs to', shortDate(until!)]] as Array<[string, string]> } as Part] : []),
@@ -710,6 +727,7 @@ export function pulledMail(calls: PulledMailCall[]): Mail {
     subject: one ? `Call pulled: ${tie(first)}` : `${calls.length} calls pulled before kick-off`,
     preheader: one ? first.reason : calls.map(tie).join(', '),
     heading: one ? 'We’ve pulled a call.' : `We’ve pulled ${NUMBER[calls.length] ?? calls.length} calls.`,
+    look: { ticker: 'Team news', hero: 'hero-pulled', lead: one ? `${first.home} v ${first.away}` : `${NUMBER[calls.length] ?? calls.length} calls changed` },
     parts,
   });
 }
