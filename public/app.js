@@ -5792,7 +5792,8 @@ async function viewLeagues(params = new URLSearchParams()) {
   const without = all.filter((e) => e.picks === 0);
   const totalCalls = all.reduce((t, e) => t + e.picks, 0);
   const list = Array.isArray(covered) ? covered.filter((l) => l?.id && l?.name) : [];
-  const total = list.length || 88;
+  if (list.length) coverCount = list.length;
+  const total = list.length || null;
   const show = params.get('show') === 'all' || !all.length ? 'all' : 'now';
 
   const row = (e) => `
@@ -5842,7 +5843,7 @@ async function viewLeagues(params = new URLSearchParams()) {
 
     <div class="when-tabs lg-tabs" role="tablist" aria-label="Which competitions">
       <button type="button" role="tab" data-show="now" aria-controls="lg-now"${all.length ? '' : ' disabled'}>On the board now <i>${all.length}</i></button>
-      <button type="button" role="tab" data-show="all" aria-controls="lg-all">All we cover <i>${total}</i></button>
+      <button type="button" role="tab" data-show="all" aria-controls="lg-all">All we cover${total ? ` <i>${total}</i>` : ''}</button>
     </div>
 
     <div id="lg-now" role="tabpanel">
@@ -5879,7 +5880,7 @@ async function viewLeagues(params = new URLSearchParams()) {
     app.querySelector('#lg-now').hidden = to !== 'now';
     app.querySelector('#lg-all').hidden = to !== 'all';
     sub.textContent = to === 'now'
-      ? `${all.length} of the ${total} we cover have games in the next few days. ${totalCalls
+      ? `${total ? `${all.length} of the ${total} we cover have` : `${all.length} ${all.length === 1 ? 'competition has' : 'competitions have'}`} games in the next few days. ${totalCalls
         ? `${totalCalls} ${totalCalls === 1 ? 'call' : 'calls'} between them.` : 'No calls on any of them at the moment.'}`
       : `Every competition we analyse, with when it next plays. Calls open three days before kick-off.`;
     if (write) history.replaceState(null, '', to === 'all' ? '#/leagues?show=all' : '#/leagues');
@@ -9092,13 +9093,31 @@ function paintFooter(board) {
   const stats = document.getElementById('foot-stats');
   if (stats) {
     stats.innerHTML = `
-      <div><b>88</b><span>Competitions we cover</span></div>
+      <div><b data-cover-count>80+</b><span>Competitions we cover</span></div>
       <div><b>${fixtures.length.toLocaleString()}</b><span>Games on the board</span></div>
       <div><b>15 min</b><span>Between analysis updates</span></div>
       <div><b>30 sec</b><span>Between live score updates</span></div>`;
   }
   const year = document.getElementById('foot-year');
   if (year) year.textContent = String(new Date().getFullYear());
+  fillCoverCount();
+}
+
+/*
+ * How many competitions we cover, said wherever the site says it, from the
+ * list itself (/api/leagues). It was typed in as 88, and went stale the day
+ * the list changed. Until the list is in, the page says "80-plus", which is
+ * true either way.
+ */
+let coverCount = null;
+async function fillCoverCount() {
+  if (coverCount === null) {
+    try {
+      const list = await getJSON('/api/leagues', { quiet: true });
+      if (Array.isArray(list) && list.length) coverCount = list.length;
+    } catch { return; }
+  }
+  if (coverCount) for (const el of document.querySelectorAll('[data-cover-count]')) el.textContent = String(coverCount);
 }
 
 async function health() {

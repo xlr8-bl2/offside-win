@@ -198,6 +198,12 @@ test('the competitions page links every competition playing this fortnight', asy
   assert.match(p.body, /href="\/league\/64\/uefa-nations-league">UEFA Nations League<\/a>/);
 });
 
+test('the competitions page also links every competition we cover, playing or not', async () => {
+  const p = await leaguesPage(env({ get_board: { fixtures: [FIX] }, get_leagues: [{ id: 1, name: 'Premier League', country: 'England', next: null }, { id: 7, name: 'Champions League', country: 'Europe', next: null }] }) as any, 'https://offside.win');
+  assert.match(p.body, /Every competition we cover/);
+  assert.match(p.body, /href="\/league\/7\/champions-league">Champions League<\/a>, Europe/);
+});
+
 test('the front page is the landing page: its words and FAQ data, and no photograph to preload', async () => {
   // The masthead photograph used to be preloaded here. Visitors now get the
   // landing page (viewLanding), which has no photograph, so a preload would
