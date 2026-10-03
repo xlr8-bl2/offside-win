@@ -4848,7 +4848,19 @@ async function viewFixture(id, params = new URLSearchParams()) {
 
   const callHead = verdicts.length
     ? (played ? 'What we called' : verdicts.length > 1 ? 'The calls' : 'The call')
-    : (played ? 'We did not call this one' : 'No pick');
+    : (played ? 'We did not call this one' : f.unanalysed ? 'The call' : 'No pick');
+  /*
+   * A match opened before the analysis has reached it (fixture_preview): from
+   * a competition's fixture list, a week or two out. It has the teams, the
+   * time and the competition's colours, and no view of ours yet, so it says
+   * when there will be one rather than "nothing worth a call".
+   */
+  const opensAt = Number(f.kickoff) - 3 * 86400;
+  const unanalysedHTML = played
+    ? '<p class="narrative">This one was not on our board, so there is no write-up for it.</p>'
+    : `<p class="narrative">${opensAt > Date.now() / 1000
+      ? `We have not looked at this one yet. The analysis and the call open three days before kick-off, ${esc(/^(Today|Tomorrow)$/.test(dayLabel(opensAt)) ? dayLabel(opensAt).toLowerCase() : `on ${dayLabel(opensAt)}`)}.`
+      : 'We have not looked at this one yet. The analysis goes up within the next few hours.'}</p>`;
 
   /*
    * After the match the confirmed sheets in the report, with the bench and
@@ -4867,7 +4879,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
         <div class="panel">
           <p class="panel-head">${callHead}</p>
           ${pulledHTML(f)}
-          ${verdicts.length
+          ${f.unanalysed && !verdicts.length ? unanalysedHTML : verdicts.length
             ? verdicts.map((v) => verdictHTML(v, f.home, f.away, f, { played, hg, ag })).join('')
               + (anyLocked ? lockedHTML(f) : '')
               + (played ? '' : CALLS_NOTE)
@@ -5945,13 +5957,14 @@ async function viewLeague(id, params = new URLSearchParams()) {
   const onBoard = new Set(fixtures.map((f) => Number(f.id)));
   const nextList = (Array.isArray(d.next) ? d.next : []).filter((g) => !onBoard.has(Number(g.id)));
   const lastList = (Array.isArray(d.last) ? d.last : []).filter((g) => !onBoard.has(Number(g.id)));
+  // Every game opens its match page, analysed or not (fixture_preview).
   const listRow = (g) => `
-    <div class="fl-row">
+    <a class="fl-row" href="#/fixture/${encodeURIComponent(g.id)}">
       <span class="fl-when">${esc(g.score ? dayLabel(g.kickoff) : kickoffLabel(g.kickoff))}</span>
       <span class="fl-side home"><span>${esc(g.home)}</span>${crest(g.home, 'sm', g.home_id)}</span>
       <span class="fl-mid">${g.score ? `<b>${esc(g.score[0])}–${esc(g.score[1])}</b>` : 'v'}</span>
       <span class="fl-side away">${crest(g.away, 'sm', g.away_id)}<span>${esc(g.away)}</span></span>
-    </div>`;
+    </a>`;
   const listBlock = (title, list, note = '') => list.length ? `
     <section class="league-block fixture-list">
       <h3 class="league-head">${esc(title)} <span class="count">${list.length}</span></h3>
