@@ -1390,9 +1390,44 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
   ) END;
 $fn$;
 
+-- A match not yet analysed, as far as we know it: the teams, the kick-off
+-- and the competition, from the schedule (two weeks ahead) or a competition's
+-- own fixture list and results (leagueinfo.ts). The match page shows it in
+-- the competition's colours -- the star ball on a Champions League night --
+-- and says when the analysis opens. There is no call and no price in it.
+CREATE OR REPLACE FUNCTION fixture_preview(p_id bigint)
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  WITH g AS (
+    SELECT * FROM (
+      SELECT 1 AS src, s.id, s.league_id, s.kickoff, s.home_team AS home, s.away_team AS away,
+             s.home_team_id AS home_id, s.away_team_id AS away_id, NULL::int AS hg, NULL::int AS ag
+        FROM schedule s WHERE s.id = p_id
+      UNION ALL
+      SELECT 2, (r->>'id')::bigint, split_part(k.k, ':', 2)::bigint, (r->>'kickoff')::bigint,
+             r->>'home', r->>'away',
+             CASE WHEN (r->>'home_id') ~ '^[0-9]+$' THEN (r->>'home_id')::bigint END,
+             CASE WHEN (r->>'away_id') ~ '^[0-9]+$' THEN (r->>'away_id')::bigint END,
+             CASE WHEN (r->'score'->>0) ~ '^[0-9]+$' THEN (r->'score'->>0)::int END,
+             CASE WHEN (r->'score'->>1) ~ '^[0-9]+$' THEN (r->'score'->>1)::int END
+        FROM kv k, json_array_elements(coalesce(try_json(k.v)->'rows', '[]'::json)) r
+       WHERE (k.k LIKE 'league:%:next' OR k.k LIKE 'league:%:last') AND r->>'id' = p_id::text
+    ) x ORDER BY src LIMIT 1)
+  SELECT json_build_object(
+           'id', g.id, 'league_id', g.league_id, 'league', l.name, 'kickoff', g.kickoff,
+           'home', g.home, 'away', g.away, 'home_id', g.home_id, 'away_id', g.away_id,
+           'status', CASE WHEN g.hg IS NOT NULL AND g.ag IS NOT NULL THEN 'finished' ELSE 'notstarted' END,
+           'score', CASE WHEN g.hg IS NOT NULL AND g.ag IS NOT NULL THEN json_build_array(g.hg, g.ag) END,
+           'unanalysed', true, 'verdicts', '[]'::json, 'markets', '[]'::json,
+           'published', '[]'::json, 'pulled', '[]'::json,
+           'colors', json_build_object(
+             'home', (SELECT nullif(c.color, '') FROM team_color c WHERE c.team_id = g.home_id),
+             'away', (SELECT nullif(c.color, '') FROM team_color c WHERE c.team_id = g.away_id)))
+  FROM g LEFT JOIN league l ON l.id = g.league_id;
+$fn$;
+
 CREATE OR REPLACE FUNCTION get_fixture(p_id bigint)
 RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
-  SELECT (
+  SELECT coalesce((SELECT (
            -- A finished match is not the thing being sold, so it is not walled.
            --
            -- `get_picks` already publishes every settled call to everyone, on
@@ -1478,7 +1513,9 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
                        OR f.id = free_fixture_id())
               ), '[]'::jsonb))
          )::json
-  FROM fixture f WHERE f.id = p_id;
+  FROM fixture f WHERE f.id = p_id),
+  -- Not analysed yet: what we know of it (fixture_preview).
+  fixture_preview(p_id));
 $fn$;
 
 -- p_settled: 'true' for settled picks, 'false' for open ones, anything else for
@@ -2118,6 +2155,7 @@ GRANT EXECUTE ON FUNCTION slip_legs(text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_plans() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION free_fixture_id() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_league(bigint) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION fixture_preview(bigint) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_leagues() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_record() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_how_sure() TO anon, authenticated;

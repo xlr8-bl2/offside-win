@@ -5670,6 +5670,10 @@ html.pay-open { overflow: hidden; }
   border-top: var(--border) solid var(--hairline);
   font-size: var(--text-sm);
 }
+/* Each game opens its match page, so a row answers a finger like the board's do. */
+a.fl-row { color: inherit; text-decoration: none; transition: background var(--dur-fast) var(--ease-out); }
+a.fl-row:hover { background: var(--stand); }
+a.fl-row:focus-visible { outline: none; box-shadow: inset var(--focus-ring); }
 .fl-when { font-size: var(--text-xs); color: var(--chalk-3); font-variant-numeric: tabular-nums; }
 .fl-side { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 .fl-side > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
