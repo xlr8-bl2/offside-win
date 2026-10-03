@@ -78,18 +78,22 @@ const url = await p.evaluate(async (src) => {
     mx.fillStyle = '#000'; path(); mx.fill();
     mx.restore();
   };
-  // The handles first: down the outside from the end of each arm, then
-  // curving back in to the body below its shoulders, so the ribbons hang
-  // in front of them.
+  // The handles: down the outside from the end of each arm, then a long
+  // curve down and in to meet the stem just above its knot, as on the real
+  // trophy. Behind the ribbons: each ribbon's gap cuts across them.
   for (const s of [-1, 1]) {
     const P = (px, py) => [(CX + s * (px - CX)) * K, py * K];
     mx.save();
-    mx.strokeStyle = '#000'; mx.lineWidth = 11 * K; mx.lineCap = 'round'; mx.lineJoin = 'round';
-    mx.beginPath();
-    mx.moveTo(...P(169, 336));
-    mx.lineTo(...P(169, 430));
-    mx.bezierCurveTo(...P(169, 530), ...P(206, 584), ...P(286, 594));
-    mx.stroke();
+    mx.lineCap = 'round'; mx.lineJoin = 'round';
+    // Through the points of the owner's drawing (photo pixels), smoothed.
+    const pts = [[170, 336], [178, 470], [229, 606], [269, 719], [356, 791]].map(([px, py]) => P(px, py));
+    mx.beginPath(); mx.moveTo(...pts[0]);
+    for (let i = 1; i < pts.length - 1; i++) {
+      const mxp = (pts[i][0] + pts[i + 1][0]) / 2, myp = (pts[i][1] + pts[i + 1][1]) / 2;
+      mx.quadraticCurveTo(pts[i][0], pts[i][1], mxp, myp);
+    }
+    mx.lineTo(...pts[pts.length - 1]);
+    mx.strokeStyle = '#000'; mx.lineWidth = 11 * K; mx.stroke();
     mx.restore();
     // A ledge under each lion, from the end of the arm to the neck: what
     // the lion stands on, and what the ribbons hang from.
