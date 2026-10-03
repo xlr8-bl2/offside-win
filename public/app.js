@@ -8272,12 +8272,31 @@ function placeholder(html) {
     jumpTo(0);
   }, 400);
 }
-new MutationObserver(() => { if (placeholderTimer) { clearTimeout(placeholderTimer); placeholderTimer = null; } })
-  .observe(app, { childList: true });
+/*
+ * Where a new page opens, applied the moment its first content goes in.
+ *
+ * The jump used to wait for the whole view to finish (finishRoute), and a
+ * view writes its page and then keeps loading -- the league's scorers, the
+ * free call, the photos. Until then the new page sat at the old page's
+ * scroll position, which on a long board is past the bottom of a match page:
+ * a tap from low down showed the new page's footer, then jumped to the top.
+ * A MutationObserver runs before the browser paints, so the page is never
+ * seen anywhere but where it opens. finishRoute still has the last word,
+ * for a page that grew enough to reach a remembered place.
+ */
+let jumpOnWrite = null;
+new MutationObserver(() => {
+  if (placeholderTimer) { clearTimeout(placeholderTimer); placeholderTimer = null; }
+  if (jumpOnWrite !== null) { jumpTo(jumpOnWrite); jumpOnWrite = null; }
+}).observe(app, { childList: true });
 
 /** Straight there. Never animated: a page change is not a scroll. */
 function jumpTo(y) {
-  window.scrollTo({ top: y, left: 0, behavior: 'instant' });
+  // 'instant' is newer than the options form itself: a phone that does not
+  // know it throws, and a jump that throws leaves the new page wherever the
+  // old one was. Nothing here sets smooth scrolling, so the plain form is the
+  // same jump.
+  try { window.scrollTo({ top: y, left: 0, behavior: 'instant' }); } catch { window.scrollTo(0, y); }
 }
 
 async function route({ soft = false } = {}) {
@@ -8305,6 +8324,7 @@ async function route({ soft = false } = {}) {
   }
   const backTo = !soft && !navByLink ? scrollMemory.get(here) : undefined;
   navByLink = false;
+  jumpOnWrite = soft ? null : (backTo ?? 0);
   // What is on the page is about to be read again, so what it is watching is too.
   live.seen.clear();
   live.watching = false;
@@ -8381,6 +8401,7 @@ function finishRoute(name, soft, keepY, backTo) {
     // After the content is in, so the position is measured against the real
     // page rather than a skeleton. A view that asked for an element in view
     // (a highlighted scorer) gets it, centred.
+    jumpOnWrite = null;
     const target = state.scrollTarget;
     state.scrollTarget = null;
     if (target && !soft && backTo === undefined) target.scrollIntoView({ block: 'center' });
