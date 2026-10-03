@@ -64,10 +64,22 @@ async function one(leagueId: number, now: number): Promise<void> {
   if (standings?.length) await kvSetJSON(`league:${leagueId}:standings`, { updated_at: now, rows: standings });
   const scorers = parseScorers(scorersRaw);
   if (scorers?.length) await kvSetJSON(`league:${leagueId}:scorers`, { updated_at: now, rows: scorers });
+  // Whole rounds, not the first twelve games: a Champions League matchday is
+  // eighteen, and the page was showing two thirds of one.
   const next = ahead.map(leagueGame).filter((g): g is LeagueGame => !!g && g.kickoff > now && !g.score)
-    .sort((a, b) => a.kickoff - b.kickoff).slice(0, 12);
+    .sort((a, b) => a.kickoff - b.kickoff).slice(0, 40);
   const last = behind.map(leagueGame).filter((g): g is LeagueGame => !!g && !!g.score)
-    .sort((a, b) => b.kickoff - a.kickoff).slice(0, 12);
+    .sort((a, b) => b.kickoff - a.kickoff).slice(0, 40);
+  // A competition that played in the last three weeks and came back with no
+  // results says why in the log: how many events, and what they were marked.
+  // Shapes only -- the repo is public.
+  if (!last.length && behind.length) {
+    const marks = [...new Set(behind.map((e) => String(e['status'] ?? '?')))].slice(0, 6).join(', ');
+    const scored = behind.filter((e) => num(e['home_score']) !== undefined).length;
+    console.log(`  leagueinfo: ${leagueId} had ${behind.length} events in three weeks, none read as a result (status: ${marks}; ${scored} with a home_score)`);
+  } else if (!behind.length && standings?.length) {
+    console.log(`  leagueinfo: ${leagueId} has a table but no events in the last three weeks`);
+  }
   await kvSetJSON(`league:${leagueId}:next`, { updated_at: now, rows: next });
   await kvSetJSON(`league:${leagueId}:last`, { updated_at: now, rows: last });
 }
