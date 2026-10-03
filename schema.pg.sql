@@ -1674,19 +1674,34 @@ $fn$;
 -- midweek is a fraction of the list, under a button that said "All of them".
 -- Each comes with its country and when it next plays: the soonest of the
 -- schedule's fixtures and the competition's own fixture list (leagueinfo.ts).
+-- Its length is also the count the site quotes ("all 89 competitions").
 CREATE OR REPLACE FUNCTION get_leagues()
 RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
-  WITH t AS (SELECT floor(extract(epoch FROM now()))::bigint AS now)
-  SELECT coalesce(json_agg(json_build_object(
-           'id', l.id, 'name', l.name, 'country', nullif(l.country, ''),
-           'next', least(
+  WITH t AS (SELECT floor(extract(epoch FROM now()))::bigint AS now),
+  l AS (
+    SELECT l.id, l.name, nullif(l.country, '') AS country,
+           -- A tournament named for its year ("Africa Cup of Nations 2023").
+           substring(l.name FROM '\s((?:19|20)[0-9]{2})$')::int AS yr,
+           least(
              (SELECT min(s.kickoff) FROM schedule s, t WHERE s.league_id = l.id AND s.kickoff > t.now),
              (SELECT min((r->>'kickoff')::bigint)
                 FROM kv k, t, json_array_elements(coalesce(try_json(k.v)->'rows', '[]'::json)) r
                WHERE k.k = 'league:' || l.id || ':next' AND (r->>'kickoff') ~ '^[0-9]+$'
-                 AND (r->>'kickoff')::bigint > t.now)))
-         ORDER BY l.name), '[]'::json)
-  FROM league l WHERE l.tracked = 1;
+                 AND (r->>'kickoff')::bigint > t.now)) AS next
+    FROM league l WHERE l.tracked = 1),
+  -- A past edition with nothing scheduled is over, and is left off the list.
+  -- One whose next edition is scheduled is called by the competition's name,
+  -- not the old year's.
+  shown AS (
+    SELECT id, country, next,
+           CASE WHEN yr IS NOT NULL AND next IS NOT NULL
+                     AND yr < extract(year FROM to_timestamp(next))::int
+                THEN regexp_replace(name, '\s+(19|20)[0-9]{2}$', '') ELSE name END AS name
+    FROM l
+    WHERE NOT (yr IS NOT NULL AND next IS NULL AND yr < extract(year FROM now())::int))
+  SELECT coalesce(json_agg(json_build_object('id', id, 'name', name, 'country', country, 'next', next)
+                  ORDER BY name), '[]'::json)
+  FROM shown;
 $fn$;
 
 CREATE OR REPLACE FUNCTION get_league(p_id bigint)
