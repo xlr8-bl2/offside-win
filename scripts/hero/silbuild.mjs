@@ -78,9 +78,29 @@ const url = await p.evaluate(async (src) => {
     mx.fillStyle = '#000'; path(); mx.fill();
     mx.restore();
   };
+  // The handles first: down the outside from the end of each arm, then
+  // curving back in to the body below its shoulders, so the ribbons hang
+  // in front of them.
   for (const s of [-1, 1]) {
-    ribbon(s, 205, 214, 34, 352, 930);   // outer, a touch of lean
-    ribbon(s, 245, 268, 34, 352, 895);   // inner, drawn in towards the stem
+    const P = (px, py) => [(CX + s * (px - CX)) * K, py * K];
+    mx.save();
+    mx.strokeStyle = '#000'; mx.lineWidth = 11 * K; mx.lineCap = 'round'; mx.lineJoin = 'round';
+    mx.beginPath();
+    mx.moveTo(...P(169, 336));
+    mx.lineTo(...P(169, 430));
+    mx.bezierCurveTo(...P(169, 530), ...P(206, 584), ...P(286, 594));
+    mx.stroke();
+    mx.restore();
+    // A ledge under each lion, from the end of the arm to the neck: what
+    // the lion stands on, and what the ribbons hang from.
+    const [x0, y0] = P(164, 343), [x1] = P(302, 343);
+    mx.fillStyle = '#000';
+    mx.fillRect(Math.min(x0, x1), y0, Math.abs(x1 - x0), 11 * K);
+  }
+  for (const s of [-1, 1]) {
+    ribbon(s, 196, 200, 31, 358, 936);   // outer, all but straight
+    ribbon(s, 230, 246, 31, 358, 912);   // middle
+    ribbon(s, 264, 292, 31, 358, 884);   // inner, drawn in towards the stem
   }
   return m.toDataURL('image/png');
 }, 'data:image/webp;base64,' + readFileSync('pl-photo.webp').toString('base64'));
