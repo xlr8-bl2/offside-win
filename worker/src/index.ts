@@ -259,6 +259,7 @@ const worker = {
       // The front page's record from the newest engine (lab/record.ts).
       if (path === '/api/record') return await passthrough(env, 'get_record', {});
       if (path === '/api/how-sure') return await passthrough(env, 'get_how_sure', {});
+      if (path === '/api/leagues') return await passthrough(env, 'get_leagues', {});
       if (path === '/api/health') return await passthrough(env, 'get_health', {});
       // The bet slip. The caller's token goes with it: the legs of an open
       // slip are members-only, and get_slip decides that from the token.

@@ -2407,9 +2407,27 @@ function trapHTML(t, { on = 'landing' } = {}) {
     </article>`;
 }
 
-/** The shout over the headline, for the day it is. */
-function landingShout(now = new Date()) {
+/**
+ * The shout over the headline, for the day it is and, once the board is in,
+ * for what is actually on it: a Champions League night says so, a Monday
+ * with a big-league game is Monday night football, and a day with nothing
+ * left to play does not shout "football's on" over an empty board.
+ */
+function landingShout(now = new Date(), fixtures = null) {
   const d = now.getDay();
+  if (Array.isArray(fixtures) && fixtures.length) {
+    const t = now.getTime() / 1000;
+    const end = new Date(now); end.setHours(24, 0, 0, 0);
+    const left = fixtures.filter((f) => matchState(f).kind !== 'ft' && f.kickoff < end.getTime() / 1000);
+    if (left.some((f) => Number(f.league_id) === 7)) return 'Champions League night. Let’s go.';
+    if (!left.length) {
+      const next = fixtures.filter((f) => f.kickoff > t).sort((a, b) => a.kickoff - b.kickoff)[0];
+      const day = dayLabel(next?.kickoff ?? 0);
+      return next ? `Quiet one today. Back ${/^(Today|Tomorrow)$/.test(day) ? day.toLowerCase() : `on ${day}`}.` : 'Quiet one today.';
+    }
+    const big = left.some((f) => LANDING_COMPS.some(([id]) => id === Number(f.league_id)));
+    if (d === 1 && big) return 'Monday night football. Let’s go.';
+  }
   if (d === 5 || d === 6 || d === 0) return 'Weekend’s here. Let’s gooo.';
   if (d === 2 || d === 3) return 'Midweek football. Let’s go.';
   return 'Football’s on. Let’s gooo.';
@@ -2434,7 +2452,7 @@ function landingHTML() {
     </div>
     <div class="wrap ld-hero-in">
       <div class="ld-copy">
-        <p class="ld-shout">${esc(landingShout())}</p>
+        <p class="ld-shout">${esc(landingShout(new Date(), state.board?.fixtures))}</p>
         <h1 class="ld-h1"><span class="ld-l">${esc(LANDING_HEADLINE[0])}</span> <span class="ld-l ld-lit">${esc(LANDING_HEADLINE[1])}</span></h1>
         <p class="ld-lede">${esc(LANDING_LEDE)}</p>
         <div class="ld-actions">
@@ -2453,7 +2471,7 @@ function landingHTML() {
     <div class="wrap ld-comps-in">
       <p>Every big league, and eighty-odd more</p>
       <ul>${LANDING_COMPS.map(([id, name]) => `<li><a href="#/league/${id}">${crest(name, 'sm', id, 'league')}<span>${esc(name)}</span></a></li>`).join('')}
-        <li><a class="ld-comps-all" href="#/leagues">All of them</a></li></ul>
+        <li><a class="ld-comps-all" href="#/leagues?show=all">All of them</a></li></ul>
     </div>
   </section>
 
@@ -2569,6 +2587,10 @@ async function viewLanding() {
   if (nav !== navTicket) return;
   const fixtures = board?.fixtures ?? [];
   const called = fixtures.filter(hasCall).length;
+  // The shout, now the board is in (landingShout).
+  const shout = app.querySelector('.ld-shout');
+  const shouted = landingShout(new Date(), fixtures);
+  if (shout && shout.textContent !== shouted) shout.textContent = shouted;
   const put = (key, html) => { const el = app.querySelector(`[data-ld="${key}"]`); if (el) { el.innerHTML = html; smartQuotes(el); } return el; };
 
   // The trap of the day, where there is one.
@@ -5723,14 +5745,24 @@ function recapCardHTML(x) {
  * in, on a page whose whole purpose is finding the calls. They lead now, and
  * the rest follow under their own heading rather than being mixed in.
  */
-async function viewLeagues() {
+/*
+ * Two views of one list. "On the board now" is what has games in the next
+ * few days, with the calls on them -- the menu opens this one. "All we cover"
+ * is every competition, grouped by country, each saying when it next plays,
+ * so the front page's "All of them" means all of them even in a break, when
+ * the board holds a fraction. The open tab is in the address (?show=all).
+ */
+async function viewLeagues(params = new URLSearchParams()) {
   // Which navigation this page belongs to: a newer one makes it stand down (see route).
   const nav = navTicket;
   placeholder(`<div class="wrap section dense">
     <div class="rows">${'<div class="skeleton skeleton-row"></div>'.repeat(8)}</div>
   </div>`);
-  const board = state.board ?? (await loadBoard());
-  const fixtures = board.fixtures ?? [];
+  const [board, covered] = await Promise.all([
+    state.board ? Promise.resolve(state.board) : loadBoard(),
+    getJSON('/api/leagues').catch(() => []),
+  ]);
+  const fixtures = board?.fixtures ?? [];
 
   const byLeague = new Map();
   for (const f of fixtures) {
@@ -5747,6 +5779,9 @@ async function viewLeagues() {
   const withCalls = all.filter((e) => e.picks > 0);
   const without = all.filter((e) => e.picks === 0);
   const totalCalls = all.reduce((t, e) => t + e.picks, 0);
+  const list = Array.isArray(covered) ? covered.filter((l) => l?.id && l?.name) : [];
+  const total = list.length || 88;
+  const show = params.get('show') === 'all' || !all.length ? 'all' : 'now';
 
   const row = (e) => `
     <a class="lg" href="${e.id ? `#/league/${encodeURIComponent(e.id)}` : esc(boardHash(state.hours, e.name))}">
@@ -5757,25 +5792,102 @@ async function viewLeagues() {
       <span class="lg-calls${e.picks ? ' on' : ''}">${e.picks ? `${e.picks} ${e.picks === 1 ? 'call' : 'calls'}` : '—'}</span>
     </a>`;
 
+  // Every competition: the big six first, in the order the front page shows
+  // them, then by country. On the board, it says so; otherwise, when it is
+  // next on.
+  const bigIds = LANDING_COMPS.map(([id]) => id);
+  const onBoard = new Map(all.filter((e) => e.id).map((e) => [Number(e.id), e]));
+  const allRow = (l) => {
+    const here = onBoard.get(Number(l.id));
+    const when = here
+      ? `${here.n} ${here.n === 1 ? 'game' : 'games'}`
+      : l.next ? dayLabel(Number(l.next)) : 'No date yet';
+    return `
+    <a class="lg${here ? '' : ' lg-off'}" href="#/league/${encodeURIComponent(l.id)}" data-find="${esc(`${l.name} ${l.country ?? ''}`.toLowerCase())}">
+      ${crest(l.name, 'sm', l.id, 'league')}
+      <span class="lg-name">${esc(l.name)}</span>
+      ${here?.live ? `<span class="lg-live"><i></i>${here.live}</span>` : ''}
+      <span class="lg-games">${esc(when)}</span>
+      <span class="lg-calls${here?.picks ? ' on' : ''}">${here?.picks ? `${here.picks} ${here.picks === 1 ? 'call' : 'calls'}` : ''}</span>
+    </a>`;
+  };
+  const big = bigIds.map((id) => list.find((l) => Number(l.id) === id)).filter(Boolean);
+  const groups = new Map();
+  for (const l of list) {
+    if (bigIds.includes(Number(l.id))) continue;
+    const c = l.country || 'World';
+    groups.set(c, [...(groups.get(c) ?? []), l]);
+  }
+  const countries = [...groups].sort((a, b) => a[0].localeCompare(b[0]));
+
   if (nav !== navTicket) return;
   app.innerHTML = `
   <div class="wrap section dense">
     <div class="page-head">
       <h1 class="display xl">Competitions</h1>
-      <p class="page-sub">${all.length} ${all.length === 1 ? 'competition' : 'competitions'} on the board right now,
-        out of 88 we cover. ${totalCalls
-          ? `${totalCalls} ${totalCalls === 1 ? 'call' : 'calls'} between them.`
-          : 'No calls anywhere on it at the moment.'}</p>
+      <p class="page-sub" data-lg-sub></p>
     </div>
 
-    ${withCalls.length ? `
-      <h2 class="side-head">Where the calls are</h2>
-      <div class="lg-list">${withCalls.map(row).join('')}</div>` : ''}
+    <div class="when-tabs lg-tabs" role="tablist" aria-label="Which competitions">
+      <button type="button" role="tab" data-show="now" aria-controls="lg-now"${all.length ? '' : ' disabled'}>On the board now <i>${all.length}</i></button>
+      <button type="button" role="tab" data-show="all" aria-controls="lg-all">All we cover <i>${total}</i></button>
+    </div>
 
-    ${without.length ? `
-      <h2 class="side-head">Nothing called in these${withCalls.length ? ', yet' : ''}</h2>
-      <div class="lg-list muted">${without.map(row).join('')}</div>` : ''}
+    <div id="lg-now" role="tabpanel">
+      ${withCalls.length ? `
+        <h2 class="side-head">Where the calls are</h2>
+        <div class="lg-list">${withCalls.map(row).join('')}</div>` : ''}
+      ${without.length ? `
+        <h2 class="side-head">Nothing called in these${withCalls.length ? ', yet' : ''}</h2>
+        <div class="lg-list muted">${without.map(row).join('')}</div>` : ''}
+    </div>
+
+    <div id="lg-all" role="tabpanel">
+      ${list.length ? `
+        <form class="search-box lg-find" role="search" onsubmit="return false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+          <input type="search" id="lg-q" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="40"
+                 placeholder="A competition or a country" aria-label="Find a competition">
+        </form>
+        ${big.length ? `<section class="lg-group"><h2 class="side-head">The big ones</h2><div class="lg-list">${big.map(allRow).join('')}</div></section>` : ''}
+        ${countries.map(([c, ls]) => `<section class="lg-group"><h2 class="side-head">${esc(c)}</h2><div class="lg-list">${ls.map(allRow).join('')}</div></section>`).join('')}
+        <p class="page-sub lg-none" hidden>None of ours by that name. Try the country.</p>`
+        : '<p class="page-sub">The full list could not be loaded. The ones on the board are under the other tab.</p>'}
+    </div>
   </div>`;
+
+  const sub = app.querySelector('[data-lg-sub]');
+  const tabs = [...app.querySelectorAll('.lg-tabs [data-show]')];
+  const set = (to, write = true) => {
+    for (const b of tabs) {
+      const on = b.dataset.show === to;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-selected', String(on));
+    }
+    app.querySelector('#lg-now').hidden = to !== 'now';
+    app.querySelector('#lg-all').hidden = to !== 'all';
+    sub.textContent = to === 'now'
+      ? `${all.length} of the ${total} we cover have games in the next few days. ${totalCalls
+        ? `${totalCalls} ${totalCalls === 1 ? 'call' : 'calls'} between them.` : 'No calls on any of them at the moment.'}`
+      : `Every competition we analyse, with when it next plays. Calls open three days before kick-off.`;
+    if (write) history.replaceState(null, '', to === 'all' ? '#/leagues?show=all' : '#/leagues');
+  };
+  for (const b of tabs) b.onclick = () => set(b.dataset.show);
+  set(show, false);
+
+  // Narrows the full list as you type: by name or by country.
+  const q = app.querySelector('#lg-q');
+  if (q) q.oninput = () => {
+    const t = q.value.trim().toLowerCase();
+    let shown = 0;
+    for (const a of app.querySelectorAll('#lg-all .lg')) {
+      const hit = !t || a.dataset.find.includes(t);
+      a.hidden = !hit;
+      if (hit) shown++;
+    }
+    for (const g of app.querySelectorAll('#lg-all .lg-group')) g.hidden = !g.querySelector('.lg:not([hidden])');
+    app.querySelector('#lg-all .lg-none').hidden = shown > 0;
+  };
 }
 
 
@@ -8576,7 +8688,7 @@ async function render(name, parts, params) {
     if (name === 'league' && parts[1]) return await viewLeague(parts[1], params);
     if (name === 'player' && parts[1]) return await viewPlayer(parts[1], params);
     if (name === 'board') return await viewBoard(params);
-    if (name === 'leagues') return await viewLeagues();
+    if (name === 'leagues') return await viewLeagues(params);
     if (name === 'search') return await viewSearch(params);
     if (name === 'results') return await viewResults();
     if (name === 'how-sure') return await viewHowSure();

@@ -1631,6 +1631,27 @@ $fn$;
 -- get_board, so they are walled exactly as the board is; the next games and
 -- latest results beyond the board are the plain fixture list (:next, :last);
 -- the settled record is public, as it is everywhere.
+-- Every competition we cover, for the Competitions page's "All" tab.
+--
+-- The page used to list only what is on the board, which during a break or
+-- midweek is a fraction of the list, under a button that said "All of them".
+-- Each comes with its country and when it next plays: the soonest of the
+-- schedule's fixtures and the competition's own fixture list (leagueinfo.ts).
+CREATE OR REPLACE FUNCTION get_leagues()
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  WITH t AS (SELECT floor(extract(epoch FROM now()))::bigint AS now)
+  SELECT coalesce(json_agg(json_build_object(
+           'id', l.id, 'name', l.name, 'country', nullif(l.country, ''),
+           'next', least(
+             (SELECT min(s.kickoff) FROM schedule s, t WHERE s.league_id = l.id AND s.kickoff > t.now),
+             (SELECT min((r->>'kickoff')::bigint)
+                FROM kv k, t, json_array_elements(coalesce(try_json(k.v)->'rows', '[]'::json)) r
+               WHERE k.k = 'league:' || l.id || ':next' AND (r->>'kickoff') ~ '^[0-9]+$'
+                 AND (r->>'kickoff')::bigint > t.now)))
+         ORDER BY l.name), '[]'::json)
+  FROM league l WHERE l.tracked = 1;
+$fn$;
+
 CREATE OR REPLACE FUNCTION get_league(p_id bigint)
 RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   WITH t AS (SELECT floor(extract(epoch FROM now()))::bigint AS now)
@@ -2097,6 +2118,7 @@ GRANT EXECUTE ON FUNCTION slip_legs(text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_plans() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION free_fixture_id() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_league(bigint) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_leagues() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_record() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_how_sure() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_player(bigint, bigint) TO anon, authenticated;
