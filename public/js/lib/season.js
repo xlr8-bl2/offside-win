@@ -232,42 +232,69 @@ function daysStrip(now, back, days) {
   return `<ol class="sn-days" aria-hidden="true">${cells.join('')}</ol>`;
 }
 
-/* The centre circle and halfway line, drawn behind the countdown. */
-const PITCH = `<svg class="sn-pitch" viewBox="0 0 120 120" aria-hidden="true"><path class="sn-line" d="M60 8V112"/><circle class="sn-line" cx="60" cy="60" r="40"/><circle class="sn-spot" cx="60" cy="60" r="2.5"/></svg>`;
-
 const words = (t) => t.split(/\s+/).map((w, i) => `<span class="sn-w"><span style="--i:${i}">${w}</span></span>`).join(' ');
 
 function cardHTML(r, { crest, esc, kickoff, now }) {
   const w = wordsFor(r);
-  let feature = '';
-  if (r.kind === 'tournament') {
-    feature = `<ul class="sn-games">${r.games.map((g) => `
+  if (r.kind !== 'tournament') return gapHTML(r, w, { esc, now });
+  const feature = `<ul class="sn-games">${r.games.map((g) => `
       <li><a href="#/fixture/${encodeURIComponent(g.id)}">
         <span class="sn-teams">${crest(g.home, 'xs', g.home_id)}<b>${esc(g.home)}</b><em>v</em>${crest(g.away, 'xs', g.away_id)}<b>${esc(g.away)}</b></span>
         <span class="sn-when">${g.live ? '<span class="live-badge"><i></i>Live</span>' : esc(kickoff(g.kickoff))}${g.call ? '<span class="sn-called" title="We have a call on this one"><span class="visually-hidden">We have a call on this one</span></span>' : ''}</span>
       </a></li>`).join('')}</ul>`;
-  } else {
-    const c = countdownWords(r.days);
-    if (c) {
-      feature = `<div class="sn-gap">
-        <div class="sn-count">${c.n !== null ? `<span class="sn-num">${PITCH}<b data-to="${c.n}">${c.n}</b></span>` : ''}<span>${esc(c.text)}</span></div>
-        ${daysStrip(now, r.back, r.days)}
-      </div>`;
-    }
-  }
   return `
     <div class="sn-scrim" data-season-close></div>
     <div class="sn-card" role="dialog" aria-modal="true" aria-labelledby="sn-title" tabindex="-1" data-kind="${esc(r.kind)}">
       <div class="sn-glow" aria-hidden="true"><div class="sn-sweep"></div></div>
-      <button class="sn-x" type="button" data-season-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      ${X}
       <h2 class="sn-title" id="sn-title">${words(esc(w.title))}</h2>
       <p class="sn-lead">${esc(w.lead)}</p>
       ${feature}
       <div class="sn-text">${w.text.filter(Boolean).map((t) => `<p>${esc(t)}</p>`).join('')}</div>
-      <div class="sn-actions">
+      ${actionsHTML(w, esc)}
+    </div>`;
+}
+
+const X = `<button class="sn-x" type="button" data-season-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
+const actionsHTML = (w, esc) => `<div class="sn-actions">
         <a class="btn btn-primary" href="${w.cta.href}" data-season-go>${esc(w.cta.label)}</a>
         <button class="btn btn-ghost" type="button" data-season-close>Got it</button>
+      </div>`;
+
+/*
+ * A break, or the close season: a poster. The Premier League trophy stands
+ * in the dark, lit from behind, and beside it the days until the league is
+ * back, as big as the card allows. The trophy is a silhouette traced from a
+ * photograph of the real one (/brand/pl-trophy.svg), painted through a mask
+ * so it takes the card's colours. Under the poster, the why in one line, the
+ * days themselves, and the rest said quietly.
+ */
+function gapHTML(r, w, { esc, now }) {
+  const c = countdownWords(r.days);
+  const count = !c ? ''
+    : c.n !== null
+      ? `<p class="sn-count"><b data-to="${c.n}">${c.n}</b><span>${esc(c.text)}</span></p>`
+      : `<p class="sn-count sn-count-words"><span>${esc(c.text)}</span></p>`;
+  const [why, board, promise] = w.text;
+  return `
+    <div class="sn-scrim" data-season-close></div>
+    <div class="sn-card" role="dialog" aria-modal="true" aria-labelledby="sn-title" tabindex="-1" data-kind="${esc(r.kind)}" data-poster>
+      <div class="sn-poster">
+        <div class="sn-trophy" aria-hidden="true"><i></i></div>
+        <div class="sn-poster-text">
+          <h2 class="sn-title" id="sn-title">${words(esc(w.title))}</h2>
+          ${count}
+        </div>
       </div>
+      ${X}
+      <p class="sn-lead">${esc(w.lead)}</p>
+      ${daysStrip(now, r.back, r.days)}
+      <div class="sn-text">
+        ${why ? `<p>${esc(why)}</p>` : ''}
+        ${board ? `<p class="sn-small">${esc(board)}</p>` : ''}
+        ${promise ? `<p class="sn-promise">${esc(promise)}</p>` : ''}
+      </div>
+      ${actionsHTML(w, esc)}
     </div>`;
 }
 
@@ -400,12 +427,14 @@ export function openSeason(r, helpers, { fromChip = false } = {}) {
     { duration: 900, delay: 100, easing: EXPO });
   // A floodlight sweeps across it once.
   go(root.querySelector('.sn-sweep'), [{ transform: 'translateX(-120%) skewX(-18deg)', opacity: 0 }, { opacity: 1, offset: 0.2 }, { transform: 'translateX(220%) skewX(-18deg)', opacity: 0 }], { duration: 1400, delay: 520, easing: 'cubic-bezier(0.65, 0, 0.35, 1)' });
+  // The trophy comes up out of the dark, its rim light last.
+  go(root.querySelector('.sn-trophy'), [{ opacity: 0, transform: 'translateY(18px) scale(0.97)', filter: 'brightness(0.2)' }, { opacity: 1, offset: 0.4 }, { transform: 'none', opacity: 1, filter: 'none' }], { duration: 1600, delay: 260, easing: EXPO });
   // The headline, a word at a time, up through its mask.
   const ws = root.querySelectorAll('.sn-w > span');
   ws.forEach((w, i) => go(w, [{ transform: 'translateY(105%) rotate(4deg)' }, { transform: 'none' }], { duration: 900, delay: 360 + i * 60, easing: EXPO }));
   const tail = 420 + ws.length * 60;
   // The reason, then everything under it.
-  for (const [sel, extra] of [['.sn-lead', 0], ['.sn-gap, .sn-games', 120], ['.sn-text', 260], ['.sn-actions', 360]]) {
+  for (const [sel, extra] of [['.sn-count', 0], ['.sn-lead', 80], ['.sn-gap, .sn-games, .sn-days', 160], ['.sn-text', 260], ['.sn-actions', 360]]) {
     go(root.querySelector(sel), [{ opacity: 0, transform: 'translateY(14px)', filter: 'blur(4px)' }, { opacity: 1, transform: 'none', filter: 'blur(0)' }], { duration: 800, delay: tail + extra, easing: EXPO });
   }
   // The halfway line and the centre circle draw themselves.

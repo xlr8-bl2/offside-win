@@ -2554,6 +2554,151 @@
   }
 }
 
+/* --- the break as a poster: the trophy in the dark, lit from behind, and
+   the days to go as big as the card allows. The poster runs to the card's
+   edges: its margins undo the card's padding, so each size the card's
+   padding changes at (above) is repeated here. */
+.sn-card[data-poster] {
+  container-type: inline-size;
+  background: var(--stand);
+}
+.sn-poster {
+  position: relative;
+  height: calc(74cqi + 2 * var(--space-8));
+  margin: calc(-1 * var(--space-9)) calc(-1 * var(--space-8)) var(--space-5);
+  overflow: hidden;
+  background: radial-gradient(140% 110% at 70% 40%, #0d0a1c, #050409 70%);
+}
+/* The trophy, a cut-out in black (traced from a photograph of the real one,
+   with our own ribbons; /brand/pl-trophy.svg). One small, hard light behind
+   its neck is all there is: the crown's points, the lions and the ribbons'
+   edges stand out against it, and nothing of the trophy itself is lit. */
+.sn-trophy {
+  position: absolute;
+  z-index: 1;
+  right: calc(var(--space-8) + 2cqi);
+  bottom: 5%;
+  height: 84%;
+  aspect-ratio: 196 / 372;
+}
+.sn-trophy::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 28%;
+  width: 98%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  /* Hard-edged: the disc ends in a pixel, then only a faint bloom. */
+  background: radial-gradient(circle, #ffffff 0, #f1ecff 38%, #c9baff 62%, #9a80ff calc(70% - 1px), rgba(122, 90, 248, 0.22) 70.5%, rgba(122, 90, 248, 0.06) 82%, rgba(122, 90, 248, 0) 100%);
+}
+/* The floor: a thin hard line of light under the base, so the foot of the
+   silhouette has something to stand on. */
+.sn-trophy::after {
+  content: '';
+  position: absolute;
+  left: -14%;
+  right: -14%;
+  bottom: -1px;
+  height: 2px;
+  background: radial-gradient(closest-side, rgba(226, 216, 255, 0.9), rgba(122, 90, 248, 0.3) 70%, transparent);
+}
+.sn-trophy i {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #040308;
+  -webkit-mask: url('/brand/pl-trophy.svg') center / contain no-repeat;
+  mask: url('/brand/pl-trophy.svg') center / contain no-repeat;
+}
+.sn-poster-text {
+  position: absolute;
+  z-index: 2;
+  top: var(--space-8);
+  bottom: 6%;
+  left: var(--space-8);
+  right: calc(var(--space-8) + 40cqi);
+  display: flex;
+  flex-direction: column;
+}
+.sn-card[data-poster] .sn-title {
+  margin: 0;
+  padding: 0;
+  font-size: clamp(1.5rem, 7.4cqi, 2.4rem);
+}
+.sn-card[data-poster] .sn-count { display: block; min-height: 0; margin: auto 0 0; }
+.sn-card[data-poster] .sn-count b {
+  display: block;
+  min-width: 0;
+  font-size: 36cqi;
+  line-height: 0.78;
+  /* The fill is a gradient clipped to the text, and it paints only inside
+     the box: with the line set this tight, the top of the figure sat above
+     the box and was cut off flat. Room above it, taken back with the margin. */
+  padding-top: 0.16em;
+  margin-top: -0.16em;
+  text-align: left;
+  letter-spacing: var(--tracking-num);
+  background: linear-gradient(180deg, #ffffff 35%, #b9a6ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.sn-card[data-poster] .sn-count span {
+  display: block;
+  max-width: 18ch;
+  margin-top: 2.4cqi;
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+  color: var(--chalk-2);
+}
+.sn-card[data-poster] .sn-count-words span {
+  max-width: none;
+  font-family: var(--display);
+  font-size: clamp(1.4rem, 7cqi, 2.2rem);
+  font-weight: var(--weight-black);
+  line-height: var(--leading-display);
+  color: var(--chalk);
+}
+.sn-card[data-poster] .sn-x { z-index: 3; background: rgba(5, 5, 8, 0.35); color: var(--chalk-2); }
+.sn-card[data-poster] .sn-lead {
+  margin: 0 0 var(--space-4);
+  font-size: calc(var(--text-read) * 1.125);
+  font-weight: var(--weight-medium);
+  color: var(--chalk);
+}
+.sn-card[data-poster] .sn-days { margin: 0 0 var(--space-5); }
+.sn-card[data-poster] .sn-text p { font-size: var(--text-read); line-height: var(--leading-normal); }
+.sn-card[data-poster] .sn-text .sn-small { color: var(--chalk-3); font-weight: var(--weight-normal); }
+.sn-card[data-poster] .sn-text .sn-promise {
+  display: flex;
+  gap: var(--space-2);
+  color: var(--chalk);
+  font-weight: var(--weight-medium);
+}
+.sn-card[data-poster] .sn-text .sn-promise::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 0.5em;
+  border-radius: 50%;
+  background: var(--floodlight-hi);
+  box-shadow: 0 0 8px rgba(158, 134, 255, 0.7);
+}
+@media (max-width: 520px) {
+  .sn-poster { height: calc(74cqi + 2 * var(--space-6)); margin: calc(-1 * var(--space-8)) calc(-1 * var(--space-6)) var(--space-5); }
+  .sn-trophy { right: calc(var(--space-6) + 2cqi); }
+  .sn-poster-text { top: var(--space-7); left: var(--space-6); right: calc(var(--space-6) + 40cqi); }
+}
+@media (max-width: 520px) and (max-height: 740px) {
+  .sn-poster { margin-top: calc(-1 * var(--space-7)); }
+  .sn-poster-text { top: var(--space-6); }
+}
+
 /* The chip it leaves behind: one line, in the corner, above the offer bar. */
 .sn-chip {
   position: fixed;
@@ -2613,7 +2758,9 @@
  *           meet in the middle, the name goes up a letter at a time;
  *   return  the centre circle the break note counted down inside gets its
  *           ball back, and the fixtures come in on a vidiprinter;
- *   ucl     a ring of stars, and the night's games on the vidiprinter.
+ *   ucl     the starball floats over a violet night, a stadium roof clad
+ *           in its stars glows under it, and the night's games come up on
+ *           the vidiprinter.
  */
 .mo-root {
   position: fixed;
@@ -2875,6 +3022,183 @@
   .mo-kicker { font-size: var(--text-3xl); }
 }
 @media print { .mo-root { display: none !important; } }
+
+/* --- return: a league back, as the break note's poster with the light back
+   on. The poster runs to the card's edges (its margins undo the card's
+   padding, repeated at each size the padding changes). */
+.mo-card[data-poster] { background: var(--stand); container-type: inline-size; }
+.mo-poster {
+  position: relative;
+  height: calc(62cqi + 2 * var(--space-8));
+  margin: calc(-1 * var(--space-8)) calc(-1 * var(--space-8)) var(--space-5);
+  overflow: hidden;
+  background: radial-gradient(140% 110% at 70% 40%, #120d27, #050409 70%);
+}
+.mo-mark {
+  position: absolute;
+  z-index: 1;
+  right: calc(var(--space-8) + 2cqi);
+  bottom: 5%;
+  height: 84%;
+  aspect-ratio: 196 / 372;
+}
+/* No transform here: the entrance animates it, and would undo it. */
+.mo-mark[data-shape="logo"] { height: auto; width: 36cqi; aspect-ratio: 1; top: 50%; bottom: auto; margin-top: -16cqi; }
+/* The light, back on: the break's small hard disc grown big and bright. */
+.mo-mark::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 32%;
+  width: 138%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0, #f4f0ff 34%, #cdbfff 58%, #a088ff calc(68% - 1px), rgba(122, 90, 248, 0.3) 68.5%, rgba(122, 90, 248, 0.08) 82%, rgba(122, 90, 248, 0) 100%);
+}
+.mo-mark[data-shape="logo"]::before { top: 50%; width: 136%; }
+.mo-mark::after {
+  content: '';
+  position: absolute;
+  left: -14%;
+  right: -14%;
+  bottom: -1px;
+  height: 2px;
+  background: radial-gradient(closest-side, rgba(226, 216, 255, 0.9), rgba(122, 90, 248, 0.3) 70%, transparent);
+}
+.mo-mark[data-shape="logo"]::after { display: none; }
+.mo-mark i {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #040308;
+  -webkit-mask: center / contain no-repeat;
+  mask: center / contain no-repeat;
+}
+.mo-poster-text {
+  position: absolute;
+  z-index: 2;
+  top: var(--space-8);
+  bottom: 7%;
+  left: var(--space-8);
+  right: calc(var(--space-8) + 44cqi);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.mo-card[data-poster] .mo-title { font-size: clamp(1.9rem, 10.5cqi, 3.2rem); line-height: var(--leading-display); }
+.mo-card[data-poster] .mo-x { background: rgba(5, 5, 8, 0.45); }
+.mo-card[data-poster] .mo-lead {
+  margin: 0 0 var(--space-4);
+  font-size: calc(var(--text-read) * 1.125);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-snug);
+  color: var(--chalk);
+}
+.mo-card[data-poster] .mo-calls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--chalk-2);
+}
+.mo-card[data-poster] .mo-calls::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--floodlight-hi);
+  box-shadow: 0 0 8px rgba(158, 134, 255, 0.7);
+}
+/* The way out stays in reach: a long card scrolls under its buttons. */
+.mo-card[data-poster] .mo-actions {
+  position: sticky;
+  bottom: calc(-1 * var(--space-7));
+  z-index: 3;
+  margin: var(--space-4) calc(-1 * var(--space-8)) calc(-1 * var(--space-7));
+  padding: var(--space-5) var(--space-8) var(--space-7);
+  background: linear-gradient(to bottom, rgba(22, 23, 27, 0), var(--stand) 30%);
+}
+@media (max-width: 520px) {
+  .mo-card[data-poster] .mo-actions {
+    bottom: calc(-1 * var(--space-6));
+    margin: var(--space-4) calc(-1 * var(--space-6)) calc(-1 * var(--space-6));
+    padding: var(--space-5) var(--space-6) var(--space-6);
+  }
+  .mo-poster { height: calc(66cqi + 2 * var(--space-6)); margin: calc(-1 * var(--space-8)) calc(-1 * var(--space-6)) var(--space-5); }
+  .mo-mark { right: calc(var(--space-6) + 2cqi); }
+  .mo-poster-text { left: var(--space-6); right: calc(var(--space-6) + 44cqi); top: var(--space-7); }
+}
+
+/* --- ucl: the night. The scene is one still, three by two, the stadium's
+   skyline at about two thirds of the way down; the starball, the shout and
+   the title stack in the sky above it, sized off the card's width so they
+   keep clear of the skyline at every size. The scene fades into the card at
+   its foot and the reading starts over the faded roof. */
+.mo-card[data-kind="ucl"] {
+  padding: 0;
+  background: var(--stand);
+  container-type: inline-size;
+}
+.mo-night { position: relative; aspect-ratio: 3 / 2; overflow: hidden; text-align: center; }
+.mo-night-sky { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 100%; }
+.mo-night::after {
+  content: '';
+  position: absolute;
+  inset: 66% 0 0;
+  background: linear-gradient(to bottom, rgba(22, 23, 27, 0), rgba(22, 23, 27, 0.55) 55%, var(--stand));
+  pointer-events: none;
+}
+.mo-night-top {
+  position: absolute;
+  inset: 4.5cqi var(--space-6) auto;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.mo-night-ball { position: relative; display: grid; place-items: center; width: 20cqi; aspect-ratio: 1; margin-bottom: 2.4cqi; }
+.mo-night-ball .mo-logo { width: 100%; height: 100%; filter: drop-shadow(0 0 3cqi rgba(158, 134, 255, 0.55)); }
+.mo-night-ball .mo-ripple { inset: 0; width: auto; height: auto; margin: 0; left: 0; top: 0; border-color: rgba(244, 246, 250, 0.8); }
+.mo-night .mo-title {
+  font-size: clamp(1.75rem, 8.6cqi, 2.6rem);
+  line-height: var(--leading-display);
+  letter-spacing: var(--tracking-xl);
+}
+.mo-night-body { position: relative; z-index: 1; margin-top: -5cqi; padding: 0 var(--space-8) var(--space-7); }
+.mo-card[data-kind="ucl"] .mo-lead {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-read);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-snug);
+  color: var(--chalk);
+  text-wrap: pretty;
+}
+.mo-card[data-kind="ucl"] .mo-calls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--chalk-2);
+}
+.mo-card[data-kind="ucl"] .mo-calls::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--floodlight-hi);
+  box-shadow: 0 0 8px rgba(158, 134, 255, 0.7);
+}
+@media (max-width: 520px) {
+  .mo-night-body { padding: 0 var(--space-6) var(--space-6); }
+}
 
 /* ========================================================= the landing page
  *
