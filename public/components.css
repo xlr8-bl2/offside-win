@@ -2634,9 +2634,10 @@
   padding: 0;
   font-size: clamp(1.5rem, 7.4cqi, 2.4rem);
 }
-/* The count sits centred in the space under the title, level with the
-   body of the trophy, not dropped to the floor. */
-.sn-card[data-poster] .sn-count { display: block; min-height: 0; margin: auto 0; padding-top: var(--space-5); }
+/* The count sits centred in the space beside the trophy, both ways: level
+   with its body, and in the middle of the room between the card's edge and
+   the trophy rather than pushed against the edge. */
+.sn-card[data-poster] .sn-count { display: block; min-height: 0; margin: auto 0; padding-top: var(--space-5); text-align: center; }
 .sn-card[data-poster] .sn-count b {
   display: block;
   min-width: 0;
@@ -2647,7 +2648,7 @@
      the box and was cut off flat. Room above it, taken back with the margin. */
   padding-top: 0.16em;
   margin-top: -0.16em;
-  text-align: left;
+  text-align: center;
   /* The display face's own figures, set at their natural widths: the
      tabular ones left a gap after a 1 as wide as an 8. */
   font-family: var(--display);
@@ -2663,6 +2664,8 @@
 .sn-card[data-poster] .sn-count span {
   display: block;
   max-width: 18ch;
+  margin-left: auto;
+  margin-right: auto;
   margin-top: 2.4cqi;
   font-size: var(--text-md);
   line-height: var(--leading-snug);
