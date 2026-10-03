@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, membershipMail,
-  pulledMail, renewalStoppedMail, renewedMail, type EmailBinding, type Mail,
+  pulledMail, receiptMail, receiptNumber, renewalStoppedMail, renewedMail, type EmailBinding, type Mail,
 } from '../src/mail.ts';
 import { authEmailHook, hookSecret, verifyHook } from '../src/authhook.ts';
 
@@ -18,6 +18,8 @@ const every: Mail[] = [
   accessEndedMail({ reason: 'refund' }),
   freeTimeMail({ days: 7, until }),
   accountDeletedMail({ stoppedRenewal: false }),
+  accountDeletedMail({ stoppedRenewal: true }),
+  receiptMail({ paymentId: 'pay_abc123', at: NOW, plan: 'monthly', amountMinor: 900, currency: 'GBP', until }),
   authMail({ action: 'magiclink', link: 'https://x.supabase.co/auth/v1/verify?token=a&type=magiclink' }),
   authMail({ action: 'signup', link: 'https://x.supabase.co/auth/v1/verify?token=a&type=signup' }),
   authMail({ action: 'reauthentication', link: null, code: '123456' }),
@@ -195,4 +197,23 @@ test('several pulled at once are one email', () => {
   assert.equal(m.subject, '3 calls pulled before kick-off');
   assert.match(m.html, /We’ve pulled three calls\./);
   for (const t of ['Ajax v X', 'PSV v X', 'Feyenoord v X']) assert.match(m.html, new RegExp(t));
+});
+
+test('no email names the payment processor', () => {
+  for (const m of every) {
+    assert.doesNotMatch(m.html, /whop/i, m.tag);
+    assert.doesNotMatch(m.text, /whop/i, m.tag);
+  }
+});
+
+test('the receipt says what was bought, what it cost and its number', () => {
+  const m = receiptMail({ paymentId: 'pay_abc123', at: NOW, plan: 'monthly', amountMinor: 900, currency: 'GBP', until });
+  const no = receiptNumber('pay_abc123');
+  assert.match(no, /^OW-[2-9A-HJKMNP-Z]{8}$/);
+  assert.equal(receiptNumber('pay_abc123'), no, 'the same payment always has the same number');
+  assert.notEqual(receiptNumber('pay_abc124'), no);
+  assert.match(m.text, /£9\.00/);
+  assert.match(m.text, /Monthly membership/);
+  assert.ok(m.text.includes(no));
+  assert.ok(m.subject.includes(no));
 });
