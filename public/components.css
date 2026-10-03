@@ -55,6 +55,11 @@
  * top so the head is never cut, with no ring round it.
  */
 .crest-player { border: 0; background: var(--chalk-2); }
+/* Competition logos are drawn for a white page: the Premier League's lion,
+   the Champions League's ball and Ligue 1's mark are dark artwork and went
+   all but invisible on the dark disc. They sit on a light one instead. */
+.crest-league { border-color: transparent; background: var(--chalk); }
+.crest-league img { width: 70%; height: 70%; }
 .crest-player img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 12%; }
 .crest.noimg { background: linear-gradient(145deg, var(--c2, #3b82f6), var(--c1, #1e3a8a)); }
 .crest.noimg i { display: block; }
