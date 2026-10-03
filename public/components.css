@@ -2554,6 +2554,146 @@
   }
 }
 
+/* --- the break as a poster: the trophy in the dark, lit from behind, and
+   the days to go as big as the card allows. The poster runs to the card's
+   edges: its margins undo the card's padding, so each size the card's
+   padding changes at (above) is repeated here. */
+.sn-card[data-poster] {
+  container-type: inline-size;
+  background: var(--stand);
+}
+.sn-poster {
+  position: relative;
+  height: calc(74cqi + 2 * var(--space-8));
+  margin: calc(-1 * var(--space-9)) calc(-1 * var(--space-8)) var(--space-5);
+  overflow: hidden;
+  background: radial-gradient(140% 110% at 70% 40%, #0d0a1c, #050409 70%);
+}
+/* The trophy, a cut-out in black (traced from a photograph of the real one,
+   with our own ribbons; /brand/pl-trophy.svg). One small, hard light behind
+   its neck is all there is: the crown's points, the lions and the ribbons'
+   edges stand out against it, and nothing of the trophy itself is lit. */
+.sn-trophy {
+  position: absolute;
+  z-index: 1;
+  right: calc(var(--space-8) + 2cqi);
+  bottom: 5%;
+  height: 84%;
+  aspect-ratio: 196 / 372;
+}
+.sn-trophy::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 28%;
+  width: 98%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  /* Hard-edged: the disc ends in a pixel, then only a faint bloom. */
+  background: radial-gradient(circle, #ffffff 0, #f1ecff 38%, #c9baff 62%, #9a80ff calc(70% - 1px), rgba(122, 90, 248, 0.22) 70.5%, rgba(122, 90, 248, 0.06) 82%, rgba(122, 90, 248, 0) 100%);
+}
+/* The floor: a thin hard line of light under the base, so the foot of the
+   silhouette has something to stand on. */
+.sn-trophy::after {
+  content: '';
+  position: absolute;
+  left: -14%;
+  right: -14%;
+  bottom: -1px;
+  height: 2px;
+  background: radial-gradient(closest-side, rgba(226, 216, 255, 0.9), rgba(122, 90, 248, 0.3) 70%, transparent);
+}
+.sn-trophy i {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #040308;
+  -webkit-mask: url('/brand/pl-trophy.svg') center / contain no-repeat;
+  mask: url('/brand/pl-trophy.svg') center / contain no-repeat;
+}
+.sn-poster-text {
+  position: absolute;
+  z-index: 2;
+  top: var(--space-8);
+  bottom: 6%;
+  left: var(--space-8);
+  right: calc(var(--space-8) + 40cqi);
+  display: flex;
+  flex-direction: column;
+}
+.sn-card[data-poster] .sn-title {
+  margin: 0;
+  padding: 0;
+  font-size: clamp(1.5rem, 7.4cqi, 2.4rem);
+}
+.sn-card[data-poster] .sn-count { display: block; min-height: 0; margin: auto 0 0; }
+.sn-card[data-poster] .sn-count b {
+  display: block;
+  min-width: 0;
+  font-size: 36cqi;
+  line-height: 0.78;
+  text-align: left;
+  letter-spacing: var(--tracking-num);
+  background: linear-gradient(180deg, #ffffff 35%, #b9a6ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.sn-card[data-poster] .sn-count span {
+  display: block;
+  max-width: 18ch;
+  margin-top: 2.4cqi;
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+  color: var(--chalk-2);
+}
+.sn-card[data-poster] .sn-count-words span {
+  max-width: none;
+  font-family: var(--display);
+  font-size: clamp(1.4rem, 7cqi, 2.2rem);
+  font-weight: var(--weight-black);
+  line-height: var(--leading-display);
+  color: var(--chalk);
+}
+.sn-card[data-poster] .sn-x { z-index: 3; background: rgba(5, 5, 8, 0.35); color: var(--chalk-2); }
+.sn-card[data-poster] .sn-lead {
+  margin: 0 0 var(--space-4);
+  font-size: calc(var(--text-read) * 1.125);
+  font-weight: var(--weight-medium);
+  color: var(--chalk);
+}
+.sn-card[data-poster] .sn-days { margin: 0 0 var(--space-5); }
+.sn-card[data-poster] .sn-text p { font-size: var(--text-read); line-height: var(--leading-normal); }
+.sn-card[data-poster] .sn-text .sn-small { color: var(--chalk-3); font-weight: var(--weight-normal); }
+.sn-card[data-poster] .sn-text .sn-promise {
+  display: flex;
+  gap: var(--space-2);
+  color: var(--chalk);
+  font-weight: var(--weight-medium);
+}
+.sn-card[data-poster] .sn-text .sn-promise::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 0.5em;
+  border-radius: 50%;
+  background: var(--floodlight-hi);
+  box-shadow: 0 0 8px rgba(158, 134, 255, 0.7);
+}
+@media (max-width: 520px) {
+  .sn-poster { height: calc(74cqi + 2 * var(--space-6)); margin: calc(-1 * var(--space-8)) calc(-1 * var(--space-6)) var(--space-5); }
+  .sn-trophy { right: calc(var(--space-6) + 2cqi); }
+  .sn-poster-text { top: var(--space-7); left: var(--space-6); right: calc(var(--space-6) + 40cqi); }
+}
+@media (max-width: 520px) and (max-height: 740px) {
+  .sn-poster { margin-top: calc(-1 * var(--space-7)); }
+  .sn-poster-text { top: var(--space-6); }
+}
+
 /* The chip it leaves behind: one line, in the corner, above the offer bar. */
 .sn-chip {
   position: fixed;

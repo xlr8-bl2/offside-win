@@ -16,3 +16,15 @@ To render, serve a folder holding `hero.html`, `starball.js`
 The starball (`public/brand/ucl-emblem.svg`) is the competition logo the site
 already shows beside its name (the provider's, league 7), traced with potrace
 and filled white for the dark.
+
+## The Premier League trophy
+
+`public/brand/pl-trophy.svg`, the silhouette on the break note, is made from a
+photograph of the trophy on white: `silbuild.mjs` takes the crown and the
+lions from the photo, draws the vase from its measured profile (mirrored, so
+it is symmetrical), the arms and the base, and our own ribbons, two a side
+with a swallowtail and a thin gap round each; `silsvg.mjs` traces it. The
+photo itself is not kept or shipped.
+
+    node silbuild.mjs          # reads pl-photo.webp, writes pl-mask2.png
+    node silsvg.mjs pl-mask2.png pl-trophy.svg 800 1065
