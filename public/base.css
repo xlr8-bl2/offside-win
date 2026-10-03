@@ -328,6 +328,12 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 @supports not (backdrop-filter: blur(1px)) {
   .top { background: var(--pitch); }
 }
+/* On a phone the blur is the most expensive thing on screen while scrolling:
+   everything that passes under the sticky header is redrawn blurred, every
+   frame. A solid header looks the same at that size and costs nothing. */
+@media (max-width: 900px), (hover: none) {
+  .top { background: var(--pitch); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
 
 /*
  * The bar: the name and the sections on the left, reading as one line, and

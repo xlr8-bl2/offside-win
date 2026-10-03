@@ -2901,11 +2901,9 @@
   object-fit: cover;
   object-position: 50% 40%;
   opacity: 0;
-  filter: saturate(0.85) contrast(1.05);
-  transform: scale(1.06);
-  transition: opacity 1.4s var(--ease-out), transform 6s var(--ease-out);
+  transition: opacity 0.8s var(--ease-out);
 }
-.ld-shot-img.is-in { opacity: 0.42; transform: none; }
+.ld-shot-img.is-in { opacity: 0.36; }
 .ld-scrim {
   position: absolute;
   inset: 0;
@@ -2913,35 +2911,6 @@
     linear-gradient(90deg, var(--pitch) 0%, rgba(10, 10, 12, 0.88) 38%, rgba(10, 10, 12, 0.35) 75%, rgba(10, 10, 12, 0.55) 100%),
     linear-gradient(0deg, var(--pitch) 0%, rgba(10, 10, 12, 0) 40%),
     radial-gradient(70% 90% at 85% 0%, var(--floodlight-dim), transparent 70%);
-}
-/* The gantry along the top: four lamps, each with its beam falling down the ground. */
-.ld-lamps, .ld-lights { position: absolute; inset: 0; }
-.ld-lamp {
-  position: absolute;
-  top: 18px;
-  left: var(--x, 50%);
-  width: 10px;
-  height: 10px;
-  margin-left: -5px;
-  border-radius: 50%;
-  background: #fffaf0;
-  box-shadow: 0 0 8px 2px rgba(255, 244, 214, 0.95), 0 0 30px 8px rgba(255, 236, 190, 0.45), 0 0 80px 24px rgba(158, 134, 255, 0.22);
-  opacity: 0;
-}
-.ld-beam {
-  position: absolute;
-  top: 22px;
-  left: var(--x, 50%);
-  width: 420px;
-  height: 120%;
-  margin-left: -210px;
-  background: linear-gradient(180deg, rgba(255, 246, 222, 0.16), rgba(255, 246, 222, 0.05) 18%, transparent 60%);
-  clip-path: polygon(48.5% 0, 51.5% 0, 100% 100%, 0 100%);
-  transform-origin: 50% 0;
-  transform: rotate(calc((var(--n, 1.5) - 1.5) * 14deg));
-  filter: blur(12px);
-  mix-blend-mode: screen;
-  opacity: 0;
 }
 .ld-hero-in {
   position: relative;
@@ -3000,6 +2969,8 @@
 .ld-actions { display: flex; flex-wrap: wrap; gap: var(--space-4); }
 .ld-go { box-shadow: 0 10px 30px -10px rgba(122, 90, 248, 0.8); }
 .ld-small { margin: var(--space-5) 0 0; font-size: var(--text-sm); color: var(--chalk-3); }
+/* The reassurance sits right under the button, where the doubt is. */
+.ld-assure { margin: var(--space-3) 0 0; font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--chalk-2); }
 
 /* Today's free call, as a matchday ticket: the two clubs' colours meeting at
    a seam with the crests on them, a perforation, then the match and the
@@ -3102,8 +3073,8 @@
 /* The plans. */
 .ld-plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-5); margin: 0; padding: 0; list-style: none; }
 .ld-plans li {
-  display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-7);
   border: var(--border) solid var(--rule);
@@ -3111,8 +3082,12 @@
   background: var(--stand);
   color: var(--chalk);
 }
-.ld-plans li .btn { justify-self: stretch; margin-top: var(--space-3); }
+.ld-plans li .btn { align-self: stretch; margin-top: auto; }
 .ld-plans b { font-size: var(--text-md); color: var(--chalk-2); }
+.ld-plans .ld-week { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--won); }
+/* Our recommendation, marked by the accent rather than by a claim about other
+   people's choices. */
+.ld-plans li.is-pick { border-color: var(--floodlight); }
 .ld-price { font-family: var(--display-figures); font-size: var(--text-3xl); font-weight: var(--weight-black); line-height: 1; font-variant-numeric: tabular-nums; }
 .ld-blurb { font-size: var(--text-md); line-height: var(--leading-normal); color: var(--chalk-2); }
 
@@ -3209,7 +3184,6 @@
   .ld-receipts { grid-template-columns: minmax(0, 1fr); }
   .ld-hero { min-height: 0; padding: var(--space-11) 0 var(--space-10); }
   .ld-scrim { background: linear-gradient(180deg, rgba(10, 10, 12, 0.6) 0%, rgba(10, 10, 12, 0.85) 45%, var(--pitch) 100%), radial-gradient(90% 60% at 80% 0%, var(--floodlight-dim), transparent 70%); }
-  .ld-beam { width: 260px; margin-left: -130px; }
   .ld-hero-in { grid-template-columns: minmax(0, 1fr); gap: var(--space-9); }
   .ld-plans { grid-template-columns: minmax(0, 1fr); gap: var(--space-6); }
 }
@@ -6056,9 +6030,7 @@ html.dd-locked, html.dd-locked body { overflow: hidden; }
 .hero.theme-ucl .hero-media,
 .hero.theme-ucl .fx-wash,
 .ld-hero.theme-ucl .ld-shot,
-.ld-hero.theme-ucl .ld-scrim,
-.ld-hero.theme-ucl .ld-lights,
-.ld-hero.theme-ucl .ld-lamps { display: none; }
+.ld-hero.theme-ucl .ld-scrim { display: none; }
 .hero.theme-ucl .matchcentre { background: rgba(1, 1, 74, 0.72); }
 
 /* The Champions League night card: the ball rises behind its top corner. */
@@ -6068,3 +6040,16 @@ html.dd-locked, html.dd-locked body { overflow: hidden; }
 .mo-card.theme-ucl .comp-art-ucl::after {
   background: linear-gradient(180deg, transparent 0%, rgba(1, 1, 74, 0.45) 24%, rgba(1, 1, 74, 0.9) 50%, var(--ucl-night-deep) 100%);
 }
+
+/* The landing page closes on its own call to action; the footer's band would be
+   a second, competing one directly under it. */
+body[data-page="landing"] .foot-top { display: none; }
+
+/* Pricing: the proof, beside the price. Three short checkable lines. */
+.plan-proof { display: grid; gap: var(--space-2); max-width: 62ch; margin: 0 0 var(--space-6); padding: 0; list-style: none; }
+.plan-proof li { position: relative; padding-left: var(--space-5); font-size: var(--text-md); line-height: var(--leading-normal); color: var(--chalk-2); }
+.plan-proof li::before { content: ''; position: absolute; left: 0; top: 0.55em; width: 8px; height: 8px; border-radius: 50%; background: var(--won); }
+.plan-proof b { color: var(--chalk); }
+.plan-proof a { color: var(--floodlight-hi); }
+.locked-when { margin: var(--space-2) 0 0; font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--warn); }
+.locked-when span { font-variant-numeric: tabular-nums; }

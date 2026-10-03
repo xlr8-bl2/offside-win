@@ -2431,8 +2431,6 @@ function landingHTML() {
     <div class="ld-bg" aria-hidden="true">
       <div class="ld-shot" data-ld="shot"></div>
       <div class="ld-scrim"></div>
-      <div class="ld-lights">${[14, 38, 62, 86].map((x, i) => `<span class="ld-beam" style="--x:${x}%;--n:${i}"></span>`).join('')}</div>
-      <div class="ld-lamps">${[14, 38, 62, 86].map((x) => `<span class="ld-lamp" style="--x:${x}%"></span>`).join('')}</div>
     </div>
     <div class="wrap ld-hero-in">
       <div class="ld-copy">
@@ -2443,8 +2441,9 @@ function landingHTML() {
           <a class="btn btn-primary btn-lg ld-go" href="#/board" data-ld="free">Get today’s free call</a>
           <a class="ld-alt" href="#/pricing">or see membership, from £3.49</a>
         </div>
+        <p class="ld-assure">Free. No sign-up, no card.</p>
         <div class="ld-proof" data-ld="proof"></div>
-        <p class="ld-small">The free call needs no sign-up. 18+. No guaranteed winners, because there’s no such thing.</p>
+        <p class="ld-small">18+. No guaranteed winners, because there’s no such thing.</p>
       </div>
       <aside class="ld-call" data-ld="call" aria-label="Today’s free call"><div class="ld-call-wait"></div></aside>
     </div>
@@ -2510,39 +2509,43 @@ function excerpt(text, max = 260) {
 
 async function viewLanding() {
   const nav = navTicket;
+  document.body.dataset.page = 'landing';
   app.innerHTML = landingHTML();
   if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
     /*
-     * One entrance, at the top, and it is the floodlights: the lamps strike
-     * along the gantry, stuttering before they hold, their beams fall across
-     * the ground, the shout slams on, the headline rises, and the second line
-     * fills with light from left to right. Nothing below the hero moves.
+     * One entrance, at the top: the shout slams on, the headline rises and
+     * the second line fills with light from left to right. Nothing below the
+     * hero moves.
      */
     const EXPO = 'cubic-bezier(0.16, 1, 0.3, 1)';
-    const strike = [{ opacity: 0 }, { opacity: 0.9, offset: 0.08 }, { opacity: 0.1, offset: 0.16 }, { opacity: 0.8, offset: 0.26 }, { opacity: 0.3, offset: 0.34 }, { opacity: 1, offset: 0.5 }, { opacity: 1 }];
-    app.querySelectorAll('.ld-lamp').forEach((l, i) => l.animate(strike, { duration: 900, delay: 100 + i * 130, easing: 'linear', fill: 'both' }));
-    app.querySelectorAll('.ld-beam').forEach((b, i) => b.animate(strike.map((f) => ({ ...f, opacity: f.opacity * 0.85 })), { duration: 900, delay: 120 + i * 130, easing: 'linear', fill: 'both' }));
+    // Quick and light on a phone: transform and opacity only, every delay
+    // short, and nothing held once it has played ('backwards' rather than
+    // 'both'), so no layer is kept alive after the intro. The blur on the
+    // shout, the four floodlight beams and the lamps were the heaviest things
+    // on the page to draw and are gone.
     app.querySelector('.ld-shout')?.animate([
-      { transform: 'scale(2.4) rotate(-6deg)', opacity: 0, filter: 'blur(6px)' },
-      { transform: 'scale(0.94) rotate(1deg)', opacity: 1, filter: 'blur(0)', offset: 0.55 },
-      { transform: 'scale(1.03) rotate(-0.5deg)', offset: 0.75 },
-      { transform: 'none', opacity: 1, filter: 'blur(0)' }], { duration: 640, delay: 420, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'both' });
-    app.querySelectorAll('.ld-l').forEach((l, i) => l.animate([{ transform: 'translateY(45%)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 900, delay: 620 + i * 160, easing: EXPO, fill: 'both' }));
-    app.querySelector('.ld-lit')?.animate([{ backgroundPosition: '100% 0' }, { backgroundPosition: '0% 0' }], { duration: 1100, delay: 1150, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', fill: 'both' });
-    for (const [sel, d] of [['.ld-lede', 1000], ['.ld-actions', 1120], ['.ld-proof', 1180], ['.ld-small', 1240]]) {
-      app.querySelector(`.ld-hero ${sel}`)?.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 700, delay: d, easing: EXPO, fill: 'both' });
+      { transform: 'scale(1.6) rotate(-4deg)', opacity: 0 },
+      { transform: 'none', opacity: 1 }], { duration: 420, delay: 120, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'backwards' });
+    app.querySelectorAll('.ld-l').forEach((l, i) => l.animate([{ transform: 'translateY(30%)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 600, delay: 220 + i * 110, easing: EXPO, fill: 'backwards' }));
+    const lit = app.querySelector('.ld-lit');
+    if (lit) {
+      lit.style.setProperty('background-position', '0% 0');
+      lit.animate([{ backgroundPosition: '100% 0' }, { backgroundPosition: '0% 0' }], { duration: 800, delay: 500, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', fill: 'backwards' });
     }
-    app.querySelector('.ld-go')?.animate([{ boxShadow: '0 0 0 0 rgba(122, 90, 248, 0.7)' }, { boxShadow: '0 0 0 16px rgba(122, 90, 248, 0)' }], { duration: 1200, delay: 1700, iterations: 2, easing: 'ease-out' });
+    for (const [sel, d] of [['.ld-lede', 420], ['.ld-actions', 480], ['.ld-proof', 540], ['.ld-small', 580]]) {
+      app.querySelector(`.ld-hero ${sel}`)?.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 500, delay: d, easing: EXPO, fill: 'backwards' });
+    }
   } else {
     app.querySelector('.ld-lit')?.style.setProperty('background-position', '0% 0');
   }
 
-  const [board, hero, livePicks, plans, rec] = await Promise.all([
+  const [board, hero, livePicks, plans, rec, sure] = await Promise.all([
     loadBoard().catch(() => null),
     getJSON('/api/hero').catch(() => null),
     getJSON('/api/picks?limit=60&settled=true').then((r) => r.picks ?? []).catch(() => []),
     getJSON('/api/plans').catch(() => []),
     getJSON('/api/record').catch(() => null),
+    getJSON('/api/how-sure').catch(() => null),
   ]);
   // The record is the newest engine's (lab/record.ts): its calls on the games
   // played before it went live, then the live engine's own from then on.
@@ -2562,6 +2565,7 @@ async function viewLanding() {
     : livePicks;
   if (nav !== navTicket) return;
   const fixtures = board?.fixtures ?? [];
+  const called = fixtures.filter(hasCall).length;
   const put = (key, html) => { const el = app.querySelector(`[data-ld="${key}"]`); if (el) { el.innerHTML = html; smartQuotes(el); } return el; };
 
   // The trap of the day, where there is one.
@@ -2603,9 +2607,9 @@ async function viewLanding() {
       // The ticket is handed over: in on a tilt, and the two sides of the
       // band slam together behind the crests.
       card.animate([{ opacity: 0, transform: 'translateY(30px) rotate(3deg) scale(0.96)' }, { opacity: 1, transform: 'rotate(-1deg)', offset: 0.7 }, { opacity: 1, transform: 'none' }], { duration: 1000, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
-      card.querySelector('.ld-tk-h')?.animate([{ transform: 'translateX(-105%)' }, { transform: 'none' }], { duration: 560, delay: 200, easing: 'cubic-bezier(0.7, 0, 0.84, 0)', fill: 'both' });
-      card.querySelector('.ld-tk-a')?.animate([{ transform: 'translateX(105%)' }, { transform: 'none' }], { duration: 560, delay: 200, easing: 'cubic-bezier(0.7, 0, 0.84, 0)', fill: 'both' });
-      card.querySelectorAll('.ld-tk-crest').forEach((c, i) => c.animate([{ transform: `translateX(${i ? '' : '-'}160%) scale(1.4)`, opacity: 0, filter: 'blur(8px)' }, { transform: 'none', opacity: 1, filter: 'blur(0)' }], { duration: 700, delay: 520, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)', fill: 'both' }));
+      card.querySelector('.ld-tk-h')?.animate([{ transform: 'translateX(-105%)' }, { transform: 'none' }], { duration: 560, delay: 200, easing: 'cubic-bezier(0.7, 0, 0.84, 0)', fill: 'backwards' });
+      card.querySelector('.ld-tk-a')?.animate([{ transform: 'translateX(105%)' }, { transform: 'none' }], { duration: 560, delay: 200, easing: 'cubic-bezier(0.7, 0, 0.84, 0)', fill: 'backwards' });
+      card.querySelectorAll('.ld-tk-crest').forEach((c, i) => c.animate([{ transform: `translateX(${i ? '' : '-'}160%) scale(1.4)`, opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 700, delay: 520, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)', fill: 'backwards' }));
       card.querySelector('.ld-tk-seam')?.animate([{ opacity: 0 }, { opacity: 1, offset: 0.15 }, { opacity: 0.6 }], { duration: 900, delay: 760, fill: 'both' });
     }
     // A Champions League free call brings the competition's night with it,
@@ -2622,8 +2626,11 @@ async function viewLanding() {
     // then the match's own, then the rest of the board's. The browser works
     // down the list until one is a real photograph (venueShot).
     const venues = [...new Set([hero?.shot_venue_id, fx.venue_id, ...fixtures.filter(hasCall).map((f) => f.venue_id), ...fixtures.map((f) => f.venue_id)].filter(Boolean))];
-    if (shot && venues.length) {
-      shot.innerHTML = venueShot(venues, 'ld-shot-img', true);
+    // Not on a phone: a 200KB photograph shown at under half strength behind
+    // a dark scrim, with up to a dozen fallbacks tried in turn, was most of
+    // what the landing page downloaded and drew there.
+    if (shot && venues.length && matchMedia('(min-width: 900px)').matches) {
+      shot.innerHTML = venueShot(venues.slice(0, 4), 'ld-shot-img', true);
       const img = shot.querySelector('img');
       img?.addEventListener('load', () => img.classList.add('is-in'), { once: true });
     }
@@ -2643,8 +2650,13 @@ async function viewLanding() {
 
   // Proof beside the button: the record in one line and the last ten.
   if (fw + fl) {
+    // Two kinds of proof, both checkable: the record, and that our confidence
+    // means something (how-sure). Specific numbers beat adjectives.
+    const tenths = sure?.n >= 50 ? Math.round(Number(sure.said) * 10) : 0;
+    const honest = tenths && Math.abs(Number(sure.landed) / Number(sure.n) - Number(sure.said)) <= 0.04;
     put('proof', `<ol class="ld-form ld-form-sm" aria-hidden="true">${all.slice(-10).map(chip).join('')}</ol>
-      <p><b>${fw} of our last ${fw + fl}</b> calls landed, misses counted. <a href="#/results">See the results</a></p>`);
+      <p><b>${fw} of our last ${fw + fl}</b> calls landed, misses counted. <a href="#/results">See the results</a></p>
+      ${honest ? `<p>When we say ${esc(TENTHS[tenths])} in ten, ${esc(TENTHS[tenths])} in ten land. <a href="#/how-sure">How we check</a></p>` : ''}`);
   } else app.querySelector('[data-ld="proof"]')?.remove();
 
   // What's on every match page, shown on today's free call.
@@ -2658,7 +2670,6 @@ async function viewLanding() {
     ? `<div class="ld-formrows">${['home', 'away'].map((k) => `<div>${crest(side(k), 'xs', fx[`${k}_id`])}<b>${esc(side(k))}</b>
         <ol class="ld-form ld-form-sm" aria-label="${esc(`${side(k)}, last six, oldest first`)}">${seq(k).map((c) => `<li class="ld-chip is-${c === 'W' ? 'w' : c === 'L' ? 'l' : 'v'}">${c}</li>`).join('')}</ol></div>`).join('')}</div>`
     : '<p class="ld-show-note">The last six for both sides, on every match page.</p>');
-  const called = fixtures.filter(hasCall).length;
   put('get-2', fixtures.length
     ? `<p class="ld-bignum"><b>${called}</b><span>of the ${fixtures.length} games on the board have a call right now. The rest get the reasons we passed.</span></p>`
     : '');
@@ -2699,6 +2710,9 @@ async function viewLanding() {
         </li>`).join('')}</ul>` : ''}`);
   } else app.querySelector('[data-ld="record"]')?.remove();
 
+  // The price per week, which is how a subscription is easiest to weigh
+  // against a pint. Only for the plans that run longer than a week.
+  const perWeek = (p) => (p.days > 7 ? `About ${money(Math.round(p.amount_minor / (p.days / 7)), p.currency)} a week` : null);
   // The plans, each with its own button. The matchday pass is one payment
   // and stops by itself, which is worth saying where people decide.
   const PLAN = {
@@ -2708,14 +2722,18 @@ async function viewLanding() {
   };
   const list = (Array.isArray(plans) ? plans : []).filter((p) => p && p.amount_minor).sort((a, b) => a.amount_minor - b.amount_minor);
   if (list.length) {
+    // What is waiting behind the wall today, counted from the board: a real
+    // number, said once, right where the decision is made.
+    const behind = Math.max(0, called - 1);
     put('plans', `
       <h2 class="ld-h2">Every call, from ${esc(money(list[0].amount_minor, list[0].currency))}</h2>
-      <p class="ld-sub">The match pages, the free call and the record stay free whatever you do. Members get every call the moment it goes up, the bet slip, and the reasons behind all of them.</p>
+      <p class="ld-sub">${behind > 1 ? `${called} calls are up on today’s board. One is free. Members see the other ${behind}, with the odds and the reason, the moment each goes up. ` : ''}The match pages, the free call and the record stay free whatever you do.</p>
       <ul class="ld-plans">${list.map((p) => `
-        <li>
+        <li${p.id === 'monthly' ? ' class="is-pick"' : ''}>
           <b>${esc(p.name)}</b>
           <span class="ld-price">${esc(money(p.amount_minor, p.currency))}</span>
-          <span class="ld-blurb">${esc(PLAN[p.id]?.[0] ?? `${p.days} days of every call.`)}${p.id === 'quarter' ? ` Works out at ${esc(money(Math.round(p.amount_minor / 3), p.currency))} a month.` : ''}</span>
+          ${perWeek(p) ? `<span class="ld-week">${esc(perWeek(p))}</span>` : ''}
+          <span class="ld-blurb">${esc(PLAN[p.id]?.[0] ?? `${p.days} days of every call.`)}</span>
           <a class="btn ${p.id === 'monthly' ? 'btn-primary' : 'btn-ghost'}" href="#/checkout?plan=${encodeURIComponent(p.id)}">${esc(PLAN[p.id]?.[1] ?? `Get ${p.name}`)}</a>
         </li>`).join('')}</ul>`);
   } else app.querySelector('[data-ld="plans"]')?.remove();
@@ -3496,17 +3514,22 @@ function lockedHTML(fixture = null) {
   // it is holding is a different proposition from one that states only that it
   // is shut, and the count gives nothing away: no market, no side, no price.
   const head = n > 1
-    ? `${n} calls on ${tie}.`
-    : `Our call on ${tie}.`;
+    ? `${n} calls on ${tie} are in.`
+    : `Our call on ${tie} is in.`;
+  // The deadline is real: a call closes at kick-off and is never sold after,
+  // so saying when is information, not pressure.
+  const ko = Number(fixture?.kickoff) || 0;
+  const soon = ko > Date.now() / 1000 && ko - Date.now() / 1000 < 2 * 86400;
 
   return `
   <div class="locked">
     <div class="locked-body">
       <b>${esc(head)}</b>
-      <p>Which market, which side, the odds and the book offering it. The reading above
-         is free; one call a day is free too, on the front page. This one is for members.</p>
+      <p>Which market, which side, the odds and the book offering it, with why we back it.
+         The reading above is free, and so is one call a day on the front page.</p>
+      ${soon ? `<p class="locked-when">Closes at kick-off, in <span data-countdown="${ko}" data-done="now">—</span>.</p>` : ''}
     </div>
-    <a class="btn btn-accent" href="#/pricing" data-public-price>From £3.49 for the weekend</a>
+    <a class="btn btn-accent" href="#/pricing" data-public-price>See it: from £3.49 for the week</a>
   </div>`;
 }
 
@@ -4940,6 +4963,8 @@ async function viewFixture(id, params = new URLSearchParams()) {
     </div>` : ''}
     ${TABS.map(([k, , html]) => `<div class="tabpane" data-pane="${k}"${k === open ? '' : ' hidden'}>${html}</div>`).join('')}
   </div>`;
+  // The locked call says when it closes; keep that count running.
+  tickCountdowns();
 
   /*
    * `history.length > 1` is true of a tab that has been anywhere at all, so on
@@ -6381,12 +6406,19 @@ async function viewPricing() {
   // Which navigation this page belongs to: a newer one makes it stand down (see route).
   const nav = navTicket;
   placeholder(skeletonHTML());
-  const [user, plans, hero, running] = await Promise.all([
+  const [user, plans, hero, running, sure, board] = await Promise.all([
     currentUser(),
     getJSON('/api/plans').catch(() => []),
     getJSON('/api/hero').catch(() => null),
     getJSON('/api/promos').catch(() => []),
+    getJSON('/api/how-sure').catch(() => null),
+    loadBoard().catch(() => null),
   ]);
+  // Proof beside the price, all of it checkable: the record, whether our
+  // confidence holds up, and what is on the board today.
+  const callsToday = (board?.fixtures ?? []).filter((f) => hasCall(f) && matchState(f).kind === 'upcoming').length;
+  const sureTenths = sure?.n >= 50 ? Math.round(Number(sure.said) * 10) : 0;
+  const sureHolds = sureTenths && Math.abs(Number(sure.landed) / Number(sure.n) - Number(sure.said)) <= 0.04;
   // A member arriving here is shown what they have, not sold it again.
   let account = null;
   if (user) {
@@ -6417,10 +6449,17 @@ async function viewPricing() {
    */
   const COPY = {
     matchday: { blurb: 'A weekend of every call. One payment, seven days, and it stops.', renews: false, tag: null },
-    monthly:  { blurb: 'All the calls, all month. Renews each month until you cancel.', renews: true, tag: 'Most take this' },
+    // "Our pick", not "Most take this": nobody has taken anything yet, and a
+    // popularity claim we cannot back is the misleading kind (CMA, DMCC Act).
+    monthly:  { blurb: 'All the calls, all month. Renews each month until you cancel.', renews: true, tag: 'Our pick' },
     quarter:  { blurb: 'Three months of every call, cheaper by the month. Renews every three months until you cancel.', renews: true, tag: 'Best value' },
   };
-  const perMonth = (p) => p.days >= 80 ? money(Math.round(p.amount_minor / Math.round(p.days / 30)), p.currency) + ' a month' : null;
+  // A longer plan said in smaller units too, the way it is easiest to weigh.
+  const perMonth = (p) => {
+    const week = money(Math.round(p.amount_minor / (p.days / 7)), p.currency);
+    if (p.days >= 80) return `${money(Math.round(p.amount_minor / Math.round(p.days / 30)), p.currency)} a month, about ${week} a week`;
+    return p.days > 7 ? `About ${week} a week` : null;
+  };
   const per = (p) => (p.days === 7 ? 'for the week' : p.days >= 300 ? 'a year' : p.days >= 80 ? 'for three months' : 'a month');
 
   // What each plan's button does for this reader: buy it, or, for a member,
@@ -6460,6 +6499,11 @@ async function viewPricing() {
         every open call the moment it goes up, the legs of the bet slip, and the reason behind each call.</p>
     </div>
 
+    ${sure?.n || callsToday ? `<ul class="plan-proof">
+      ${sure?.n ? `<li><b>${Number(sure.landed)} of ${Number(sure.n)}</b> settled calls landed, misses counted. <a href="#/results">Every result</a></li>` : ''}
+      ${sureHolds ? `<li>When we say ${esc(TENTHS[sureTenths])} in ten, ${esc(TENTHS[sureTenths])} in ten land. <a href="#/how-sure">How we check</a></li>` : ''}
+      ${callsToday > 1 ? `<li><b>${callsToday} calls</b> on the board still to kick off. One is free.</li>` : ''}
+    </ul>` : ''}
     ${freeLineHTML(free)}`}
 
     <div class="plans" data-public-price>
@@ -6503,7 +6547,7 @@ async function viewPricing() {
       <section class="tier tier-paid">
         <h3>Members</h3>
         <ul class="ticks">
-          <li><b>Every open call</b> the moment it goes up, typically twenty to sixty a day</li>
+          <li><b>Every open call</b> the moment it goes up, with the odds and the book</li>
           <li><b>The bet slip's legs</b>, before the first one kicks off</li>
           <li><b>Why this call</b> on every match: the argument for this market at these odds</li>
           <li>The board's filters by league and by day</li>
@@ -8267,6 +8311,9 @@ async function route({ soft = false } = {}) {
   clearInterval(state.poll);
   if (state.onVisible) { removeEventListener('visibilitychange', state.onVisible); state.onVisible = null; }
   for (const a of document.querySelectorAll('.nav a')) a.classList.toggle('on', a.dataset.route === (name === 'checkout' ? 'pricing' : name));
+  // Which page is up, for the few rules that differ by page (the landing page
+  // ends on its own call to action, so the footer's band stands down there).
+  document.body.dataset.page = name;
   // Whop's card fields belong to the checkout page; leaving it takes them down.
   if (!soft && state.payHandle) { state.payHandle.destroy(); state.payHandle = null; }
   if (!soft) setMenu(false);
