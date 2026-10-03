@@ -401,6 +401,11 @@ function body(m, w, { esc, clock, now }) {
  * (/brand/ucl-night.webp, rendered by scripts/hero); the starball is the
  * competition's logo, the one the site shows beside its name everywhere,
  * traced and filled white for the dark (/brand/ucl-emblem.svg).
+ *
+ * One loud thing: the title, big, under the starball, the way the
+ * competition sets its own name. No stamp over it; everything under the
+ * scene is set quietly, and the violet dot that marks a called game is the
+ * only accent, in the count of calls and against each game it counts.
  */
 function nightHTML(m, w, { esc, clock, now, x, actions }) {
   const words = (t) => t.split(/\s+/).map((wd, i) => `<span class="mo-w"><span style="--i:${i}">${esc(wd)}</span></span>`).join(' ');
@@ -411,7 +416,6 @@ function nightHTML(m, w, { esc, clock, now, x, actions }) {
         <img class="mo-night-sky" src="/brand/ucl-night.webp" alt="" aria-hidden="true" decoding="async">
         <div class="mo-night-top">
           <div class="mo-night-ball" aria-hidden="true"><span class="mo-ripple"></span><img class="mo-logo" src="/brand/ucl-emblem.svg" alt="" decoding="async"></div>
-          <p class="mo-shout">${esc(w.shout)}</p>
           <h2 class="mo-title" id="mo-title">${words(w.title)}</h2>
         </div>
       </div>
