@@ -169,7 +169,8 @@ type Part =
   | { facts: Array<[string, string]> }
   | { note: string }
   | { code: string }
-  | { link: string; href: string };
+  | { link: string; href: string }
+  | { chip: string };
 
 function part(x: Part): string {
   if ('p' in x) {
@@ -180,12 +181,12 @@ function part(x: Part): string {
   if ('html' in x) return x.html;
   if ('button' in x) {
     return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 26px"><tr>
-<td style="border-radius:10px;background:${C.violet}"><a href="${esc(x.href)}" style="display:inline-block;padding:15px 26px;font:600 16px/1 ${SANS};color:#ffffff;text-decoration:none;border-radius:10px">${esc(x.button)}</a></td>
+<td style="border-radius:999px;background:${C.violet}"><a href="${esc(x.href)}" style="display:inline-block;padding:16px 30px;font:700 16px/1 ${SANS};color:#ffffff;text-decoration:none;border-radius:999px">${esc(x.button)}</a></td>
 </tr></table>`;
   }
   if ('facts' in x) {
     const rows = x.facts.map(([k, v], i) => `<tr>
-<td style="padding:13px 16px;${i ? `border-top:1px solid ${C.line};` : ''}font:14px/1.4 ${SANS};color:${C.chalk3};white-space:nowrap">${esc(k)}</td>
+<td style="padding:13px 16px;${i ? `border-top:1px solid ${C.line};` : ''}font:14px/1.4 ${SANS};color:${C.chalk3};white-space:nowrap;text-align:left">${esc(k)}</td>
 <td style="padding:13px 16px;${i ? `border-top:1px solid ${C.line};` : ''}font:600 14px/1.4 ${SANS};color:${C.chalk};text-align:right">${esc(v)}</td>
 </tr>`).join('');
     return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;background:${C.terrace};border-radius:10px">${rows}</table>`;
@@ -193,6 +194,11 @@ function part(x: Part): string {
   if ('note' in x) {
     return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 22px"><tr>
 <td style="border-left:3px solid ${C.violet};padding:2px 0 2px 14px;font:14px/1.6 ${SANS};color:${C.chalk2}">${esc(x.note)}</td></tr></table>`;
+  }
+  if ('chip' in x) {
+    // A line that matters, in a tinted block (Hello Klean's green bar, in violet).
+    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:2px 0 22px"><tr>
+<td align="center" style="padding:13px 16px;border-radius:12px;background:#231c46;font:700 14px/1.45 ${SANS};color:${C.violetHi};text-align:center">${esc(x.chip)}</td></tr></table>`;
   }
   if ('code' in x) {
     return `<p style="margin:0 0 24px;font:800 38px/1 ${DISPLAY};letter-spacing:.18em;color:${C.chalk}">${esc(x.code)}</p>`;
@@ -208,6 +214,7 @@ function plain(x: Part): string {
   if ('facts' in x) return x.facts.map(([k, v]) => `${k}: ${v}`).join('\n');
   if ('note' in x) return x.note;
   if ('code' in x) return x.code;
+  if ('chip' in x) return x.chip;
   return `${x.link}\n${x.href}`;
 }
 
@@ -222,6 +229,83 @@ interface Frame {
   links?: boolean;
   /** The gambling line. Off for mail about the account itself. */
   gamble?: boolean;
+  /**
+   * The campaign look, after the emails the owner pointed at (Hello Klean,
+   * Candy Creams, NYCFC): a ticker along the top, a hero picture with our
+   * products floating round the headline (scripts/mail-art.mjs), a rounded
+   * card that overlaps it, then coloured feature cards. The heading becomes
+   * the hero's alt text; the card leads with `lead` in its place.
+   */
+  look?: Look;
+}
+
+export interface Look {
+  /** Said along the ticker, repeated to fill it. */
+  ticker: string;
+  /** public/brand/mail/<hero>.png, 600 x 560. */
+  hero: string;
+  /** The card's first line, under the hero. */
+  lead: string;
+  /** Feature cards under the card, public/brand/mail/feature-<name>.png. */
+  features?: Array<{ name: string; alt: string; href: string }>;
+  /** Small print kept under the features rather than in the card. */
+  after?: Part[];
+}
+
+/** The frame's body without the campaign look: the wordmark, then the card. */
+function plainBody(f: Frame, linkRow: string, foot: string): string {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.pitch}"><tr><td align="center" style="padding:28px 0 36px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
+<tr><td class="pad" style="padding:0 30px 18px">
+<a href="${SITE}" style="text-decoration:none;font:700 24px/1 ${SANS};letter-spacing:-1px;color:${C.chalk}">offside<span style="display:inline-block;width:6px;height:6px;margin:0 2px 0 2px;border-radius:3px;background:${C.violetHi};vertical-align:baseline"></span><span style="color:${C.chalk3}">win</span></a>
+</td></tr>
+<tr><td class="card" style="background:${C.stand};border:1px solid ${C.line};border-radius:16px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tr><td style="height:3px;line-height:3px;font-size:0;background:${C.violet};border-radius:16px 16px 0 0">&nbsp;</td></tr>
+<tr><td class="pad" style="padding:34px 30px 12px">
+<h1 class="h1" style="margin:0 0 22px;font:800 40px/1 ${DISPLAY};letter-spacing:.005em;color:${C.chalk}">${esc(f.heading)}</h1>
+${f.parts.map(part).join('\n')}
+${linkRow}
+</td></tr>
+<tr><td class="pad" style="padding:22px 30px 28px">
+<p style="margin:0;padding-top:20px;border-top:1px solid ${C.line};font:12px/1.6 ${SANS};color:${C.chalk3}">${foot}</p>
+</td></tr>
+</table></td></tr>
+<tr><td class="pad" style="padding:18px 30px 0;font:12px/1.5 ${SANS};color:${C.chalk3}">Offside.win &nbsp; <a href="${SITE}" style="color:${C.chalk3}">offside.win</a></td></tr>
+</table></td></tr></table>`;
+}
+
+/*
+ * The campaign look. Everything that sits over the hero picture is drawn
+ * into it (the card's rounded top included), so the overlap holds in every
+ * mail app; the card below is 93.33% wide to meet that drawn top exactly
+ * (560 of 600) at any size the email is shown.
+ */
+function lookBody(f: Frame, look: Look, linkRow: string, foot: string): string {
+  // Twice, and allowed to wrap: a line that will not wrap sets the email's
+  // width, and widened it past a phone's screen.
+  const ticker = [esc(look.ticker), esc(look.ticker)].join(' &nbsp;&bull;&nbsp; ');
+  const features = (look.features ?? []).map((x) => `<tr><td align="center" style="padding:0 0 18px"><a href="${esc(x.href)}" style="text-decoration:none"><img src="${SITE}/brand/mail/feature-${esc(x.name)}.png" width="560" alt="${esc(x.alt)}" style="display:block;width:100%;max-width:560px;height:auto;border:0;color:${C.chalk};font:600 16px/1.4 ${SANS}"></a></td></tr>`).join('');
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.pitch}"><tr><td align="center" style="padding:0 0 36px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px">
+<tr><td style="background:${C.violet};padding:9px 12px;font:800 11px/1.3 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#ffffff;text-align:center">${ticker}</td></tr>
+<tr><td style="font-size:0;line-height:0;background:#1a1145"><a href="${SITE}" style="text-decoration:none"><img src="${SITE}/brand/mail/${esc(look.hero)}.png" width="600" height="560" alt="${esc(f.heading)}" style="display:block;width:100%;max-width:600px;height:auto;border:0;background:#1a1145;color:${C.chalk};font:800 40px/1.1 ${DISPLAY}"></a></td></tr>
+<tr><td align="center" style="background:${C.pitch}">
+<table role="presentation" width="93.33%" cellpadding="0" cellspacing="0" style="width:93.33%;background:${C.stand};border:1px solid ${C.line};border-top:0;border-radius:0 0 26px 26px">
+<tr><td class="pad" align="center" style="padding:4px 30px 30px;text-align:center">
+<h1 style="margin:0 0 14px;font:800 30px/1.08 ${DISPLAY};color:${C.chalk}">${esc(look.lead)}</h1>
+${f.parts.map(part).join('\n').replace(/<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 26px">/g, '<table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:6px auto 26px">')}
+</td></tr>
+</table></td></tr>
+${features ? `<tr><td align="center" style="padding:34px 0 8px;font:800 12px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:${C.chalk3}">What’s open to you now</td></tr>
+<tr><td align="center" style="padding:10px 0 0"><table role="presentation" width="93.33%" cellpadding="0" cellspacing="0" style="width:93.33%">${features}</table></td></tr>` : ''}
+${look.after?.length ? `<tr><td class="pad" style="padding:14px 30px 0">${look.after.map(part).join('\n')}</td></tr>` : ''}
+<tr><td class="pad" align="center" style="padding:26px 30px 0;text-align:center">
+<a href="${SITE}" style="text-decoration:none;font:700 22px/1 ${SANS};letter-spacing:-1px;color:${C.chalk}">offside<span style="display:inline-block;width:5px;height:5px;margin:0 2px;border-radius:3px;background:${C.violetHi};vertical-align:baseline"></span><span style="color:${C.chalk3}">win</span></a>
+${linkRow ? linkRow.replace('margin:4px 0 0', 'margin:14px 0 0') : ''}
+<p style="margin:18px 0 0;padding-top:18px;border-top:1px solid ${C.line};font:12px/1.6 ${SANS};color:${C.chalk3}">${foot}</p>
+</td></tr>
+</table></td></tr></table>`;
 }
 
 function compose(f: Frame): Mail {
@@ -243,29 +327,14 @@ function compose(f: Frame): Mail {
 </head>
 <body style="margin:0;padding:0;background:${C.pitch};-webkit-text-size-adjust:100%">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:${C.pitch}">${esc(f.preheader)}&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.pitch}"><tr><td align="center" style="padding:28px 0 36px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
-<tr><td class="pad" style="padding:0 30px 18px">
-<a href="${SITE}" style="text-decoration:none;font:700 24px/1 ${SANS};letter-spacing:-1px;color:${C.chalk}">offside<span style="display:inline-block;width:6px;height:6px;margin:0 2px 0 2px;border-radius:3px;background:${C.violetHi};vertical-align:baseline"></span><span style="color:${C.chalk3}">win</span></a>
-</td></tr>
-<tr><td class="card" style="background:${C.stand};border:1px solid ${C.line};border-radius:16px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-<tr><td style="height:3px;line-height:3px;font-size:0;background:${C.violet};border-radius:16px 16px 0 0">&nbsp;</td></tr>
-<tr><td class="pad" style="padding:34px 30px 12px">
-<h1 class="h1" style="margin:0 0 22px;font:800 40px/1 ${DISPLAY};letter-spacing:.005em;color:${C.chalk}">${esc(f.heading)}</h1>
-${f.parts.map(part).join('\n')}
-${linkRow}
-</td></tr>
-<tr><td class="pad" style="padding:22px 30px 28px">
-<p style="margin:0;padding-top:20px;border-top:1px solid ${C.line};font:12px/1.6 ${SANS};color:${C.chalk3}">${foot}</p>
-</td></tr>
-</table></td></tr>
-<tr><td class="pad" style="padding:18px 30px 0;font:12px/1.5 ${SANS};color:${C.chalk3}">Offside.win &nbsp; <a href="${SITE}" style="color:${C.chalk3}">offside.win</a></td></tr>
-</table></td></tr></table></body></html>`;
+${f.look ? lookBody(f, f.look, linkRow, foot) : plainBody(f, linkRow, foot)}
+</body></html>`;
 
   const text = [
     f.heading, '',
+    ...(f.look ? [f.look.lead, ''] : []),
     ...f.parts.map(plain).filter(Boolean).flatMap((t) => [t, '']),
+    ...(f.look?.after ?? []).map(plain).filter(Boolean).flatMap((t) => [t, '']),
     ...(links ? [`Your account: ${SITE}/#/account`, `Terms: ${SITE}/terms`, ''] : []),
     `Questions? Reply to this email or write to ${SUPPORT}.`,
     ...(gamble ? ['', '18+. Offside.win gives opinions about football matches, not advice to bet. BeGambleAware.org'] : []),
@@ -290,21 +359,26 @@ export function membershipMail({ plan, until, consent }: MembershipMailInput): M
   const renews = plan !== 'matchday';
   const when = longDate(until);
   const parts: Part[] = [
-    { p: `Your ${name.toLowerCase()} is on. Every call, every leg of the bet slip and the reasons behind each one are open to you now.` },
+    { p: 'Every call, every leg of the bet slip and the reasons behind each one are open to you now.' },
+    { chip: renews
+      ? `Renews on ${shortDate(until)} at the same price. Stopping it takes one tap.`
+      : `Runs to ${shortDate(until)}, then ends by itself. Nothing renews.` },
     { button: "See today's calls", href: `${SITE}/#/board` },
     { facts: [
       ['Plan', name],
       [renews ? 'Paid to' : 'Runs to', shortDate(until)],
       ['Renews', renews ? 'Yes, until you stop it' : 'No, it ends by itself'],
     ] },
+  ];
+  const after: Part[] = [
     { p: renews
       ? `It renews at the same price on ${when} unless you stop it. Stopping takes one tap on your account page, and you keep everything you have paid for until then.`
-      : `It ends by itself on ${when}. Nothing renews and nothing more is charged.` },
+      : `It ends by itself on ${when}. Nothing renews and nothing more is charged.`, small: true },
   ];
   if (consent) {
-    parts.push({ note: `What you agreed: at checkout on ${longDate(consent.at)} you confirmed you are 18 or over and agreed to our terms of use (the version in force from ${termsDate(consent.terms)}). You asked for your membership to start straight away and accepted that, once it started, you lose the 14-day right to cancel for a change of mind. If anything of ours fails, you still get it put right or your money back.` });
+    after.push({ note: `What you agreed: at checkout on ${longDate(consent.at)} you confirmed you are 18 or over and agreed to our terms of use (the version in force from ${termsDate(consent.terms)}). You asked for your membership to start straight away and accepted that, once it started, you lose the 14-day right to cancel for a change of mind. If anything of ours fails, you still get it put right or your money back.` });
   }
-  parts.push({ p: 'Members’ calls are for you alone. Don’t post, sell or pass them on.', small: true });
+  after.push({ p: 'Members’ calls are for you alone. Don’t post, sell or pass them on.', small: true });
 
   return compose({
     tag: 'membership',
@@ -312,6 +386,17 @@ export function membershipMail({ plan, until, consent }: MembershipMailInput): M
     preheader: renews ? `Everything is open. It renews on ${shortDate(until)} unless you stop it.` : `Everything is open until ${when}.`,
     heading: "You're in.",
     parts,
+    look: {
+      ticker: 'Every call is open',
+      hero: 'hero-joined',
+      lead: `Your ${name.toLowerCase()} is on.`,
+      features: [
+        { name: 'calls', alt: 'Every call, and why: the pick, the odds, the bookmaker, and the reasons in plain football.', href: `${SITE}/#/board` },
+        { name: 'slip', alt: 'The slip, built for you: our surest calls of the day, put together.', href: `${SITE}/#/board` },
+        { name: 'alerts', alt: 'Told the minute it changes: team news turns a call, we pull it and email you.', href: `${SITE}/#/account` },
+      ],
+      after,
+    },
   });
 }
 
