@@ -2548,30 +2548,24 @@ async function viewLanding() {
     app.querySelector('.ld-lit')?.style.setProperty('background-position', '0% 0');
   }
 
-  const [board, hero, livePicks, plans, rec, sure] = await Promise.all([
+  const [board, hero, picks, plans, sure] = await Promise.all([
     loadBoard().catch(() => null),
     getJSON('/api/hero').catch(() => null),
     getJSON('/api/picks?limit=60&settled=true').then((r) => r.picks ?? []).catch(() => []),
     getJSON('/api/plans').catch(() => []),
-    getJSON('/api/record').catch(() => null),
     getJSON('/api/how-sure').catch(() => null),
   ]);
-  // The record is the newest engine's (lab/record.ts): its calls on the games
-  // played before it went live, then the live engine's own from then on.
-  const liveFrom = Number(rec?.live_from) || 0;
-  const replayed = Array.isArray(rec?.rows) ? rec.rows.map((r) => {
-    const same = livePicks.find((x) => Number(x.fixture_id) === Number(r.fixture_id) && x.market === r.market
-      && String(x.outcome) === String(r.outcome) && (x.line ?? null) === (r.line ?? null));
-    return {
-      fixture_id: r.fixture_id, kickoff: r.kickoff, market: r.market, outcome: r.outcome, line: r.line, result: r.result,
-      home_team: r.home, away_team: r.away, home_team_id: r.home_id, away_team_id: r.away_id,
-      home_goals: r.home_goals, away_goals: r.away_goals, narrative: same?.narrative ?? null, why: same?.why ?? null,
-      postmortem_json: same?.postmortem_json ?? r.postmortem ?? null,
-    };
-  }) : [];
-  const picks = replayed.length
-    ? [...livePicks.filter((x) => Number(x.kickoff) >= liveFrom), ...replayed].sort((a, b) => Number(b.kickoff) - Number(a.kickoff))
-    : livePicks;
+  /*
+   * The record is the calls we published, and nothing else.
+   *
+   * It used to splice in the newest engine's replay (lab/record.ts): what it
+   * would have called on games played before it went live. Those rows showed
+   * "Landed" on matches whose own page, rightly, said "We did not call this
+   * one" -- Athletic Club v Sport Recife was one -- and a backtest shown as a
+   * track record is a misleading claim. Every number and card here now comes
+   * from the pick table, the same rows the results page and the match pages
+   * read, so a reader who taps through always finds the call.
+   */
   if (nav !== navTicket) return;
   const fixtures = board?.fixtures ?? [];
   const called = fixtures.filter(hasCall).length;
