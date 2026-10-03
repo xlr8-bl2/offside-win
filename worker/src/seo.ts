@@ -627,7 +627,12 @@ export function render(shell: string, page: Page): string {
     .replace(/<meta name="twitter:image" content="[^"]*">/, (m) => (page.image ? `<meta name="twitter:image" content="${esc(page.image.url)}">` : m))
     .replace(/<meta name="robots" content="[^"]*">/, page.noindex ? '<meta name="robots" content="noindex">' : '$&')
     .replace('</head>', `<meta property="og:url" content="${esc(page.canonical)}">\n${page.json ? `<link rel="alternate" type="application/json" href="${esc(page.json)}">\n` : ''}${page.preloadImage ? `<link rel="preload" as="image" href="${esc(page.preloadImage)}" fetchpriority="high">\n` : ''}${ld}\n</head>`);
-  html = html.replace(/<main id="app">[\s\S]*?<\/main>/, `<main id="app">${page.body}</main>`);
+  // The loading skeleton stays, with the page's words beside it. Where the
+  // app runs, the words are hidden (html.js, base.css) and the skeleton shows
+  // until the app draws the page, so nobody sees a page of text that is then
+  // replaced by the real one. Search engines and browsers without the app get
+  // the words.
+  html = html.replace(/<main id="app">([\s\S]*?)<\/main>/, (_m, shell: string) => `<main id="app">${shell}${page.body}</main>`);
   return cleanLinks(html);
 }
 
