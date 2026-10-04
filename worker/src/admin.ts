@@ -23,7 +23,7 @@
  */
 
 import type { PayEnv } from './pay.ts';
-import { accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, goodwillEndMail, goodwillStartMail, membershipMail, receiptMail, renewalStoppedMail, renewedMail, sendMail } from './mail.ts';
+import { accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, goodwillEndMail, goodwillStartMail, membershipMail, noticeMail, pulledMail, receiptMail, renewalStoppedMail, renewedMail, sendMail } from './mail.ts';
 
 export interface AdminEnv extends PayEnv {
   /** Comma-separated SHA-256 hex digests of the owner's lower-cased email. */
@@ -156,6 +156,10 @@ export async function admin(request: Request, env: AdminEnv, jwt: string | null,
     const all = [
       authMail({ action: 'magiclink', link }),
       authMail({ action: 'signup', link }),
+      authMail({ action: 'invite', link }),
+      authMail({ action: 'reauthentication', link: null, code: '482913' }),
+      authMail({ action: 'email_change_current', link, newEmail: 'new@example.com' }),
+      noticeMail('identity_linked_notification'),
       membershipMail({ plan: 'monthly', until, consent: { at: now, terms: '2026-09-27' } }),
       membershipMail({ plan: 'matchday', until: now + 86400 }),
       receiptMail({ paymentId: 'pay_test_owner', at: now, plan: 'monthly', amountMinor: 900, currency: 'GBP', until }),
@@ -166,6 +170,8 @@ export async function admin(request: Request, env: AdminEnv, jwt: string | null,
       goodwillStartMail({ until: until + 86400, whop: true }),
       goodwillEndMail({ days: 9, until: until + 9 * 86400, whop: false }),
       accountDeletedMail({ stoppedRenewal: true }),
+      pulledMail([{ home: 'Arsenal', away: 'Liverpool', kickoff: now + 5 * 3600, label: 'Arsenal to win', odds: 1.85, bookmaker: 'bet365',
+        reason: 'Saka left out of the squad this morning. Without him Arsenal have won one in five.', replaced_by: 'Under 3.5 goals', href: link }]),
     ];
     const via: Record<string, string | null> = {};
     for (const m of all) via[m.tag + (via[m.tag] !== undefined ? '+' : '')] = await deliver(env, who.email, { ...m, subject: `[Test] ${m.subject}` });
