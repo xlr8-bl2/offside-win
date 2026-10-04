@@ -207,3 +207,18 @@ test('search passes the words through, trimmed and capped', async () => {
   assert.equal(u.searchParams.get('p_q')!.length, 60);
   assert.ok(u.searchParams.get('p_q')!.startsWith('Atlético Madrid'));
 });
+
+test('every answer carries the browser protections: no framing, no sniffing, HTTPS only', async () => {
+  const assets = { ...ENV, ASSETS: { fetch: async () => new Response('the page', { status: 200, headers: { 'cache-control': 'public' } }) } };
+  for (const path of ['/api/board', '/no-such-page.txt']) {
+    const res = await worker.fetch(new Request(`https://offside.win${path}`), assets);
+    assert.equal(res.headers.get('x-frame-options'), 'DENY', path);
+    assert.match(res.headers.get('content-security-policy') ?? '', /frame-ancestors 'none'/, path);
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff', path);
+    assert.match(res.headers.get('strict-transport-security') ?? '', /max-age=31536000/, path);
+  }
+  // A redirect keeps its own headers and gains them too.
+  const moved = await worker.fetch(new Request('https://offside-win.example.workers.dev/today'), { ...assets, SITE_URL: 'https://offside.win' });
+  assert.equal(moved.status, 301);
+  assert.equal(moved.headers.get('x-frame-options'), 'DENY');
+});

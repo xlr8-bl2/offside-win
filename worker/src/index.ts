@@ -380,4 +380,34 @@ async function hit(request: Request, env: Env): Promise<Response> {
 /** The pages seo.ts writes; everything else without a file is a 404 from the assets. */
 const SEO_PAGES = /^\/(?:|today|tomorrow|weekend|free-prediction|predictions(?:\/[a-z0-9-]+)?|results|slip|leagues|pricing|cookies|refunds|contact|responsible-gambling|match\/\d+(?:\/[^/]*)?|league\/\d+(?:\/[^/]*)?|team\/\d+(?:\/[^/]*)?)\/?$/;
 
-export default worker;
+/*
+ * The browser's own protections, on everything this Worker answers (the
+ * static files get the same from dist/_headers, scripts/build-public.mjs).
+ * Above all, no other site may frame these pages: a checkout or an account
+ * page drawn invisibly inside someone else's page is how a reader is tricked
+ * into clicking it. Kept to rules that cannot break a third party the site
+ * uses (Whop's checkout, Google sign-in, the crests and photographs): a full
+ * script policy waits until it can be tested against all of them.
+ */
+export const SECURITY_HEADERS: Record<string, string> = {
+  'strict-transport-security': 'max-age=31536000; includeSubDomains',
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+  'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+  'content-security-policy': "frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
+};
+
+export function secured(res: Response): Response {
+  if (res.status === 101) return res;
+  const out = new Response(res.body, res);
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) if (!out.headers.has(k)) out.headers.set(k, v);
+  return out;
+}
+
+export default {
+  ...worker,
+  async fetch(request: Request, env: Env, ctx?: { waitUntil(p: Promise<unknown>): void }): Promise<Response> {
+    return secured(await worker.fetch(request, env, ctx));
+  },
+};

@@ -197,7 +197,7 @@ function verdict(pm: Omit<PostMortem, 'line'>): string {
     if (shape === 'as we read it' && swing !== null && swing <= 1) {
       return market === 'came to us'
         ? 'We read the game right and the market agreed by kick-off. It still came down to one goal, and the goal went the other way.'
-        : 'The game went the way we said it would. One goal in the wrong place is the whole of it.';
+        : 'We had the shape of the game right. One goal in the wrong place cost us the call.';
     }
     if (shape === 'as we read it') {
       return 'The match was roughly what we expected. The result was not, and there is no more to it than that.';

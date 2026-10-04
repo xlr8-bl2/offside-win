@@ -1527,7 +1527,7 @@ function promoHTML(user) {
     <div class="promo-stub" data-sell="stub" data-public-price>
       <span class="promo-from">From</span>
       <b class="promo-price" data-public-price>£3.49</b>
-      <span class="promo-per">for the weekend</span>
+      <span class="promo-per">for seven days</span>
       <a class="btn btn-accent" href="#/pricing">See the plans</a>
     </div>
   </section>`;
@@ -2459,7 +2459,7 @@ function landingHTML() {
           <a class="btn btn-primary btn-lg ld-go" href="#/board" data-ld="free">Get today’s free call</a>
           <a class="ld-alt" href="#/pricing" data-sell="alt" data-public-price>or see membership, from £3.49</a>
         </div>
-        <p class="ld-assure">Free. No sign-up, no card.</p>
+        <p class="ld-assure">Today’s free call needs no sign-up and no card.</p>
         <div class="ld-proof" data-ld="proof"></div>
         <p class="ld-small">18+. No guaranteed winners, because there’s no such thing.</p>
       </div>
@@ -2586,7 +2586,11 @@ async function viewLanding() {
    */
   if (nav !== navTicket) return;
   const fixtures = board?.fixtures ?? [];
-  const called = fixtures.filter(hasCall).length;
+  // Counted as the board's own "To play" tab counts them: games still to
+  // kick off. The whole list carries the ones already played and graded, so
+  // the landing page said fourteen calls were up while the board showed two.
+  const ahead = fixtures.filter((f) => ['upcoming', 'off'].includes(matchState(f).kind));
+  const called = ahead.filter(hasCall).length;
   // The shout, now the board is in (landingShout).
   const shout = app.querySelector('.ld-shout');
   const shouted = landingShout(new Date(), fixtures);
@@ -2699,8 +2703,8 @@ async function viewLanding() {
     ? `<div class="ld-formrows">${['home', 'away'].map((k) => `<div>${crest(side(k), 'xs', fx[`${k}_id`])}<b>${esc(side(k))}</b>
         <ol class="ld-form ld-form-sm" aria-label="${esc(`${side(k)}, last six, oldest first`)}">${seq(k).map((c) => `<li class="ld-chip is-${c === 'W' ? 'w' : c === 'L' ? 'l' : 'v'}">${c}</li>`).join('')}</ol></div>`).join('')}</div>`
     : '<p class="ld-show-note">The last six for both sides, on every match page.</p>');
-  put('get-2', fixtures.length
-    ? `<p class="ld-bignum"><b>${called}</b><span>of the ${fixtures.length} games on the board have a call right now. The rest get the reasons we passed.</span></p>`
+  put('get-2', ahead.length
+    ? `<p class="ld-bignum"><b>${called}</b><span>of the ${ahead.length} games still to play have a call right now. The rest get the reasons we passed.</span></p>`
     : '');
   const ago = fx?.computed_at ? Math.max(1, Math.round((Date.now() / 1000 - Number(fx.computed_at)) / 60)) : null;
   put('get-3', ago && ago < 24 * 60
@@ -2756,7 +2760,7 @@ async function viewLanding() {
     const behind = Math.max(0, called - 1);
     put('plans', `
       <h2 class="ld-h2" data-sell="head" data-public-price>Every call, from ${esc(money(list[0].amount_minor, list[0].currency))}</h2>
-      <p class="ld-sub">${behind > 1 ? `${called} calls are up on today’s board. One is free. Members see the other ${behind}, with the odds and the reason, the moment each goes up. ` : ''}The match pages, the free call and the record stay free whatever you do.</p>
+      <p class="ld-sub">${behind > 1 ? `${called} calls are up on the board. One is free. Members see the other ${behind}, with the odds and the reason, the moment each goes up. ` : ''}The match pages, the free call and the record stay free whatever you do.</p>
       <ul class="ld-plans">${list.map((p) => `
         <li${p.id === 'monthly' ? ' class="is-pick"' : ''} data-sell-plan="${esc(p.id)}" data-public-price>
           <b>${esc(p.name)}</b>
@@ -6583,7 +6587,7 @@ async function viewPricing() {
    * sells a subscription and a reader has to be told so before, not after.
    */
   const COPY = {
-    matchday: { blurb: 'A weekend of every call. One payment, seven days, and it stops.', renews: false, tag: null },
+    matchday: { blurb: 'Seven days of every call. One payment, and it stops by itself.', renews: false, tag: null },
     // "Our pick", not "Most take this": nobody has taken anything yet, and a
     // popularity claim we cannot back is the misleading kind (CMA, DMCC Act).
     monthly:  { blurb: 'All the calls, all month. Renews each month until you cancel.', renews: true, tag: 'Our pick' },
@@ -6606,7 +6610,7 @@ async function viewPricing() {
    * to. So the button says so, and the card says when the new price begins.
    */
   const buttonFor = (id, p) => {
-    const buy = p.days === 7 ? 'Get the weekend' : p.days >= 80 ? 'Get three months' : 'Join for the month';
+    const buy = p.days === 7 ? 'Get the matchday pass' : p.days >= 80 ? 'Get three months' : 'Join for the month';
     if (!mine) return { label: buy };
     if (mine.plan_id === id) return { label: 'Your plan', mine: true };
     if (id === 'matchday') return { label: 'Covered by yours', covered: true };
@@ -7431,7 +7435,7 @@ async function viewAccount() {
         <span class="ticket-who">${esc(name)}</span>
         ${active
           ? `<span class="ticket-until">Valid until <b>${esc(when(m.expires_at))}</b></span>`
-          : `<span class="ticket-until" data-public-price data-sell="line">One call a day is free. The rest are from £3.49 for the weekend.</span>`}
+          : `<span class="ticket-until" data-public-price data-sell="line">One call a day is free. The rest are from £3.49 for seven days.</span>`}
       </div>
       <div class="ticket-stub">
         ${active

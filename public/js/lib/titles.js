@@ -13,7 +13,7 @@
 
 export const SITE_NAME = 'Offside.win';
 export const HOME_TITLE = "Offside.win: football predictions for today's biggest games";
-export const HOME_DESCRIPTION = "Football predictions for today's biggest games across more than 80 competitions: our call on every match, the reason behind it, team news, and every result, the misses included.";
+export const HOME_DESCRIPTION = "Football predictions for today's biggest games: our call on every match, the reason behind it, team news, and every result, misses included.";
 
 /** A page's title with the name after it; the front page has its own. */
 export const fullTitle = (t) => (t ? `${t} | ${SITE_NAME}` : HOME_TITLE);
@@ -30,7 +30,7 @@ export function matchTitle({ home, away, state, score = null, live = null }) {
   return `${home} v ${away} prediction, preview and team news`;
 }
 
-export const leagueTitle = (name) => `${name} predictions, fixtures, results and table`;
+export const leagueTitle = (name) => `${name} predictions, fixtures and table`;
 
 /** "Saturday 27 September", the day in the UK, as the pages say it. */
 export const ukDay = (epoch) => new Intl.DateTimeFormat('en-GB', {
@@ -50,7 +50,7 @@ export const TITLES = {
   results: 'Our record: every call and how it went',
   'how-sure': 'When we’re confident, are we right? Our calls checked',
   leagues: 'Leagues and competitions we cover',
-  pricing: 'Membership: every call, from £3.49 for the weekend',
+  pricing: 'Membership: every call, from £3.49 for seven days',
   signin: 'Sign in',
   account: 'Your account',
   search: 'Find a game',
