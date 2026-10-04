@@ -6874,9 +6874,9 @@ async function viewCheckout(params) {
         ${moving ? `
         <p class="co-price"><b>${esc(money(0, plan.currency))}</b> <span>today</span></p>
         <p class="co-terms"><b>Then ${esc(price)} ${esc(terms.per)}, from ${esc(longDate(moving.expires_at))}.</b>
-          Your ${esc((PLAN_NAME[moving.plan_id] ?? 'membership').toLowerCase())} is paid up to that date, so the ${esc(name.toLowerCase())}
+          Your ${esc((PLAN_NAME[moving.plan_id] ?? 'membership').toLowerCase())} already runs to that date, so the ${esc(name.toLowerCase())}
           starts now and its first payment waits until then. The ${esc((PLAN_NAME[moving.plan_id] ?? 'membership').toLowerCase())} stops renewing.
-          You keep every day you have paid for and pay for none twice.</p>` : `
+          You keep every day you already have and pay for none twice.</p>` : `
         ${trial ? `
         <p class="co-price"><b>${esc(trial.trial_days)} days free</b> <span>then ${esc(money(plan.amount_minor, plan.currency))} ${esc(terms.per)}</span></p>
         <p class="co-terms"><b>${esc(trial.title)}.</b> ${esc(promo.terms(trial))}</p>
