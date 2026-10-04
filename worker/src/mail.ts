@@ -289,7 +289,7 @@ function lookBody(f: Frame, look: Look, linkRow: string, foot: string): string {
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.pitch}"><tr><td align="center" style="padding:0 0 36px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px">
 ${ticker ? `<tr><td style="background:${C.violet};padding:9px 12px;font:800 11px/1.3 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#ffffff;text-align:center">${ticker}</td></tr>` : ''}
-<tr><td style="font-size:0;line-height:0;background:#1a1145"><a href="${SITE}" style="text-decoration:none"><img src="${SITE}/brand/mail/${esc(look.hero)}.jpg" width="600" alt="${esc(f.heading)}" style="display:block;width:100%;max-width:600px;height:auto;border:0;background:#1a1145;color:${C.chalk};font:800 40px/1.1 ${DISPLAY}"></a></td></tr>
+<tr><td style="font-size:0;line-height:0;background-color:#1a1145"><a href="${SITE}" style="text-decoration:none"><img src="${SITE}/brand/mail/${esc(look.hero)}.jpg" width="600" alt="${esc(f.heading)}" style="display:block;width:100%;max-width:600px;height:auto;border:0;background-color:#1a1145;color:${C.chalk};font:800 40px/1.1 ${DISPLAY}"></a></td></tr>
 <tr><td align="center" style="background:${C.pitch}">
 <table role="presentation" width="93.33%" cellpadding="0" cellspacing="0" style="width:93.33%;background:${C.stand};border:1px solid ${C.line};border-top:0;border-radius:0 0 26px 26px">
 <tr><td class="pad" align="center" style="padding:4px 30px 30px;text-align:center">
@@ -325,6 +325,9 @@ function gmailDark(html: string): string {
   const wrap = (inner: string) => `<span class="gb-s" style="display:block"><span class="gb-d" style="display:block">${inner}</span></span>`;
   const head = html.slice(0, html.indexOf('<body'));
   let body = html.slice(html.indexOf('<body'));
+  // Painted colours only, written `background:`. The hero picture and its cell
+  // say `background-color:` so this leaves them alone: with a gradient on the
+  // picture itself, Gmail on the iPhone fetched it and then never drew it.
   body = body.replace(/background:(#[0-9a-fA-F]{6})(?=[;"])/g, 'background:$1;background-image:linear-gradient($1,$1)');
   // Type: the inside of every paragraph and heading, and of every cell that
   // holds words rather than a table or a picture.
