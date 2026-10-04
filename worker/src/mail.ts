@@ -308,6 +308,32 @@ ${linkRow ? linkRow.replace('margin:4px 0 0', 'margin:14px 0 0') : ''}
 </table></td></tr></table>`;
 }
 
+/*
+ * Gmail on the iPhone, in dark mode, turns every email's colours over,
+ * a dark one included: ours came out grey and white with dark type. Two fixes
+ * it does respect:
+ *   - a background drawn as a gradient image is left alone, so every flat
+ *     background is given one of the same colour;
+ *   - type wrapped in a screen-then-difference blend comes back as it was
+ *     written (Rémi Parmentier's fix). The blend classes are reached only
+ *     through `u + .body`, which matches nowhere but Gmail (it puts a <u>
+ *     before the body), so every other app sees the email untouched.
+ */
+function gmailDark(html: string): string {
+  // Spans, shown as blocks: a <div> inside a <p> closes the paragraph, and
+  // the type falls out of its style.
+  const wrap = (inner: string) => `<span class="gb-s" style="display:block"><span class="gb-d" style="display:block">${inner}</span></span>`;
+  const head = html.slice(0, html.indexOf('<body'));
+  let body = html.slice(html.indexOf('<body'));
+  body = body.replace(/background:(#[0-9a-fA-F]{6})(?=[;"])/g, 'background:$1;background-image:linear-gradient($1,$1)');
+  // Type: the inside of every paragraph and heading, and of every cell that
+  // holds words rather than a table or a picture.
+  body = body.replace(/(<(p|h1)\b[^>]*>)([\s\S]*?)(<\/\2>)/g, (_, open, _t, inner, close) => `${open}${wrap(inner)}${close}`);
+  body = body.replace(/(<td\b[^>]*>)((?:(?!<td\b|<\/td>|<table\b|<img\b|<p\b|<h1\b)[\s\S])*?\S(?:(?!<td\b|<\/td>|<table\b|<img\b|<p\b|<h1\b)[\s\S])*?)(<\/td>)/g,
+    (_, open, inner, close) => `${open}${wrap(inner)}${close}`);
+  return head + body;
+}
+
 function compose(f: Frame): Mail {
   const links = f.links !== false;
   const gamble = f.gamble !== false;
@@ -323,9 +349,9 @@ function compose(f: Frame): Mail {
 <meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark">
 <title>${esc(f.subject)}</title>
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&display=swap" rel="stylesheet">
-<style>:root{color-scheme:dark;supported-color-schemes:dark}a{color:${C.violetHi}}@media (max-width:480px){.card{border-radius:0!important}.pad{padding-left:22px!important;padding-right:22px!important}.h1{font-size:30px!important}}</style>
+<style>:root{color-scheme:dark;supported-color-schemes:dark}u + .body .gb-s{background:#000;mix-blend-mode:screen}u + .body .gb-d{background:#000;mix-blend-mode:difference}a{color:${C.violetHi}}@media (max-width:480px){.card{border-radius:0!important}.pad{padding-left:22px!important;padding-right:22px!important}.h1{font-size:30px!important}}</style>
 </head>
-<body style="margin:0;padding:0;background:${C.pitch};-webkit-text-size-adjust:100%">
+<body class="body" style="margin:0;padding:0;background:${C.pitch};-webkit-text-size-adjust:100%">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:${C.pitch}">${esc(f.preheader)}&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;&#8203;&nbsp;</div>
 ${f.look ? lookBody(f, f.look, linkRow, foot) : plainBody(f, linkRow, foot)}
 </body></html>`;
@@ -340,7 +366,7 @@ ${f.look ? lookBody(f, f.look, linkRow, foot) : plainBody(f, linkRow, foot)}
     ...(gamble ? ['', '18+. Offside.win gives opinions about football matches, not advice to bet. BeGambleAware.org'] : []),
   ].join('\n');
 
-  return { subject: f.subject, html, text, tag: f.tag };
+  return { subject: f.subject, html: gmailDark(html), text, tag: f.tag };
 }
 
 /* --------------------------------------------------------- the messages */
