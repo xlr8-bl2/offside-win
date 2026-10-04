@@ -47,6 +47,17 @@ export interface MailEnv {
 
 export const SUPPORT = 'support@offside.win';
 const SITE = 'https://offside.win';
+
+/*
+ * Where the email pictures are fetched from: jsDelivr, serving this public
+ * repo at a fixed commit, not offside.win. Gmail never fetches a picture from
+ * the reader's phone; Google's image proxy does, and something in front of
+ * offside.win turned it away, so every hero came out blank in Gmail while
+ * loading fine everywhere else. Off Cloudflare, no zone setting can do that.
+ * Pinned to a commit so a cached copy can never be stale: after changing the
+ * art (scripts/mail-art.mjs), merge it, then point this at that merge commit.
+ */
+const MAIL_ART = 'https://cdn.jsdelivr.net/gh/xlr8-bl2/offside-win@77ee4ec12c340808ee89e67faf0d2bcd88fb429e/public/brand/mail';
 const FROM_NAME = 'Offside.win';
 
 export interface Mail { subject: string; html: string; text: string; tag: string }
@@ -285,11 +296,11 @@ function lookBody(f: Frame, look: Look, linkRow: string, foot: string): string {
   // Twice, and allowed to wrap: a line that will not wrap sets the email's
   // width, and widened it past a phone's screen.
   const ticker = look.ticker ? [esc(look.ticker), esc(look.ticker)].join(' &nbsp;&bull;&nbsp; ') : '';
-  const features = (look.features ?? []).map((x) => `<tr><td align="center" style="padding:0 0 18px"><a href="${esc(x.href)}" style="text-decoration:none"><img src="${SITE}/brand/mail/feature-${esc(x.name)}.png" width="560" alt="${esc(x.alt)}" style="display:block;width:100%;max-width:560px;height:auto;border:0;color:${C.chalk};font:600 16px/1.4 ${SANS}"></a></td></tr>`).join('');
+  const features = (look.features ?? []).map((x) => `<tr><td align="center" style="padding:0 0 18px"><a href="${esc(x.href)}" style="text-decoration:none"><img src="${MAIL_ART}/feature-${esc(x.name)}.png" width="560" alt="${esc(x.alt)}" style="display:block;width:100%;max-width:560px;height:auto;border:0;color:${C.chalk};font:600 16px/1.4 ${SANS}"></a></td></tr>`).join('');
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.pitch}"><tr><td align="center" style="padding:0 0 36px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px">
 ${ticker ? `<tr><td style="background:${C.violet};padding:9px 12px;font:800 11px/1.3 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#ffffff;text-align:center">${ticker}</td></tr>` : ''}
-<tr><td style="font-size:0;line-height:0;background:#1a1145"><a href="${SITE}" style="text-decoration:none"><img src="${SITE}/brand/mail/${esc(look.hero)}.jpg" width="600" alt="${esc(f.heading)}" style="display:block;width:100%;max-width:600px;height:auto;border:0;background:#1a1145;color:${C.chalk};font:800 40px/1.1 ${DISPLAY}"></a></td></tr>
+<tr><td style="font-size:0;line-height:0;background:#1a1145"><a href="${SITE}" style="text-decoration:none"><img src="${MAIL_ART}/${esc(look.hero)}.jpg" width="600" alt="${esc(f.heading)}" style="display:block;width:100%;max-width:600px;height:auto;border:0;background:#1a1145;color:${C.chalk};font:800 40px/1.1 ${DISPLAY}"></a></td></tr>
 <tr><td align="center" style="background:${C.pitch}">
 <table role="presentation" width="93.33%" cellpadding="0" cellspacing="0" style="width:93.33%;background:${C.stand};border:1px solid ${C.line};border-top:0;border-radius:0 0 26px 26px">
 <tr><td class="pad" align="center" style="padding:4px 30px 30px;text-align:center">

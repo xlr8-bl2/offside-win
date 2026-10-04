@@ -237,3 +237,16 @@ test('no picture sits inside the Gmail blend (it blanks it)', () => {
     assert.doesNotMatch(m.html, /class="gb-d"[^>]*>(?:(?!<\/span>)[\s\S])*<img/, m.tag);
   }
 });
+
+test('every email picture is served off the site, at a pinned commit, and exists in the repo', async () => {
+  const { existsSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const dir = fileURLToPath(new URL('../../public/brand/mail/', import.meta.url));
+  for (const m of every) {
+    for (const [, src] of m.html.matchAll(/<img[^>]+src="([^"]+)"/g)) {
+      const hit = src!.match(/^https:\/\/cdn\.jsdelivr\.net\/gh\/xlr8-bl2\/offside-win@[0-9a-f]{40}\/public\/brand\/mail\/([\w-]+\.(?:jpg|png))$/);
+      assert.ok(hit, `${m.tag}: ${src}`);
+      assert.ok(existsSync(dir + hit![1]), `${m.tag}: ${hit![1]} is not in public/brand/mail`);
+    }
+  }
+});
