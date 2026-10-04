@@ -48,7 +48,53 @@ async function cloudflare(token: string, path: string, init: RequestInit = {}) {
 /** Brevo writes "@" for the domain itself and a bare label for the rest. */
 const fqdn = (host: string) => (!host || host === '@' ? DOMAIN : host.endsWith(DOMAIN) ? host : `${host}.${DOMAIN}`);
 
+/**
+ * Can mail clients fetch the email pictures? Gmail never fetches them from the
+ * reader's phone: Google's image proxy does, from Google's own addresses, and
+ * a zone setting that challenges automated traffic blanks every hero. Reads
+ * the settings that can do that and the last day of requests for
+ * /brand/mail/, grouped by status and, for Google's fetchers only, the agent.
+ * Nothing about a person is printed.
+ */
+async function imageCheck(): Promise<void> {
+  const token = process.env['CF_API_TOKEN'] ?? '';
+  if (!token) throw new Error('CF_API_TOKEN is not set');
+  const z = await cloudflare(token, `/zones?name=${DOMAIN}`);
+  const zone = z.ok ? z.body?.result?.[0]?.id ?? null : null;
+  console.log('cloudflare zone:', z.status, zone ? 'found' : 'not visible to this token');
+  if (!zone) return;
+  for (const s of ['security_level', 'hotlink_protection', 'browser_check', 'challenge_ttl']) {
+    const r = await cloudflare(token, `/zones/${zone}/settings/${s}`);
+    console.log(`  ${s}:`, r.ok ? JSON.stringify(r.body?.result?.value) : `cannot read (${r.status})`);
+  }
+  const bm = await cloudflare(token, `/zones/${zone}/bot_management`);
+  console.log('  bot management:', bm.ok ? JSON.stringify(bm.body?.result) : `cannot read (${bm.status})`);
+  const since = new Date(Date.now() - 86400_000).toISOString();
+  const until = new Date().toISOString();
+  const gql = async (query: string) => {
+    const r = await fetch(`${CF}/graphql`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ query }) });
+    return r.json().catch(() => null) as Promise<any>;
+  };
+  const reqs = await gql(`{ viewer { zones(filter: {zoneTag: "${zone}"}) {
+    httpRequestsAdaptiveGroups(limit: 50, filter: {datetime_geq: "${since}", datetime_leq: "${until}", clientRequestPath_like: "/brand/mail/%"}) {
+      count dimensions { edgeResponseStatus userAgent securityAction } } } } }`);
+  if (reqs?.errors?.length) console.log('requests:', JSON.stringify(reqs.errors.map((e: any) => e.message)).slice(0, 300));
+  for (const g of reqs?.data?.viewer?.zones?.[0]?.httpRequestsAdaptiveGroups ?? []) {
+    const ua = String(g.dimensions.userAgent ?? '');
+    const who = /google/i.test(ua) ? ua.slice(0, 120) : 'other agent';
+    console.log(`  ${g.count} x status ${g.dimensions.edgeResponseStatus} action ${g.dimensions.securityAction || '-'} from ${who}`);
+  }
+  const fw = await gql(`{ viewer { zones(filter: {zoneTag: "${zone}"}) {
+    firewallEventsAdaptiveGroups(limit: 20, filter: {datetime_geq: "${since}", datetime_leq: "${until}"}) {
+      count dimensions { action source clientRequestPath } } } } }`);
+  if (fw?.errors?.length) console.log('firewall:', JSON.stringify(fw.errors.map((e: any) => e.message)).slice(0, 300));
+  for (const g of fw?.data?.viewer?.zones?.[0]?.firewallEventsAdaptiveGroups ?? []) {
+    console.log(`  firewall: ${g.count} x ${g.dimensions.action} by ${g.dimensions.source} on ${String(g.dimensions.clientRequestPath).slice(0, 60)}`);
+  }
+}
+
 export async function mailSetup(testTo?: string): Promise<void> {
+  if (testTo === 'images') return imageCheck();
   const key = process.env['BREVO_API_KEY'] ?? '';
   if (!key) throw new Error('BREVO_API_KEY is not set in Actions secrets. Add it in the repo settings, then run this again.');
 
