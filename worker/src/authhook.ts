@@ -22,6 +22,8 @@
 
 import { authMail, deliver, noticeMail, type MailEnv } from './mail.ts';
 
+const SITE = 'https://offside.win';
+
 export interface HookEnv extends MailEnv {
   SUPABASE_URL: string;
   SUPABASE_SERVICE_KEY?: string;
@@ -108,11 +110,18 @@ export async function authEmailHook(request: Request, env: HookEnv): Promise<Res
   const d = body.email_data ?? {};
   const action = String(d.email_action_type ?? 'magiclink');
   const email = body.user?.email ?? '';
+  // The link opens our own site, which redeems the token itself
+  // (completeSignIn in public/js/lib/auth.js). A button on offside.win that
+  // led to a supabase.co address is the shape of a phishing email: Gmail
+  // hid the pictures for it, and the address meant nothing to the reader.
   const verify = (hash: string) => {
-    const u = new URL('/auth/v1/verify', env.SUPABASE_URL);
-    u.searchParams.set('token', hash);
+    let u = new URL('/', SITE);
+    try {
+      const back = d.redirect_to ? new URL(d.redirect_to) : null;
+      if (back && back.origin === u.origin) u = new URL(back.pathname, SITE);
+    } catch { /* not a URL: the home page */ }
+    u.searchParams.set('token_hash', hash);
     u.searchParams.set('type', action);
-    if (d.redirect_to) u.searchParams.set('redirect_to', d.redirect_to);
     return u.toString();
   };
 

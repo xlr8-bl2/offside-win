@@ -616,7 +616,6 @@ export function authMail({ action, link, code, newEmail }: { action: AuthAction;
     { p: 'It works once, and only for the next hour. Open it on the phone or computer you want to be signed in on.', small: true },
     { p: 'Didn’t ask for this? Ignore it. Nobody gets in without this email.', small: true },
   ];
-  const fallback: Part[] = link ? [{ link: 'Button not working? Paste this into your browser:', href: link }] : [];
 
   if (action === 'reauthentication' || !link) {
     return compose({
@@ -642,7 +641,7 @@ export function authMail({ action, link, code, newEmail }: { action: AuthAction;
       parts: [
         { p: 'Confirm this is your email and your Offside.win account is ready. You’ll be signed in straight away.' },
         { button: 'Confirm and sign in', href: link },
-        ...tail, ...fallback,
+        ...tail,
       ],
     });
   }
@@ -656,7 +655,7 @@ export function authMail({ action, link, code, newEmail }: { action: AuthAction;
       parts: [
         { p: 'An Offside.win account has been set up for this email. Tap to accept it and sign in.' },
         { button: 'Accept and sign in', href: link },
-        ...tail, ...fallback,
+        ...tail,
       ],
     });
   }
@@ -670,7 +669,7 @@ export function authMail({ action, link, code, newEmail }: { action: AuthAction;
       parts: [
         { p: 'Tap to move your Offside.win account to this address. Until you do, nothing changes.' },
         { button: 'Confirm new email', href: link },
-        ...tail, ...fallback,
+        ...tail,
       ],
     });
   }
@@ -687,7 +686,6 @@ export function authMail({ action, link, code, newEmail }: { action: AuthAction;
           : 'Someone asked to move your Offside.win account to a new address. If that was you, confirm it here too.' },
         { button: 'Confirm the change', href: link },
         { p: 'Wasn’t you? Ignore this and the change does not happen. Then write to us.', small: true },
-        ...fallback,
       ],
     });
   }
@@ -701,7 +699,7 @@ export function authMail({ action, link, code, newEmail }: { action: AuthAction;
     parts: [
       { p: 'Here’s your link to Offside.win. No password, nothing to remember.' },
       { button: 'Sign in to Offside.win', href: link },
-      ...tail, ...fallback,
+      ...tail,
     ],
   });
 }
