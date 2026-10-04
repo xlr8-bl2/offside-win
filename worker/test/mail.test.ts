@@ -56,10 +56,11 @@ test('no message promises money back from betting', () => {
   for (const m of every) assert.doesNotMatch(m.text, /profit|guaranteed|win big|returns/i, m.tag);
 });
 
-test('a sign-in link goes in the button and in plain text', () => {
-  const link = 'https://x.supabase.co/auth/v1/verify?token=pkce_1&type=magiclink&redirect_to=https%3A%2F%2Foffside.win%2F';
+test('a sign-in link goes in the button and in plain text, and is never printed in the HTML', () => {
+  const link = 'https://offside.win/?token_hash=pkce_1&type=magiclink';
   const m = authMail({ action: 'magiclink', link });
-  assert.ok(m.html.includes(link.replace(/&/g, '&amp;')));
+  assert.ok(m.html.includes(`href="${link.replace(/&/g, '&amp;')}"`));
+  assert.equal(m.html.split(link.replace(/&/g, '&amp;')).length, 2, 'the link appears once: the button');
   assert.ok(m.text.includes(link));
 });
 
@@ -147,7 +148,20 @@ test('the hook sends a sign-in link built from the token hash', async () => {
   assert.equal(res.status, 200);
   const msg = EMAIL.sent[0] as { to: string; text: string };
   assert.equal(msg.to, 'a@b.c');
-  assert.ok(msg.text.includes('https://abc.supabase.co/auth/v1/verify?token=pkce_xyz&type=magiclink&redirect_to=https%3A%2F%2Foffside.win%2F'));
+  assert.ok(msg.text.includes('https://offside.win/?token_hash=pkce_xyz&type=magiclink'));
+  assert.ok(!msg.text.includes('supabase.co'), 'the button opens our own site');
+});
+
+test('a sign-in link keeps the page it was asked from, and never leaves the site', async () => {
+  const send = async (redirect_to: string) => {
+    const EMAIL = binding();
+    const env = { SUPABASE_URL: 'https://abc.supabase.co', SUPABASE_SERVICE_KEY: SERVICE, EMAIL };
+    const req = await signed({ user: { email: 'a@b.c' }, email_data: { token_hash: 'h', email_action_type: 'magiclink', redirect_to } }, await hookSecret(SERVICE));
+    assert.equal((await authEmailHook(req, env)).status, 200);
+    return (EMAIL.sent[0] as { text: string }).text;
+  };
+  assert.ok((await send('https://offside.win/pricing')).includes('https://offside.win/pricing?token_hash=h&type=magiclink'));
+  assert.ok((await send('https://evil.example/')).includes('https://offside.win/?token_hash=h&type=magiclink'));
 });
 
 test('an email change sends each address its own half', async () => {
@@ -159,8 +173,8 @@ test('an email change sends each address its own half', async () => {
   }, await hookSecret(SERVICE));
   assert.equal((await authEmailHook(req, env)).status, 200);
   const byTo = Object.fromEntries((EMAIL.sent as Array<{ to: string; text: string }>).map((m) => [m.to, m.text]));
-  assert.match(byTo['old@b.c']!, /token=for_old/);
-  assert.match(byTo['new@b.c']!, /token=for_new/);
+  assert.match(byTo['old@b.c']!, /token_hash=for_old/);
+  assert.match(byTo['new@b.c']!, /token_hash=for_new/);
 });
 
 test('with no way to send, the hook says so instead of pretending', async () => {

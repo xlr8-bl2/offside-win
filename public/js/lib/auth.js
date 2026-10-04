@@ -420,6 +420,18 @@ export async function accountRpc(fn, args) {
 export async function completeSignIn() {
   if (isGoogleReturn()) return completeGoogleReturn();
   const url = new URL(location.href);
+  // Our own emails link here with the token itself (worker/src/authhook.ts),
+  // so the button reads offside.win rather than a supabase.co address.
+  const tokenHash = url.searchParams.get('token_hash');
+  if (tokenHash) {
+    const type = url.searchParams.get('type') || 'magiclink';
+    url.searchParams.delete('token_hash');
+    url.searchParams.delete('type');
+    history.replaceState(null, '', url.toString());
+    const { error } = await (await client()).auth.verifyOtp({ token_hash: tokenHash, type });
+    if (error) throw new Error(error.message);
+    return true;
+  }
   const code = url.searchParams.get('code');
   const failed = url.searchParams.get('error_description') ?? url.searchParams.get('error');
   if (!code && !failed) return false;
