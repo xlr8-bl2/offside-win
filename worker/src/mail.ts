@@ -329,8 +329,10 @@ function gmailDark(html: string): string {
   // Type: the inside of every paragraph and heading, and of every cell that
   // holds words rather than a table or a picture.
   body = body.replace(/(<(p|h1)\b[^>]*>)([\s\S]*?)(<\/\2>)/g, (_, open, _t, inner, close) => `${open}${wrap(inner)}${close}`);
-  body = body.replace(/(<td\b[^>]*>)((?:(?!<td\b|<\/td>|<table\b|<img\b|<p\b|<h1\b)[\s\S])*?\S(?:(?!<td\b|<\/td>|<table\b|<img\b|<p\b|<h1\b)[\s\S])*?)(<\/td>)/g,
-    (_, open, inner, close) => `${open}${wrap(inner)}${close}`);
+  body = body.replace(/(<td\b[^>]*>)((?:(?!<td\b|<\/td>)[\s\S])*)(<\/td>)/g, (all, open, inner, close) =>
+    // Innermost cells only, and only words: never a picture (a blend over it
+    // blanks it in Gmail), a table, or what is already wrapped.
+    (/<(img|table|p|h1)\b|class="gb-s"/.test(inner) || !/\S/.test(inner.replace(/<[^>]*>|&nbsp;/g, ''))) ? all : `${open}${wrap(inner)}${close}`);
   return head + body;
 }
 

@@ -217,3 +217,9 @@ test('the receipt says what was bought, what it cost and its number', () => {
   assert.ok(m.text.includes(no));
   assert.ok(m.subject.includes(no));
 });
+
+test('no picture sits inside the Gmail blend (it blanks it)', () => {
+  for (const m of every) {
+    assert.doesNotMatch(m.html, /class="gb-d"[^>]*>(?:(?!<\/span>)[\s\S])*<img/, m.tag);
+  }
+});
