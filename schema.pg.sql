@@ -2874,9 +2874,16 @@ BEGIN
       LEFT JOIN auth.users u ON lower(u.email) = lower(e.email)
       LEFT JOIN profile p ON p.user_id = u.id
      WHERE e.status = 'active' AND e.expires_at > now_s AND coalesce(p.call_alerts, true)),
+  -- A member is told about a call once. The slate can pull a call, see it
+  -- come back on the next pass and pull it again: that is a new row here,
+  -- but the same call on the same match, and it arrived twice in an inbox.
   claimed AS (
     INSERT INTO pulled_notice (pulled_id, email, sent_at)
     SELECT c.id, m.email, now_s FROM calls c CROSS JOIN members m
+     WHERE NOT EXISTS (
+       SELECT 1 FROM pulled_notice n JOIN pulled_call o ON o.id = n.pulled_id
+        WHERE n.email = m.email AND o.fixture_id = c.fixture_id
+          AND o.market = c.market AND o.outcome = c.outcome AND o.line IS NOT DISTINCT FROM c.line)
     ON CONFLICT DO NOTHING RETURNING pulled_id, email),
   handled AS (
     UPDATE pulled_call SET alerted_at = now_s WHERE id IN (SELECT id FROM calls) RETURNING id)
