@@ -628,7 +628,7 @@ const scenarios = {
           faq: app.querySelectorAll('.ld-faq details').length,
         };
       });
-      report(`landing ${w}: the headline, today's free call and every section`, /We call the big games/.test(m.h1 ?? '') && m.sections.length >= 5 && m.faq === 5, JSON.stringify({ h1: m.h1, sections: m.sections, call: m.call }));
+      report(`landing ${w}: the headline, today's free call and every section`, /show their working/.test(m.h1 ?? '') && m.sections.length >= 5 && m.faq === 5, JSON.stringify({ h1: m.h1, sections: m.sections, call: m.call }));
       report(`landing ${w}: the free call is its reasoning, linked to its match`, !m.call || /^(#\/fixture|\/match)\/\d+/.test(m.freeHref ?? ''), JSON.stringify({ call: m.call, href: m.freeHref }));
       report(`landing ${w}: no odds anywhere on it`, !m.odds.length, m.odds.join(' | '));
       report(`landing ${w}: nothing spills sideways, no errors`, !m.hscroll && !errors.length, errors.join(' | '));

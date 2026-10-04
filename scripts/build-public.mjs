@@ -97,7 +97,17 @@ const rules = [
   // Named one by one: a rule's splat stands for the rest of a path, not a suffix.
   ...files.map(rel).filter((p) => /^\/[^/]+\.(png|svg|webmanifest)$/.test(p)).map((p) => [p, 'public, max-age=86400']),
 ];
-writeFileSync(join(OUT, '_headers'), `${rules.map(([p, v]) => `${p}\n  Cache-Control: ${v}`).join('\n')}\n`);
+// The browser's protections on every file, as the Worker sets them on what it
+// answers (SECURITY_HEADERS in worker/src/index.ts): above all, no framing.
+const secure = [
+  'Strict-Transport-Security: max-age=31536000; includeSubDomains',
+  'X-Content-Type-Options: nosniff',
+  'X-Frame-Options: DENY',
+  'Referrer-Policy: strict-origin-when-cross-origin',
+  'Permissions-Policy: camera=(), microphone=(), geolocation=()',
+  "Content-Security-Policy: frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
+];
+writeFileSync(join(OUT, '_headers'), `/*\n${secure.map((h) => `  ${h}`).join('\n')}\n${rules.map(([p, v]) => `${p}\n  Cache-Control: ${v}`).join('\n')}\n`);
 
 const before = files.filter((p) => /\.(js|css)$/.test(p)).reduce((n, p) => n + statSync(join(SRC, relative(OUT, p))).size, 0);
 const after = files.filter((p) => /\.(js|css)$/.test(p)).reduce((n, p) => n + statSync(p).size, 0);
