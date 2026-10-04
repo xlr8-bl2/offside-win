@@ -339,6 +339,21 @@ function gmailDark(html: string): string {
   return head + body;
 }
 
+/*
+ * A mark nobody sees, different in every email: at the top, in the hero's
+ * cell and at the foot. Gmail stacks emails with one subject into a single
+ * conversation and folds anything that repeats an earlier one behind "•••".
+ * Every sign-in email opens with the same picture, so from the second one on
+ * Gmail hid the hero, and the email started at the card.
+ */
+function unrepeated(html: string): string {
+  const mark = () => `<span style="display:none;font-size:0;line-height:0;max-height:0;max-width:0;opacity:0;overflow:hidden;color:transparent">${crypto.randomUUID().slice(0, 8)}</span>`;
+  return html
+    .replace(/(<body\b[^>]*>)/, (b) => `${b}${mark()}`)
+    .replace(/(<td style="font-size:0;line-height:0;background-color:#1a1145">)/, (td) => `${td}${mark()}`)
+    .replace('</body>', () => `${mark()}</body>`);
+}
+
 function compose(f: Frame): Mail {
   const links = f.links !== false;
   const gamble = f.gamble !== false;
@@ -371,7 +386,7 @@ ${f.look ? lookBody(f, f.look, linkRow, foot) : plainBody(f, linkRow, foot)}
     ...(gamble ? ['', '18+. Offside.win gives opinions about football matches, not advice to bet. BeGambleAware.org'] : []),
   ].join('\n');
 
-  return { subject: f.subject, html: gmailDark(html), text, tag: f.tag };
+  return { subject: f.subject, html: unrepeated(gmailDark(html)), text, tag: f.tag };
 }
 
 /* --------------------------------------------------------- the messages */

@@ -244,3 +244,12 @@ test('no picture, and no cell holding one, carries the Gmail gradient', () => {
     for (const [, td] of m.html.matchAll(/(<td\b[^>]*>)(?:(?!<\/td>)[\s\S])*?<img\b/g)) assert.doesNotMatch(td!, /gradient/, `${m.tag}: ${td!.slice(0, 80)}`);
   }
 });
+
+test('the same email sent twice is never identical, so Gmail does not fold it away', () => {
+  const a = authMail({ action: 'magiclink', link: 'https://offside.win/?token_hash=x&type=magiclink' }).html;
+  const b = authMail({ action: 'magiclink', link: 'https://offside.win/?token_hash=x&type=magiclink' }).html;
+  assert.notEqual(a, b);
+  const hero = (h: string) => h.match(/<td style="font-size:0;line-height:0;background-color:#1a1145">[\s\S]*?<\/td>/)![0];
+  assert.notEqual(hero(a), hero(b), 'the hero cell itself differs');
+  assert.notEqual(a.match(/<body\b[^>]*>[\s\S]{0,200}/)![0], b.match(/<body\b[^>]*>[\s\S]{0,200}/)![0], 'and so does the very top');
+});
