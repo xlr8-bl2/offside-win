@@ -90,6 +90,11 @@ export async function whopCheck(): Promise<void> {
   try { lj = JSON.parse(lt); } catch { /* not json */ }
   console.log('memberships list:', l.status, l.ok ? `${lj?.data?.length ?? 0} found` : JSON.stringify(lj?.error ?? lt.slice(0, 200)));
   for (const m of lj?.data ?? []) {
+    // Every field that looks like a date, and the trial ones, by name: which
+    // one says when free days end. Dates and numbers only, never people.
+    const when = Object.entries(m).filter(([k, v]) => /(_at|_end|_start|trial|period|expir|renew)/i.test(k) && (v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'));
+    console.log('  fields', m.id, JSON.stringify(Object.fromEntries(when)));
+    if (m.plan && typeof m.plan === 'object') console.log('  plan fields', JSON.stringify(Object.fromEntries(Object.entries(m.plan).filter(([k]) => /(trial|period|days|type|id)/i.test(k)))));
     console.log('  membership', m.id, 'status', m.status, 'account id on it', /^[0-9a-f-]{36}$/i.test(m.metadata?.user_id ?? '') ? 'yes' : 'no',
       'plan', m.metadata?.plan ?? '-', 'created', m.created_at, 'period end', m.renewal_period_end, 'manage url', Boolean(m.manage_url), 'buyer email present', Boolean(m.user?.email));
   }

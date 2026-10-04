@@ -799,8 +799,14 @@ export async function grantFromMembership(env: PayEnv, m: Rec): Promise<GrantOut
   const ourPlan = asStr(meta['plan']);
   const plan = ourPlan && /^[a-z0-9_-]{1,40}$/.test(ourPlan) ? ourPlan : await planForWhop(env, asStr(asRec(m['plan'])?.['id']));
   const now = Math.floor(Date.now() / 1000);
-  const end = toEpoch(m['renewal_period_end'])
-    ?? ((toEpoch(m['created_at']) ?? toEpoch(m['joined_at']) ?? now) + (await daysOf(env, plan)) * 86400);
+  // Whop's own end of the period paid for, or of the free days on a trial:
+  // `current_period_end` today, `renewal_period_end` in older payloads. Only
+  // without either is it worked out from the plan, and never for a trial,
+  // whose free days are not the plan's length: reading a trial as a whole
+  // plan handed out a month for a seven-day trial.
+  const started = toEpoch(m['created_at']) ?? toEpoch(m['joined_at']) ?? now;
+  const end = toEpoch(m['current_period_end']) ?? toEpoch(m['renewal_period_end']) ?? toEpoch(m['expires_at'])
+    ?? (status === 'trialing' ? started + 86400 : started + (await daysOf(env, plan)) * 86400);
   if (end <= now) return { membership: id, result: 'period over' };
   const manage = asStr(m['manage_url']);
   const out = await rpcAsService(env, 'record_entitlement', {

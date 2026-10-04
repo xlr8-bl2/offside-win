@@ -377,6 +377,24 @@ test('a renewing membership is dated by Whop, and a dead one is left alone', asy
   assert.ok(!find('/rpc/record_entitlement'), 'nothing granted for a dead membership');
 });
 
+test('a free trial is granted to the end of its free days, not the plan\'s length', async () => {
+  route = (url) => {
+    if (url.includes('/auth/v1/admin/users/')) return new Response(JSON.stringify({ email: 'o@a.com' }), { status: 200 });
+    if (url.includes('/rest/v1/plan')) return new Response(JSON.stringify([{ id: 'monthly', days: 30 }]), { status: 200 });
+    if (url.includes('/rpc/record_entitlement')) return new Response(JSON.stringify({ applied: true }), { status: 200 });
+    return new Response('[]', { status: 200 });
+  };
+  // As Whop sends it: trialing, current_period_end at the end of the free days, no renewal_period_end.
+  const freeEnd = new Date(Date.now() + 7 * 86400_000).toISOString();
+  await grantFromMembership(WHOP, mem({ status: 'trialing', current_period_end: freeEnd, billing_period_days: 30, metadata: { user_id: UID, plan: 'monthly' } }));
+  assert.equal(find('/rpc/record_entitlement')!.body.p_expires, Math.floor(Date.parse(freeEnd) / 1000));
+  sent = [];
+  // With no end at all, a trial gets a day, never the month.
+  await grantFromMembership(WHOP, mem({ status: 'trialing', metadata: { user_id: UID, plan: 'monthly' } }));
+  const days = (find('/rpc/record_entitlement')!.body.p_expires - Date.now() / 1000) / 86400;
+  assert.ok(days > 0 && days <= 1.01, `a day, not ${days.toFixed(1)}`);
+});
+
 test('confirm grants only the caller\'s own memberships', async () => {
   route = (url) => {
     if (url.includes('/auth/v1/user')) return new Response(JSON.stringify({ id: UID, email: 'o@a.com' }), { status: 200 });
