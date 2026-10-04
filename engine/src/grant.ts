@@ -9,12 +9,62 @@
  *   npm run grant -- someone@example.com            (ten years)
  *   npm run grant -- someone@example.com 30          (thirty days)
  *   npm run grant -- someone@example.com off         (revoke)
+ *   npm run grant -- all off                          (revoke every membership)
  */
 
+import { cancelWhopAtPeriodEnd } from '../../worker/src/whop.ts';
 import { exec, select } from './store.ts';
+
+/**
+ * End every membership on the site, however it was given, and stop every Whop
+ * subscription renewing so none of them takes money or comes back. For clearing
+ * the owner's test accounts before launch. Prints counts only: the repo is
+ * public, so its logs never carry an email.
+ */
+async function endAll(): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  const comp = await select(
+    `UPDATE membership SET expires_at = ?, auto_renew = 0, cancelled_at = coalesce(cancelled_at, ?), updated_at = ?
+      WHERE expires_at > ? RETURNING 1`,
+    [now, now, now, now],
+  );
+  const bought = await select(
+    `UPDATE entitlement SET status = 'ended', expires_at = least(expires_at, ?), renew_stopped_at = coalesce(renew_stopped_at, ?), updated_at = ?
+      WHERE status = 'active' AND expires_at > ? RETURNING 1`,
+    [now, now, now, now],
+  );
+  console.log(`Memberships ended: ${comp.length} on the site, ${bought.length} bought through checkout.`);
+
+  const key = process.env['WHOP_API_KEY'] ?? '';
+  const company = process.env['WHOP_COMPANY_ID'] ?? '';
+  if (!key || !company) { console.log('Whop not configured; no subscriptions to stop.'); return; }
+  let after: string | null = null, live = 0, stopped = 0, failed = 0;
+  for (let page = 0; page < 20; page++) {
+    const q = new URLSearchParams({ account_id: company, first: '100', created_after: '2020-01-01T00:00:00Z' });
+    if (after) q.set('after', after);
+    const res = await fetch(`https://api.whop.com/api/v1/memberships?${q}`, { headers: { authorization: `Bearer ${key}`, accept: 'application/json' } });
+    if (!res.ok) throw new Error(`Whop memberships list: ${res.status}. The site's memberships are ended; Whop's are not.`);
+    const body = await res.json() as { data?: Array<Record<string, unknown>>; page_info?: { has_next_page?: boolean; end_cursor?: string } };
+    for (const m of body.data ?? []) {
+      if (!/^(active|trialing|past_due)$/i.test(String(m['status'] ?? ''))) continue;
+      live++;
+      if (m['cancel_at_period_end'] === true || typeof m['id'] !== 'string') continue;
+      const code = await cancelWhopAtPeriodEnd(key, m['id']);
+      if (code < 400) stopped++; else { failed++; console.log('  could not stop one:', code); }
+    }
+    after = body.page_info?.has_next_page ? body.page_info.end_cursor ?? null : null;
+    if (!after) break;
+  }
+  console.log(`Whop: ${live} still running, ${stopped} stopped from renewing now${failed ? `, ${failed} failed` : ''}.`);
+  if (failed) throw new Error('Some Whop subscriptions are still renewing.');
+}
 
 export async function grant(email: string, arg: string | undefined): Promise<void> {
   const target = String(email ?? '').trim().toLowerCase();
+  if (target === 'all') {
+    if (arg !== 'off') throw new Error('Only "all off" works on every account: comping everyone is not a thing.');
+    return endAll();
+  }
   if (!target.includes('@')) throw new Error('grant needs an email address: npm run grant -- you@example.com');
 
   const [user] = await select<{ id: string }>(
