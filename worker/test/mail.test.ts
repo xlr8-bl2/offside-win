@@ -237,3 +237,10 @@ test('no picture sits inside the Gmail blend (it blanks it)', () => {
     assert.doesNotMatch(m.html, /class="gb-d"[^>]*>(?:(?!<\/span>)[\s\S])*<img/, m.tag);
   }
 });
+
+test('no picture, and no cell holding one, carries the Gmail gradient', () => {
+  for (const m of every) {
+    for (const [tag] of m.html.matchAll(/<img\b[^>]*>/g)) assert.doesNotMatch(tag, /gradient/, `${m.tag}: ${tag.slice(0, 80)}`);
+    for (const [, td] of m.html.matchAll(/(<td\b[^>]*>)(?:(?!<\/td>)[\s\S])*?<img\b/g)) assert.doesNotMatch(td!, /gradient/, `${m.tag}: ${td!.slice(0, 80)}`);
+  }
+});
