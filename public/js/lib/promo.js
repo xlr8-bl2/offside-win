@@ -153,6 +153,98 @@ export function terms(p) {
 
 export const checkoutHref = (p) => `#/checkout?plan=${encodeURIComponent(p.plan_id)}&promo=${encodeURIComponent(p.id)}`;
 
+/* -------------------------------------------------------- the price spots */
+
+/*
+ * Every place the site quotes its price outside the plans page carries
+ * data-sell: the "From £3.49" under a locked call, the line beside the
+ * landing page's button, the promo stub, the landing plans. While a deal or a
+ * free trial is running that this reader may have, those spots say so and
+ * lead to it, so a visitor is never told "from £3.49" on the same screen as a
+ * free week. Each spot keeps what it said, and goes back to it when the offer
+ * is gone or the reader turns out to be a member.
+ *
+ *   data-sell="go"        a link or button: its words, and where it leads
+ *   data-sell="alt"       the quiet "or see membership" line
+ *   data-sell="head"      a heading that names the price
+ *   data-sell="line"      a sentence that names the price
+ *   data-sell="stub"      the promo stub: from, price, per, button
+ *   data-sell-plan="id"   a landing plan card: price, note, button
+ */
+
+/** The offer the price spots should show this reader: a trial first, then the cheapest deal. */
+export function bestOffer(list, who) {
+  const mine = (list ?? []).filter((p) => p.kind !== 'notice' && p.plan && eligible(p, who));
+  return mine.find((p) => p.kind === 'trial')
+    ?? mine.filter((p) => p.kind === 'deal').sort((a, b) => a.price_minor - b.price_minor)[0]
+    ?? null;
+}
+
+function sellWords(p) {
+  const plan = p.plan;
+  const full = money(plan.amount_minor, plan.currency);
+  const per = PER[plan.id] ?? '';
+  if (p.kind === 'trial') {
+    const free = `${p.trial_days} days free`;
+    return {
+      go: `Start ${free}`, alt: `or start ${free}`, head: `Every call, ${free}`,
+      line: `One call a day is free. Try every call free for ${p.trial_days} days, then ${full} ${per}.`,
+      stub: ['Free for', `${p.trial_days} days`, `then ${full} ${per}`, `Start ${free}`],
+      card: [`${p.trial_days} days free`, `then ${full} ${per}`, `Start ${free}`],
+    };
+  }
+  const now = money(p.price_minor, plan.currency);
+  return {
+    go: `${plan.name} for ${now}`, alt: `or get ${plan.name} for ${now}`, head: null,
+    line: `One call a day is free. ${plan.name} is ${now} ${per} right now, instead of ${full}.`,
+    stub: [plan.name, now, `${per}, instead of ${full}`, `Get ${plan.name} for ${now}`],
+    card: [now, `${per}, instead of ${full}`, `Get ${plan.name} for ${now}`],
+  };
+}
+
+/** What a spot said before it was dressed, kept on the element so it can be put back. */
+function keep(el) {
+  if (el.dataset.sellWas === undefined) {
+    el.dataset.sellWas = el.innerHTML;
+    if (el.hasAttribute('href')) el.dataset.sellHref = el.getAttribute('href');
+  }
+}
+
+export function dressSellers(root, p) {
+  if (!root) return;
+  for (const el of root.querySelectorAll('[data-sell-was]')) {
+    // Back to its own words: no offer now, or a different one.
+    if (p && el.dataset.sellFor === p.id) continue;
+    el.innerHTML = el.dataset.sellWas;
+    if (el.dataset.sellHref) el.setAttribute('href', el.dataset.sellHref);
+    delete el.dataset.sellWas; delete el.dataset.sellHref; delete el.dataset.sellFor;
+  }
+  if (!p) return;
+  const w = sellWords(p);
+  const to = checkoutHref(p);
+  const set = (el, html, href) => {
+    if (el.dataset.sellFor === p.id) return;
+    keep(el);
+    el.innerHTML = html;
+    if (href && el.hasAttribute('href')) el.setAttribute('href', href);
+    el.dataset.sellFor = p.id;
+  };
+  for (const el of root.querySelectorAll('[data-sell="go"]')) set(el, esc(w.go), to);
+  for (const el of root.querySelectorAll('[data-sell="alt"]')) set(el, esc(w.alt), to);
+  for (const el of root.querySelectorAll('[data-sell="line"]')) set(el, esc(w.line));
+  if (w.head) for (const el of root.querySelectorAll('[data-sell="head"]')) set(el, esc(w.head));
+  for (const el of root.querySelectorAll('[data-sell="stub"]')) {
+    const [from, price, per, go] = w.stub;
+    set(el, `<span class="promo-from">${esc(from)}</span><b class="promo-price">${esc(price)}</b><span class="promo-per">${esc(per)}</span><a class="btn btn-accent" href="${esc(to)}">${esc(go)}</a>`);
+  }
+  for (const el of root.querySelectorAll(`[data-sell-plan="${CSS.escape(p.plan_id)}"]`)) {
+    const [price, note, go] = w.card;
+    const name = el.querySelector('b')?.outerHTML ?? '';
+    const blurb = el.querySelector('.ld-blurb')?.outerHTML ?? '';
+    set(el, `${name}<span class="ld-price">${esc(price)}</span><span class="ld-week">${esc(note)}</span>${blurb}<a class="btn btn-primary" href="${esc(to)}">${esc(go)}</a>`);
+  }
+}
+
 /* ---------------------------------------------------------------- styles */
 
 /** Load promo.css once; resolves when it has applied (or failed), so nothing is drawn unstyled. */
