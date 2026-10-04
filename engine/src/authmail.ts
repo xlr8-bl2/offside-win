@@ -4,6 +4,7 @@
  *   npm run mail:auth            what is set now
  *   npm run mail:auth -- on      sign-in emails come from the Worker, designed
  *   npm run mail:auth -- off     back to Supabase's own sender and templates
+ *   npm run mail:auth -- limits  raise how many sign-in emails go out an hour
  *
  * "On" points Supabase Auth's send-email hook at /api/auth/email
  * (worker/src/authhook.ts) with a signing secret derived from the service
@@ -21,6 +22,7 @@ import { hookSecret } from '../../worker/src/authhook.ts';
 
 const SITE = process.env['SITE_URL'] ?? 'https://offside.win';
 const HOOK = `${SITE}/api/auth/email`;
+const EMAILS_AN_HOUR = 500;
 
 function projectRef(): string {
   const explicit = process.env['SUPABASE_PROJECT_REF'];
@@ -53,7 +55,22 @@ export async function authMail(mode = 'status'): Promise<void> {
   const now = await management(token, `/projects/${ref}/config/auth`);
   if (!now.ok) { console.log('supabase config:', now.status, JSON.stringify(now.body).slice(0, 200)); process.exitCode = 1; return; }
   console.log('hook now:', now.body?.['hook_send_email_enabled'] ? `on, ${now.body?.['hook_send_email_uri']}` : 'off (Supabase sends its own emails)');
+  console.log('limits now:', `${now.body?.['rate_limit_email_sent'] ?? '?'} emails an hour across the site,`,
+    `one per address every ${now.body?.['smtp_max_frequency'] ?? '?'}s`);
   if (mode === 'status') return;
+
+  // The site-wide hourly cap is what a launch runs into: every new reader's
+  // first sign-in is one email, and the default was set for a test project.
+  // The once-a-minute rule per address stays: it is what stops someone
+  // filling a stranger's inbox from our sign-in box.
+  if (mode === 'limits') {
+    const set = await management(token, `/projects/${ref}/config/auth`, {
+      method: 'PATCH', body: JSON.stringify({ rate_limit_email_sent: EMAILS_AN_HOUR }),
+    });
+    console.log('raise limit:', set.status, set.ok ? `${set.body?.['rate_limit_email_sent'] ?? EMAILS_AN_HOUR} sign-in emails an hour` : JSON.stringify(set.body).slice(0, 300));
+    if (!set.ok) process.exitCode = 1;
+    return;
+  }
 
   if (mode === 'on') {
     if (!sending?.cloudflare && !sending?.brevo) {
@@ -79,5 +96,5 @@ export async function authMail(mode = 'status'): Promise<void> {
     if (!set.ok) process.exitCode = 1;
     return;
   }
-  throw new Error(`mail:auth takes on, off or nothing, not "${mode}"`);
+  throw new Error(`mail:auth takes on, off, limits or nothing, not "${mode}"`);
 }
