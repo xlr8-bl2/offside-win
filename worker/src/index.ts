@@ -35,6 +35,7 @@ import { pulledAlerts } from './pulled.ts';
 const GOODWILL_CRON = '20 6 * * *';
 import { authEmailHook, type HookEnv } from './authhook.ts';
 import { admin, type AdminEnv } from './admin.ts';
+import { socials, type SocialEnv } from './social.ts';
 import { fixtureChanges, liveList, liveMatch, type LiveEnv } from './live.ts';
 import { EDGE_PATHS, edgeCached } from './edge.ts';
 
@@ -183,6 +184,8 @@ const worker = {
 
     try {
       if (path === '/api/config') return config(env);
+      // The site's own social accounts, for the footer (social.ts).
+      if (path === '/api/site') return new Response(JSON.stringify({ socials: await socials(env as unknown as SocialEnv) }), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=300' } });
 
       // Supabase's send-email hook: sign-in links, sent in the site's own
       // design. Signed by Supabase; authhook.ts checks it before anything.

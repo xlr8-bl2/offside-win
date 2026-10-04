@@ -22,6 +22,7 @@
  * paths is in the edge's list (edge.ts).
  */
 
+import { NETWORKS, profileUrl, saveSocials, socials, type SocialEnv, type Socials } from './social.ts';
 import type { PayEnv } from './pay.ts';
 import { accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, goodwillEndMail, goodwillStartMail, membershipMail, noticeMail, pulledMail, receiptMail, renewalStoppedMail, renewedMail, sendMail } from './mail.ts';
 
@@ -176,6 +177,19 @@ export async function admin(request: Request, env: AdminEnv, jwt: string | null,
     const via: Record<string, string | null> = {};
     for (const m of all) via[m.tag + (via[m.tag] !== undefined ? '+' : '')] = await deliver(env, who.email, { ...m, subject: `[Test] ${m.subject}` });
     return reply({ to: 'your own address', sent: Object.values(via).filter(Boolean).length, of: all.length, via, cloudflare: Boolean(env.EMAIL) });
+  }
+  // The site's social accounts (social.ts): what is saved, and saving them.
+  if (get && route === 'social') return reply({ socials: await socials(env as unknown as SocialEnv) });
+  if (post && route === 'social') {
+    const b = await body(request);
+    const next: Socials = {};
+    for (const n of NETWORKS) {
+      const u = profileUrl(n, b[n]);
+      if (u === undefined) return refuse(`That ${n === 'x' ? 'X' : n[0]!.toUpperCase() + n.slice(1)} account does not look right. Paste the profile link or the handle.`, 400);
+      if (u) next[n] = u;
+    }
+    if (!(await saveSocials(env as unknown as SocialEnv, next))) return refuse('Could not save just now. Nothing changed.', 503);
+    return reply({ ok: true, socials: next });
   }
   if (post && route === 'end') {
     const b = await body(request);

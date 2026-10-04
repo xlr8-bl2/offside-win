@@ -28,6 +28,7 @@
  * the site's voice, from the facts.
  */
 
+import { socials, withSocials, type SocialEnv } from './social.ts';
 import { describe as describeCall } from '../../public/js/lib/markets.js';
 import { findBannedInProse } from '../../engine/src/vocabulary.ts';
 import { HOME_DESCRIPTION, SITE_NAME, TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle } from '../../public/js/lib/titles.js';
@@ -707,7 +708,7 @@ export async function seoResponse(request: Request, env: SeoEnv): Promise<Respon
   }
   if (!page) return null;
 
-  const html = render(await shellHTML(env, url.origin), page);
+  const html = withSocials(render(await shellHTML(env, url.origin), page), await socials(env as SocialEnv));
   return new Response(html, {
     status: page.status ?? 200,
     headers: {

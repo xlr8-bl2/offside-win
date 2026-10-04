@@ -8683,6 +8683,25 @@ function sellOffer(offer, promo = null) {
   sellObserver.observe(app, { childList: true, subtree: true });
 }
 
+/*
+ * The footer's social icons: shown only for the accounts the owner has saved
+ * (worker/src/social.ts). The Worker fills them into the pages it writes;
+ * this covers a page that came from the plain shell.
+ */
+async function footerSocials() {
+  const box = document.querySelector('.foot-follow[data-socials]');
+  if (!box || !box.hidden) return;
+  try {
+    const { socials } = await getJSON('/api/site');
+    let any = false;
+    for (const a of box.querySelectorAll('a[data-social]')) {
+      const u = socials?.[a.dataset.social];
+      if (typeof u === 'string' && /^https:\/\/(x\.com|instagram\.com|t\.me|youtube\.com)\//.test(u)) { a.href = u; a.hidden = false; any = true; }
+    }
+    if (any) box.hidden = false;
+  } catch { /* the footer is fine without them */ }
+}
+
 async function schedulePromos() {
   try {
     const running = await getJSON('/api/promos').catch(() => []);
@@ -9315,6 +9334,7 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
   await faces;
   await route();
   smartQuotes(document.querySelector('footer'));
+  footerSocials();
   crawlable(document.querySelector('header'));
   crawlable(document.querySelector('footer'));
   const settings = document.getElementById('cookie-settings');

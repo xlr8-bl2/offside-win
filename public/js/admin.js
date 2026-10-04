@@ -26,6 +26,12 @@ const TABS = [
   ['plans', 'Plans'],
   ['log', 'Log'],
 ];
+const SOCIALS = [
+  ['x', 'X', 'https://x.com/yourname'],
+  ['instagram', 'Instagram', 'https://instagram.com/yourname'],
+  ['telegram', 'Telegram', 'https://t.me/yourname'],
+  ['youtube', 'YouTube', 'https://youtube.com/@yourname'],
+];
 const PLAN_NAMES = { matchday: 'Matchday pass', monthly: 'Monthly', quarter: '3 months', season: 'Season ticket' };
 const planName = (id) => PLAN_NAMES[id] ?? id ?? 'None';
 
@@ -184,12 +190,36 @@ async function overview(main) {
         </ul>
       </section>
       <section class="adm-card">
+        <h2>Your social accounts</h2>
+        <p class="adm-quiet">Paste each profile link or handle. Each one shows as an icon in the site's footer and tells Google the account is yours. Leave a box empty to hide it.</p>
+        <form class="adm-form" id="adm-social">
+          ${SOCIALS.map(([k, label, eg]) => `<label class="adm-f"><span>${esc(label)}</span><input name="${k}" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${esc(eg)}"></label>`).join('')}
+          <div class="adm-actions"><button class="btn btn-primary btn-sm" type="submit">Save accounts</button></div>
+          <p class="adm-msg" id="adm-social-msg" role="status"></p>
+        </form>
+      </section>
+      <section class="adm-card">
         <h2>Emails</h2>
         <p class="adm-quiet">Every email the site sends, to your own address, so you can see them as members do.</p>
         <p><button class="btn btn-ghost btn-sm" type="button" id="adm-mail">Send me every email</button></p>
         <p class="adm-quiet" id="adm-mail-out" role="status"></p>
       </section>
     </div>`;
+  const social = main.querySelector('#adm-social');
+  const socialMsg = main.querySelector('#adm-social-msg');
+  api('social').then((r) => { for (const [k] of SOCIALS) social.elements[k].value = r.socials?.[k] ?? ''; }).catch(() => {});
+  social.onsubmit = async (e) => {
+    e.preventDefault();
+    socialMsg.textContent = 'Saving';
+    try {
+      const r = await api('social', Object.fromEntries(SOCIALS.map(([k]) => [k, social.elements[k].value])));
+      for (const [k] of SOCIALS) social.elements[k].value = r.socials?.[k] ?? '';
+      const n = Object.keys(r.socials ?? {}).length;
+      socialMsg.textContent = n ? `Saved. ${n === 1 ? 'It shows' : `All ${n} show`} in the footer within ten minutes.` : 'Saved. No accounts show in the footer.';
+    } catch (err) {
+      socialMsg.textContent = err.message;
+    }
+  };
   const btn = main.querySelector('#adm-mail');
   const out = main.querySelector('#adm-mail-out');
   btn.onclick = async () => {
