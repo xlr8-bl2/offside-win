@@ -1310,7 +1310,7 @@ function heroCallHTML(hero, row) {
     <div class="hero-lock">
       ${LOCK_SVG}
       <p><b>We have a call on this one.</b> Which market, the odds and the book are for members.</p>
-      <a class="btn btn-accent btn-sm" href="#/pricing" data-public-price>From £3.49</a>
+      <a class="btn btn-accent btn-sm" href="#/pricing" data-public-price data-sell="go">From £3.49</a>
     </div>`;
 }
 
@@ -1524,7 +1524,7 @@ function promoHTML(user) {
       </ul>
       <p class="promo-note">The previews and the full record, the losses included, stay free.</p>
     </div>
-    <div class="promo-stub">
+    <div class="promo-stub" data-sell="stub" data-public-price>
       <span class="promo-from">From</span>
       <b class="promo-price" data-public-price>£3.49</b>
       <span class="promo-per">for the weekend</span>
@@ -2457,7 +2457,7 @@ function landingHTML() {
         <p class="ld-lede">${esc(LANDING_LEDE)}</p>
         <div class="ld-actions">
           <a class="btn btn-primary btn-lg ld-go" href="#/board" data-ld="free">Get today’s free call</a>
-          <a class="ld-alt" href="#/pricing">or see membership, from £3.49</a>
+          <a class="ld-alt" href="#/pricing" data-sell="alt" data-public-price>or see membership, from £3.49</a>
         </div>
         <p class="ld-assure">Free. No sign-up, no card.</p>
         <div class="ld-proof" data-ld="proof"></div>
@@ -2497,7 +2497,7 @@ function landingHTML() {
       <h2 class="ld-h2" data-ld="end-title">Your game’s probably on the board already.</h2>
       <div class="ld-actions">
         <a class="btn btn-primary btn-lg" href="#/board" data-ld="end-go">Get today’s free call</a>
-        <a class="ld-alt" href="#/pricing">or see membership, from £3.49</a>
+        <a class="ld-alt" href="#/pricing" data-sell="alt" data-public-price>or see membership, from £3.49</a>
       </div>
     </div>
   </section>`;
@@ -2755,10 +2755,10 @@ async function viewLanding() {
     // number, said once, right where the decision is made.
     const behind = Math.max(0, called - 1);
     put('plans', `
-      <h2 class="ld-h2">Every call, from ${esc(money(list[0].amount_minor, list[0].currency))}</h2>
+      <h2 class="ld-h2" data-sell="head" data-public-price>Every call, from ${esc(money(list[0].amount_minor, list[0].currency))}</h2>
       <p class="ld-sub">${behind > 1 ? `${called} calls are up on today’s board. One is free. Members see the other ${behind}, with the odds and the reason, the moment each goes up. ` : ''}The match pages, the free call and the record stay free whatever you do.</p>
       <ul class="ld-plans">${list.map((p) => `
-        <li${p.id === 'monthly' ? ' class="is-pick"' : ''}>
+        <li${p.id === 'monthly' ? ' class="is-pick"' : ''} data-sell-plan="${esc(p.id)}" data-public-price>
           <b>${esc(p.name)}</b>
           <span class="ld-price">${esc(money(p.amount_minor, p.currency))}</span>
           ${perWeek(p) ? `<span class="ld-week">${esc(perWeek(p))}</span>` : ''}
@@ -3558,7 +3558,7 @@ function lockedHTML(fixture = null) {
          The reading above is free, and so is one call a day on the front page.</p>
       ${soon ? `<p class="locked-when">Closes at kick-off, in <span data-countdown="${ko}" data-done="now">—</span>.</p>` : ''}
     </div>
-    <a class="btn btn-accent" href="#/pricing" data-public-price>See it: from £3.49 for the week</a>
+    <a class="btn btn-accent" href="#/pricing" data-public-price data-sell="go">See it: from £3.49 for the week</a>
   </div>`;
 }
 
@@ -7431,7 +7431,7 @@ async function viewAccount() {
         <span class="ticket-who">${esc(name)}</span>
         ${active
           ? `<span class="ticket-until">Valid until <b>${esc(when(m.expires_at))}</b></span>`
-          : `<span class="ticket-until" data-public-price>One call a day is free. The rest are from £3.49 for the weekend.</span>`}
+          : `<span class="ticket-until" data-public-price data-sell="line">One call a day is free. The rest are from £3.49 for the weekend.</span>`}
       </div>
       <div class="ticket-stub">
         ${active
@@ -8654,14 +8654,40 @@ async function scheduleSeason() {
  * then they are treated as a member, so nobody who has paid is sold to while
  * the page is still finding out. headerAuth() calls this again once it knows.
  */
+/*
+ * The price spots (data-sell, js/lib/promo.js) follow the running offer: a
+ * free trial or a deal this reader may have replaces "from £3.49" wherever
+ * the site quotes it, including parts of a page that arrive after it draws,
+ * which the observer catches. With no offer they say what they always did.
+ */
+let sellObserver = null;
+function sellOffer(offer, promo = null) {
+  sellObserver?.disconnect();
+  sellObserver = null;
+  if (!promo) {
+    if (document.querySelector('[data-sell-was]')) import('./js/lib/promo.js').then((m) => m.dressSellers(document.body, null)).catch(() => {});
+    return;
+  }
+  promo.dressSellers(document.body, offer);
+  if (!offer) return;
+  let queued = false;
+  sellObserver = new MutationObserver(() => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; promo.dressSellers(document.body, offer); });
+  });
+  sellObserver.observe(app, { childList: true, subtree: true });
+}
+
 async function schedulePromos() {
   try {
     const running = await getJSON('/api/promos').catch(() => []);
-    if (!Array.isArray(running) || !running.length) { document.getElementById('promo-bar')?.remove(); return; }
+    if (!Array.isArray(running) || !running.length) { document.getElementById('promo-bar')?.remove(); sellOffer(null); return; }
     const promo = await import('./js/lib/promo.js');
     const signedIn = !!state.user;
     const member = signedIn ? state.member !== false : false;
     const returning = signedIn && !!state.account?.returning;
+    sellOffer(promo.bestOffer(running, { signedIn, member, returning }), promo);
     await promo.runPromos({ route: parseHash().parts[0] || 'home', signedIn, member, returning, anchor: app, promos: running });
   } catch { /* an offer is never worth an error */ }
 }
