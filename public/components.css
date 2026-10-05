@@ -6431,5 +6431,15 @@ body[data-page="landing"] .foot-top { display: none; }
 .plan-proof li::before { content: ''; position: absolute; left: 0; top: 0.55em; width: 8px; height: 8px; border-radius: 50%; background: var(--won); }
 .plan-proof b { color: var(--chalk); }
 .plan-proof a { color: var(--floodlight-hi); }
+/* No calls up yet: said before anyone pays, not after (app.js, viewPricing). */
+.plan-quiet {
+  max-width: 62ch;
+  margin: 0 0 var(--space-6);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--floodlight);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  color: var(--chalk-2);
+}
 .locked-when { margin: var(--space-2) 0 0; font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--warn); }
 .locked-when span { font-variant-numeric: tabular-nums; }

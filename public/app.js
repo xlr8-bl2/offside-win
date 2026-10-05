@@ -2670,6 +2670,21 @@ async function viewLanding() {
   } else {
     app.querySelector('.ld-call')?.remove();
     app.querySelector('.ld-hero')?.classList.add('ld-solo');
+    /*
+     * No free call today, yet: the board can be empty of calls for hours
+     * before team news lands. The main button said "Get today's free call"
+     * regardless and led to a board saying there was none, the first thing
+     * a visitor tapped broken on its first tap. Say what is there instead,
+     * and when the call usually arrives.
+     */
+    if (!freeId) {
+      for (const a of app.querySelectorAll('[data-ld="free"], [data-ld="end-go"]')) {
+        a.textContent = 'See today’s games, free';
+        a.setAttribute('href', '#/board');
+      }
+      const assure = app.querySelector('.ld-assure');
+      if (assure) assure.textContent = 'No free call yet today. It goes up as team news lands, usually a few hours before kick-off. Every preview is free in the meantime, no sign-up.';
+    }
   }
 
   // Three numbers, all of them real and all of them pub numbers.
@@ -6698,6 +6713,7 @@ async function viewPricing() {
       ${sureHolds ? `<li>When we say ${esc(TENTHS[sureTenths])} in ten, ${esc(TENTHS[sureTenths])} in ten land. <a href="#/how-sure">How we check</a></li>` : ''}
       ${callsToday > 1 ? `<li><b>${callsToday} calls</b> on the board still to kick off. One is free.</li>` : ''}
     </ul>` : ''}
+    ${board?.fixtures?.length && !callsToday ? `<p class="plan-quiet" role="note">No calls are up yet today. They go up through the day as team news lands, and members get each one the moment it does.</p>` : ''}
     ${freeLineHTML(free)}`}
 
     <div class="plans" data-public-price>
