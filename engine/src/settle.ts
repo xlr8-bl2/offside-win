@@ -426,6 +426,61 @@ export async function enrichPostMortems(limit = 300): Promise<number> {
 /** How long after kick-off a match with no final result is given up on. */
 const STALE_AFTER = 72 * 3600;
 
+/**
+ * Grade the calls we pulled before kick-off, once their match is over: how
+ * each would have gone had we left it up. The same grading as a live call
+ * (settleSelection) against the same final score, written beside the pulled
+ * call for the results page and kept out of every record and number.
+ *
+ * Reads the score we already hold (the match history, or the fixture the
+ * settlement just wrote it to); a corners call waits for the match stats like
+ * a live one. A match that was not played makes it VOID.
+ */
+export async function gradePulled(now = Math.floor(Date.now() / 1000)): Promise<number> {
+  const rows = await select<{
+    id: number; market: MarketCode; outcome: Outcome; line: number | null; odds: number;
+    mh: number | null; ma: number | null; fh: number | null; fa: number | null; hc: number | null; ac: number | null;
+    hr: number | null; ar: number | null; status: string | null;
+  }>(
+    `SELECT pc.id, pc.market, pc.outcome, pc.line, pc.odds,
+            m.home_goals AS mh, m.away_goals AS ma, f.home_goals AS fh, f.away_goals AS fa,
+            m.home_corners AS hc, m.away_corners AS ac, m.home_reds AS hr, m.away_reds AS ar,
+            f.status
+       FROM pulled_call pc
+       LEFT JOIN match m ON m.id = pc.fixture_id
+       LEFT JOIN fixture f ON f.id = pc.fixture_id
+      WHERE pc.after_result IS NULL AND pc.restored_at IS NULL
+        AND coalesce(f.kickoff, pc.kickoff) < ?
+      ORDER BY pc.kickoff ASC LIMIT 300`,
+    [now - 110 * 60],
+  );
+  let graded = 0;
+  for (const r of rows) {
+    // The match history's score is final. The fixture's is trusted only once
+    // the provider calls the match finished: before that it can be a running
+    // score, and a half-time score is how calls were once graded wrong.
+    const fixtureFinal = r.status !== null && isFinishedStatus(r.status);
+    const hg = r.mh ?? (fixtureFinal ? r.fh : null);
+    const ag = r.ma ?? (fixtureFinal ? r.fa : null);
+    let result: Result | null = null;
+    if (r.status && /postpon|cancel|abandon|suspend|walkover|awarded/i.test(r.status) && hg === null) {
+      result = 'VOID';
+    } else if (hg !== null && ag !== null) {
+      const out = settleSelection(r.market, r.outcome, r.line, r.odds, {
+        homeGoals: hg, awayGoals: ag, homeCorners: r.hc, awayCorners: r.ac,
+        reds: r.hr === null && r.ar === null ? null : (r.hr ?? 0) + (r.ar ?? 0),
+      });
+      result = out?.result ?? null;
+    }
+    if (!result) continue;
+    await exec('UPDATE pulled_call SET after_result = ?, after_home = ?, after_away = ?, after_at = ? WHERE id = ?',
+      [result, hg, ag, now, r.id]);
+    graded++;
+  }
+  if (graded) console.log(`Graded ${graded} pulled call${graded === 1 ? '' : 's'} against the final score (not in the record).`);
+  return graded;
+}
+
 export async function runSettle(): Promise<SettleReport> {
   const now = Math.floor(Date.now() / 1000);
   // Late enough that a match can have finished: 110 minutes covers a half,
@@ -462,6 +517,7 @@ export async function runSettle(): Promise<SettleReport> {
     report.backfilled = await backfillPostMortems();
     report.reports = await writeMissingReports({ sinceDays: 7, limit: 60 });
     report.decided = await enrichPostMortems();
+    await gradePulled(now);
     await kvSetJSON('settle:last_run', { at: now, ...report });
     return report;
   }
@@ -638,6 +694,7 @@ export async function runSettle(): Promise<SettleReport> {
   // first, a page's worth per hour.
   report.reports = await writeMissingReports({ sinceDays: 7, limit: 60 });
   report.decided = await enrichPostMortems();
+  await gradePulled(now);
   await refreshCalibration();
   await kvSetJSON('settle:last_run', { at: now, ...report });
 

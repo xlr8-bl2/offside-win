@@ -257,6 +257,8 @@ const worker = {
         return await passthrough(env, 'search_games', { p_q: q }, jwt);
       }
       if (path === '/api/picks') return await picks(url, env, jwt);
+      // Calls pulled before kick-off and how each would have gone (results page).
+      if (path === '/api/pulled') return await passthrough(env, 'get_pulled', { p_limit: Math.min(60, Math.max(1, Number(url.searchParams.get('limit') ?? 20) || 20)) }, jwt);
       if (path === '/api/model') return await passthrough(env, 'get_model', {});
       if (path === '/api/hero') return await passthrough(env, 'get_hero', {});
       // The front page's record from the newest engine (lab/record.ts).
