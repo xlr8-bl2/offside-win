@@ -626,6 +626,27 @@
   color: var(--floodlight-hi);
 }
 
+/* Calls pulled before kick-off, beside the results (app.js, pulledHTML). */
+.pl-head { margin-top: var(--space-8); }
+.pl-note { margin: 0 0 var(--space-2); font-size: var(--text-xs); color: var(--chalk-3); }
+.pl-why {
+  display: block;
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  color: var(--chalk-2);
+}
+.pl-after {
+  display: inline-block;
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--chalk-3);
+}
+.pl-after.is-won { color: var(--won); }
+.pl-after.is-lost { color: var(--lost); }
+.pl-list .side-item { align-items: start; }
+
 /* ============================================================ the form bar */
 
 /*

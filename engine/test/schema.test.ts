@@ -128,8 +128,14 @@ const PRIVATE_FUNCTIONS = new Set(['pulled_claim', 'goodwill_lean', 'goodwill_cr
 // one IS the wall, and every one that returns calls must apply it. Anything
 // else runs as the caller: SECURITY DEFINER on a function that does not
 // filter is the one way a read-only surface becomes a data leak.
-const DEFINER = new Set(['get_promos', 'get_board', 'get_fixture', 'get_picks', 'get_model', 'get_hero', 'get_health', 'get_slip', 'get_plans', 'get_account', 'has_membership', 'free_fixture_id', 'get_league', 'get_leagues', 'fixture_preview', 'get_record', 'record_view', 'get_player', 'save_profile', 'set_follow', 'search_games', 'record_consent', 'get_team', 'goodwill_credit', 'goodwill_whop_applied', 'goodwill_noted', 'goodwill_ended', 'get_how_sure', 'set_call_alerts', 'pulled_claim']);
+const DEFINER = new Set(['get_promos', 'get_board', 'get_fixture', 'get_picks', 'get_model', 'get_hero', 'get_health', 'get_slip', 'get_plans', 'get_account', 'has_membership', 'free_fixture_id', 'get_league', 'get_leagues', 'fixture_preview', 'get_record', 'record_view', 'get_player', 'save_profile', 'set_follow', 'search_games', 'record_consent', 'get_team', 'goodwill_credit', 'goodwill_whop_applied', 'goodwill_noted', 'goodwill_ended', 'get_how_sure', 'set_call_alerts', 'pulled_claim', 'get_pulled']);
 const WALLED = new Set(['get_board', 'get_fixture', 'get_picks', 'get_slip', 'search_games', 'get_team']);
+// get_pulled returns calls too, but only once their match has kicked off,
+// when a call is history like any result; that filter is its wall.
+test('get_pulled shows a pulled call only after kick-off', () => {
+  const body = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION get_pulled('));
+  assert.match(body.slice(0, body.indexOf('$fn$;')), /kickoff\) < floor\(extract\(epoch FROM now\(\)\)\)/);
+});
 // The owner's dashboard. Every admin_ function reads auth.users or the
 // payment tables, so it runs as its owner, and none of them may be callable
 // with the public key: Postgres grants EXECUTE to PUBLIC on every new

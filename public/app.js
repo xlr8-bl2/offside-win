@@ -5096,9 +5096,16 @@ function pulledHTML(f) {
   return list.map((p) => {
     const what = p.label ? `We’d been on ${p.label}${Number(p.odds) > 1 ? ` at ${oddsOf(Number(p.odds))}` : ''}. ` : '';
     const swap = p.replaced_by ? ` We’ve switched to ${p.replaced_by}.` : '';
+    // After the game: how it would have gone (settle.ts, gradePulled).
+    const r = p.after_result;
+    const score = p.after_home != null && p.after_away != null ? ` It finished ${p.after_home}–${p.after_away}.` : '';
+    const after = r === 'WON' || r === 'HALF_WON' ? ['won', `It would have landed.${score}`]
+      : r === 'LOST' || r === 'HALF_LOST' ? ['lost', `It would have missed.${score}`]
+      : r === 'PUSH' ? ['void', `The stake would have come back.${score}`] : null;
     return `<div class="pulled">
       <p class="pulled-head"><span class="pulled-tag">Call pulled</span><span>${esc(at(p.pulled_at))}</span></p>
       <p class="pulled-why">${esc(what)}${esc(cleanProse(p.reason))}${esc(swap)}</p>
+      ${after ? `<p class="pl-after is-${after[0]}">${esc(after[1])} Not counted in our record.</p>` : ''}
     </div>`;
   }).join('');
 }
@@ -5193,6 +5200,52 @@ async function viewHowSure() {
   smartQuotes(app);
 }
 
+/*
+ * Calls we pulled before kick-off, and how each would have gone.
+ *
+ * A reader who saw the free call in the morning and came back after the game
+ * found nothing: it had been pulled before kick-off, and only calls standing
+ * at kick-off are graded. This says what happened to it and why, and then,
+ * once the game is over, whether it would have landed -- both ways, so a call
+ * we were right to pull is shown as plainly as one we were wrong to.
+ * Graded by settle.ts (gradePulled) and never counted in the record.
+ */
+function pulledListHTML(list) {
+  const rows = Array.isArray(list) ? list.filter((x) => x && x.label) : [];
+  if (!rows.length) return '';
+  const before = (x) => {
+    const m = Math.round((Number(x.kickoff) - Number(x.pulled_at)) / 60);
+    if (!(m > 0)) return 'Pulled at kick-off.';
+    if (m < 90) return `Pulled ${m} minute${m === 1 ? '' : 's'} before kick-off.`;
+    const h = Math.round(m / 60);
+    return h < 36 ? `Pulled ${h} hour${h === 1 ? '' : 's'} before kick-off.` : 'Pulled days before kick-off.';
+  };
+  const after = (x) => {
+    const score = x.after_home != null && x.after_away != null ? `, ${x.after_home}–${x.after_away}` : '';
+    if (x.after_result === 'WON' || x.after_result === 'HALF_WON') return ['won', `Would have landed${score}`];
+    if (x.after_result === 'LOST' || x.after_result === 'HALF_LOST') return ['lost', `Would have missed${score}`];
+    if (x.after_result === 'PUSH') return ['void', `Stake would have come back${score}`];
+    if (x.after_result === 'VOID') return ['void', 'Match not played'];
+    return ['wait', 'Result to come'];
+  };
+  return `
+        <h2 class="side-head pl-head">Pulled before kick-off</h2>
+        <p class="pl-note">Calls we took down before the game, and how each would have gone. They are not in the record above.</p>
+        <div class="side-list pl-list">${rows.map((x) => {
+          const [tone, said] = after(x);
+          return `
+          <a class="side-item" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
+            <span class="side-thumb">${crest(x.home ?? '', 'sm', x.home_team_id)}${crest(x.away ?? '', 'sm', x.away_team_id)}</span>
+            <span class="side-body">
+              <span class="side-sel">${esc(x.label)}</span>
+              <span class="side-meta">${esc(x.home)} v ${esc(x.away)}, ${esc(kickoffLabel(x.kickoff))}</span>
+              <span class="pl-why">${esc(before(x))} ${esc(x.reason ?? '')}</span>
+              <span class="pl-after is-${tone}">${esc(said)}</span>
+            </span>
+          </a>`;
+        }).join('')}</div>`;
+}
+
 async function viewResults() {
   // Which navigation this page belongs to: a newer one makes it stand down (see route).
   const nav = navTicket;
@@ -5206,11 +5259,12 @@ async function viewResults() {
    * then "Nothing has finished yet" directly underneath it. The API can filter
    * by settled; asking it to is the whole fix.
    */
-  let data, open;
+  let data, open, pulled;
   try {
-    [data, open] = await Promise.all([
+    [data, open, pulled] = await Promise.all([
       getJSON('/api/picks?limit=120&settled=true'),
       getJSON('/api/picks?limit=20&settled=false').catch(() => ({ picks: [] })),
+      getJSON('/api/pulled?limit=12').catch(() => []),
     ]);
   } catch (err) {
     return errorState(err, nav);
@@ -5378,6 +5432,7 @@ async function viewResults() {
             </a>`;
           }).join('')}</div>`;
         })()}
+        ${pulledListHTML(pulled)}
       </aside>
     </div>
   </div>`;

@@ -368,6 +368,46 @@ CREATE TABLE IF NOT EXISTS pulled_call (
 CREATE INDEX IF NOT EXISTS pulled_call_fixture ON pulled_call (fixture_id);
 ALTER TABLE pulled_call ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON pulled_call FROM anon, authenticated;
+-- How a pulled call would have gone, graded after the game by settle.ts
+-- (gradePulled) exactly as a live call is. Shown on the results page beside
+-- why it was pulled, and never counted in the record: nobody was told to
+-- back it at kick-off. VOID when the match was not played.
+ALTER TABLE pulled_call ADD COLUMN IF NOT EXISTS after_result text;
+ALTER TABLE pulled_call ADD COLUMN IF NOT EXISTS after_home   integer;
+ALTER TABLE pulled_call ADD COLUMN IF NOT EXISTS after_away   integer;
+ALTER TABLE pulled_call ADD COLUMN IF NOT EXISTS after_at     bigint;
+
+-- Calls pulled before kick-off, for the results page: only once the match
+-- has started (before that, a pulled call can still come back, and what it
+-- was is for members), one row per call however often it was pulled, and
+-- none that came back and went out at kick-off -- those are in the record.
+CREATE OR REPLACE FUNCTION get_pulled(p_limit integer DEFAULT 20)
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  SELECT coalesce(json_agg(row_to_json(x) ORDER BY x.kickoff DESC), '[]'::json)
+  FROM (
+    SELECT * FROM (
+      SELECT DISTINCT ON (pc.fixture_id, pc.market, pc.outcome, pc.line)
+             pc.fixture_id, coalesce(f.kickoff, pc.kickoff) AS kickoff, pc.home, pc.away,
+             f.home_team_id, f.away_team_id,
+             pc.label, pc.odds, pc.bookmaker, pc.reason, pc.pulled_at,
+             pc.after_result, pc.after_home, pc.after_away
+        FROM pulled_call pc
+        LEFT JOIN fixture f ON f.id = pc.fixture_id
+       WHERE pc.restored_at IS NULL
+         AND coalesce(f.kickoff, pc.kickoff) < floor(extract(epoch FROM now()))::bigint
+         AND NOT EXISTS (
+           SELECT 1 FROM pick p
+            WHERE p.fixture_id = pc.fixture_id AND p.kind = 'CONFIDENT'
+              AND p.market = pc.market AND p.outcome = pc.outcome
+              AND p.line IS NOT DISTINCT FROM pc.line)
+       ORDER BY pc.fixture_id, pc.market, pc.outcome, pc.line, pc.pulled_at DESC
+    ) d
+    ORDER BY d.kickoff DESC
+    LIMIT greatest(1, least(coalesce(p_limit, 20), 60))
+  ) x;
+$fn$;
+REVOKE ALL ON FUNCTION get_pulled(integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION get_pulled(integer) TO anon, authenticated;
 
 -- Which member has been emailed about which pulled call, so a retry or a
 -- second Worker run never sends the same alert twice.
@@ -1490,8 +1530,13 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
            -- one was pulled and why; what it was, and what replaced it, is for
            -- members and the free call, like the call itself.
            || jsonb_build_object('pulled', coalesce((
-                SELECT jsonb_agg(jsonb_build_object('pulled_at', pc.pulled_at, 'reason', pc.reason)
+                SELECT jsonb_agg(jsonb_build_object('pulled_at', pc.pulled_at, 'reason', pc.reason,
+                                                    'after_result', pc.after_result,
+                                                    'after_home', pc.after_home, 'after_away', pc.after_away)
+                         -- What it was is for members and the free call until
+                         -- kick-off; after that it is history, like the results page.
                          || CASE WHEN has_membership() OR f.id = free_fixture_id()
+                                   OR f.kickoff < floor(extract(epoch FROM now()))::bigint
                                  THEN jsonb_build_object('label', pc.label, 'odds', pc.odds, 'bookmaker', pc.bookmaker,
                                                          'replaced_by', pc.replaced_by)
                                  ELSE '{}'::jsonb END
