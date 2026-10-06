@@ -5376,8 +5376,8 @@ async function viewResults() {
   <div class="wrap section">
     <div class="page-head">
       <h1 class="display xl">Results</h1>
-      <p class="page-sub">Every pick we have published, marked against the real result.
-        Nothing removed, nothing hidden.</p>
+      <p class="page-sub">Every call we have published since 6 October 2026, when this engine went live,
+        marked against the real result. Nothing removed, nothing hidden.</p>
     </div>
 
     ${n === 0 ? `<p class="record-sub">${esc(headline)}</p>` : `
