@@ -8132,9 +8132,9 @@ function viewLegal(which) {
     const c = readChoice();
     const gpc = !!navigator.globalPrivacyControl
       && !(() => { try { return localStorage.getItem(CONSENT_KEY); } catch { return null; } })();
-    const said = !c ? 'You have not answered yet, so both are off.'
-      : gpc ? 'Your browser sends the Global Privacy Control signal, so both are off.'
-      : `Saved pages are ${c.save ? 'on' : 'off'} and visit counts are ${c.count ? 'on' : 'off'}.`;
+    const said = !c ? 'You have not answered yet, so all three are off.'
+      : gpc ? 'Your browser sends the Global Privacy Control signal, so all three are off.'
+      : `Saved pages are ${c.save ? 'on' : 'off'}, visit counts are ${c.count ? 'on' : 'off'} and ad measurement is ${c.ads ? 'on' : 'off'}.`;
     return `
     <section class="panel consent-panel" aria-labelledby="consent-h">
       <p class="panel-head" id="consent-h">Your choice</p>
@@ -8190,25 +8190,48 @@ function readConsent() {
   return navigator.globalPrivacyControl ? 'declined' : null;
 }
 /**
- * What the reader allowed, one switch per use: saved pages and visit counts.
- * Stored as 'accepted' (both), 'declined' (neither) or 'custom:' and the ones
- * allowed, so an answer given before the choice was split still reads right.
+ * What the reader allowed, one switch per use: saved pages, visit counts and
+ * ad measurement. Stored as 'all', 'declined' (none) or 'custom:' and the
+ * ones allowed. 'accepted' is the "Accept all" from before ad measurement
+ * existed: it still means the two the reader was shown, and never the third,
+ * which nobody has agreed to until they are asked about it.
  * Null until they answer: nothing is on by default.
  */
 function readChoice() {
   const v = readConsent();
   if (!v) return null;
-  if (v === 'accepted') return { save: true, count: true };
+  if (v === 'all') return { save: true, count: true, ads: true };
+  if (v === 'accepted') return { save: true, count: true, ads: false };
   if (v.startsWith('custom:')) {
     const on = new Set(v.slice(7).split(','));
-    return { save: on.has('save'), count: on.has('count') };
+    return { save: on.has('save'), count: on.has('count'), ads: on.has('ads') };
   }
-  return { save: false, count: false };
+  return { save: false, count: false, ads: false };
 }
 const canSave = () => !!readChoice()?.save;
 const canCount = () => !!readChoice()?.count;
-const choiceValue = ({ save, count }) => (save && count ? 'accepted' : !save && !count ? 'declined'
-  : `custom:${[save && 'save', count && 'count'].filter(Boolean).join(',')}`);
+const canMeasureAds = () => !!readChoice()?.ads;
+const choiceValue = ({ save, count, ads }) => (save && count && ads ? 'all' : !save && !count && !ads ? 'declined'
+  : `custom:${[save && 'save', count && 'count', ads && 'ads'].filter(Boolean).join(',')}`);
+
+/*
+ * The Whop pixel (index.html, #whop-pixel), for measuring which adverts bring
+ * readers here. It sits in the page as Whop supplies it, inert in a template,
+ * and is put in to run only with the reader's yes to ad measurement. Its own
+ * code records the page it loads on; after that the site changes page without
+ * reloading, so each later page is recorded here (adPageView).
+ */
+let adPixelOn = false;
+function loadAdPixel() {
+  if (adPixelOn || !canMeasureAds()) return;
+  const tpl = document.getElementById('whop-pixel');
+  if (!tpl) return;
+  adPixelOn = true;
+  document.head.appendChild(document.importNode(tpl.content, true));
+}
+function adPageView() {
+  if (adPixelOn && canMeasureAds()) { try { window.whop?.track('page'); } catch { /* a lost view is fine */ } }
+}
 
 function applyConsent(value) {
   try { localStorage.setItem(CONSENT_KEY, value); } catch { /* private mode: ask again next visit */ }
@@ -8217,6 +8240,10 @@ function applyConsent(value) {
   // Whatever was waiting for the bottom of the screen (the offer bar) can have it.
   dispatchEvent(new Event('ow:consent'));
   if (canCount()) countView();
+  // A yes to ad measurement starts the pixel now; a no after a yes needs the
+  // page reloaded, since a script that has run cannot be taken back out.
+  if (canMeasureAds()) loadAdPixel();
+  else if (adPixelOn) { location.reload(); return; }
   // A no to saved pages removes what a yes stored.
   if (!canSave()) cacheClear({ keepMemory: true });
   // The cookie policy shows the current choice; redraw it if it is open.
@@ -8262,7 +8289,7 @@ function reserveForNotice() {
  * arrives pre-ticked.
  */
 function consentRows(prefix) {
-  const c = readChoice() ?? { save: false, count: false };
+  const c = readChoice() ?? { save: false, count: false, ads: false };
   const row = (key, title, what) => `
     <li>
       <label for="${prefix}-${key}"><b>${title}</b><span>${what}</span></label>
@@ -8276,13 +8303,14 @@ function consentRows(prefix) {
     </li>
     ${row('save', 'Saved pages', 'A copy of each page on this device, so the site opens instantly next time.')}
     ${row('count', 'Visit counts', 'An anonymous count of which pages get read. Nothing is stored on your device.')}
+    ${row('ads', 'Ad measurement', 'Whop’s pixel, so we can tell which of our adverts brought you here. Whop sees the pages you open.')}
   </ul>`;
 }
 
 /** The switches under `root`, as a stored answer. */
 function choiceFrom(root) {
   const on = (k) => !!root.querySelector(`[data-consent-key="${k}"]`)?.checked;
-  return choiceValue({ save: on('save'), count: on('count') });
+  return choiceValue({ save: on('save'), count: on('count'), ads: on('ads') });
 }
 
 function cookieNotice({ force = false } = {}) {
@@ -8584,6 +8612,7 @@ function finishRoute(name, soft, keepY, backTo) {
   {
     if (!soft) setReading(name);
     if (!soft) countView();
+    if (!soft) adPageView();
     if (!soft) schedulePromos();
     if (!soft) attention.notePage();
     if (!soft) scheduleSeason();
@@ -9398,6 +9427,7 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
       health();
       headerAuth();
       cookieNotice();
+      loadAdPixel();
       return;
     }
     if (intent && intent.startsWith('#/')) location.hash = intent;
@@ -9413,4 +9443,6 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
   health();
   headerAuth();
   cookieNotice();
+  // After the first page has drawn: the pixel records that page itself.
+  loadAdPixel();
 })();

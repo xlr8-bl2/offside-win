@@ -83,6 +83,11 @@
 <!-- For assistants and agents: what the site is, and the data behind it. -->
 <link rel="alternate" type="text/markdown" href="/llms.txt" title="Offside.win, for AI assistants">
 <link rel="service-desc" type="application/openapi+json" href="/openapi.json">
+<!-- The Whop pixel, character for character as Whop supplies it, for
+     measuring which adverts bring readers here. Inert inside a template: it
+     runs only once a reader switches on "Ad measurement" in the cookie
+     choices (app.js, loadAdPixel), as PECR requires of a tracking pixel. -->
+<template id="whop-pixel"><script>!function(w,d,s,u,n,a,b){if(w[n])return;a=w[n]={q:[],t:+new Date,s:[],o:u,track:function(){a.q.push([+new Date].concat([].slice.call(arguments)))},setScope:function(){a.s=[].slice.call(arguments).filter(function(x){return typeof x==="string"});a.q.push([+new Date,"setScope"].concat(a.s))},scope:function(){var c=[].slice.call(arguments);return{track:function(){a.q.push([+new Date].concat([].slice.call(arguments)).concat([{__scope:c}]))}}}};b=d.createElement(s);b.async=1;b.src=u+"/s.js";d.getElementsByTagName(s)[0].parentNode.insertBefore(b,d.getElementsByTagName(s)[0])}(window,document,"script","https://t.whop.tw","whop");whop.setScope("biz_u3qYuQLDjOpDZH");whop.track("page");</script></template>
 </head>
 <body>
 
@@ -156,15 +161,16 @@
 -->
 <template id="cookie-tpl"><div class="cookie" id="cookie-notice" role="region" aria-labelledby="cookie-title">
     <h2 class="cookie-title" id="cookie-title">Cookies and storage</h2>
-    <p class="cookie-text">We'd like to save pages on this device so the site opens instantly, and count
-       visits anonymously so we know what gets read. No adverts, and nothing that follows you around the web.</p>
+    <p class="cookie-text">We'd like to save pages on this device so the site opens instantly, count
+       visits anonymously so we know what gets read, and let Whop's pixel tell us which of our adverts
+       brought you here. Each one is your choice.</p>
     <div class="cookie-options" id="cookie-options" hidden>
       <div data-consent-rows></div>
       <button class="btn btn-primary btn-sm cookie-save" data-consent-save>Save my choices</button>
     </div>
     <div class="cookie-actions">
       <button class="btn btn-sm" data-consent="declined">Reject all</button>
-      <button class="btn btn-sm" data-consent="accepted">Accept all</button>
+      <button class="btn btn-sm" data-consent="all">Accept all</button>
     </div>
     <div class="cookie-foot">
       <button type="button" class="cookie-more" aria-expanded="false" aria-controls="cookie-options">Choose what to allow</button>
