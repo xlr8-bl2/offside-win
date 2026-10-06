@@ -294,6 +294,12 @@ const commands: Record<string, () => Promise<unknown>> = {
       await runPulls();
       return;
     }
+    if (study === 'deep slip') {
+      const { loadHistory } = await import('./lab/run.ts');
+      const { runSlipBack } = await import('./lab/slipback.ts');
+      runSlipBack(await loadHistory());
+      return;
+    }
     if (study === 'deep insight' || study === 'deep insight write') {
       const { runInsightPreview } = await import('./lab/insightpreview.ts');
       await runInsightPreview({ draft: study.endsWith('write') });
