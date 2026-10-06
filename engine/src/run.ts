@@ -257,6 +257,14 @@ const commands: Record<string, () => Promise<unknown>> = {
     return plans(id ?? (process.env['GRANT_EMAIL'] || undefined), value ?? (process.env['GRANT_ARG'] || undefined));
   },
 
+  // Start the public record from now, setting earlier calls aside (recordreset.ts).
+  async 'record:reset'() {
+    requireEnv({ provider: false });
+    await ensureSchema();
+    const { recordReset } = await import('./recordreset.ts');
+    await recordReset(process.env['ARG'] ?? '');
+  },
+
   async 'whop:check'() {
     return whopCheck();
   },
@@ -277,13 +285,13 @@ const commands: Record<string, () => Promise<unknown>> = {
       await runBooks();
       return;
     }
-    if (study === 'deep' || study === 'deep anatomy' || study === 'deep live' || study === 'deep penalty' || study === 'deep ceiling') {
+    if (study === 'deep' || study === 'deep anatomy' || study === 'deep live' || study === 'deep penalty' || study === 'deep ceiling' || study === 'deep compare') {
       const { loadHistory } = await import('./lab/run.ts');
-      const { runDeep, runAnatomy, runLiveGap, runPenalty, runCeiling } = await import('./lab/deep.ts');
+      const { runDeep, runAnatomy, runLiveGap, runPenalty, runCeiling, runCompare } = await import('./lab/deep.ts');
       const { kvSetJSON } = await import('./store.ts');
       const rows = await loadHistory();
       const report = study === 'deep' ? runDeep(rows) : study === 'deep live' ? await runLiveGap(rows)
-        : study === 'deep penalty' ? runPenalty(rows) : study === 'deep ceiling' ? runCeiling(rows) : runAnatomy(rows);
+        : study === 'deep penalty' ? runPenalty(rows) : study === 'deep ceiling' ? runCeiling(rows) : study === 'deep compare' ? runCompare(rows) : runAnatomy(rows);
       await kvSetJSON(`lab:${study.replace(' ', ':')}`, { at: Math.floor(Date.now() / 1000), ...report });
       return;
     }

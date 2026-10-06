@@ -569,3 +569,38 @@ export function runCeiling(rows: HistRow[]): Record<string, unknown> {
   }
   return out;
 }
+
+/**
+ * `lab deep compare`: the engine before 6 October 2026 against the engine
+ * after, replayed on the same games. Before, the live floor carried the
+ * overclaim charge measured on every call ever published: handicaps at 25.7
+ * points (a floor of 104%, so none) and results at 1.7. After, the charge is
+ * measured on the current rule's calls only, which comes to nothing. The hold
+ * rule cannot be replayed here: the history keeps each match's prices at
+ * kick-off only, not how they moved through the day.
+ */
+export function runCompare(rows: HistRow[]): Record<string, unknown> {
+  const sorted = [...rows].sort((a, b) => a.kickoff - b.kickoff);
+  const a = sorted.slice(0, Math.floor(sorted.length * 0.5));
+  const b = sorted.slice(a.length, Math.floor(sorted.length * 0.75));
+  const c = sorted.slice(a.length + b.length);
+  const cache: Cache = new Map(sorted.map((r) => [r.id, optionsFor(r, PROD.modelWeight)]));
+  const OLD: Policy = { ...PROD, name: 'old engine', floorBump: { handicap: 0.257, result: 0.017 } };
+  const NEW: Policy = { ...PROD, name: 'new engine' };
+  const out: Record<string, unknown> = {};
+  const iso = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
+  console.log(`lab deep compare: ${sorted.length} finished games, ${iso(sorted[0]!.kickoff)} to ${iso(sorted[sorted.length - 1]!.kickoff)}`);
+  for (const [label, part] of [['A (oldest half)', a], ['B (next quarter)', b], ['C (newest quarter)', c], ['all', sorted]] as const) {
+    console.log(`\n  ${label}: ${part.length} games, ${iso(part[0]!.kickoff)} to ${iso(part[part.length - 1]!.kickoff)}`);
+    for (const p of [OLD, NEW]) {
+      const r = simulate(p, part, cache);
+      out[`${label} ${p.name}`] = r;
+      const fam = Object.entries(r.byFamily).map(([k, v]) => `${k} ${v.n} (${pct(v.roi)})`).join(', ');
+      console.log(`  ${simLine(p.name === 'old engine' ? 'old' : 'new', r)}  £10 a call: ${r.pnl >= 0 ? '+' : '-'}£${Math.abs(r.pnl * 10).toFixed(0)}`);
+      console.log(`        ${fam}`);
+    }
+    const bs = bootstrap(perDay(dayPicks(NEW, part, cache)), perDay(dayPicks(OLD, part, cache)), 2000);
+    console.log(`      new against old: return ahead in ${pct(bs.roiAhead)} of resampled draws, difference ${pct(bs.lo)} to ${pct(bs.hi)} a call`);
+  }
+  return out;
+}

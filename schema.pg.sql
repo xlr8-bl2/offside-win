@@ -2988,3 +2988,24 @@ CROSS JOIN LATERAL (SELECT jsonb_build_object(
     'verdicts', '[]'::jsonb, 'markets', '[]'::jsonb, 'restored', true)::text AS card) c
 WHERE g.league_id IS NOT NULL AND g.home IS NOT NULL AND g.away IS NOT NULL
 ON CONFLICT (id) DO NOTHING;
+
+-- The record before launch, set aside (engine/src/recordreset.ts, `record:reset`).
+--
+-- Before launch the owner chose to start the public record with the engine of
+-- 6 October 2026, the one that goes live, rather than carry the calls of the
+-- engines before it. Nothing is deleted: those calls, their pulled calls and
+-- their slips move here, out of reach of every page (all of which read pick,
+-- pulled_call and slip), and `record:reset undo` moves them back. Private:
+-- no page reads these and the public key reaches none of them.
+CREATE TABLE IF NOT EXISTS pick_archive (LIKE pick);
+ALTER TABLE pick_archive ADD COLUMN IF NOT EXISTS archived_at bigint;
+ALTER TABLE pick_archive ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON pick_archive FROM anon, authenticated;
+CREATE TABLE IF NOT EXISTS pulled_call_archive (LIKE pulled_call);
+ALTER TABLE pulled_call_archive ADD COLUMN IF NOT EXISTS archived_at bigint;
+ALTER TABLE pulled_call_archive ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON pulled_call_archive FROM anon, authenticated;
+CREATE TABLE IF NOT EXISTS slip_archive (LIKE slip);
+ALTER TABLE slip_archive ADD COLUMN IF NOT EXISTS archived_at bigint;
+ALTER TABLE slip_archive ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON slip_archive FROM anon, authenticated;
