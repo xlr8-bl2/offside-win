@@ -182,7 +182,73 @@ function isInitialism(name) {
  *
  * @returns {{name:string, plain:string, wins:string, returns:string, outcomes?:Array}}
  */
-export function describe({ market, outcome, line, home, away, odds, stake = purse().stake }) {
+export function describe(args) {
+  const H = args.home || 'the home side';
+  const A = args.away || 'the away side';
+  return { ...plainly(args), bet: betslip(args.market, args.outcome, args.line, H, A) };
+}
+
+/**
+ * The call as a bookmaker lists it: the market's own name, and the selection
+ * inside it, spelt the way the button is.
+ *
+ * "Switzerland -1" on its own is two different bets. The Asian handicap gives
+ * the stake back on a one-goal win; the three-way handicap of the same name
+ * loses it. A reader who taps the first "Switzerland -1" they find can place
+ * the wrong one, so the market is always named beside the selection. Quarter
+ * lines get the split spelling some books print instead ("-0.5, -1.0" for
+ * -0.75), so the button can be found either way.
+ */
+export function betslip(market, outcome, line, H, A) {
+  const o = String(outcome ?? '');
+  const lo = o.toLowerCase();
+  const ou = (n) => `${lo === 'over' ? 'Over' : 'Under'} ${n}`;
+  switch (market) {
+    case '1x2':
+      return { market: 'Match Result', selection: o === 'HOME' ? H : o === 'AWAY' ? A : 'Draw' };
+    case 'double_chance':
+      return { market: 'Double Chance', selection: o === '1X' ? `${H} or Draw` : o === 'X2' ? `${A} or Draw` : `${H} or ${A}` };
+    case 'draw_no_bet':
+      return { market: 'Draw No Bet', selection: o === 'HOME' ? H : A };
+    case 'asian_handicap': {
+      if (line === null || line === undefined) return { market: 'Asian Handicap', selection: o === 'HOME' ? H : A };
+      const own = o === 'HOME' ? line : -line;
+      const quarter = Math.abs(own * 4) % 2 === 1;
+      return {
+        market: 'Asian Handicap',
+        selection: `${o === 'HOME' ? H : A} ${handicapLine(own)}`,
+        // The two halves, nearer zero first: -0.75 is "-0.5, -1.0".
+        ...(quarter ? { alt: [own + 0.25, own - 0.25].sort((a, b) => Math.abs(a) - Math.abs(b)).map(handicapLine).join(', ') } : {}),
+      };
+    }
+    case 'european_handicap':
+      return { market: '3-Way Handicap', selection: `${o === 'HOME' ? H : o === 'AWAY' ? A : 'Draw'} (${line > 0 ? '+' : ''}${line})` };
+    case 'over_under_05':
+    case 'over_under_15':
+    case 'over_under_25':
+    case 'over_under_35':
+      return { market: 'Total Goals', selection: ou(line ?? Number(market.slice(-2)) / 10) };
+    case 'total_corners':
+      return { market: 'Total Corners', selection: ou(line ?? 0) };
+    case 'btts':
+      return { market: 'Both Teams to Score', selection: lo === 'yes' ? 'Yes' : 'No' };
+    case 'total_red_cards':
+      return { market: 'Total Red Cards', selection: ou(line ?? 0.5) };
+    case 'red_card':
+      return { market: 'Red Card in the Match', selection: lo === 'yes' ? 'Yes' : 'No' };
+    default:
+      return { market: '', selection: o };
+  }
+}
+
+/** "-1.0", "+0.5", "0.0", "-0.75": a handicap the way the books print it. */
+export function handicapLine(n) {
+  const v = Math.round(n * 100) / 100;
+  const body = Math.abs(v * 4) % 2 === 1 ? Math.abs(v).toFixed(2) : Math.abs(v).toFixed(1);
+  return v > 0 ? `+${body}` : v < 0 ? `-${body}` : body;
+}
+
+function plainly({ market, outcome, line, home, away, odds, stake = purse().stake }) {
   const H = home || 'the home side';
   const A = away || 'the away side';
   const money = odds ? stakeLine(odds, stake) : '';
@@ -215,7 +281,7 @@ export function describe({ market, outcome, line, home, away, odds, stake = purs
       const own = outcome === 'HOME' ? line : -line;
       const start = -own;
       return out(
-        `${t} ${own > 0 ? '+' : ''}${own}`,
+        `${t} ${handicapLine(own)}`,
         start > 0 ? `${t}, giving a ${fmtStart(start)} start` : `${t}, with a ${fmtStart(-start)} start`,
         handicapWins(own, t),
         { outcomes: handicapOutcomes(own, t) },

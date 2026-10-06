@@ -140,3 +140,21 @@ test('no description uses the private vocabulary', () => {
     assert.equal(bad.length, 0, `${c.market}/${c.outcome}: ${JSON.stringify(bad)} in "${text}"`);
   }
 });
+
+test('every call names its market the way a bookmaker lists it', () => {
+  const b = (market: string, outcome: string, line?: number) =>
+    mkt({ market, outcome, line, home: 'Switzerland', away: 'North Macedonia', odds: 1.85 }).bet;
+  // "Switzerland -1" alone is two bets: the market is what tells them apart.
+  assert.deepEqual(b('asian_handicap', 'HOME', -1), { market: 'Asian Handicap', selection: 'Switzerland -1.0' });
+  assert.equal(b('european_handicap', 'HOME', -1).market, '3-Way Handicap');
+  // Quarter lines also carry the split spelling some books print.
+  assert.deepEqual(b('asian_handicap', 'HOME', -0.75), { market: 'Asian Handicap', selection: 'Switzerland -0.75', alt: '-0.5, -1.0' });
+  assert.deepEqual(b('asian_handicap', 'AWAY', -0.75), { market: 'Asian Handicap', selection: 'North Macedonia +0.75', alt: '+0.5, +1.0' });
+  assert.equal(b('asian_handicap', 'HOME', 0.25).alt, '0.0, +0.5');
+  assert.equal(b('asian_handicap', 'AWAY', 0.5).selection, 'North Macedonia -0.5');
+  assert.deepEqual(b('over_under_15', 'over', 1.5), { market: 'Total Goals', selection: 'Over 1.5' });
+  assert.deepEqual(b('double_chance', 'X2'), { market: 'Double Chance', selection: 'North Macedonia or Draw' });
+  assert.deepEqual(b('draw_no_bet', 'HOME'), { market: 'Draw No Bet', selection: 'Switzerland' });
+  assert.deepEqual(b('1x2', 'DRAW'), { market: 'Match Result', selection: 'Draw' });
+  assert.deepEqual(b('btts', 'yes'), { market: 'Both Teams to Score', selection: 'Yes' });
+});
