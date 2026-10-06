@@ -10,7 +10,7 @@
  * page. One source, so the two can never disagree.
  */
 
-export const UPDATED = '30 September 2026';
+export const UPDATED = '6 October 2026';
 
 /*
  * The address on the contact page. It is referenced from the privacy policy and
@@ -41,7 +41,7 @@ export const TERMS_VERSION = '2026-09-28';
 export const LEGAL = {
   privacy: {
     title: 'Privacy Policy',
-    version: '2.1',
+    version: '2.2',
     standfirst: `This Privacy Policy describes how Offside.win collects, uses, discloses and retains
       personal data in connection with the website at offside.win and the services made available
       through it, the legal bases on which it does so, and the rights available to you. It should be
@@ -50,7 +50,7 @@ export const LEGAL = {
       'No personal data is required to read the freely available parts of the Site.',
       'Where you register an Account we hold your email address and the preferences you provide; where you purchase a Membership we additionally hold a record of that purchase.',
       'Card details are provided directly to our Payment Provider and are not received or stored by us.',
-      'We do not sell personal data, disclose it for advertising purposes or track you across other websites.',
+      'We do not sell personal data. Only if you switch on ad measurement does the Whop pixel run, so that we can tell which of our adverts brought you here; it is off unless you say yes.',
       'Members’ Content carries identifying marks linked to the Account to which it is displayed, for the purpose of detecting unauthorised disclosure. This is described in clauses 2 and 4.',
       'You may access, export or delete your data from your account page, and you may complain to the Information Commissioner’s Office at any time.',
     ],
@@ -115,6 +115,11 @@ export const LEGAL = {
          for that category of page. The count records only the date and the category of page, contains
          no identifier and does not constitute personal data. Where you do not consent, no count is
          made.</p>
+      <p><b>Ad measurement.</b> Where you consent, the Site loads the Whop pixel, which reports to Whop
+         each page of the Site you open, together with the technical information transmitted with the
+         request (including your IP address and browser details) and any identifier Whop sets, so
+         that we can measure which of our advertisements led to visits and purchases. Where you do not
+         consent, the pixel is not loaded.</p>
       <p>We do not process special category data, do not acquire personal data from third parties for
          marketing purposes and do not use data brokers.</p>`,
       },
@@ -135,6 +140,7 @@ export const LEGAL = {
           <tr><td>Preventing fraud, abuse and payment disputes</td><td>Account, payment records, request logs</td><td>Legitimate interests (Art. 6(1)(f))</td></tr>
           <tr><td>Responding to correspondence and complaints</td><td>Correspondence</td><td>Legitimate interests (Art. 6(1)(f)) or performance of a contract</td></tr>
           <tr><td>Saved pages and visit counting</td><td>Storage on your device; aggregate count</td><td>Consent (Art. 6(1)(a)), which may be withdrawn at any time</td></tr>
+          <tr><td>Measuring our advertising (the Whop pixel)</td><td>Pages opened, technical request information, Whop’s identifier</td><td>Consent (Art. 6(1)(a)) and, for the device access involved, regulation 6 of PECR; consent may be withdrawn at any time</td></tr>
           <tr><td>Establishing, exercising or defending legal claims</td><td>Data relevant to the claim</td><td>Legitimate interests (Art. 6(1)(f))</td></tr>
         </tbody>
       </table></div>
@@ -182,7 +188,8 @@ export const LEGAL = {
             concerning your Membership;</li>
         <li><b>Whop</b>: the operation of checkout and billing and the storage of payment card details.
             In respect of the payment information you provide to it, Whop acts as an independent
-            controller under its own privacy policy;</li>
+            controller under its own privacy policy. Where you consent to ad measurement, Whop also
+            receives the pages you open through its pixel, for the measurement of our advertising;</li>
         <li><b>Google LLC</b>, where you elect to sign in with Google: Google acts as an independent
             controller in respect of your Google account and makes your email address, name and profile
             image available to us;</li>
@@ -315,7 +322,8 @@ export const LEGAL = {
       <p>The Site does not set cookies of its own. It stores a limited number of items in your browser’s
          local storage, which is subject to the same rules as cookies under PECR. Items strictly
          necessary to provide the Site, including those that maintain your session and record your
-         choice, are always stored. Saved pages and visit counting are enabled only with your consent.
+         choice, are always stored. Saved pages, visit counting and the Whop pixel used for ad
+         measurement are enabled only with your consent.
          Each item is listed in our <a href="#/legal/cookies">Cookies and Storage Notice</a>, where your
          choice may be changed at any time. A Global Privacy Control signal sent by your browser is
          treated as a refusal of consent.</p>`,
@@ -327,9 +335,10 @@ export const LEGAL = {
       <p><b>European Economic Area.</b> Where the EU General Data Protection Regulation applies to our
          processing of your personal data, you have rights corresponding to those set out in clause 8 and
          may lodge a complaint with the supervisory authority of your Member State of residence.</p>
-      <p><b>United States.</b> We do not sell personal information, do not share it for cross-context
-         behavioural advertising and do not use or disclose sensitive personal information, and have not
-         done so in the preceding twelve months. Irrespective of whether the privacy law of your state
+      <p><b>United States.</b> We do not sell personal information and do not use or disclose sensitive
+         personal information. Pages you open are shared with Whop for the measurement of our
+         advertising only where you have switched on ad measurement, and switching it off stops that
+         sharing. Irrespective of whether the privacy law of your state
          applies to us, you may request access to or deletion of your personal information, and you will
          not be subject to discrimination for doing so. We do not disclose personal information to third
          parties for their direct marketing purposes.</p>`,
@@ -771,7 +780,7 @@ export const LEGAL = {
   },
   cookies: {
     title: 'Cookies and Storage Notice',
-    version: '2.1',
+    version: '2.2',
     body: `
       <p>This Notice describes the information stored on your device when you use offside.win, as
          required by regulation 6 of the Privacy and Electronic Communications (EC Directive)
@@ -798,12 +807,14 @@ export const LEGAL = {
         <tbody>
           <tr><td>Saved pages (<code>ow.c1:…</code>)</td><td>A copy of each page’s data, so that the Site opens immediately on your next visit and then updates.</td><td>Replaced as pages update; deleted if consent is withdrawn</td></tr>
           <tr><td>Visit counting</td><td>An anonymous count of each page opened, by category of page. Nothing is stored on your device for this purpose.</td><td>Not stored on your device</td></tr>
+          <tr><td>Ad measurement (the Whop pixel, from <code>t.whop.tw</code>)</td><td>Reports each page you open to Whop, so that we can tell which of our advertisements brought you to the Site. Whop may store its own identifier on your device for this purpose.</td><td>As set by Whop; the pixel stops loading as soon as consent is withdrawn</td></tr>
         </tbody>
       </table></div>
 
       <h2>Other technologies</h2>
-      <p>The Site uses no advertising cookies, tracking pixels, social media plug-ins or third-party
-         analytics services. Fonts are served from the Site itself. A Global Privacy Control signal sent
+      <p>Apart from the Whop pixel above, which runs only with your consent, the Site uses no
+         advertising cookies, tracking pixels, social media plug-ins or third-party analytics services.
+         Fonts are served from the Site itself. A Global Privacy Control signal sent
          by your browser is treated as a refusal of consent.</p>
       <p>Further information on our processing of personal data is set out in our
          <a href="#/legal/privacy">Privacy Policy</a>.</p>`,
