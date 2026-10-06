@@ -95,11 +95,11 @@ export function sideInsights(team: string, side: 'home' | 'away', games: TeamGam
     const better = xg.filter((g) => g.xf! - g.xa! >= CLEAR).length;
     const worse = xg.filter((g) => g.xa! - g.xf! >= CLEAR).length;
     if (better >= Math.ceil(xg.length * 0.7)) {
-      out.push({ text: `${team} have created the better chances in ${share(better, xg.length)} games`, side, weight: 96 });
+      out.push({ text: `${team} have created the better chances in ${share(better, xg.length)} games`, side, lean: 1, weight: 96 });
     } else if (worse >= Math.ceil(xg.length * 0.6)) {
-      out.push({ text: `${team} have been out-created in ${share(worse, xg.length)} games`, side, weight: 96 });
+      out.push({ text: `${team} have been out-created in ${share(worse, xg.length)} games`, side, lean: -1, weight: 96 });
     } else if (better <= 1 && worse <= 1 && xg.length >= 6) {
-      out.push({ text: `${team}'s games are tight: neither side made clearly the better chances in ${share(xg.length - better - worse, xg.length)} games`, side, weight: 70 });
+      out.push({ text: `${team}'s games are tight: neither side made clearly the better chances in ${share(xg.length - better - worse, xg.length)} games`, side, lean: 0, weight: 70 });
     }
 
     // 2. Results against the run of the chances.
@@ -109,7 +109,7 @@ export function sideInsights(team: string, side: 'home' | 'away', games: TeamGam
     if (stolen >= 3) {
       out.push({
         text: `${team} have won ${w(stolen)} of their last ${w(xg.length)} games in which the other side made the better chances. Results like that rarely last`,
-        side, weight: 98,
+        side, lean: -1, weight: 98,
       });
     }
     if (robbed >= 3) {
@@ -117,7 +117,7 @@ export function sideInsights(team: string, side: 'home' | 'away', games: TeamGam
         text: robbedLost >= 3
           ? `${team} have lost ${w(robbedLost)} of their last ${w(xg.length)} games in which they made the better chances. Their football is better than their results`
           : `${team} have failed to win ${w(robbed)} of their last ${w(xg.length)} games in which they made the better chances. Their football is better than their results`,
-        side, weight: 98,
+        side, lean: 1, weight: 98,
       });
     }
 
@@ -128,14 +128,14 @@ export function sideInsights(team: string, side: 'home' | 'away', games: TeamGam
     const allowed = xg.reduce((a, g) => a + g.xa!, 0);
     const span = `in their last ${w(xg.length)}`;
     if (goals - chances >= 4 && goals >= chances * 1.4) {
-      out.push({ text: `${team} have scored ${goals} ${span} from chances that would usually bring about ${Math.round(chances)}. That finishing is running hot`, side, weight: 94 });
+      out.push({ text: `${team} have scored ${goals} ${span} from chances that would usually bring about ${Math.round(chances)}. That finishing is running hot`, side, lean: -1, weight: 94 });
     } else if (chances - goals >= 4 && chances >= goals * 1.4) {
-      out.push({ text: `${team} have scored only ${goals} ${span} from chances that would usually bring about ${Math.round(chances)}. The goals are coming`, side, weight: 94 });
+      out.push({ text: `${team} have scored only ${goals} ${span} from chances that would usually bring about ${Math.round(chances)}. The goals are coming`, side, lean: 1, weight: 94 });
     }
     if (conceded - allowed >= 4 && conceded >= allowed * 1.4) {
-      out.push({ text: `${team} have conceded ${conceded} ${span} from chances that would usually cost about ${Math.round(allowed)}. They have been punished for very little`, side, weight: 90 });
+      out.push({ text: `${team} have conceded ${conceded} ${span} from chances that would usually cost about ${Math.round(allowed)}. They have been punished for very little`, side, lean: 1, weight: 90 });
     } else if (allowed - conceded >= 4 && allowed >= conceded * 1.4) {
-      out.push({ text: `${team} have conceded only ${conceded} ${span} when the chances they allowed would usually cost about ${Math.round(allowed)}. Their goalkeeper and their luck have carried them`, side, weight: 92 });
+      out.push({ text: `${team} have conceded only ${conceded} ${span} when the chances they allowed would usually cost about ${Math.round(allowed)}. Their goalkeeper and their luck have carried them`, side, lean: -1, weight: 92 });
     }
 
     // 7. Which way it is moving: the last four against the games before.
@@ -143,8 +143,8 @@ export function sideInsights(team: string, side: 'home' | 'away', games: TeamGam
       const diff = (gs: TeamGame[]) => gs.reduce((a, g) => a + g.xf! - g.xa!, 0) / gs.length;
       const now = diff(xg.slice(0, 4));
       const before = diff(xg.slice(4));
-      if (now - before >= 0.8 && now > 0) out.push({ text: `${team} are trending up: in their last four games they have made clearly better chances than in the games before`, side, weight: 84 });
-      if (before - now >= 0.8 && now < 0.2) out.push({ text: `${team} are trending down: their last four games have been their poorest for the chances they make and allow`, side, weight: 84 });
+      if (now - before >= 0.8 && now > 0) out.push({ text: `${team} are trending up: in their last four games they have made clearly better chances than in the games before`, side, lean: 1, weight: 84 });
+      if (before - now >= 0.8 && now < 0.2) out.push({ text: `${team} are trending down: their last four games have been their poorest for the chances they make and allow`, side, lean: -1, weight: 84 });
     }
 
     // 8. The venue split, in the same terms.
@@ -154,8 +154,8 @@ export function sideInsights(team: string, side: 'home' | 'away', games: TeamGam
       const hw = here.filter((g) => g.xa! - g.xf! >= CLEAR).length;
       const where = venue === 'home' ? 'At home' : 'Away from home';
       const kind = venue === 'home' ? 'home games' : 'away games';
-      if (hb === here.length || (hb >= 4 && hb >= here.length - 1)) out.push({ text: `${where}, ${team} have made the better chances in ${share(hb, here.length)} ${kind}`, side, weight: 86 });
-      else if (hw >= Math.ceil(here.length * 0.7)) out.push({ text: `${where}, ${team} have been out-created in ${share(hw, here.length)} ${kind}`, side, weight: 86 });
+      if (hb === here.length || (hb >= 4 && hb >= here.length - 1)) out.push({ text: `${where}, ${team} have made the better chances in ${share(hb, here.length)} ${kind}`, side, lean: 1, weight: 86 });
+      else if (hw >= Math.ceil(here.length * 0.7)) out.push({ text: `${where}, ${team} have been out-created in ${share(hw, here.length)} ${kind}`, side, lean: -1, weight: 86 });
     }
   }
 
@@ -164,8 +164,8 @@ export function sideInsights(team: string, side: 'home' | 'away', games: TeamGam
   if (sotA.length >= 5) {
     const tight = sotA.filter((g) => g.sotAgainst! <= 2).length;
     const open = sotA.filter((g) => g.sotAgainst! >= 6).length;
-    if (tight >= Math.ceil(sotA.length * 0.7)) out.push({ text: `${team} have let the other side put two or fewer efforts on target in ${share(tight, sotA.length)} games`, side, weight: 88 });
-    else if (open >= Math.ceil(sotA.length * 0.6)) out.push({ text: `${team} have faced six or more efforts on target in ${share(open, sotA.length)} games. They are getting opened up`, side, weight: 88 });
+    if (tight >= Math.ceil(sotA.length * 0.7)) out.push({ text: `${team} have let the other side put two or fewer efforts on target in ${share(tight, sotA.length)} games`, side, lean: 1, weight: 88 });
+    else if (open >= Math.ceil(sotA.length * 0.6)) out.push({ text: `${team} have faced six or more efforts on target in ${share(open, sotA.length)} games. They are getting opened up`, side, lean: -1, weight: 88 });
   }
 
   // 5. Shooting from anywhere, or working good chances.
@@ -173,8 +173,8 @@ export function sideInsights(team: string, side: 'home' | 'away', games: TeamGam
   if (sh.length >= 5) {
     const shots = sh.reduce((a, g) => a + g.shots!, 0);
     const sot = sh.reduce((a, g) => a + g.sot!, 0);
-    if (shots >= 60 && sot * 4 <= shots) out.push({ text: `${team} shoot plenty but from poor positions: ${sot} on target from ${shots} shots in their last ${w(sh.length)}`, side, weight: 80 });
-    else if (shots <= 60 && sot * 2 >= shots && shots >= 25) out.push({ text: `${team} do not shoot often but they make it count: ${sot} of their ${shots} shots in the last ${w(sh.length)} were on target`, side, weight: 80 });
+    if (shots >= 60 && sot * 4 <= shots) out.push({ text: `${team} shoot plenty but from poor positions: ${sot} on target from ${shots} shots in their last ${w(sh.length)}`, side, lean: -1, weight: 80 });
+    else if (shots <= 60 && sot * 2 >= shots && shots >= 25) out.push({ text: `${team} do not shoot often but they make it count: ${sot} of their ${shots} shots in the last ${w(sh.length)} were on target`, side, lean: 1, weight: 80 });
   }
 
   // 6. The ball, and whether it turns into anything.
@@ -184,15 +184,15 @@ export function sideInsights(team: string, side: 'home' | 'away', games: TeamGam
     const sterile = more.filter((g) => g.xf! - g.xa! < CLEAR).length;
     if (more.length >= Math.ceil(po.length * 0.75)) {
       if (sterile >= Math.ceil(more.length * 0.6)) {
-        out.push({ text: `${team} have most of the ball in nearly every game but it goes nowhere: in ${w(sterile)} of the ${w(more.length)} they dominated it, they did not make the better chances`, side, weight: 90 });
+        out.push({ text: `${team} have most of the ball in nearly every game but it goes nowhere: in ${w(sterile)} of the ${w(more.length)} they dominated it, they did not make the better chances`, side, lean: -1, weight: 90 });
       } else {
-        out.push({ text: `${team} have had most of the ball in ${share(more.length, po.length)} games, and they turn it into chances`, side, weight: 74 });
+        out.push({ text: `${team} have had most of the ball in ${share(more.length, po.length)} games, and they turn it into chances`, side, lean: 1, weight: 74 });
       }
     }
     const less = po.filter((g) => g.poss! <= 45);
     const counter = less.filter((g) => g.xf! - g.xa! >= CLEAR).length;
     if (less.length >= 4 && counter >= Math.ceil(less.length * 0.5)) {
-      out.push({ text: `${team} are happy without the ball: in ${w(counter)} of the ${w(less.length)} games they had less of it, they still made the better chances`, side, weight: 88 });
+      out.push({ text: `${team} are happy without the ball: in ${w(counter)} of the ${w(less.length)} games they had less of it, they still made the better chances`, side, lean: 1, weight: 88 });
     }
   }
 
@@ -215,9 +215,9 @@ export function matchInsights(
   const leak = (gs: TeamGame[]) => { const x = gs.slice(0, 8).filter((g) => g.xf !== null && g.xa !== null); return x.length >= 5 ? x.filter((g) => g.xa! - g.xf! >= CLEAR).length / x.length : null; };
   const hc = create(home.games), ac = create(away.games), hl = leak(home.games), al = leak(away.games);
   if (hc !== null && al !== null && hc >= 0.7 && al >= 0.5) {
-    out.push({ text: `This is where it is decided: ${home.name} make the better chances almost every week, and ${away.name} have been out-created in most of their recent games`, side: 'match', weight: 99 });
+    out.push({ text: `This is where it is decided: ${home.name} make the better chances almost every week, and ${away.name} have been out-created in most of their recent games`, side: 'match', lean: 1, weight: 99, decides: 'home' });
   } else if (ac !== null && hl !== null && ac >= 0.7 && hl >= 0.5) {
-    out.push({ text: `This is where it is decided: ${away.name} make the better chances almost every week, and ${home.name} have been out-created in most of their recent games`, side: 'match', weight: 99 });
+    out.push({ text: `This is where it is decided: ${away.name} make the better chances almost every week, and ${home.name} have been out-created in most of their recent games`, side: 'match', lean: 1, weight: 99, decides: 'away' });
   }
   return out;
 }

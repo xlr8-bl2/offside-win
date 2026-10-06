@@ -38,6 +38,14 @@ export interface PubFact {
   weight: number;
   /** The fit player a threat line is about (a name key), so the slate can rest them next time. */
   threat?: string;
+  /**
+   * A read underneath the results (insight.ts), and which way it points for
+   * the side it is about: 1 good for them, -1 bad, 0 neither. Only reads carry
+   * it, which is how the paragraph built without the writer finds them.
+   */
+  lean?: -1 | 0 | 1;
+  /** On the read that puts both sides together: whose game it is. */
+  decides?: 'home' | 'away';
 }
 
 interface LedgerEntry {

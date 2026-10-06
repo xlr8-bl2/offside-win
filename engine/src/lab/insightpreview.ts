@@ -3,15 +3,18 @@
  * (narrate/insight.ts) on the biggest matches still to play, and the writer's
  * preview drafted from them beside the preview the site carries now.
  *
- * Read-only: nothing is stored, and only three previews are drafted, out of
- * the same daily allowance the slate writes from. Every match here is still
- * to be played, so only the free preview is drafted -- never a call.
+ * Read-only: nothing is stored. Every match shows the paragraph the slate
+ * builds from the reads when the writer cannot help (narrate/rescue.ts).
+ * With `deep insight write`, up to four are also drafted by the writer, out
+ * of the same daily allowance the slate writes from. Every match here is
+ * still to be played, so only the free preview is drafted -- never a call.
  */
 
 import { select } from '../store.ts';
 import { pubFacts } from '../narrate/facts.ts';
 import { matchInsights, teamGames } from '../narrate/insight.ts';
 import { write } from '../narrate/write.ts';
+import { fromReads } from '../narrate/rescue.ts';
 import { geminiWriter } from '../narrate/gemini.ts';
 import type { MatchRow } from '../types.ts';
 
@@ -28,7 +31,7 @@ async function recent(teamId: number, before: number): Promise<MatchRow[]> {
   );
 }
 
-export async function runInsightPreview(): Promise<void> {
+export async function runInsightPreview({ draft = false }: { draft?: boolean } = {}): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const fixtures = await select<{ id: number; kickoff: number; rank: number | null; home_team: string; away_team: string; home_team_id: number; away_team_id: number; bundle_json: string; league_id: number }>(
     `SELECT id, kickoff, rank, home_team, away_team, home_team_id, away_team_id, bundle_json, league_id
@@ -36,7 +39,7 @@ export async function runInsightPreview(): Promise<void> {
       ORDER BY coalesce(rank, 9), kickoff LIMIT 14`,
     [now, now + 3 * 86400],
   );
-  const key = process.env['GEMINI_API_KEY'];
+  const key = draft ? process.env['GEMINI_API_KEY'] : undefined;
   // The slate's own fallback order: the first model that answers writes.
   const models = [...new Set([process.env['GEMINI_MODEL']?.trim(), 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview'].filter(Boolean) as string[])];
   const writers = key ? models.map((model) => geminiWriter({ apiKey: key, model, ratePerMinute: 6 })) : [];
@@ -56,14 +59,16 @@ export async function runInsightPreview(): Promise<void> {
     let b: Record<string, unknown> = {};
     try { b = JSON.parse(f.bundle_json); } catch { /* no bundle yet */ }
     const before = typeof b['preview'] === 'string' ? b['preview'] as string : null;
-    if (!writer || drafted >= 4 || reads.length < 2) continue;
-    drafted++;
     const facts = pubFacts({
       home: f.home_team, away: f.away_team,
       ledger: b['ledger'] as never, form: b['form'] as never, h2h: b['h2h'] as never, lineups: b['lineups'] as never,
       players: b['players'] as never, extras: b['extras'] as never,
       matches: { home: hm, away: am, homeId: Number(f.home_team_id), awayId: Number(f.away_team_id) },
     });
+    console.log(`  BEFORE: ${before ?? '(none stored)'}`);
+    console.log(`  FROM THE READS: ${fromReads(f.home_team, f.away_team, facts) ?? '(too few reads; the grammar keeps it)'}`);
+    if (!writer || drafted >= 4 || reads.length < 2) continue;
+    drafted++;
     console.log('  facts the writer gets, in order:');
     for (const x of facts.slice(0, 18)) console.log(`    - ${x.text}`);
     let res = await write({ home: f.home_team, away: f.away_team, competition: String(b['league'] ?? 'this competition'), call: '', facts, previewOnly: true }, writer);
@@ -71,7 +76,6 @@ export async function runInsightPreview(): Promise<void> {
       if (res.text || !res.error) break;
       res = await write({ home: f.home_team, away: f.away_team, competition: String(b['league'] ?? 'this competition'), call: '', facts, previewOnly: true }, other);
     }
-    console.log(`  BEFORE: ${before ?? '(none stored)'}`);
-    console.log(`  AFTER:  ${res.text ?? `(rejected: ${res.rejections.join(', ')}${res.error ? `; ${res.error}` : ''})`}`);
+    console.log(`  WRITER: ${res.text ?? `(rejected: ${res.rejections.join(', ')}${res.error ? `; ${res.error}` : ''})`}`);
   }
 }

@@ -69,3 +69,28 @@ test("the model's working is not taken for its answer", async () => {
   assert.ok(!notProse('Spain should comfortably dominate a fading Croatia side. Croatia have won three of their last six, but those results hide a decline.'));
   assert.ok(!notProse('"Spain" is a word here, and 2-1 was the score last time.'));
 });
+
+test('with no writer, the reads become a paragraph that takes a side', async () => {
+  const { fromReads } = await import('../src/narrate/rescue.ts');
+  const strong = Array.from({ length: 10 }, (_, i) => row(i, 1, 100 + i, i % 2 === 0, 2, 0, 2.1, 0.6));
+  const weak = Array.from({ length: 10 }, (_, i) => row(i, 2, 200 + i, i % 2 === 1, 0, 2, 0.5, 1.9));
+  const facts = [
+    { text: 'Spain have won four of their last six', side: 'away' as const, weight: 85 },
+    ...matchInsights({ name: 'Croatia', games: teamGames(weak, 2) }, { name: 'Spain', games: teamGames(strong, 1) }),
+  ];
+  const text = fromReads('Croatia', 'Spain', facts)!;
+  assert.ok(text, 'a paragraph');
+  assert.match(text, /Spain/);
+  assert.match(text, /^(Look past|Everything underneath|The results only)/, text);
+  assert.match(text, /This is where it is decided/);
+  // Only the reads: the lookup is not one of them.
+  assert.doesNotMatch(text, /won four of their last six/);
+  assert.deepEqual(findBannedInProse(text, facts.map((f) => f.text)), []);
+  assert.equal(text, fromReads('Croatia', 'Spain', facts), 'the same words every run');
+});
+
+test('one read is not an argument: the grammar keeps it', async () => {
+  const { fromReads } = await import('../src/narrate/rescue.ts');
+  assert.equal(fromReads('A', 'B', [{ text: 'A have been out-created in all of their last eight games', side: 'home', weight: 96, lean: -1 }]), null);
+  assert.equal(fromReads('A', 'B', [{ text: 'A have won four of their last six', side: 'home', weight: 85 }]), null);
+});

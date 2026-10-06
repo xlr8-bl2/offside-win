@@ -46,7 +46,10 @@ export interface WriteRequest {
 
 export interface Writer {
   name: string;
-  generate(prompt: string): Promise<string>;
+  /** `avoid`: a model to ask last, for a chain of models (budget.ts). */
+  generate(prompt: string, opts?: { avoid?: string }): Promise<string>;
+  /** The model that wrote the last answer, when there is a choice of them. */
+  lastModel?: string;
 }
 
 /** Why a draft was thrown away, for the run log. */
@@ -113,7 +116,8 @@ export function buildPrompt(req: WriteRequest): string {
 - No number with a decimal point${odds ? `, except the odds exactly as given: "${odds}"` : ''}.
 - Never use these words: ${NEVER}.
 - Never mention a bet, market, odds, price or bookmaker${req.previewOnly ? '' : ' in PREVIEW'}.
-- Short sentences against longer ones. Talk to someone who watches football.
+- Short sentences against longer ones. Talk to someone who watches football, the way a pundit talks on the telly, not the way an essay reads.
+- Never write: "this encounter", "this contest", "this clash", "ultimately", "set to", "look to", "navigate", "massive", "crippling", "relentless", "showing that", "it is worth noting", "in the final third". Say the plain thing: "they will have the ball", "they cannot defend a cross".
 - No dashes between clauses. Use a full stop, a comma or a colon instead.
 - No heading beyond the label${req.previewOnly ? '' : 's'}, no sign-off, no quotation marks around the paragraph.
 - Never say how long a manager has been in charge, and never list who starts or who is out. A reader can look those up; they are paying for what they cannot.
@@ -397,9 +401,10 @@ export function validateWhy(text: string, req: WriteRequest): Rejection[] {
 /**
  * Write one preview, or return null and let the caller fall back.
  *
- * One retry, because a rejected draft is usually a one-off rather than a
- * systematic failure, and a second rejection means something is wrong with the
- * brief or the facts and more attempts will not fix it.
+ * One retry with the faults spelt out, then, where the writer has more than
+ * one model, one more on a different model. Half the previews on 6 October
+ * failed twice on the same model and went back to the template; a different
+ * model makes different mistakes.
  */
 export async function write(req: WriteRequest, writer: Writer): Promise<WriteResult> {
   const rejections: Rejection[] = [];
@@ -412,14 +417,22 @@ export async function write(req: WriteRequest, writer: Writer): Promise<WriteRes
   let good: string | null = null;
   let goodWhy: string | null = null;
 
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // The third go is for a preview that failed twice, and only where there
+    // is another model to ask: the same model a third time writes the same
+    // paragraph a third time.
+    if (attempt === 2 && (good || !writer.lastModel)) break;
     let draft: string;
     try {
-      draft = (await writer.generate(prompt)).trim();
+      draft = (await writer.generate(prompt, attempt === 2 ? { avoid: writer.lastModel } : undefined)).trim();
     } catch (err) {
+      // The extra go on another model is a bonus; no model free to take it
+      // is not the writer failing, and the drafts already judged stand.
+      if (attempt === 2) break;
       rejections.push('error');
       return {
-        text: null,
+        text: good,
+        why: goodWhy,
         rejections,
         unbacked,
         provider: writer.name,
@@ -442,7 +455,7 @@ export async function write(req: WriteRequest, writer: Writer): Promise<WriteRes
       good ??= tidy(preview);
       // A members' paragraph that failed is worth one more try while there is
       // one: it is the part a member pays to read. The preview already stands.
-      if (req.previewOnly || whyOk || attempt === 1) {
+      if (req.previewOnly || whyOk || attempt >= 1) {
         return { text: good, why: whyOk ?? goodWhy, rejections, unbacked, provider: writer.name };
       }
     } else {

@@ -294,9 +294,9 @@ const commands: Record<string, () => Promise<unknown>> = {
       await runPulls();
       return;
     }
-    if (study === 'deep insight') {
+    if (study === 'deep insight' || study === 'deep insight write') {
       const { runInsightPreview } = await import('./lab/insightpreview.ts');
-      await runInsightPreview();
+      await runInsightPreview({ draft: study.endsWith('write') });
       return;
     }
     if (study === 'deep books') {
