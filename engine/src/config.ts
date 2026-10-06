@@ -295,6 +295,15 @@ export const config = {
      * market the old board leaned on, lost in both tuning periods when value
      * was measured against the consensus.
      */
+    //
+    // Rechecked by lab deep (3,338 fixtures, 13 August to 6 October 2026,
+    // same three-way split): the floor is not what leaves a match uncalled.
+    // A match goes without a call because nothing likely is priced at or
+    // above fair (55%), the likely outcome is too short (12%) or nothing is
+    // priced (4%); too close to call is about 3%. Every looser floor did
+    // worse than this one on the newer half (results at 74%: ahead in 0.2%
+    // of resampled draws), and so did every lower ceiling and every other
+    // ranking (lab deep ceiling): none held in all three periods.
     floor: num('CONF_FLOOR', 0.78),
     /**
      * One call per fixture.
