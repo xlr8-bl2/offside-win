@@ -291,16 +291,33 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
 
   const status = state === 'ft' ? 'https://schema.org/EventCompleted'
     : state === 'off' ? 'https://schema.org/EventPostponed' : 'https://schema.org/EventScheduled';
-  const event: Rec = {
+  /*
+   * The match as an event, for Google's event results.
+   *
+   * Search Console flagged 11 pages (6 October 2026) for an event with no
+   * date and no place. That was the competition, nested here as a
+   * `superEvent` with a name and nothing else: Google reads every Event it
+   * finds, nested or not. The competition is the organiser now, with its own
+   * page as its address. A match whose ground the provider does not name
+   * gets no event at all rather than one with a made-up place, since a place
+   * is required. The end is kick-off plus two hours, which covers a match
+   * and its half-time; extra time is the exception.
+   */
+  const teams = [{ '@type': 'SportsTeam', name: home }, { '@type': 'SportsTeam', name: away }];
+  const event: Rec | null = venue && Number.isFinite(Number(f.kickoff)) ? {
     '@context': 'https://schema.org', '@type': 'SportsEvent',
     name: `${home} v ${away}`, sport: 'Football', url: canonical, description,
-    startDate: when.iso, eventStatus: status, eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
-    homeTeam: { '@type': 'SportsTeam', name: home }, awayTeam: { '@type': 'SportsTeam', name: away },
-    competitor: [{ '@type': 'SportsTeam', name: home }, { '@type': 'SportsTeam', name: away }],
-    location: venue ? { '@type': 'Place', name: f.venue.name, address: f.venue.city ?? f.venue.name } : { '@type': 'Place', name: `${home} v ${away}` },
-    ...(league ? { superEvent: { '@type': 'SportsEvent', name: league } } : {}),
-    organizer: { '@type': 'Organization', name: league || SITE },
-  };
+    startDate: when.iso, endDate: new Date((Number(f.kickoff) + 7200) * 1000).toISOString(),
+    eventStatus: status, eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
+    homeTeam: teams[0], awayTeam: teams[1], competitor: teams, performer: teams,
+    location: {
+      '@type': 'Place', name: String(f.venue.name),
+      address: { '@type': 'PostalAddress', addressLocality: String(f.venue.city ?? f.venue.name) },
+    },
+    organizer: league && f.league_id
+      ? { '@type': 'SportsOrganization', name: league, url: `${site}${leaguePath(f.league_id, league)}` }
+      : { '@type': 'Organization', name: SITE, url: `${site}/` },
+  } : null;
 
   // Its own share card (engine/src/cards), drawn by the cards workflow. The
   // query changes at full time so a platform that cached the preview card
@@ -308,8 +325,8 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
   const image = { url: `${site}/og/${Number(f.id)}.jpg?s=${cardState(f)}`, alt: `${home} v ${away}${score ? `, ${score[0]}–${score[1]}` : ''}` };
   // The event's picture too: Google lists `image` among an event's
   // recommended properties, and the share card is exactly that.
-  event['image'] = [image.url];
-  return { title, description: clip(description), canonical, body, jsonLd: [event, c.ld], image, json: `${site}/api/fixture/${Number(f.id)}` };
+  if (event) event['image'] = [image.url];
+  return { title, description: clip(description), canonical, body, jsonLd: event ? [event, c.ld] : [c.ld], image, json: `${site}/api/fixture/${Number(f.id)}` };
 }
 
 function rowStatus(f: Rec): string {
