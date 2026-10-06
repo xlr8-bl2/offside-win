@@ -115,7 +115,15 @@ export function buildPrompt(req: WriteRequest): string {
 - Never mention a bet, market, odds, price or bookmaker${req.previewOnly ? '' : ' in PREVIEW'}.
 - Short sentences against longer ones. Talk to someone who watches football.
 - No dashes between clauses. Use a full stop, a comma or a colon instead.
-- No heading beyond the label${req.previewOnly ? '' : 's'}, no sign-off, no quotation marks around the paragraph.`;
+- No heading beyond the label${req.previewOnly ? '' : 's'}, no sign-off, no quotation marks around the paragraph.
+- Never say how long a manager has been in charge, and never list who starts or who is out. A reader can look those up; they are paying for what they cannot.
+- Rest only matters when one side has had clearly less of it than the other. Otherwise leave it out.`;
+
+  // What the reader pays for: the read underneath the results, not the lookups.
+  const analysis = `- Lead with what is happening underneath the results: who makes the better chances, whose results are ahead of or behind their football, who is finishing above or below their chances, what each side gives up at the back. The facts that say this come first in the list. Build on at least two of them.
+- Join them into an argument about how this game goes: who controls it, where the chances come from, and what that means for the score.
+- Mention an absence only by what it changes on the pitch ("without their scorer, the chances they make will be harder to finish"), never as a list of names.
+- Have a take, and back it. Be willing to say a side's results are flattering them, or that they are better than the table says.`;
 
   if (req.previewOnly) {
     return `You are a football pundit writing a preview of ${req.home} v ${req.away} in the ${req.competition}.
@@ -129,9 +137,9 @@ PREVIEW:
 <the preview>
 
 PREVIEW: 70 to 120 words about the football only. Count them.
-- Open with an opinion, not a fact. Have a take on how this one goes.
-- Name players and managers from the facts: who is out, who starts, who scores.
-- Be willing to say a team is poor, in trouble, or flattered by the table.
+- Open with your take on how this one goes, in one sentence.
+${analysis}
+- End on the one thing that decides it.
 
 ${rules}`;
   }
@@ -149,18 +157,16 @@ WHY:
 <why the call>
 
 PREVIEW: 70 to 120 words about the football only. Count them.
-- Open with an opinion, not a fact. Have a take.
-- Name players and managers from the facts: who is out, who starts, who scores.
-  A reader pays for names. "Nice are missing four players" is not analysis;
-  "Nice are without Mendy and Bombito at the back" is.
-- Be willing to say a team is poor, in trouble, or flattered by the table.
+- Open with your take on how this one goes, in one sentence.
+${analysis}
+- End on the one thing that decides it.
 - Do NOT mention any bet, market, call, odds, price or bookmaker in this paragraph.
 
 WHY: 40 to 90 words explaining why our call is: ${req.call}${odds ? `, ${odds}` : ''}.
-- Say plainly how the football above leads to THIS outcome, not just that one side is good.
-  If the call is about goals, argue about goals: who scores, who cannot defend.
-  If it is about a side not losing, argue about why that side avoids defeat.
-- Name at least one player from the facts.${odds ? `
+- Show the mechanism: how the reads underneath lead to THIS outcome, not just that one side is better.
+  If the call is about goals, argue about the chances each side makes and gives up.
+  If it is about a side not losing, argue about why the other side cannot hurt them.
+- Then say in one sentence what would have to go wrong for it to fail.${odds ? `
 - Include the exact words "${odds}" once.` : ''}
 
 ${rules.replace('Hard rules:', 'Hard rules for both:')}`;

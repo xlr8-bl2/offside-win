@@ -176,7 +176,7 @@ export function narrativeKey(fixtureId: number, c: Candidate, news = ''): string
  */
 export function teamNews(lineups: { status?: string; unavailable?: Array<{ id: number }> } | null | undefined): string {
   const out = (lineups?.unavailable ?? []).map((u) => u.id).sort((a, b) => a - b);
-  return `p1|${lineups?.status === 'confirmed' ? 'c' : 'p'}|${out.join(',')}`;
+  return `p2|${lineups?.status === 'confirmed' ? 'c' : 'p'}|${out.join(',')}`;
 }
 
 function fnv(s: string): string {
@@ -684,6 +684,7 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
             players: players ?? null,
             extras,
             recentThreats: recentThreats(),
+            matches: { home: ctx.styleMatches.home, away: ctx.styleMatches.away, homeId: ctx.home.team_id, awayId: ctx.away.team_id },
           });
       if (writer && !writerGaveUp) {
         for (const v of confidentVerdicts) {
