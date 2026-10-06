@@ -25,6 +25,7 @@
     "lab:model": "npm -w engine run lab:model",
     "lab:losses": "npm -w engine run lab:losses",
     "lab:slices": "npm -w engine run lab:slices",
+    "record:reset": "npm -w engine run record:reset",
     "lab:live": "npm -w engine run lab:live",
     "lab:record": "npm -w engine run lab:record",
     "lab:calib": "npm -w engine run lab:calib",

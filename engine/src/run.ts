@@ -257,6 +257,14 @@ const commands: Record<string, () => Promise<unknown>> = {
     return plans(id ?? (process.env['GRANT_EMAIL'] || undefined), value ?? (process.env['GRANT_ARG'] || undefined));
   },
 
+  // Start the public record from now, setting earlier calls aside (recordreset.ts).
+  async 'record:reset'() {
+    requireEnv({ provider: false });
+    await ensureSchema();
+    const { recordReset } = await import('./recordreset.ts');
+    await recordReset(process.env['ARG'] ?? '');
+  },
+
   async 'whop:check'() {
     return whopCheck();
   },

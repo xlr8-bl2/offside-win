@@ -17,6 +17,7 @@
     "lab:leans": "tsx src/run.ts lab:leans",
     "lab:losses": "tsx src/run.ts lab:losses",
     "lab:slices": "tsx src/run.ts lab:slices",
+    "record:reset": "tsx src/run.ts record:reset",
     "lab:live": "tsx src/run.ts lab:live",
     "lab:record": "tsx src/run.ts lab:record",
     "lab:calib": "tsx src/run.ts lab:calib",
