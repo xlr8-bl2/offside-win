@@ -51,3 +51,18 @@ test('the chance is said in words, not as a percentage', () => {
   assert.equal(chanceInWords(0.52), 'about five times in ten');
   assert.equal(chanceInWords(0.03), 'less than once in ten');
 });
+
+test('after the surest call, the longest prices: fewer legs to reach the band', () => {
+  // The surest call (1.13) leads. Surest-first would then stack four more
+  // 1.15s and still need a sixth leg; longest-first takes the 1.30s and is
+  // done in four.
+  const legs = [leg(1, 1.13, 0.9), leg(2, 1.15, 0.89), leg(3, 1.15, 0.89), leg(4, 1.15, 0.88), leg(5, 1.15, 0.88),
+    leg(6, 1.3, 0.8), leg(7, 1.3, 0.8), leg(8, 1.3, 0.79)];
+  const s = buildSlip(legs);
+  assert.ok(s);
+  assert.ok(s.legs.some((l) => l.fixture_id === 1), 'the surest call is always on');
+  assert.equal(s.legs.length, 4);
+  assert.ok(s.odds >= 2 && s.odds <= 3);
+  const old = buildSlip(legs, { minOdds: 2, maxOdds: 3, minLegs: 2, maxLegs: 6, pool: 14, order: 'surest' });
+  assert.ok(old && old.legs.length > s.legs.length, 'the old rule needed more legs');
+});

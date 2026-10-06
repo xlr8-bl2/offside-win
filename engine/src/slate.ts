@@ -18,6 +18,7 @@ import { forBundle } from './context/players.ts';
 import { gatherExtras, type Extras } from './context/extras.ts';
 import { refreshLeagueInfo } from './leagueinfo.ts';
 import { geminiWriter } from './narrate/gemini.ts';
+import { fromReads } from './narrate/rescue.ts';
 import { budgeted, keyId, spent, todays, type BudgetState } from './narrate/budget.ts';
 import { write, type Writer } from './narrate/write.ts';
 import { freeBoard, freeBundle } from './membership/redact.ts';
@@ -176,7 +177,7 @@ export function narrativeKey(fixtureId: number, c: Candidate, news = ''): string
  */
 export function teamNews(lineups: { status?: string; unavailable?: Array<{ id: number }> } | null | undefined): string {
   const out = (lineups?.unavailable ?? []).map((u) => u.id).sort((a, b) => a - b);
-  return `p1|${lineups?.status === 'confirmed' ? 'c' : 'p'}|${out.join(',')}`;
+  return `p2|${lineups?.status === 'confirmed' ? 'c' : 'p'}|${out.join(',')}`;
 }
 
 function fnv(s: string): string {
@@ -323,6 +324,9 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
   let previewAttempts = 0;
   let previewsWritten = 0;
   let previewsReused = 0;
+  // Built from the reads (narrate/rescue.ts) where the writer could not help.
+  let narrateRescued = 0;
+  let previewsRescued = 0;
   const previewRejections: Record<string, number> = {};
   const from = new Date((now - config.slate.lookbackHours * 3600) * 1000).toISOString();
   const to = new Date((now + config.slate.horizonHours * 3600) * 1000).toISOString();
@@ -684,7 +688,10 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
             players: players ?? null,
             extras,
             recentThreats: recentThreats(),
+            matches: { home: ctx.styleMatches.home, away: ctx.styleMatches.away, homeId: ctx.home.team_id, awayId: ctx.away.team_id },
           });
+      // Calls the writer answered for, this run or an earlier one.
+      const written = new Set<object>();
       if (writer && !writerGaveUp) {
         for (const v of confidentVerdicts) {
           // Written once per call, not once per run.
@@ -695,6 +702,7 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
           if (cached && typeof cached === 'object' && cached.text) {
             v.narrative = cached.text;
             v.why = cached.why ?? null;
+            written.add(v);
             narrateReused++;
             continue;
           }
@@ -721,6 +729,7 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
           if (result.text) {
             v.narrative = result.text;
             v.why = result.why ?? null;
+            written.add(v);
             narrateWritten++;
             // The threats this write-up could have named, rested from now.
             for (const f of facts.slice(0, 18)) {
@@ -751,6 +760,16 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
             }
           }
         }
+      }
+
+      // A call the writer could not reach -- the day's allowance gone, or two
+      // drafts that failed -- gets the paragraph built from the reads rather
+      // than the grammar's, when there are reads enough to argue from
+      // (narrate/rescue.ts). Not cached: the writer replaces it when it can.
+      for (const v of confidentVerdicts) {
+        if (written.has(v)) continue;
+        const r = fromReads(analysis.home_team, analysis.away_team, factsFor());
+        if (r) { v.narrative = r; narrateRescued++; }
       }
 
       // What a reader is actually shown. The split exists because the two
@@ -799,6 +818,10 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
           } else {
             for (const r of result.rejections) previewRejections[r] = (previewRejections[r] ?? 0) + 1;
           }
+        }
+        if (!preview) {
+          preview = fromReads(analysis.home_team, analysis.away_team, factsFor());
+          if (preview) previewsRescued++;
         }
       }
 
@@ -1438,6 +1461,9 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
   if (previewAttempts || previewsReused) {
     console.log(`Previews of matches with no call: ${previewsReused} reused, ${previewsWritten}/${previewAttempts} written`
       + (Object.keys(previewRejections).length ? ` (thrown away: ${Object.entries(previewRejections).map(([k, v]) => `${k} ${v}`).join(', ')})` : '') + '.');
+  }
+  if (narrateRescued || previewsRescued) {
+    console.log(`Narratives built from the reads, not the grammar: ${narrateRescued} calls, ${previewsRescued} previews.`);
   }
   if (Object.keys(narrateUnbacked).length) {
     console.log(`Narratives: numbers the drafts used that no fact carried: ${Object.entries(narrateUnbacked)

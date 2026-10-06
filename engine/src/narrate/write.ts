@@ -46,11 +46,14 @@ export interface WriteRequest {
 
 export interface Writer {
   name: string;
-  generate(prompt: string): Promise<string>;
+  /** `avoid`: a model to ask last, for a chain of models (budget.ts). */
+  generate(prompt: string, opts?: { avoid?: string }): Promise<string>;
+  /** The model that wrote the last answer, when there is a choice of them. */
+  lastModel?: string;
 }
 
 /** Why a draft was thrown away, for the run log. */
-export type Rejection = 'banned-term' | 'invented-number' | 'too-short' | 'too-long' | 'error';
+export type Rejection = 'banned-term' | 'invented-number' | 'too-short' | 'too-long' | 'copied-fact' | 'not-prose' | 'error';
 
 export interface WriteResult {
   text: string | null;
@@ -113,9 +116,19 @@ export function buildPrompt(req: WriteRequest): string {
 - No number with a decimal point${odds ? `, except the odds exactly as given: "${odds}"` : ''}.
 - Never use these words: ${NEVER}.
 - Never mention a bet, market, odds, price or bookmaker${req.previewOnly ? '' : ' in PREVIEW'}.
-- Short sentences against longer ones. Talk to someone who watches football.
+- Short sentences against longer ones. Talk to someone who watches football, the way a pundit talks on the telly, not the way an essay reads.
+- Never write: "this encounter", "this contest", "this clash", "ultimately", "set to", "look to", "navigate", "massive", "crippling", "relentless", "showing that", "it is worth noting", "in the final third". Say the plain thing: "they will have the ball", "they cannot defend a cross".
 - No dashes between clauses. Use a full stop, a comma or a colon instead.
-- No heading beyond the label${req.previewOnly ? '' : 's'}, no sign-off, no quotation marks around the paragraph.`;
+- No heading beyond the label${req.previewOnly ? '' : 's'}, no sign-off, no quotation marks around the paragraph.
+- Never say how long a manager has been in charge, and never list who starts or who is out. A reader can look those up; they are paying for what they cannot.
+- Rest only matters when one side has had clearly less of it than the other. Otherwise leave it out.`;
+
+  // What the reader pays for: the read underneath the results, not the lookups.
+  const analysis = `- Lead with what is happening underneath the results: who makes the better chances, whose results are ahead of or behind their football, who is finishing above or below their chances, what each side gives up at the back. The facts that say this come first in the list. Build on at least two of them.
+- Join them into an argument about how this game goes: who controls it, where the chances come from, and what that means for the score.
+- Mention an absence only when you can say what it changes on the pitch for that side, and never as a list of names.
+- The facts are your evidence, not your sentences. Say each one in your own words and tie it to the next; never copy a fact, and never repeat a line from these instructions.
+- Have a take, and back it. Be willing to say a side's results are flattering them, or that they are better than the table says.`;
 
   if (req.previewOnly) {
     return `You are a football pundit writing a preview of ${req.home} v ${req.away} in the ${req.competition}.
@@ -129,9 +142,9 @@ PREVIEW:
 <the preview>
 
 PREVIEW: 70 to 120 words about the football only. Count them.
-- Open with an opinion, not a fact. Have a take on how this one goes.
-- Name players and managers from the facts: who is out, who starts, who scores.
-- Be willing to say a team is poor, in trouble, or flattered by the table.
+- Open with your take on how this one goes, in one sentence.
+${analysis}
+- End on the one thing that decides it.
 
 ${rules}`;
   }
@@ -149,18 +162,16 @@ WHY:
 <why the call>
 
 PREVIEW: 70 to 120 words about the football only. Count them.
-- Open with an opinion, not a fact. Have a take.
-- Name players and managers from the facts: who is out, who starts, who scores.
-  A reader pays for names. "Nice are missing four players" is not analysis;
-  "Nice are without Mendy and Bombito at the back" is.
-- Be willing to say a team is poor, in trouble, or flattered by the table.
+- Open with your take on how this one goes, in one sentence.
+${analysis}
+- End on the one thing that decides it.
 - Do NOT mention any bet, market, call, odds, price or bookmaker in this paragraph.
 
 WHY: 40 to 90 words explaining why our call is: ${req.call}${odds ? `, ${odds}` : ''}.
-- Say plainly how the football above leads to THIS outcome, not just that one side is good.
-  If the call is about goals, argue about goals: who scores, who cannot defend.
-  If it is about a side not losing, argue about why that side avoids defeat.
-- Name at least one player from the facts.${odds ? `
+- Show the mechanism: how the reads underneath lead to THIS outcome, not just that one side is better.
+  If the call is about goals, argue about the chances each side makes and gives up.
+  If it is about a side not losing, argue about why the other side cannot hurt them.
+- Then say in one sentence what would have to go wrong for it to fail.${odds ? `
 - Include the exact words "${odds}" once.` : ''}
 
 ${rules.replace('Hard rules:', 'Hard rules for both:')}`;
@@ -175,6 +186,9 @@ export function feedback(preview: string, why: string | null, req: WriteRequest)
   if (nums.length) notes.push(`It used ${nums.map((n) => `"${n}"`).join(', ')}, which ${nums.length === 1 ? 'is' : 'are'} not in the facts. Leave ${nums.length === 1 ? 'it' : 'them'} out entirely.`);
   const banned = [...new Set([...findBannedInProse(preview, allowed), ...(why ? findBannedInProse(why, whyAllowed) : [])].map((v) => v.term))];
   if (banned.length) notes.push(`It used ${banned.map((t) => `"${t}"`).join(', ')}, which ${banned.length === 1 ? 'is' : 'are'} not allowed. Say it another way.`);
+  if (notProse(preview)) notes.push('It was not a finished paragraph. Write only the paragraph itself: start with a capital letter, no notes, no bullet or emphasis marks, and nothing about these instructions.');
+  const copied = copiedFact(preview, req.facts);
+  if (copied) notes.push(`It copied a fact word for word ("${copied}"). Every fact must be said in your own words.`);
   const words = (t: string) => t.trim().split(/\s+/).filter(Boolean).length;
   const pw = words(preview);
   if (pw < MIN_WORDS) notes.push(`PREVIEW was ${pw} words. Write 70 to 120.`);
@@ -233,7 +247,46 @@ export function validate(text: string, req: WriteRequest): Rejection[] {
   // Every digit and every number-word has to be traceable to a fact.
   if (inventedNumber(text, allowed)) out.push('invented-number');
 
+  // A paragraph made of the fact lines strung together is the list the
+  // reader already had, not analysis of it.
+  if (copiedFact(text, req.facts)) out.push('copied-fact');
+
+  if (notProse(text)) out.push('not-prose');
+
   return out;
+}
+
+/**
+ * The model's working, not its answer.
+ *
+ * A thinking model handed back its notes on one match (Estonia v Iceland,
+ * 6 October 2026): a paragraph that opened mid-sentence, ran into "Yes,
+ * starts with results" and then quoted the brief back with its bullet marks.
+ * Every word was allowed and every number backed, so nothing caught it. Prose
+ * starts with a capital, has no list or emphasis marks, and does not talk
+ * about the brief.
+ */
+export function notProse(text: string): boolean {
+  const t = text.trim();
+  if (!/^[\p{Lu}0-9"“']/u.test(t)) return true;
+  if (/[*#_`]|^\s*[-•]\s/m.test(t)) return true;
+  if (/\b(PREVIEW|WHY)\s*:|\bthe facts\b|\bhard rules?\b|\bcount them\b|\bthese instructions\b|\bthe brief\b|\bword count\b|^\s*(yes|okay|ok),/im.test(t)) return true;
+  return false;
+}
+
+const WINDOW = 10;
+const wordsOf = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, ' ').split(/\s+/).filter(Boolean);
+
+/** The first fact the text repeats word for word, ten words or more in a row; null when none. */
+export function copiedFact(text: string, facts: PubFact[]): string | null {
+  const hay = ` ${wordsOf(text).join(' ')} `;
+  for (const f of facts) {
+    const w = wordsOf(f.text);
+    for (let i = 0; i + WINDOW <= w.length; i++) {
+      if (hay.includes(` ${w.slice(i, i + WINDOW).join(' ')} `)) return f.text;
+    }
+  }
+  return null;
 }
 
 /**
@@ -348,9 +401,10 @@ export function validateWhy(text: string, req: WriteRequest): Rejection[] {
 /**
  * Write one preview, or return null and let the caller fall back.
  *
- * One retry, because a rejected draft is usually a one-off rather than a
- * systematic failure, and a second rejection means something is wrong with the
- * brief or the facts and more attempts will not fix it.
+ * One retry with the faults spelt out, then, where the writer has more than
+ * one model, one more on a different model. Half the previews on 6 October
+ * failed twice on the same model and went back to the template; a different
+ * model makes different mistakes.
  */
 export async function write(req: WriteRequest, writer: Writer): Promise<WriteResult> {
   const rejections: Rejection[] = [];
@@ -363,14 +417,22 @@ export async function write(req: WriteRequest, writer: Writer): Promise<WriteRes
   let good: string | null = null;
   let goodWhy: string | null = null;
 
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // The third go is for a preview that failed twice, and only where there
+    // is another model to ask: the same model a third time writes the same
+    // paragraph a third time.
+    if (attempt === 2 && (good || !writer.lastModel)) break;
     let draft: string;
     try {
-      draft = (await writer.generate(prompt)).trim();
+      draft = (await writer.generate(prompt, attempt === 2 ? { avoid: writer.lastModel } : undefined)).trim();
     } catch (err) {
+      // The extra go on another model is a bonus; no model free to take it
+      // is not the writer failing, and the drafts already judged stand.
+      if (attempt === 2) break;
       rejections.push('error');
       return {
-        text: null,
+        text: good,
+        why: goodWhy,
         rejections,
         unbacked,
         provider: writer.name,
@@ -393,7 +455,7 @@ export async function write(req: WriteRequest, writer: Writer): Promise<WriteRes
       good ??= tidy(preview);
       // A members' paragraph that failed is worth one more try while there is
       // one: it is the part a member pays to read. The preview already stands.
-      if (req.previewOnly || whyOk || attempt === 1) {
+      if (req.previewOnly || whyOk || attempt >= 1) {
         return { text: good, why: whyOk ?? goodWhy, rejections, unbacked, provider: writer.name };
       }
     } else {

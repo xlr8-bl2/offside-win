@@ -105,11 +105,15 @@ export function spent(state: BudgetState, limit: number, models: string[] = [], 
 export function budgeted(
   chain: Array<{ model: string; writer: Writer }>, state: BudgetState, limit: number, perModel = Infinity,
 ): Writer {
-  return {
+  const out: Writer = {
     name: chain.length === 1 ? chain[0]!.writer.name : `gemini (${chain.length} models)`,
-    async generate(prompt: string): Promise<string> {
+    async generate(prompt: string, opts?: { avoid?: string }): Promise<string> {
       let lastError = '';
-      for (const { model, writer } of chain) {
+      // A draft that failed twice goes to another model rather than the same
+      // one a third time. The one to avoid goes last, not out: when it is the
+      // only one open it still writes.
+      const order = opts?.avoid ? [...chain.filter((c) => c.model !== opts.avoid), ...chain.filter((c) => c.model === opts.avoid)] : chain;
+      for (const { model, writer } of order) {
         const now = Math.floor(Date.now() / 1000);
         if (state.used >= limit) break;
         if (!modelOpen(state, model, perModel, now)) continue;
@@ -118,7 +122,9 @@ export function budgeted(
         state.used++;
         m.used++;
         try {
-          return await writer.generate(prompt);
+          const text = await writer.generate(prompt);
+          out.lastModel = model;
+          return text;
         } catch (err) {
           if (err instanceof QuotaExhausted) {
             state.exhausted = true;
@@ -142,4 +148,5 @@ export function budgeted(
       throw new QuotaExhausted(`no model could take it: every one is spent or waiting (${state.used}/${limit})${lastError ? `; last error: ${lastError.slice(0, 120)}` : ''}`);
     },
   };
+  return out;
 }

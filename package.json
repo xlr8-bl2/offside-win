@@ -36,6 +36,7 @@
     "plans": "npm -w engine run plans --",
     "whop:check": "npm -w engine run whop:check",
     "gemini:check": "npm -w engine run gemini:check",
+    "mail:route": "npm -w engine run mail:route",
     "mail:setup": "npm -w engine run mail:setup",
     "mail:auth": "npm -w engine run mail:auth",
     "cards": "npm -w engine run cards",

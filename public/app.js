@@ -54,6 +54,38 @@ const FRACTIONS = ['1/20', '1/16', '1/12', '1/10', '1/8', '1/7', '1/6', '1/5', '
   '6/4', '13/8', '7/4', '15/8', '2/1', '9/4', '5/2', '11/4', '3/1', '10/3', '7/2', '4/1', '9/2', '5/1', '11/2', '6/1',
   '13/2', '7/1', '15/2', '8/1', '9/1', '10/1', '11/1', '12/1', '14/1', '16/1', '20/1', '25/1', '33/1', '40/1', '50/1', '66/1', '100/1']
   .map((f) => { const [a, b] = f.split('/').map(Number); return [f, a / b]; });
+/*
+ * The call the way a bookmaker's slip shows it: the selection as the button
+ * reads, and the market's own name under it. "Switzerland -1" on its own is
+ * two different bets -- the Asian handicap gives the stake back on a one-goal
+ * win, the three-way handicap of the same name loses it -- so the market is
+ * never left off. Quarter lines also carry the split spelling some books
+ * print, so the button can be found either way (markets.js, betslip).
+ */
+function betHTML(d) {
+  const b = d.bet ?? { selection: d.name, market: '' };
+  return `<span class="bet"><span class="bet-sel">${esc(b.selection)}</span>${b.market
+    ? `<span class="bet-mkt">${esc(b.market)}${b.alt ? `<span class="bet-alt">Some books list it as ${esc(b.alt)}</span>` : ''}</span>` : ''}</span>`;
+}
+
+/**
+ * What each final score does to the bet, before kick-off, for the lines
+ * where one sentence is not enough: a handicap that gives the stake back on
+ * an exact margin, or half of it on a quarter line. A bookmaker never says
+ * this anywhere; it is the thing people get wrong.
+ */
+function paysHTML(d) {
+  return `<table class="tbl settle-tbl pays">
+    <thead><tr><th>If the final result is</th><th class="num">Your bet</th></tr></thead>
+    <tbody>${d.outcomes.map((r) => `<tr><td>${esc(r.label)}</td><td class="num ${r.result.startsWith('half') ? 'part' : r.result}">${esc(r.effect)}</td></tr>`).join('')}</tbody>
+  </table>`;
+}
+
+/** The same, as one line of plain text: for shares and short lists. */
+function betText(d) {
+  return d.bet?.market ? `${d.bet.selection} (${d.bet.market})` : d.name;
+}
+
 function showOdds(v) {
   if (typeof v !== 'number' || !isFinite(v) || v <= 1 || oddsFormat === 'decimal') return dec(v);
   if (oddsFormat === 'american') return v >= 2 ? `+${Math.round((v - 1) * 100)}` : `−${Math.round(100 / (v - 1))}`;
@@ -1155,14 +1187,14 @@ function freeCallHTML(hero, detail, free = null) {
     <a class="freecall-tie" href="#/fixture/${encodeURIComponent(tie.id)}">${crest(tie.home, 'xs', tie.home_id)}${esc(tie.home)}
       ${shown ? `<b>${esc(shown[0])}–${esc(shown[1])}</b>` : 'v'} ${crest(tie.away, 'xs', tie.away_id)}${esc(tie.away)}
       ${st.kind === 'live' ? liveBadge(st) : ''}</a>
-    <p class="freecall-sel">${esc(d.name)}</p>
+    <p class="freecall-sel">${betHTML(d)}</p>
     <p class="freecall-meta" data-public-price>${landed
       ? `<span class="mark ${landed}">${WORD[landed] ?? ''}</span>`
       : trackHTML(liveTrack(v, free))} <b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}
       ${shareButtonHTML({
         text: landed && shown
-          ? `Today's free call ${landed === 'won' ? 'landed' : 'is in'}: ${d.name}, at odds of ${Number(v.odds).toFixed(2)}. ${tie.home} ${shown[0]}–${shown[1]} ${tie.away}.`
-          : `Today's free call on ${tie.home} v ${tie.away}: ${d.name}, at odds of ${Number(v.odds).toFixed(2)}.`,
+          ? `Today's free call ${landed === 'won' ? 'landed' : 'is in'}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}. ${tie.home} ${shown[0]}–${shown[1]} ${tie.away}.`
+          : `Today's free call on ${tie.home} v ${tie.away}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}.`,
         url: matchUrl(tie.id, tie.home, tie.away), title: `${tie.home} v ${tie.away}` })}</p>
     <p class="hero-blurb">${landed
       ? `Free for everyone, as one call is every day.${isMember() ? '' : ' Members had every other call on the board.'}`
@@ -1174,9 +1206,9 @@ function freeCallHTML(hero, detail, free = null) {
   <div class="freecall">
     <span class="freecall-tag">Today's free call</span>
     ${elsewhere ? `<a class="freecall-tie" href="#/fixture/${encodeURIComponent(tie.id)}">${crest(tie.home, 'xs', tie.home_id)}${esc(tie.home)} v ${crest(tie.away, 'xs', tie.away_id)}${esc(tie.away)}<span>${esc(kickoffLabel(tie.kickoff))}</span></a>` : ''}
-    <p class="freecall-sel">${elsewhere ? `<a href="#/fixture/${encodeURIComponent(tie.id)}">${esc(d.name)}</a>` : esc(d.name)}</p>
+    <p class="freecall-sel">${elsewhere ? `<a href="#/fixture/${encodeURIComponent(tie.id)}">${betHTML(d)}</a>` : betHTML(d)}</p>
     <p class="freecall-meta" data-public-price><b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}
-      ${shareButtonHTML({ text: `Today's free call on ${tie.home} v ${tie.away}: ${d.name}, at odds of ${Number(v.odds).toFixed(2)}.`,
+      ${shareButtonHTML({ text: `Today's free call on ${tie.home} v ${tie.away}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}.`,
         url: matchUrl(tie.id, tie.home, tie.away), title: `${tie.home} v ${tie.away}` })}</p>
     <p class="hero-blurb">The call we are surest of today, free for everyone.${isMember() ? '' : ' Members get every other call the moment it goes up.'}</p>
   </div>`;
@@ -1297,7 +1329,7 @@ function heroCallHTML(hero, row) {
     return `
     <div class="freecall hero-call">
       <span class="freecall-tag${row.free_call ? '' : ' is-ours'}">${row.free_call ? 'Our call, free today' : 'Our call'}</span>
-      <p class="freecall-sel">${esc(d.name)}</p>
+      <p class="freecall-sel">${betHTML(d)}</p>
       <p class="freecall-meta" data-public-price>${st.kind === 'live' ? `${trackHTML(liveTrack(v, row))} ` : ''}<b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
     </div>`;
   }
@@ -1636,7 +1668,7 @@ function slipHTML(data, fixtures = []) {
       return `
         <li><a href="#/fixture/${encodeURIComponent(l.fixture_id)}">
           <span class="slip-tie">${esc(l.home)} v ${esc(l.away)}</span>
-          <span class="slip-sel">${esc(d.name)}</span>
+          <span class="slip-sel">${betHTML(d)}</span>
           <span class="slip-meta">${esc(kickoffLabel(l.kickoff))}<span class="slip-state">${legState(l)}<b>${oddsTag(l.odds)}</b></span></span>
         </a></li>`;
     }).join('')}</ol>`
@@ -1776,7 +1808,7 @@ async function viewSlip() {
           </div>
           <ul class="played-calls">${(r.legs ?? []).map((l) => {
             const d = market({ market: l.market, outcome: l.outcome, line: l.line, home: l.home, away: l.away, odds: l.odds });
-            return `<li><span>${esc(l.home)} v ${esc(l.away)}: ${esc(d.name)}</span><span>${oddsTag(l.odds)}</span></li>`;
+            return `<li><span>${esc(l.home)} v ${esc(l.away)}: ${esc(betText(d))}</span><span>${oddsTag(l.odds)}</span></li>`;
           }).join('')}</ul>
         </div>`).join('')}
       </div>
@@ -1858,7 +1890,7 @@ function sideHTML(fixtures, slip) {
           <a class="side-item" href="#/fixture/${encodeURIComponent(f.id)}"${f.free_call ? ' data-public-price' : ''}>
             <span class="side-thumb">${crest(f.home, 'sm', f.home_id)}${crest(f.away, 'sm', f.away_id)}</span>
             <span class="side-body">
-              <span class="side-sel">${esc(d.name)}${f.free_call ? ' <span class="freecall-tag">Free</span>' : ''}</span>
+              <span class="side-sel">${betHTML(d)}${f.free_call ? ' <span class="freecall-tag">Free</span>' : ''}</span>
               <span class="side-meta">${esc(kickoffLabel(f.kickoff))} <b>${oddsTag(f.top_pick.odds)}</b></span>
             </span>
           </a>`;
@@ -1952,7 +1984,7 @@ function playedHTML(picks, { showOdds = false } = {}) {
         ${scorersHTML(x.goals, 'scorers played-scorers')}
         ${calls.length > 1 ? `<ul class="played-calls">${calls.map((c, i) => {
           const d = market({ market: c.market, outcome: c.outcome, line: c.line, home: c.home_team, away: c.away_team, odds: c.odds });
-          return `<li><span>${esc(d.name)}</span><span class="mark ${tones[i]}">${esc(({ won: 'Landed', lost: 'Missed', back: 'Void' })[tones[i]])}</span></li>`;
+          return `<li><span>${esc(betText(d))}</span><span class="mark ${tones[i]}">${esc(({ won: 'Landed', lost: 'Missed', back: 'Void' })[tones[i]])}</span></li>`;
         }).join('')}</ul>` : ''}
       </a>`;
     }).join('')}
@@ -2091,7 +2123,7 @@ function rowHTML(f) {
 
     ${d ? `<div class="row-call">
       ${kindTag}
-      <div class="row-sel">${esc(d.name)}</div>
+      <div class="row-sel">${betHTML(d)}</div>
       <p class="row-wins">${
         played
           ? esc(recap({ market: pick.market, outcome: pick.outcome, line: pick.line,
@@ -2748,7 +2780,7 @@ async function viewLanding() {
             const text = excerpt(x.narrative ?? x.why, 200);
             return text
               ? `<p class="ld-rc-said"><span>What we said</span>${esc(text)}</p>`
-              : `<p class="ld-rc-said"><span>The call</span>${esc(market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team }).name)}</p>`;
+              : `<p class="ld-rc-said"><span>The call</span>${esc(betText(market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team })))}</p>`;
           })()}
           ${(() => {
             const went = wentLine(x);
@@ -3657,14 +3689,14 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
       ? '<span class="row-kind is-free">Free call today: open to everyone</span>'
       : `<span class="row-kind is-members"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>Members' call</span>`}
     <div class="verdict-head">
-      <span class="sel">${esc(d.name)}</span>
+      <span class="sel">${betHTML(d)}<span class="bet-tie">${esc(home)} v ${esc(away)}</span></span>
       ${landed
         ? `<span class="mark ${landed}">${esc(VERDICT_WORD[landed] ?? '')}</span>`
-        : `<span class="price">${showOdds(odds)}<small>odds</small></span>`}
+        : `<span class="verdict-odds"><span class="odds-tile${p && !p.local ? ' away' : ''}"><span class="odds">${showOdds(odds)}</span><span class="odds-unit">odds</span></span>${p?.book ? `<span class="odds-book">${esc(p.book)}</span>` : ''}</span>`}
     </div>
     ${landed
       ? `<p class="wins">${esc(story ?? d.wins)}</p>`
-      : `<p class="wins">${esc(d.wins)}</p>`}
+      : d.outcomes?.length ? paysHTML(d) : `<p class="wins">${esc(d.wins)}</p>`}
     ${landed && v.record?.postmortem ? postMortemHTML({ postmortem_json: v.record.postmortem }) : ''}
     ${track ? `<p class="track-line">${trackHTML(track)}<span>${esc(track.need)} It’s ${esc(track.score)}. ${esc(track.time)}</span></p>` : ''}
     ${prose ? `<p class="narrative">${link(esc(prose))}</p>` : ''}
@@ -3675,9 +3707,9 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
         const url = matchUrl(fixture.id, home, away);
         const tie = `${home} v ${away}`;
         const text = landed
-          ? `${VERDICT_WORD[landed] ?? 'Settled'}: ${d.name}, at odds of ${Number(c.odds).toFixed(2)}. ${home} ${hg}–${ag} ${away}.`
+          ? `${VERDICT_WORD[landed] ?? 'Settled'}: ${betText(d)}, at odds of ${Number(c.odds).toFixed(2)}. ${home} ${hg}–${ag} ${away}.`
           : isFreeFixture(fixture.id) || !isMember()
-            ? `Today's free call on ${tie}: ${d.name}, at odds of ${Number(odds).toFixed(2)}.`
+            ? `Today's free call on ${tie}: ${betText(d)}, at odds of ${Number(odds).toFixed(2)}.`
             : `${tie}: we have a call on this one.`;
         return shareButtonHTML({ text, url, title: tie });
       })() : ''}
@@ -3696,9 +3728,9 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
             .map((q) => `<tr><td>${esc(bookName(q.book, q.slug))}</td><td class="num">${showOdds(q.odds)}</td></tr>`).join('')}
         </tbody></table>
       </details>` : ''}
-    ${d.outcomes?.length ? `
+    ${d.outcomes?.length && landed ? `
       <details class="settles">
-        <summary>${played ? 'How it would have settled' : 'How this settles'}</summary>
+        <summary>How it settled at every score</summary>
         <table class="tbl settle-tbl"><tbody>
           ${d.outcomes.map((r) => `<tr><td>${esc(r.label)}</td><td class="num ${r.result.startsWith('half') ? 'part' : r.result}">${esc(r.effect)}</td></tr>`).join('')}
         </tbody></table>
@@ -5441,7 +5473,7 @@ async function viewResults() {
             <a class="side-item" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
               <span class="side-thumb">${crest(x.home_team ?? '', 'sm', x.home_team_id)}${crest(x.away_team ?? '', 'sm', x.away_team_id)}</span>
               <span class="side-body">
-                <span class="side-sel">${esc(d.name)}</span>
+                <span class="side-sel">${betHTML(d)}</span>
                 <span class="side-meta">${esc(kickoffLabel(x.kickoff))}<b>${oddsTag(x.odds)}</b></span>
               </span>
             </a>`;
@@ -5779,7 +5811,7 @@ function recapCardHTML(x) {
       ${scorersHTML(x.goals)}
     </a>
     <div class="recap-body">
-      <p class="recap-call">We said <b>${esc(d.name)}</b>${x.odds ? ` at ${oddsOf(x.odds)}` : ''}.</p>
+      <p class="recap-call">We said <b>${esc(betText(d))}</b>${x.odds ? ` at ${oddsOf(x.odds)}` : ''}.</p>
       ${said ? `<p class="recap-what">${esc(said)}</p>` : ''}
       ${disputed ? '' : postMortemHTML(x)}
       ${(() => {

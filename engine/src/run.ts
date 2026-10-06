@@ -279,6 +279,33 @@ const commands: Record<string, () => Promise<unknown>> = {
     requireEnv({ provider: false });
     // A named study instead of the whole report: `deep` (lab/deep.ts).
     const study = (process.env['ARG'] ?? '').trim();
+    if (study === 'deep budget') {
+      // The writer's daily allowance as it stands (narrate/budget.ts). Counts only, never the key.
+      const { kvGetJSON } = await import('./store.ts');
+      const { pacificDay } = await import('./narrate/budget.ts');
+      const b = await kvGetJSON<Record<string, unknown>>('gemini:budget');
+      const models = (b?.['models'] ?? {}) as Record<string, Record<string, unknown>>;
+      console.log(`writer budget for ${String(b?.['day'] ?? '-')} (today, Pacific: ${pacificDay()}): used ${String(b?.['used'] ?? 0)} of ${process.env['GEMINI_PER_DAY'] || 200}; Google said spent: ${String(b?.['exhausted'] ?? false)}; paused until: ${b?.['pausedUntil'] ? new Date(Number(b['pausedUntil']) * 1000).toISOString() : 'not paused'}`);
+      for (const [m, st] of Object.entries(models)) console.log(`  ${m}: ${JSON.stringify(st)}`);
+      return;
+    }
+    if (study === 'deep pulls') {
+      const { runPulls } = await import('./lab/pulls.ts');
+      await runPulls();
+      return;
+    }
+    if (study === 'deep slip' || study === 'deep slip study') {
+      const { loadHistory } = await import('./lab/run.ts');
+      const { runSlipBack, runSlipStudy } = await import('./lab/slipback.ts');
+      const rows = await loadHistory();
+      if (study === 'deep slip') runSlipBack(rows); else runSlipStudy(rows);
+      return;
+    }
+    if (study === 'deep insight' || study === 'deep insight write') {
+      const { runInsightPreview } = await import('./lab/insightpreview.ts');
+      await runInsightPreview({ draft: study.endsWith('write') });
+      return;
+    }
     if (study === 'deep books') {
       requireEnv();
       const { runBooks } = await import('./lab/deep.ts');
@@ -408,6 +435,12 @@ const commands: Record<string, () => Promise<unknown>> = {
   // Brevo: the key, the domain's DNS records, the sender, and a test email.
   async 'mail:setup'() {
     return mailSetup(process.argv[3] ?? (process.env['GRANT_EMAIL'] || undefined));
+  },
+
+  // Mail to support@ and hello@, forwarded to the owner's inbox (Cloudflare Email Routing).
+  async 'mail:route'() {
+    const { mailRoute } = await import('./mailroute.ts');
+    return mailRoute(process.argv[3] ?? (process.env['GRANT_EMAIL'] || undefined));
   },
 
   // Sign-in emails: from the Worker in the site's design, or back to Supabase's.

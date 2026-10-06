@@ -13,13 +13,13 @@ on:
       command:
         description: 'Engine command to run against Postgres'
         type: choice
-        options: [migrate, history, 'history:cards', ratings, slate, 'slate:fresh', settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players', 'probe:profile', 'probe:reds', 'probe:extras', grant, plans, 'whop:check', 'gemini:check', trace, 'mail:setup', 'mail:auth', 'record:reset', lab, 'lab:tune', 'lab:leans', 'lab:model', 'lab:losses', 'lab:slices', 'lab:live', 'lab:record', 'lab:calib', 'lab:odds', 'lab:backfill', 'leagues:refresh']
+        options: [migrate, history, 'history:cards', ratings, slate, 'slate:fresh', settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players', 'probe:profile', 'probe:reds', 'probe:extras', grant, plans, 'whop:check', 'gemini:check', trace, 'mail:setup', 'mail:route', 'mail:auth', 'record:reset', lab, 'lab:tune', 'lab:leans', 'lab:model', 'lab:losses', 'lab:slices', 'lab:live', 'lab:record', 'lab:calib', 'lab:odds', 'lab:backfill', 'leagues:refresh']
         default: migrate
       arg:
         # Free text for the commands that take one. `grant` reads an email and
         # an optional second word: "you@example.com", "you@example.com 30",
         # "you@example.com off".
-        description: 'Argument for the command (grant: "email [days|off]"; plans: "id <checkout url | price in pence>"; trace: the code from #/trace; mail:setup: an email to send a test to; mail:auth: on, off or blank; record:reset: dry, undo or blank)'
+        description: 'Argument for the command (grant: "email [days|off]"; plans: "id <checkout url | price in pence>"; trace: the code from #/trace; mail:setup: an email to send a test to; mail:route: the inbox support@ and hello@ forward to, or blank to check; mail:auth: on, off or blank; record:reset: dry, undo or blank)'
         type: string
         default: ''
       leagues:

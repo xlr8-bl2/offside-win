@@ -25,6 +25,8 @@
  */
 
 import { absenceReason } from '../context/absence.ts';
+import { matchInsights, teamGames } from './insight.ts';
+import type { MatchRow } from '../types.ts';
 import type { Extras } from '../context/extras.ts';
 
 export interface PubFact {
@@ -36,6 +38,17 @@ export interface PubFact {
   weight: number;
   /** The fit player a threat line is about (a name key), so the slate can rest them next time. */
   threat?: string;
+  /**
+   * A read underneath the results (insight.ts), and what it says about how
+   * good the side it is about is: 1 good, -1 poor, 0 nothing either way --
+   * the reads about luck (results ahead of or behind the chances) are 0,
+   * since they say the results will move, not how good the side is. Only
+   * reads carry it, which is how the paragraph built without the writer
+   * finds them.
+   */
+  lean?: -1 | 0 | 1;
+  /** On the read that puts both sides together: whose game it is. */
+  decides?: 'home' | 'away';
 }
 
 interface LedgerEntry {
@@ -71,6 +84,8 @@ interface Bundle {
   now?: number;
   /** The referee, managers against this opponent, team of the season, signings, caps (context/extras.ts). */
   extras?: Extras | null;
+  /** Each side's recent matches with their chances, shots and possession, for the reads underneath (insight.ts). */
+  matches?: { home: MatchRow[]; away: MatchRow[]; homeId: number; awayId: number } | null;
 }
 
 /** What `forBundle` stores. Everything optional: older bundles have none of it. */
@@ -275,10 +290,10 @@ function managerFacts(id: string, ev: Record<string, unknown>, team: string, sid
   // A count of games in charge is only news while it is tiny; after that the
   // point is simply that the manager is new, and it is not a lead.
   if (id.includes('.bounce') && games <= 3) {
-    return [{ text: games <= 1 ? `${who} has only just taken over at ${team}` : `${who} took over at ${team} only ${n(games)} games ago`, side, weight: 62 }];
+    return [{ text: games <= 1 ? `${who} has only just taken over at ${team}` : `${who} took over at ${team} only ${n(games)} games ago`, side, weight: 30 }];
   }
   if ((id.includes('.bounce') || id.includes('.settling')) && games <= 14) {
-    return [{ text: `${who} is still settling in at ${team}`, side, weight: 45 }];
+    return [{ text: `${who} is still settling in at ${team}`, side, weight: 15 }];
   }
   return [];
 }
@@ -291,7 +306,7 @@ function fatigueFacts(ev: Record<string, unknown>, team: string, side: 'home' | 
   const in14 = num(ev['matches_in_14_days']) ?? num(ev['matchesIn14']);
 
   if (rest !== null && rest <= 3) {
-    out.push({ text: `${team} played only ${n(rest)} days ago`, side, weight: 70 });
+    out.push({ text: `${team} played only ${n(rest)} days ago`, side, weight: 40 });
   }
   if (in14 !== null && in14 >= 4) {
     out.push({ text: `${team} are into their ${n(in14)}th game in a fortnight`, side, weight: 65 });
@@ -412,10 +427,10 @@ function lineupFacts(b: Bundle): PubFact[] {
     const xi = (s?.players ?? []).filter((p) => p.starting && p.name);
     if (xi.length < 9) continue;
     const fwd = xi.filter((p) => p.position === 'F').map((p) => p.name!);
-    if (fwd.length === 1) out.push({ text: `${fwd[0]} ${verb1} up front for ${team}`, side, weight: 72 });
-    else if (fwd.length > 1) out.push({ text: `${list(fwd.slice(0, 3))} ${verb} up front for ${team}`, side, weight: 72 });
+    if (fwd.length === 1) out.push({ text: `${fwd[0]} ${verb1} up front for ${team}`, side, weight: 50 });
+    else if (fwd.length > 1) out.push({ text: `${list(fwd.slice(0, 3))} ${verb} up front for ${team}`, side, weight: 50 });
     const gk = xi.find((p) => p.position === 'G')?.name;
-    if (gk) out.push({ text: `${gk} ${verb1} in goal for ${team}`, side, weight: 40 });
+    if (gk) out.push({ text: `${gk} ${verb1} in goal for ${team}`, side, weight: 25 });
     const shape = str(s?.formation);
     if (shape && /^\d(-\d){2,4}$/.test(shape)) out.push({ text: `${team} line up ${shape}`, side, weight: 35 });
   }
@@ -870,6 +885,20 @@ export function pubFacts(bundle: Bundle): PubFact[] {
   out.push(...playerFacts(bundle));
   out.push(...managerNameFacts(bundle));
   out.push(...extrasFacts(bundle));
+
+  // The reads underneath the results, which lead (insight.ts).
+  const m = bundle.matches;
+  if (m) {
+    out.push(...matchInsights(
+      { name: home, games: teamGames(m.home, m.homeId) },
+      { name: away, games: teamGames(m.away, m.awayId) },
+    ));
+  }
+
+  // Rest is news only when one side has had clearly less of it. Both sides
+  // "played only three days ago" is the international calendar, not a reason.
+  const rested = out.filter((f) => /played only \w+ days ago$/.test(f.text));
+  if (rested.length === 2) for (const f of rested) out.splice(out.indexOf(f), 1);
 
   if (bundle.lineups?.status === 'confirmed') {
     out.push({ text: 'the team sheets are confirmed', side: 'match', weight: 20 });

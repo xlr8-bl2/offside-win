@@ -279,3 +279,22 @@ test('a preview on its own asks for no members\' paragraph and never mentions a 
   assert.match(p, /Never mention a bet, market, odds, price or bookmaker/);
   assert.match(p, /confidence \(say "belief"/);
 });
+
+test('a preview that fails twice gets one more go on a different model', async () => {
+  const { budgeted } = await import('../src/narrate/budget.ts');
+  const bad = 'Too short.';
+  const good = `PREVIEW:\n${'Croatia look in a bad way here and the football says so. '.repeat(7).trim()}`;
+  const asked: string[] = [];
+  const chain = ['a', 'b'].map((m) => ({ model: m, writer: { name: m, generate: async () => { asked.push(m); return m === 'a' ? bad : good; } } }));
+  const w = budgeted(chain, { day: 'x', used: 0 } as never, 100);
+  const res = await write({ ...REQ, previewOnly: true }, w);
+  assert.deepEqual(asked, ['a', 'a', 'b']);
+  assert.ok(res.text, res.rejections.join(','));
+});
+
+test('a single model is not asked a third time', async () => {
+  let n = 0;
+  const res = await write({ ...REQ, previewOnly: true }, { name: 'one', generate: async () => { n++; return 'Too short.'; } });
+  assert.equal(n, 2);
+  assert.equal(res.text, null);
+});
