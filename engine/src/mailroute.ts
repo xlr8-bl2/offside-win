@@ -62,7 +62,12 @@ export async function mailRoute(to?: string): Promise<void> {
     // Adds Cloudflare's MX and SPF records, and switches routing on.
     let on = await cf(token, `/zones/${zone.id}/email/routing/dns`, { method: 'POST', body: '{}' });
     if (!on.ok) on = await cf(token, `/zones/${zone.id}/email/routing/enable`, { method: 'POST', body: '{}' });
-    if (!on.ok) { console.log('could not switch routing on:', why(on)); console.log(PERMISSIONS); return; }
+    if (!on.ok) {
+      console.log('could not switch routing on:', why(on));
+      await diagnose(token, zone.id, account);
+      console.log(PERMISSIONS);
+      return;
+    }
     st = await cf(token, `/zones/${zone.id}/email/routing`);
     console.log('email routing: switched on', `(${st.body?.result?.status ?? 'unknown'})`);
   }
@@ -112,5 +117,32 @@ export async function mailRoute(to?: string): Promise<void> {
       : await cf(token, `/zones/${zone.id}/email/routing/rules`, { method: 'POST', body });
     console.log(`${addr}: ${r.ok ? `now forwards to ${shape(to)}` : `could not set (${why(r)})`}`);
     if (!r.ok) console.log(PERMISSIONS);
+  }
+}
+
+/**
+ * What this token can and cannot do, one call per permission, so a refusal
+ * says which permission is missing rather than only that one is. Prints
+ * yes/no and status codes only.
+ */
+async function diagnose(token: string, zone: string, account?: string): Promise<void> {
+  const v = await cf(token, '/user/tokens/verify');
+  console.log(`  token: ${v.ok ? `valid (${v.body?.result?.status ?? '?'})` : `cannot verify (${v.status})`}`);
+  const checks: Array<[string, string]> = [
+    ['Zone Settings (read)', `/zones/${zone}/settings/ssl`],
+    ['DNS (read)', `/zones/${zone}/dns_records?per_page=1`],
+    ['Email Routing Rules (read)', `/zones/${zone}/email/routing/rules?per_page=1`],
+    ['Email Routing settings (read)', `/zones/${zone}/email/routing`],
+    ...(account ? [['Email Routing Addresses (read)', `/accounts/${account}/email/routing/addresses?per_page=1`] as [string, string]] : []),
+  ];
+  for (const [label, path] of checks) {
+    const r = await cf(token, path);
+    console.log(`  ${label}: ${r.ok ? 'yes' : `no (${r.status})`}`);
+  }
+  // A write that changes nothing: the same value back, to test Zone Settings > Edit.
+  const cur = await cf(token, `/zones/${zone}/settings/always_use_https`);
+  if (cur.ok) {
+    const w = await cf(token, `/zones/${zone}/settings/always_use_https`, { method: 'PATCH', body: JSON.stringify({ value: cur.body?.result?.value }) });
+    console.log(`  Zone Settings (edit): ${w.ok ? 'yes' : `no (${w.status})`}`);
   }
 }
