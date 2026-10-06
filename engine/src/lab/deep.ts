@@ -441,3 +441,46 @@ export async function runLiveGap(rows: HistRow[]): Promise<Record<string, unknow
   console.log(`  lab only, over it (missed for another reason)  ${show(passed)}`);
   return out;
 }
+
+/**
+ * `lab deep books`: where the sharp book went. What the board's own bundles
+ * carried, day by day, and which books the provider quotes right now for a
+ * few matches still to play. Counts and bookmaker names only, never a price.
+ */
+export async function runBooks(): Promise<void> {
+  const { select } = await import('../store.ts');
+  const { fetchQuotes } = await import('../odds.ts');
+  const now = Math.floor(Date.now() / 1000);
+  const rows = await select<{ id: number; kickoff: number; rank: number | null; bundle_json: string }>(
+    'SELECT id, kickoff, rank, bundle_json FROM fixture WHERE kickoff > $1 ORDER BY kickoff', [now - 21 * 86400]);
+  const days = new Map<string, { n: number; priced: number; sharp: number; open: number; books: number; by: Record<string, number> }>();
+  for (const r of rows) {
+    let b: Record<string, any>;
+    try { b = JSON.parse(r.bundle_json); } catch { continue; }
+    const d = new Date(Number(r.kickoff) * 1000).toISOString().slice(0, 10) + (Number(r.kickoff) > now ? ' (to come)' : '');
+    const t = days.get(d) ?? { n: 0, priced: 0, sharp: 0, open: 0, books: 0, by: {} };
+    t.n++;
+    const res = (Array.isArray(b.markets) ? b.markets : []).find((m: any) => m?.market === '1x2');
+    if (res) {
+      t.priced++;
+      if (res.sharp) { t.sharp++; t.by[res.sharp.book] = (t.by[res.sharp.book] ?? 0) + 1; }
+      if (res.open) t.open++;
+      if (typeof res.books === 'number') t.books++;
+    }
+    days.set(d, t);
+  }
+  console.log('The board\'s own bundles, by kick-off day: fixtures, with a result market, and of those with the sharp book / opening price / book count');
+  for (const [d, t] of [...days].sort()) {
+    console.log(`  ${d.padEnd(22)} ${String(t.n).padStart(4)}  priced ${String(t.priced).padStart(4)}  sharp ${pct(t.sharp / (t.priced || 1)).padStart(6)}  open ${pct(t.open / (t.priced || 1)).padStart(6)}  books ${pct(t.books / (t.priced || 1)).padStart(6)}  ${Object.entries(t.by).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  }
+  const next = rows.filter((r) => Number(r.kickoff) > now && Number(r.rank ?? 9) <= 5).slice(0, 8);
+  console.log('\nThe provider, now, for matches still to play: quotes per book (result market)');
+  for (const r of next) {
+    const qs = await fetchQuotes(Number(r.id));
+    const res = qs.filter((q) => q.market === '1x2');
+    const per: Record<string, number> = {};
+    for (const q of res) per[q.bookmaker_slug] = (per[q.bookmaker_slug] ?? 0) + 1;
+    const all = new Set(qs.map((q) => q.bookmaker_slug));
+    console.log(`  ${r.id} rank ${r.rank}: ${qs.length} quotes from ${all.size} books; result market: ${Object.entries(per).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}`);
+  }
+}

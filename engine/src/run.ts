@@ -271,6 +271,12 @@ const commands: Record<string, () => Promise<unknown>> = {
     requireEnv({ provider: false });
     // A named study instead of the whole report: `deep` (lab/deep.ts).
     const study = (process.env['ARG'] ?? '').trim();
+    if (study === 'deep books') {
+      requireEnv();
+      const { runBooks } = await import('./lab/deep.ts');
+      await runBooks();
+      return;
+    }
     if (study === 'deep' || study === 'deep anatomy' || study === 'deep live') {
       const { loadHistory } = await import('./lab/run.ts');
       const { runDeep, runAnatomy, runLiveGap } = await import('./lab/deep.ts');
