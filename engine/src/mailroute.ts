@@ -115,8 +115,11 @@ export async function mailRoute(to?: string): Promise<void> {
     const r = rule
       ? await cf(token, `/zones/${zone.id}/email/routing/rules/${rule.id ?? rule.tag}`, { method: 'PUT', body })
       : await cf(token, `/zones/${zone.id}/email/routing/rules`, { method: 'POST', body });
-    console.log(`${addr}: ${r.ok ? `now forwards to ${shape(to)}` : `could not set (${why(r)})`}`);
-    if (!r.ok) console.log(PERMISSIONS);
+    const unconfirmed = !r.ok && /not verified/i.test(JSON.stringify(r.body?.errors ?? ''));
+    console.log(`${addr}: ${r.ok ? `now forwards to ${shape(to)}` : unconfirmed
+      ? 'waiting: Cloudflare will not forward to the address until its confirmation link is tapped. Tap it, then run this again.'
+      : `could not set (${why(r)})`}`);
+    if (!r.ok && !unconfirmed) console.log(PERMISSIONS);
   }
 }
 
