@@ -35,6 +35,7 @@ import { pulledAlerts } from './pulled.ts';
 const GOODWILL_CRON = '20 6 * * *';
 import { authEmailHook, type HookEnv } from './authhook.ts';
 import { admin, type AdminEnv } from './admin.ts';
+import { inbound, type InboundMessage } from './support.ts';
 import { socials, type SocialEnv } from './social.ts';
 import { fixtureChanges, liveList, liveMatch, type LiveEnv } from './live.ts';
 import { EDGE_PATHS, edgeCached } from './edge.ts';
@@ -414,5 +415,9 @@ export default {
   ...worker,
   async fetch(request: Request, env: Env, ctx?: { waitUntil(p: Promise<unknown>): void }): Promise<Response> {
     return secured(await worker.fetch(request, env, ctx));
+  },
+  // Mail to support@ and hello@, routed here by Cloudflare Email Routing (support.ts).
+  async email(message: InboundMessage, env: Env): Promise<void> {
+    await inbound(message, env);
   },
 };

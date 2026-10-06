@@ -24,6 +24,7 @@
 
 import { NETWORKS, profileUrl, saveSocials, socials, type SocialEnv, type Socials } from './social.ts';
 import type { PayEnv } from './pay.ts';
+import { composeReply, replySubject, sendSupport } from './support.ts';
 import { accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, goodwillEndMail, goodwillStartMail, membershipMail, noticeMail, pulledMail, receiptMail, renewalStoppedMail, renewedMail, sendMail } from './mail.ts';
 
 export interface AdminEnv extends PayEnv {
@@ -86,6 +87,16 @@ async function db(env: AdminEnv, fn: string, args: Record<string, unknown> = {})
   return reply(out);
 }
 
+/** A database function's answer as data, for routes that act on it before answering. */
+async function dbJson(env: AdminEnv, fn: string, args: Record<string, unknown> = {}): Promise<any> {
+  const res = await db(env, fn, args);
+  if (!res.ok) return null;
+  return res.json().catch(() => null);
+}
+
+const STATUSES = new Set(['open', 'waiting', 'closed', 'all']);
+const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
 async function body(request: Request): Promise<Record<string, unknown>> {
   try {
     const b = await request.json();
@@ -129,6 +140,68 @@ export async function admin(request: Request, env: AdminEnv, jwt: string | null,
   if (get && route === 'plans') return db(env, 'admin_plans');
   if (get && route === 'promos') return db(env, 'admin_promos');
   if (get && route === 'log') return db(env, 'admin_log_list', { p_limit: 100 });
+
+  // Support (support.ts): the tickets, one ticket, answering, starting one, its state.
+  if (get && route === 'support') {
+    const status = url.searchParams.get('status') ?? 'open';
+    return db(env, 'admin_support_list', { p_status: STATUSES.has(status) ? status : 'open', p_limit: 200 });
+  }
+  if (get && route === 'support/ticket') {
+    const id = int(url.searchParams.get('id'));
+    if (id === null) return refuse('No such ticket.', 404);
+    return db(env, 'admin_support_ticket', { p_id: id });
+  }
+  if (post && route === 'support/reply') {
+    const b = await body(request);
+    const id = int(b['id']);
+    const text = typeof b['body'] === 'string' ? b['body'].trim().slice(0, 10_000) : '';
+    if (id === null) return refuse('No such ticket.', 404);
+    if (!text) return refuse('Write something first.', 400);
+    const t = await dbJson(env, 'admin_support_ticket', { p_id: id });
+    if (!t?.ticket) return refuse('No such ticket.', 404);
+    const msgs = (t.messages ?? []) as Array<{ direction: string; at: number; body: string; message_id: string | null; from_email: string }>;
+    const lastIn = [...msgs].reverse().find((m) => m.direction === 'in');
+    const last = msgs[msgs.length - 1];
+    const subject = replySubject(String(t.ticket.subject ?? ''), id);
+    const mail = composeReply(text, lastIn ? { at: lastIn.at, name: t.ticket.name ?? null, email: t.ticket.email, body: lastIn.body } : undefined);
+    const ids = msgs.map((m) => m.message_id).filter((x): x is string => Boolean(x)).slice(-10);
+    const sent = await sendSupport(env, {
+      to: t.ticket.email, subject, ...mail,
+      inReplyTo: last?.message_id ?? null,
+      references: ids.length ? ids.map((x) => `<${x}>`).join(' ') : null,
+    });
+    if ('error' in sent) return refuse(sent.error, 502);
+    return db(env, 'admin_support_reply', {
+      p_actor: who.id, p_id: id, p_to: t.ticket.email, p_subject: subject, p_body: text, p_message_id: sent.id, p_close: b['close'] === true,
+    });
+  }
+  if (post && route === 'support/new') {
+    const b = await body(request);
+    const to = typeof b['to'] === 'string' ? b['to'].trim().toLowerCase() : '';
+    const subject = typeof b['subject'] === 'string' ? b['subject'].trim().slice(0, 180) : '';
+    const text = typeof b['body'] === 'string' ? b['body'].trim().slice(0, 10_000) : '';
+    if (!EMAIL.test(to)) return refuse('That email address does not look right.', 400);
+    if (!subject) return refuse('Give it a subject.', 400);
+    if (!text) return refuse('Write something first.', 400);
+    const made = await dbJson(env, 'admin_support_new', { p_actor: who.id, p_email: to, p_subject: subject });
+    const id = Number(made?.id);
+    if (!Number.isFinite(id)) return refuse(made?.error ?? 'The database refused. Nothing was sent.', 400);
+    const full = `${subject} [#${id}]`;
+    const sent = await sendSupport(env, { to, subject: full, ...composeReply(text) });
+    if ('error' in sent) {
+      await dbJson(env, 'admin_support_drop', { p_id: id });
+      return refuse(sent.error, 502);
+    }
+    const res = await db(env, 'admin_support_reply', { p_actor: who.id, p_id: id, p_to: to, p_subject: full, p_body: text, p_message_id: sent.id, p_close: false });
+    return res.ok ? reply({ ok: true, id }) : res;
+  }
+  if (post && route === 'support/status') {
+    const b = await body(request);
+    const id = int(b['id']);
+    const status = String(b['status'] ?? '');
+    if (id === null || !['open', 'waiting', 'closed'].includes(status)) return refuse('No such ticket.', 404);
+    return db(env, 'admin_support_status', { p_actor: who.id, p_id: id, p_status: status });
+  }
 
   if (post && route === 'grant') {
     const b = await body(request);

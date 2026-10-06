@@ -272,6 +272,47 @@
 .adm-seg input:focus-visible + span { box-shadow: var(--focus-ring); }
 .adm-actions { display: flex; gap: var(--space-3); }
 
+/* -------------------------------------------------------------- support */
+
+.adm-filter { margin-bottom: var(--space-6); }
+.adm-filter .adm-chip[aria-current="page"] { border-color: var(--chalk); color: var(--chalk); }
+.adm-filter b { margin-left: var(--space-1); font-variant-numeric: tabular-nums; }
+.adm-tickets { list-style: none; margin: 0; padding: 0; border-top: var(--border) solid var(--hairline); }
+.adm-tickets a {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr) auto;
+  gap: var(--space-5);
+  align-items: baseline;
+  padding: var(--space-5) var(--space-3);
+  border-bottom: var(--border) solid var(--hairline);
+}
+.adm-tickets a:hover { background: var(--stand); }
+.adm-tickets a:focus-visible { outline: none; box-shadow: inset var(--focus-ring); }
+.adm-ticket-main { display: grid; gap: 2px; min-width: 0; }
+.adm-ticket-main b { color: var(--chalk); font-weight: var(--weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adm-ticket-main small, .adm-ticket-when { color: var(--chalk-3); font-size: var(--text-xs); }
+.adm-ticket-preview { color: var(--chalk-2); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adm-state.open { color: var(--sodium); }
+.adm-state.waiting { color: var(--floodlight-hi); }
+
+.adm-thread { list-style: none; margin: var(--space-6) 0; padding: 0; display: grid; gap: var(--space-4); max-width: 720px; }
+.adm-thread li {
+  padding: var(--space-5);
+  border: var(--border) solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--stand);
+}
+.adm-thread li.out { background: var(--terrace); border-color: var(--rule); }
+.adm-thread-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); margin: 0 0 var(--space-3); font-size: var(--text-sm); }
+.adm-thread-who b { color: var(--chalk); font-weight: var(--weight-medium); }
+.adm-thread-who small { color: var(--chalk-3); font-size: var(--text-xs); }
+/* What a stranger sent is text, kept as they wrote it, and never wider than the card. */
+.adm-thread-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-md); line-height: var(--leading-normal); color: var(--chalk-2); }
+.adm-thread-quote { margin-top: var(--space-4); }
+.adm-thread-quote summary { cursor: pointer; font-size: var(--text-xs); color: var(--chalk-3); }
+.adm-thread-quote .adm-thread-body { margin-top: var(--space-3); font-size: var(--text-sm); color: var(--chalk-3); }
+.adm-reply { max-width: 720px; }
+
 /* ---------------------------------------------------------- the waiting */
 
 .adm-loading { display: flex; gap: 6px; padding: var(--space-10) 0; }
@@ -311,6 +352,10 @@
   .adm-plans form { grid-template-columns: minmax(0, 1fr) 120px; }
   .adm-plans .adm-quiet { grid-column: 1 / -1; margin: 0; }
   .adm-offers a { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+  .adm-tickets a { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2) var(--space-4); }
+  .adm-tickets .adm-state { grid-column: 1; }
+  .adm-tickets .adm-ticket-when { grid-column: 2; grid-row: 1; }
+  .adm-tickets .adm-ticket-main { grid-column: 1 / -1; }
   .adm-head-row { flex-direction: column; align-items: flex-start; }
 }
 
