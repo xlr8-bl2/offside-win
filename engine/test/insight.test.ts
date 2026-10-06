@@ -60,3 +60,12 @@ test('a draft that strings the fact lines together is sent back', async () => {
   const long = 'England should dominate this. ' + 'Czechia have been out-created in all of their last eight games. '.repeat(1) + 'word '.repeat(60);
   assert.ok(validate(long, req).includes('copied-fact'));
 });
+
+test("the model's working is not taken for its answer", async () => {
+  const { notProse } = await import('../src/narrate/write.ts');
+  assert.ok(notProse('in five of their last eight outings. Iceland struggled to create.'));
+  assert.ok(notProse('Iceland look the better side. Yes, starts with results. * *Join them into an argument* about it.'));
+  assert.ok(notProse('Spain should win. This uses the facts listed above, as the brief asked.'));
+  assert.ok(!notProse('Spain should comfortably dominate a fading Croatia side. Croatia have won three of their last six, but those results hide a decline.'));
+  assert.ok(!notProse('"Spain" is a word here, and 2-1 was the score last time.'));
+});

@@ -50,7 +50,7 @@ export interface Writer {
 }
 
 /** Why a draft was thrown away, for the run log. */
-export type Rejection = 'banned-term' | 'invented-number' | 'too-short' | 'too-long' | 'copied-fact' | 'error';
+export type Rejection = 'banned-term' | 'invented-number' | 'too-short' | 'too-long' | 'copied-fact' | 'not-prose' | 'error';
 
 export interface WriteResult {
   text: string | null;
@@ -182,6 +182,7 @@ export function feedback(preview: string, why: string | null, req: WriteRequest)
   if (nums.length) notes.push(`It used ${nums.map((n) => `"${n}"`).join(', ')}, which ${nums.length === 1 ? 'is' : 'are'} not in the facts. Leave ${nums.length === 1 ? 'it' : 'them'} out entirely.`);
   const banned = [...new Set([...findBannedInProse(preview, allowed), ...(why ? findBannedInProse(why, whyAllowed) : [])].map((v) => v.term))];
   if (banned.length) notes.push(`It used ${banned.map((t) => `"${t}"`).join(', ')}, which ${banned.length === 1 ? 'is' : 'are'} not allowed. Say it another way.`);
+  if (notProse(preview)) notes.push('It was not a finished paragraph. Write only the paragraph itself: start with a capital letter, no notes, no bullet or emphasis marks, and nothing about these instructions.');
   const copied = copiedFact(preview, req.facts);
   if (copied) notes.push(`It copied a fact word for word ("${copied}"). Every fact must be said in your own words.`);
   const words = (t: string) => t.trim().split(/\s+/).filter(Boolean).length;
@@ -246,7 +247,27 @@ export function validate(text: string, req: WriteRequest): Rejection[] {
   // reader already had, not analysis of it.
   if (copiedFact(text, req.facts)) out.push('copied-fact');
 
+  if (notProse(text)) out.push('not-prose');
+
   return out;
+}
+
+/**
+ * The model's working, not its answer.
+ *
+ * A thinking model handed back its notes on one match (Estonia v Iceland,
+ * 6 October 2026): a paragraph that opened mid-sentence, ran into "Yes,
+ * starts with results" and then quoted the brief back with its bullet marks.
+ * Every word was allowed and every number backed, so nothing caught it. Prose
+ * starts with a capital, has no list or emphasis marks, and does not talk
+ * about the brief.
+ */
+export function notProse(text: string): boolean {
+  const t = text.trim();
+  if (!/^[\p{Lu}0-9"“']/u.test(t)) return true;
+  if (/[*#_`]|^\s*[-•]\s/m.test(t)) return true;
+  if (/\b(PREVIEW|WHY)\s*:|\bthe facts\b|\bhard rules?\b|\bcount them\b|\bthese instructions\b|\bthe brief\b|\bword count\b|^\s*(yes|okay|ok),/im.test(t)) return true;
+  return false;
 }
 
 const WINDOW = 10;

@@ -33,7 +33,7 @@ export async function runInsightPreview(): Promise<void> {
   const fixtures = await select<{ id: number; kickoff: number; rank: number | null; home_team: string; away_team: string; home_team_id: number; away_team_id: number; bundle_json: string; league_id: number }>(
     `SELECT id, kickoff, rank, home_team, away_team, home_team_id, away_team_id, bundle_json, league_id
        FROM fixture WHERE kickoff > $1 AND kickoff < $2 AND home_team_id IS NOT NULL
-      ORDER BY coalesce(rank, 9), kickoff LIMIT 10`,
+      ORDER BY coalesce(rank, 9), kickoff LIMIT 14`,
     [now, now + 3 * 86400],
   );
   const key = process.env['GEMINI_API_KEY'];
