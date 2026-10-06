@@ -17,7 +17,7 @@
 import { chooseDay, evOf, grade, optionsFor, probOf, simulate, type HistRow, type Option, type Pick, type Policy, type SimResult } from './markets.ts';
 import { bootstrap } from './learned.ts';
 import { byDay, PROD } from './tune.ts';
-import type { MarketFamily } from '../types.ts';
+import { MARKET_FAMILY, type MarketFamily } from '../types.ts';
 
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 const dayOf = (t: number) => Math.floor((t + 3600) / 86400);
@@ -359,5 +359,85 @@ export function runAnatomy(rows: HistRow[]): Record<string, unknown> {
     }
   }
   console.log('\n  (each cell: calls, landed / said, return per call)');
+  return out;
+}
+
+/**
+ * `lab deep live`: what the live engine does that the lab's replay does not.
+ *
+ *   1. The overclaim each market family is charged on the floor (slate.ts,
+ *      loadCalibration), which the lab never applies.
+ *   2. The settled record week by week.
+ *   3. How much of each week's prices carried the sharp book, the opening
+ *      price and a book count: the tests that lean on them go quiet without.
+ *   4. The calls the lab would make since the switch that the live engine did
+ *      not, against the floor the overclaim makes.
+ */
+export async function runLiveGap(rows: HistRow[]): Promise<Record<string, unknown>> {
+  const { loadCalibration } = await import('../slate.ts');
+  const { overclaim } = await import('../select.ts');
+  const { select } = await import('../store.ts');
+  const out: Record<string, unknown> = {};
+  const cal = await loadCalibration();
+  console.log('1. The floor each family is charged (published calls only)');
+  const fams: MarketFamily[] = ['result', 'goals', 'handicap', 'corners', 'cards'];
+  for (const f of fams) {
+    const r = cal.get(f);
+    const oc = overclaim(f, cal);
+    console.log(`  ${f.padEnd(9)} n ${String(r?.n ?? 0).padStart(4)}  said ${r?.mean_model_p != null ? pct(r.mean_model_p) : '-'}  got ${r?.mean_actual != null ? pct(r.mean_actual) : '-'}  overclaim ${pct(oc)}  floor ${pct(0.78 + oc)} (marquee ${pct(0.7 + oc)}, rank 3 ${pct(0.85 + oc)})`);
+  }
+  out['overclaim'] = Object.fromEntries(fams.map((f) => [f, overclaim(f, cal)]));
+
+  console.log('\n2. The settled record, week by week (first call per fixture)');
+  const picks = await select<{ fixture_id: number; kickoff: number; market: string; model_prob: number; odds: number; result: string; created_at: number }>(
+    `SELECT fixture_id, kickoff, market, model_prob, odds, result, created_at FROM pick
+      WHERE kind = 'CONFIDENT' AND settled_at IS NOT NULL AND result IN ('WON','LOST','HALF_WON','HALF_LOST','PUSH') ORDER BY kickoff`,
+  );
+  const weeks = new Map<string, Tally & { fams: Record<string, number> }>();
+  for (const p of picks) {
+    const wk = new Date((Math.floor(Number(p.kickoff) / 604800) * 604800 + 345600) * 1000).toISOString().slice(0, 10);
+    const t = weeks.get(wk) ?? { ...empty(), fams: {} };
+    t.n++; t.p += Number(p.model_prob); t.odds += Number(p.odds);
+    const won = p.result === 'WON' ? 1 : p.result === 'HALF_WON' ? 0.5 : 0;
+    t.won += won;
+    t.pnl += p.result === 'WON' ? Number(p.odds) - 1 : p.result === 'LOST' ? -1 : p.result === 'HALF_WON' ? (Number(p.odds) - 1) / 2 : p.result === 'HALF_LOST' ? -0.5 : 0;
+    const fam = MARKET_FAMILY[p.market as keyof typeof MARKET_FAMILY] ?? p.market;
+    t.fams[fam] = (t.fams[fam] ?? 0) + 1;
+    weeks.set(wk, t);
+  }
+  for (const [wk, t] of weeks) console.log(`  week of ${wk}  ${show(t)}  ${Object.entries(t.fams).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+
+  console.log('\n3. What the prices carried, week by week (options in the lab\'s history)');
+  const cov = new Map<string, { fx: number; sharp: number; open: number; books: number; opts: number; optSharp: number }>();
+  for (const r of rows) {
+    const wk = new Date((Math.floor(r.kickoff / 604800) * 604800 + 345600) * 1000).toISOString().slice(0, 10);
+    const c = cov.get(wk) ?? { fx: 0, sharp: 0, open: 0, books: 0, opts: 0, optSharp: 0 };
+    c.fx++;
+    const res = r.markets.find((m) => m.market === '1x2');
+    if (res?.sharp) c.sharp++;
+    if (res?.open) c.open++;
+    if (typeof res?.books === 'number') c.books++;
+    for (const m of r.markets) { c.opts++; if (m.sharp) c.optSharp++; }
+    cov.set(wk, c);
+  }
+  for (const [wk, c] of [...cov].sort()) console.log(`  week of ${wk}  ${String(c.fx).padStart(4)} fixtures: result market with sharp book ${pct(c.sharp / c.fx)}, opening price ${pct(c.open / c.fx)}, book count ${pct(c.books / c.fx)}; markets with sharp book ${pct(c.optSharp / (c.opts || 1))}`);
+  out['coverage'] = Object.fromEntries(cov);
+
+  console.log('\n4. Since the switch: calls the lab would make, against the floor the overclaim makes');
+  const SWITCH = 1790529496;
+  const period = rows.filter((r) => r.kickoff >= SWITCH);
+  const cache: Cache = new Map(period.map((r) => [r.id, optionsFor(r, PROD.modelWeight)]));
+  const liveIds = new Set(picks.map((p) => Number(p.fixture_id)));
+  const blocked = empty(), passed = empty();
+  for (const day of byDay(period)) {
+    for (const pk of chooseDay(PROD, day, cache)) {
+      if (liveIds.has(pk.row.id)) continue;
+      const floor = floorOf(PROD, pk.row, pk.option) + overclaim(pk.option.family, cal);
+      const t = pk.p < floor ? blocked : passed;
+      add(t, pk.row, pk);
+    }
+  }
+  console.log(`  lab only, under the charged floor  ${show(blocked)}`);
+  console.log(`  lab only, over it (missed for another reason)  ${show(passed)}`);
   return out;
 }

@@ -39,7 +39,7 @@ import { MARKET_FAMILY, type Candidate, type Factor, type MarketFamily } from '.
  * tier's 10 ms of CPU — there is nothing left for it to compute.
  */
 
-async function loadCalibration(): Promise<CalibrationMap> {
+export async function loadCalibration(): Promise<CalibrationMap> {
   const rows = await dbSelect<{
     market_family: MarketFamily;
     n: number;
@@ -1006,7 +1006,7 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
           drivers: v.drivers.map(forStorage),
           set_aside: v.set_aside.map(forStorage),
         })),
-        pass_reason: publishedVerdicts.length ? null : selection.passReason,
+        pass_reason: publishedVerdicts.length ? null : noCall ? `call rule: ${noCall}` : selection.passReason,
         // Written for a match with no call (above); free, like the rest of it.
         preview,
         external: analysis.external,
