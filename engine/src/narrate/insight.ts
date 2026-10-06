@@ -106,15 +106,15 @@ export function sideInsights(team: string, side: 'home' | 'away', games: TeamGam
     const stolen = xg.filter((g) => g.gf > g.ga && g.xa! - g.xf! >= AGAINST).length;
     const robbed = xg.filter((g) => g.gf <= g.ga && g.xf! - g.xa! >= AGAINST).length;
     const robbedLost = xg.filter((g) => g.gf < g.ga && g.xf! - g.xa! >= AGAINST).length;
-    if (stolen >= 2) {
+    if (stolen >= 3) {
       out.push({
         text: `${team} have won ${w(stolen)} of their last ${w(xg.length)} games in which the other side made the better chances. Results like that rarely last`,
         side, weight: 98,
       });
     }
-    if (robbed >= 2) {
+    if (robbed >= 3) {
       out.push({
-        text: robbedLost >= 2
+        text: robbedLost >= 3
           ? `${team} have lost ${w(robbedLost)} of their last ${w(xg.length)} games in which they made the better chances. Their football is better than their results`
           : `${team} have failed to win ${w(robbed)} of their last ${w(xg.length)} games in which they made the better chances. Their football is better than their results`,
         side, weight: 98,
