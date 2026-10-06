@@ -22,7 +22,7 @@ import { budgeted, keyId, spent, todays, type BudgetState } from './narrate/budg
 import { write, type Writer } from './narrate/write.ts';
 import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
-import { bucketOf, buildCandidates, confidentEligible, DayMix, driversFor, floorForRank, isLean, marketLabel, rankConfident, select, setAsideFor, type CalibrationMap } from './select.ts';
+import { bucketOf, buildCandidates, confidentEligible, DayMix, whyNoCall, type NoCallReason, driversFor, floorForRank, isLean, marketLabel, rankConfident, select, setAsideFor, type CalibrationMap } from './select.ts';
 import { consensusMarkets } from './consensus.ts';
 import { readOf } from './read.ts';
 import { snapshotOf } from './odds.ts';
@@ -535,6 +535,8 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
       // Set when this fixture's slip leg is still priced but no longer clears
       // its bar, so the leg is withdrawn rather than held (see below).
       let slipLegDropped = false;
+      // Why this match has no call, from the rule that makes the calls.
+      let noCall: NoCallReason | null = null;
       const confidentVerdicts = (() => {
         const useProvider = config.confident.source === 'provider';
         if (useProvider && !prediction) return [];
@@ -593,6 +595,9 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
             // may well have been made before the sheet was out (context/xi.ts).
             const unrotated = theirCands.filter((c) => !backsRotatedSide(c, ctx.lineups.changes));
             const ranked = rankConfident(unrotated, floor, calibration);
+            noCall = ranked.length ? 'mix'
+              : rankConfident(theirCands, floor, calibration).length ? 'rotated'
+              : whyNoCall(unrotated, floor, calibration);
             // Matches under way keep whatever they had; the mix is for calls
             // still to be made.
             if (analysis.kickoff <= Math.floor(Date.now() / 1000)) return ranked.slice(0, 1);
@@ -791,8 +796,13 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
       // "Nothing to take on Netherlands v Germany ... the closest was double
       // chance 1X at 1.47" -- a sentence that contradicts the card, and one
       // that named a market and its odds to readers who had not paid.
-      const passNarrative = selection.passReason && publishedVerdicts.length === 0
-        ? narratePass(selection.passReason, analysis.home_team, analysis.away_team, analysis.fixture_id)
+      //
+      // And the reason is the call rule's own (select.ts, whyNoCall). It was
+      // the old value selector's, which judges something else: a mismatch
+      // read "too close to call", and a match where that selector found
+      // something read nothing at all.
+      const passNarrative = publishedVerdicts.length === 0 && noCall
+        ? narratePass(noCall, analysis.home_team, analysis.away_team, analysis.fixture_id)
         : null;
 
       /*

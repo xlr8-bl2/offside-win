@@ -270,12 +270,14 @@ const commands: Record<string, () => Promise<unknown>> = {
   async lab() {
     requireEnv({ provider: false });
     // A named study instead of the whole report: `deep` (lab/deep.ts).
-    if ((process.env['ARG'] ?? '').trim() === 'deep') {
+    const study = (process.env['ARG'] ?? '').trim();
+    if (study === 'deep' || study === 'deep anatomy') {
       const { loadHistory } = await import('./lab/run.ts');
-      const { runDeep } = await import('./lab/deep.ts');
+      const { runDeep, runAnatomy } = await import('./lab/deep.ts');
       const { kvSetJSON } = await import('./store.ts');
-      const report = runDeep(await loadHistory());
-      await kvSetJSON('lab:deep', { at: Math.floor(Date.now() / 1000), ...report });
+      const rows = await loadHistory();
+      const report = study === 'deep' ? runDeep(rows) : runAnatomy(rows);
+      await kvSetJSON(study === 'deep' ? 'lab:deep' : 'lab:anatomy', { at: Math.floor(Date.now() / 1000), ...report });
       return;
     }
     await runLab();

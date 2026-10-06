@@ -365,29 +365,83 @@ export function confidentScore(c: Candidate, rankBy = config.confident.rankBy): 
   return rankBy === 'prob' ? c.model_prob : c.model_prob * Math.log(c.odds) + ev;
 }
 
+/**
+ * The first of the published bar's tests a call fails, or null when it clears
+ * them all. Named, so that a match we pass on can say which one it was.
+ *
+ *   floor     not likely enough (the floor, plus whatever the market family
+ *             has been overclaiming);
+ *   certain   so likely it is above the ceiling;
+ *   short     the odds are too short to be worth taking;
+ *   long      the odds are too long to be a likely call;
+ *   value     the best odds are shorter than the outcome deserves, against the
+ *             consensus or the sharp book, or one book is far out of line;
+ *   drift     the money has gone against it since the market opened;
+ *   excluded  a market or line the rule does not call.
+ */
+export type ConfidentGate = 'floor' | 'certain' | 'short' | 'long' | 'value' | 'drift' | 'excluded';
+
+export function confidentGate(c: Candidate, floor = config.confident.floor, calibration: CalibrationMap = new Map()): ConfidentGate | null {
+  if (c.odds < config.confident.minOdds) return 'short';
+  if (c.odds > config.confident.maxOdds) return 'long';
+  if (config.confident.excludeMarkets.includes(bucketOf(c))) return 'excluded';
+  // Quarter handicap lines (-1.75, 0.25) are a split stake nobody can explain in a sentence.
+  if (!config.confident.quarterLines && c.line !== null && Math.abs((c.line * 4) % 2) === 1) return 'excluded';
+  if ((c.books ?? 0) < config.confident.minBooks) return 'excluded';
+  if (c.model_prob > config.confident.ceiling) return 'certain';
+  // A family that has been overclaiming has to clear a higher bar, by
+  // exactly what it has been overclaiming. This is the loop the engine is
+  // built around finally reaching the calls that get published: the floor
+  // was flat, so a market landing 57% while claiming 80% kept publishing at
+  // the same rate as one landing 84%.
+  if (c.model_prob < floor + overclaim(MARKET_FAMILY[c.market], calibration)) return 'floor';
+  if (config.confident.minEv > -1 && c.model_prob * c.odds - 1 < config.confident.minEv) return 'value';
+  if (c.odds * c.book_prob > config.confident.maxGap) return 'value';
+  if (config.confident.minSharpEv !== null && c.sharp_prob != null && c.sharp_prob * c.odds - 1 < config.confident.minSharpEv) return 'value';
+  // The money has not gone against it: the market's view now (the sharp
+  // book, else the consensus) at most `maxDrift` below where it opened.
+  if (config.confident.maxDrift !== null && c.open_prob != null
+    && (c.sharp_prob ?? c.book_prob) - c.open_prob < -config.confident.maxDrift) return 'drift';
+  return null;
+}
+
 /** Whether a call clears the published bar on its own terms. */
 export function confidentEligible(c: Candidate, floor = config.confident.floor, calibration: CalibrationMap = new Map()): boolean {
-  return (
-    // A family that has been overclaiming has to clear a higher bar, by
-    // exactly what it has been overclaiming. This is the loop the engine
-    // is built around finally reaching the calls that get published: the
-    // floor was flat, so a market landing 57% while claiming 80% kept
-    // publishing at the same rate as one landing 84%.
-    c.model_prob >= floor + overclaim(MARKET_FAMILY[c.market], calibration) &&
-    c.model_prob <= config.confident.ceiling &&
-    c.odds >= config.confident.minOdds &&
-    c.odds <= config.confident.maxOdds &&
-    (config.confident.minEv <= -1 || c.model_prob * c.odds - 1 >= config.confident.minEv) &&
-    c.odds * c.book_prob <= config.confident.maxGap &&
-    (c.books ?? 0) >= config.confident.minBooks &&
-    !config.confident.excludeMarkets.includes(bucketOf(c)) &&
-    (config.confident.minSharpEv === null || c.sharp_prob == null || c.sharp_prob * c.odds - 1 >= config.confident.minSharpEv) &&
-    // The money has not gone against it: the market's view now (the sharp
-    // book, else the consensus) at most `maxDrift` below where it opened.
-    (config.confident.maxDrift === null || c.open_prob == null
-      || (c.sharp_prob ?? c.book_prob) - c.open_prob >= -config.confident.maxDrift) &&
-    (config.confident.quarterLines || c.line === null || Math.abs((c.line * 4) % 2) !== 1)
-  );
+  return confidentGate(c, floor, calibration) === null;
+}
+
+/**
+ * Why a match has no call, from the rule that makes the calls.
+ *
+ * The page used to give the old value selector's reason, which judges
+ * something else entirely: Albania v San Marino (6 October 2026) read "too
+ * close to call with any conviction" because our own ratings' confidence was a
+ * shade under that selector's gate, and a match where it found something read
+ * nothing at all. The reasons here are the call rule's own:
+ *
+ *   no-prices  nothing is priced;
+ *   short      the likely outcome is too short to be worth taking, and
+ *              nothing at a usable price is likely enough;
+ *   value      something is likely enough, at a usable price, but the price
+ *              is shorter than it deserves;
+ *   drift      something is likely enough, but the money has gone against it;
+ *   close      nothing at a usable price is likely enough; `open` when the
+ *              likeliest of them is under three in five.
+ */
+export type NoCallReason = 'no-prices' | 'short' | 'value' | 'drift' | 'close' | 'open'
+  /** Set by the slate: the only call backs a side that has been rotated, or the day already holds its share of that market. */
+  | 'rotated' | 'mix';
+
+export function whyNoCall(candidates: Candidate[], floor = config.confident.floor, calibration: CalibrationMap = new Map()): NoCallReason {
+  if (!candidates.length) return 'no-prices';
+  const gated = candidates.map((c) => ({ c, g: confidentGate(c, floor, calibration) }));
+  const usable = gated.filter((x) => x.g === 'value' || x.g === 'drift' || x.g === null)
+    .sort((a, b) => b.c.model_prob - a.c.model_prob);
+  if (usable[0]) return usable[0].g === 'drift' ? 'drift' : 'value';
+  const bar = (c: Candidate) => floor + overclaim(MARKET_FAMILY[c.market], calibration);
+  if (gated.some((x) => x.g === 'short' && x.c.model_prob >= bar(x.c))) return 'short';
+  const inBand = gated.filter((x) => x.g === 'floor').sort((a, b) => b.c.model_prob - a.c.model_prob)[0];
+  return inBand && inBand.c.model_prob >= 0.6 ? 'close' : 'open';
 }
 
 /** Every call on a fixture that clears the bar, best first. */

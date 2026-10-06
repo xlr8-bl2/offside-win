@@ -305,3 +305,59 @@ export function runDeep(rows: HistRow[]): Record<string, unknown> {
   report['calibration'] = calOut;
   return report;
 }
+
+/**
+ * `lab deep anatomy`: what separates production's calls that land from the
+ * ones that do not, period by period. Each feature is something known before
+ * kick-off; a split that holds in A, B and C is a candidate for the rule, one
+ * that flips is noise.
+ */
+export function runAnatomy(rows: HistRow[]): Record<string, unknown> {
+  const sorted = [...rows].sort((a, b) => a.kickoff - b.kickoff);
+  const a = sorted.slice(0, Math.floor(sorted.length * 0.5));
+  const b = sorted.slice(a.length, Math.floor(sorted.length * 0.75));
+  const c = sorted.slice(a.length + b.length);
+  const cache: Cache = new Map(sorted.map((r) => [r.id, optionsFor(r, PROD.modelWeight)]));
+  // The pool: every production call, plus the near misses on price, so that
+  // a split has enough in it to say something.
+  const loose: Policy = { ...PROD, name: 'loose', minEv: -0.03, minSharpEv: -0.02, maxDrift: 0.03 };
+  const features: Array<[string, (pk: Pick) => string]> = [
+    ['best odds over the sharp book\'s fair', (pk) => { const o = pk.option; if (o.sharp === null) return 'no sharp book'; const e = evOf(o.sharp, o); return e < 0 ? 'under' : e < 0.01 ? '0-1%' : e < 0.03 ? '1-3%' : e < 0.06 ? '3-6%' : '6%+'; }],
+    ['sharp book against the consensus', (pk) => { const o = pk.option; if (o.sharp === null) return 'no sharp book'; const d = o.sharp - o.book; return d < -0.02 ? 'sharp 2+ under' : d < 0 ? 'sharp 0-2 under' : d < 0.02 ? 'sharp 0-2 over' : 'sharp 2+ over'; }],
+    ['money since the open', (pk) => { const o = pk.option; if (o.open === null) return 'no open'; const m = (o.sharp ?? o.book) - o.open; return m < -0.01 ? 'against 1+' : m < 0 ? 'against 0-1' : m < 0.01 ? 'for 0-1' : m < 0.03 ? 'for 1-3' : 'for 3+'; }],
+    ['books pricing it', (pk) => { const n = pk.option.books; return n === null ? 'unknown' : n < 6 ? '<6' : n < 12 ? '6-11' : n < 20 ? '12-19' : '20+'; }],
+    ['odds', (pk) => { const x = pk.option.odds; return x < 1.17 ? '1.13-1.16' : x < 1.22 ? '1.17-1.21' : x < 1.3 ? '1.22-1.29' : x < 1.45 ? '1.30-1.44' : '1.45+'; }],
+    ['probability', (pk) => { const p = pk.p; return p < 0.78 ? '<78' : p < 0.82 ? '78-82' : p < 0.86 ? '82-86' : p < 0.9 ? '86-90' : '90+'; }],
+    ['family', (pk) => pk.option.family],
+    ['market', (pk) => `${pk.option.market} ${pk.option.outcome}${pk.option.line === null ? '' : ` ${pk.option.line > 0 ? '+' : ''}${pk.option.line}`}`.replace(/(asian_handicap|european_handicap) (HOME|AWAY) .*/, '$1 $2')],
+    ['handicap line', (pk) => pk.option.family !== 'handicap' || pk.option.line === null ? 'n/a' : `${pk.option.market === 'european_handicap' ? 'eh' : 'ah'} ${pk.option.line > 0 ? '+' : ''}${pk.option.line}`],
+    ['rank', (pk) => String(pk.row.rank)],
+    ['provider agrees', (pk) => { const o = pk.option; if (o.provider === null) return 'no provider'; const d = o.provider - (o.sharp ?? o.book); return d < -0.05 ? 'provider 5+ under' : d < 0 ? 'provider 0-5 under' : 'provider over'; }],
+    ['our blend agrees (goals)', (pk) => { const o = pk.option; if (o.family !== 'goals' || o.blend === null) return 'n/a'; const d = o.blend - (o.sharp ?? o.book); return d < -0.02 ? 'blend 2+ under' : d < 0.02 ? 'within 2' : 'blend 2+ over'; }],
+  ];
+  const out: Record<string, unknown> = {};
+  for (const [pname, pol] of [['production', PROD], ['production plus near misses on price', loose]] as const) {
+    console.log(`\n${pname}`);
+    const picks = { A: dayPicks(pol, a, cache), B: dayPicks(pol, b, cache), C: dayPicks(pol, c, cache) };
+    for (const [fname, f] of features) {
+      console.log(`  ${fname}`);
+      const keys = new Set<string>();
+      const tallies: Record<string, Record<string, Tally>> = {};
+      for (const [l, ps] of Object.entries(picks)) {
+        for (const pk of ps) {
+          const k = f(pk);
+          keys.add(k);
+          add(((tallies[k] ??= {})[l] ??= empty()), pk.row, pk);
+        }
+      }
+      for (const k of [...keys].sort()) {
+        const t = tallies[k]!;
+        const cell = (l: string) => { const x = t[l]; return x?.n ? `${String(x.n).padStart(4)} ${pct(x.won / x.n).padStart(6)}/${pct(x.p / x.n).padStart(6)} ${pct(x.pnl / x.n).padStart(7)}` : '   0' + ' '.repeat(29); };
+        console.log(`    ${k.padEnd(26)} A ${cell('A')}  B ${cell('B')}  C ${cell('C')}`);
+      }
+      out[`${pname} | ${fname}`] = tallies;
+    }
+  }
+  console.log('\n  (each cell: calls, landed / said, return per call)');
+  return out;
+}
