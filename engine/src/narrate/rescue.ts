@@ -63,6 +63,8 @@ export function fromReads(home: string, away: string, facts: PubFact[]): string 
   // Which kind of match this is, said once at the top and once at the end.
   let take: string;
   let close: string;
+  // The side the take is about, whose reads come first.
+  let first = better;
   if (decides || (score[better] > 0 && score[worse] < 0) || (score[better] > 0 && gap >= 2)) {
     take = pick([
       `Look past the results and this is ${B}'s game.`,
@@ -84,6 +86,7 @@ export function fromReads(home: string, away: string, facts: PubFact[]): string 
       : 'Neither of these is in good shape underneath the results.';
     close = 'The side that stops giving up the better chances first takes this one.';
   } else if (score[worse] < 0) {
+    first = worse;
     take = `${W} are in trouble, and not only on results.`;
     close = `Until ${W} sort that out, they are there to be got at.`;
   } else {
@@ -107,9 +110,9 @@ export function fromReads(home: string, away: string, facts: PubFact[]): string 
     if (chosen.length >= 3) break;
     if (!chosen.includes(r)) chosen.push(r);
   }
-  // Grouped by side, the better side first, quality before luck within it,
+  // Grouped by side, the side the take is about first, quality before luck within it,
   // so the paragraph turns from one team to the other only once.
-  chosen.sort((a, b) => (a.side === b.side ? Math.abs(b.lean ?? 0) - Math.abs(a.lean ?? 0) || b.weight - a.weight : a.side === better ? -1 : 1));
+  chosen.sort((a, b) => (a.side === b.side ? Math.abs(b.lean ?? 0) - Math.abs(a.lean ?? 0) || b.weight - a.weight : a.side === first ? -1 : 1));
 
   const body = chosen.map((r, i) => {
     if (i === 0) return sentence(r.text);
