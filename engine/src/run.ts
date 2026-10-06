@@ -279,6 +279,16 @@ const commands: Record<string, () => Promise<unknown>> = {
     requireEnv({ provider: false });
     // A named study instead of the whole report: `deep` (lab/deep.ts).
     const study = (process.env['ARG'] ?? '').trim();
+    if (study === 'deep budget') {
+      // The writer's daily allowance as it stands (narrate/budget.ts). Counts only, never the key.
+      const { kvGetJSON } = await import('./store.ts');
+      const { pacificDay } = await import('./narrate/budget.ts');
+      const b = await kvGetJSON<Record<string, unknown>>('gemini:budget');
+      const models = (b?.['models'] ?? {}) as Record<string, Record<string, unknown>>;
+      console.log(`writer budget for ${String(b?.['day'] ?? '-')} (today, Pacific: ${pacificDay()}): used ${String(b?.['used'] ?? 0)} of ${process.env['GEMINI_PER_DAY'] || 200}; Google said spent: ${String(b?.['exhausted'] ?? false)}; paused until: ${b?.['pausedUntil'] ? new Date(Number(b['pausedUntil']) * 1000).toISOString() : 'not paused'}`);
+      for (const [m, st] of Object.entries(models)) console.log(`  ${m}: ${JSON.stringify(st)}`);
+      return;
+    }
     if (study === 'deep pulls') {
       const { runPulls } = await import('./lab/pulls.ts');
       await runPulls();
