@@ -22,7 +22,7 @@ import { budgeted, keyId, spent, todays, type BudgetState } from './narrate/budg
 import { write, type Writer } from './narrate/write.ts';
 import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
-import { bucketOf, buildCandidates, confidentEligible, DayMix, whyNoCall, type NoCallReason, driversFor, floorForRank, isLean, marketLabel, rankConfident, select, setAsideFor, type CalibrationMap } from './select.ts';
+import { bucketOf, buildCandidates, confidentEligible, confidentHolds, DayMix, whyNoCall, type NoCallReason, driversFor, floorForRank, isLean, marketLabel, rankConfident, select, setAsideFor, type CalibrationMap } from './select.ts';
 import { consensusMarkets } from './consensus.ts';
 import { readOf } from './read.ts';
 import { snapshotOf } from './odds.ts';
@@ -63,14 +63,18 @@ export async function loadCalibration(): Promise<CalibrationMap> {
    * 81.4%: honest to within a point and a half, and being fined thirteen.
    *
    * `shrink` still comes from the full table -- it scales edges, which is a
-   * question about every candidate. Only the floor's penalty is re-based, and
-   * only where there are published calls to base it on; otherwise it keeps the
-   * family figure, which errs strict rather than loose.
+   * question about every candidate. Only the floor's penalty is re-based.
+   *
+   * And only on calls the rule running now has made (config.confident.
+   * overconfidenceSince). A family with none yet is not charged: falling back
+   * to the family figure, or to calls from an earlier engine, is how
+   * handicaps came to need 104% and stopped being called at all.
    */
   const called = await dbSelect<{ market: string; model_prob: number; result: string }>(
     `SELECT market, model_prob, result FROM pick
-     WHERE kind = 'CONFIDENT' AND settled_at IS NOT NULL
+     WHERE kind = 'CONFIDENT' AND settled_at IS NOT NULL AND created_at >= ?
        AND result IN ('WON', 'LOST', 'HALF_WON', 'HALF_LOST')`,
+    [config.confident.overconfidenceSince],
   );
   const acc = new Map<MarketFamily, { n: number; p: number; hit: number }>();
   for (const c of called) {
@@ -82,12 +86,11 @@ export async function loadCalibration(): Promise<CalibrationMap> {
     a.hit += c.result === 'WON' ? 1 : c.result === 'HALF_WON' ? 0.5 : 0;
     acc.set(fam, a);
   }
-  for (const [fam, a] of acc) {
-    const row = map.get(fam);
-    if (!row) continue;
-    row.n = a.n;
-    row.mean_model_p = a.p / a.n;
-    row.mean_actual = a.hit / a.n;
+  for (const [fam, row] of map) {
+    const a = acc.get(fam);
+    row.n = a?.n ?? 0;
+    row.mean_model_p = a ? a.p / a.n : null;
+    row.mean_actual = a ? a.hit / a.n : null;
   }
   return map;
 }
@@ -595,6 +598,14 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
             // may well have been made before the sheet was out (context/xi.ts).
             const unrotated = theirCands.filter((c) => !backsRotatedSide(c, ctx.lineups.changes));
             const ranked = rankConfident(unrotated, floor, calibration);
+            // A call already up stays up while it still holds (config.confident.hold):
+            // a price twitch or the sharp book missing for one pass is not a
+            // reason to pull it. Rotation is: `unrotated` has already left it out.
+            const standingCall = fresh ? undefined : incumbents.get(analysis.fixture_id);
+            if (standingCall && !ranked.some(matchesPin(standingCall))) {
+              const still = unrotated.find(matchesPin(standingCall));
+              if (still && confidentHolds(still, floor, calibration)) ranked.unshift(still);
+            }
             noCall = ranked.length ? 'mix'
               : rankConfident(theirCands, floor, calibration).length ? 'rotated'
               : whyNoCall(unrotated, floor, calibration);

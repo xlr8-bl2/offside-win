@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { consensusMarkets, targetsFromBook } from '../src/consensus.ts';
 import { buildBookMarkets } from '../src/odds.ts';
-import { bucketOf, confidentScore, DayMix, rankConfident } from '../src/select.ts';
+import { bucketOf, confidentGate, confidentHolds, confidentScore, DayMix, rankConfident, whyNoCall } from '../src/select.ts';
 import type { Candidate, Quote } from '../src/types.ts';
 
 /**
@@ -98,4 +98,41 @@ test('the day mix caps one market and keeps a standing call', () => {
   const standing = { market: 'over_under_15', outcome: 'over', line: null };
   assert.equal(mix.choose([ou, dc], kick, standing), ou);
   assert.equal(bucketOf({ market: 'double_chance', outcome: '1X' }), 'double_chance home');
+});
+
+test('a match with no call is given the call rule\'s own reason', () => {
+  // Albania v San Marino: the win is certain and far too short, the next
+  // likeliest is nowhere near the bar. Not "too close to call".
+  const mismatch = [cand('1x2', 'HOME', 0.93, 1.04), cand('over_under_25', 'over', 0.7, 1.4)];
+  assert.equal(confidentGate(mismatch[0]!, 0.78), 'short');
+  assert.equal(whyNoCall(mismatch, 0.78), 'short');
+  // Likely enough at a usable price, but shorter than it deserves.
+  const mean = { ...cand('over_under_15', 'over', 0.82, 1.18), sharp_prob: 0.82 } as Candidate;
+  assert.equal(confidentGate(mean, 0.78), 'value');
+  assert.equal(whyNoCall([mean], 0.78), 'value');
+  // Nothing likely enough: close when the best is a real lean, open when not.
+  assert.equal(whyNoCall([cand('1x2', 'HOME', 0.72, 1.35)], 0.78), 'close');
+  assert.equal(whyNoCall([cand('1x2', 'HOME', 0.45, 2.1)], 0.78), 'open');
+  assert.equal(whyNoCall([], 0.78), 'no-prices');
+  // And a call that clears every test has no gate.
+  assert.equal(confidentGate({ ...cand('btts', 'no', 0.8, 1.3), sharp_prob: 0.8 } as Candidate, 0.78), null);
+});
+
+test('a call already up holds through a twitch, and comes down on a real fall', () => {
+  const at = (p: number, odds: number, sharp: number | null = p, open: number | null = null) =>
+    ({ ...cand('1x2', 'HOME', p, odds), sharp_prob: sharp, open_prob: open } as Candidate);
+  // Half a point under the floor: not a new call, still a standing one.
+  assert.equal(confidentGate(at(0.775, 1.3), 0.78), 'floor');
+  assert.ok(confidentHolds(at(0.775, 1.3), 0.78));
+  // The best price a point under the sharp book's fair price.
+  assert.equal(confidentGate(at(0.8, 1.237), 0.78), 'value');
+  assert.ok(confidentHolds(at(0.8, 1.237), 0.78));
+  // Two points of money against it since the open.
+  assert.equal(confidentGate(at(0.8, 1.3, 0.8, 0.82), 0.78), 'drift');
+  assert.ok(confidentHolds(at(0.8, 1.3, 0.8, 0.82), 0.78));
+  // A real fall is not held.
+  assert.ok(!confidentHolds(at(0.75, 1.36), 0.78), 'three points under');
+  assert.ok(!confidentHolds(at(0.8, 1.2), 0.78), 'four per cent under fair');
+  assert.ok(!confidentHolds(at(0.8, 1.3, 0.8, 0.85), 0.78), 'five points against it');
+  assert.ok(!confidentHolds(at(0.8, 1.1), 0.78), 'too short is too short');
 });

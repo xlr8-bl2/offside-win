@@ -530,3 +530,42 @@ export function runPenalty(rows: HistRow[]): Record<string, unknown> {
   }
   return out;
 }
+
+/**
+ * `lab deep ceiling`: the likeliest call on a fixture is usually its shortest
+ * price, and in lab deep anatomy calls the price put at 86-90% earned nothing
+ * in any period while 78-82% earned in all three. Does a lower ceiling (the
+ * fixture then takes its next call) or another ranking do better?
+ */
+export function runCeiling(rows: HistRow[]): Record<string, unknown> {
+  const sorted = [...rows].sort((a, b) => a.kickoff - b.kickoff);
+  const a = sorted.slice(0, Math.floor(sorted.length * 0.5));
+  const b = sorted.slice(a.length, Math.floor(sorted.length * 0.75));
+  const c = sorted.slice(a.length + b.length);
+  const parts = [['A', a], ['B', b], ['C', c]] as const;
+  const cache: Cache = new Map(sorted.map((r) => [r.id, optionsFor(r, PROD.modelWeight)]));
+  const base = perDay([...dayPicks(PROD, b, cache), ...dayPicks(PROD, c, cache)]);
+  const out: Record<string, unknown> = {};
+  const variants: Array<[string, Partial<Policy>]> = [
+    ['production (ceiling 97%)', {}],
+    ['ceiling 92%', { maxProb: 0.92 }],
+    ['ceiling 90%', { maxProb: 0.9 }],
+    ['ceiling 88%', { maxProb: 0.88 }],
+    ['ceiling 86%', { maxProb: 0.86 }],
+    ['ceiling 84%', { maxProb: 0.84 }],
+    ['ranked on return', { rankBy: 'ev' }],
+    ['ranked on return x likelihood', { rankBy: 'evprob' }],
+    ['ceiling 88%, ranked on return', { maxProb: 0.88, rankBy: 'ev' }],
+    ['ceiling 90%, min odds 1.16', { maxProb: 0.9, minOdds: 1.16 }],
+  ];
+  for (const [label, v] of variants) {
+    const p: Policy = { ...PROD, ...v, name: label };
+    const sims = parts.map(([l, part]) => [l, simulate(p, part, cache)] as const);
+    const bs = bootstrap(perDay([...dayPicks(p, b, cache), ...dayPicks(p, c, cache)]), base, 2000);
+    out[label] = { ...Object.fromEntries(sims), bootstrap: bs };
+    console.log(`  ${label}`);
+    for (const [l, r] of sims) console.log(`  ${simLine(l, r)}  pnl ${r.pnl.toFixed(1)}`);
+    console.log(`      vs production on B+C: return ahead in ${pct(bs.roiAhead)} of draws, landing ahead in ${pct(bs.hitAhead)}, difference ${pct(bs.lo)} to ${pct(bs.hi)}`);
+  }
+  return out;
+}

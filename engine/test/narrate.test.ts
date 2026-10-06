@@ -255,3 +255,15 @@ test('a pass is explained in plain words, never in the engine\'s', async () => {
     assert.ok(!/edge|margin|model|threshold|dispositive/i.test(out), `jargon survived: ${out}`);
   }
 });
+
+test('a pass from the call rule says which test the match failed, in plain words', async () => {
+  const { NO_CALL } = await import('../src/narrate/compose.ts');
+  const { findBannedInProse } = await import('../src/vocabulary.ts');
+  for (const [k, v] of Object.entries(NO_CALL)) {
+    assert.deepEqual(findBannedInProse(v), [], k);
+    assert.ok(!/\d/.test(v), `${k}: ${v}`);
+  }
+  const text = narratePass('short', 'Albania', 'San Marino', 212680);
+  assert.match(text, /too short to be worth taking/);
+  assert.doesNotMatch(text, /too close/);
+});

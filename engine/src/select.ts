@@ -381,7 +381,15 @@ export function confidentScore(c: Candidate, rankBy = config.confident.rankBy): 
  */
 export type ConfidentGate = 'floor' | 'certain' | 'short' | 'long' | 'value' | 'drift' | 'excluded';
 
-export function confidentGate(c: Candidate, floor = config.confident.floor, calibration: CalibrationMap = new Map()): ConfidentGate | null {
+export interface GateSlack { floor: number; value: number; drift: number }
+const NO_SLACK: GateSlack = { floor: 0, value: 0, drift: 0 };
+
+export function confidentGate(
+  c: Candidate,
+  floor = config.confident.floor,
+  calibration: CalibrationMap = new Map(),
+  slack: GateSlack = NO_SLACK,
+): ConfidentGate | null {
   if (c.odds < config.confident.minOdds) return 'short';
   if (c.odds > config.confident.maxOdds) return 'long';
   if (config.confident.excludeMarkets.includes(bucketOf(c))) return 'excluded';
@@ -394,15 +402,23 @@ export function confidentGate(c: Candidate, floor = config.confident.floor, cali
   // built around finally reaching the calls that get published: the floor
   // was flat, so a market landing 57% while claiming 80% kept publishing at
   // the same rate as one landing 84%.
-  if (c.model_prob < floor + overclaim(MARKET_FAMILY[c.market], calibration)) return 'floor';
-  if (config.confident.minEv > -1 && c.model_prob * c.odds - 1 < config.confident.minEv) return 'value';
+  if (c.model_prob < floor + overclaim(MARKET_FAMILY[c.market], calibration) - slack.floor) return 'floor';
+  if (config.confident.minEv > -1 && c.model_prob * c.odds - 1 < config.confident.minEv - slack.value) return 'value';
   if (c.odds * c.book_prob > config.confident.maxGap) return 'value';
-  if (config.confident.minSharpEv !== null && c.sharp_prob != null && c.sharp_prob * c.odds - 1 < config.confident.minSharpEv) return 'value';
+  if (config.confident.minSharpEv !== null && c.sharp_prob != null && c.sharp_prob * c.odds - 1 < config.confident.minSharpEv - slack.value) return 'value';
   // The money has not gone against it: the market's view now (the sharp
   // book, else the consensus) at most `maxDrift` below where it opened.
   if (config.confident.maxDrift !== null && c.open_prob != null
-    && (c.sharp_prob ?? c.book_prob) - c.open_prob < -config.confident.maxDrift) return 'drift';
+    && (c.sharp_prob ?? c.book_prob) - c.open_prob < -(config.confident.maxDrift + slack.drift)) return 'drift';
   return null;
+}
+
+/**
+ * Whether a call already published still stands: the same tests, with the
+ * slack in config.confident.hold on the ones that move with every price.
+ */
+export function confidentHolds(c: Candidate, floor = config.confident.floor, calibration: CalibrationMap = new Map()): boolean {
+  return confidentGate(c, floor, calibration, config.confident.hold) === null;
 }
 
 /** Whether a call clears the published bar on its own terms. */
