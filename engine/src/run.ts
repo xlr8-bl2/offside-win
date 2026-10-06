@@ -269,6 +269,24 @@ const commands: Record<string, () => Promise<unknown>> = {
   // rule earns, replayed on the prices we actually saw. See lab/markets.ts.
   async lab() {
     requireEnv({ provider: false });
+    // A named study instead of the whole report: `deep` (lab/deep.ts).
+    const study = (process.env['ARG'] ?? '').trim();
+    if (study === 'deep books') {
+      requireEnv();
+      const { runBooks } = await import('./lab/deep.ts');
+      await runBooks();
+      return;
+    }
+    if (study === 'deep' || study === 'deep anatomy' || study === 'deep live' || study === 'deep penalty' || study === 'deep ceiling') {
+      const { loadHistory } = await import('./lab/run.ts');
+      const { runDeep, runAnatomy, runLiveGap, runPenalty, runCeiling } = await import('./lab/deep.ts');
+      const { kvSetJSON } = await import('./store.ts');
+      const rows = await loadHistory();
+      const report = study === 'deep' ? runDeep(rows) : study === 'deep live' ? await runLiveGap(rows)
+        : study === 'deep penalty' ? runPenalty(rows) : study === 'deep ceiling' ? runCeiling(rows) : runAnatomy(rows);
+      await kvSetJSON(`lab:${study.replace(' ', ':')}`, { at: Math.floor(Date.now() / 1000), ...report });
+      return;
+    }
     await runLab();
   },
 

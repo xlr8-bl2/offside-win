@@ -295,6 +295,15 @@ export const config = {
      * market the old board leaned on, lost in both tuning periods when value
      * was measured against the consensus.
      */
+    //
+    // Rechecked by lab deep (3,338 fixtures, 13 August to 6 October 2026,
+    // same three-way split): the floor is not what leaves a match uncalled.
+    // A match goes without a call because nothing likely is priced at or
+    // above fair (55%), the likely outcome is too short (12%) or nothing is
+    // priced (4%); too close to call is about 3%. Every looser floor did
+    // worse than this one on the newer half (results at 74%: ahead in 0.2%
+    // of resampled draws), and so did every lower ceiling and every other
+    // ranking (lab deep ceiling): none held in all three periods.
     floor: num('CONF_FLOOR', 0.78),
     /**
      * One call per fixture.
@@ -455,6 +464,27 @@ export const config = {
      * 1 to 2.3 over its price in every period.
      */
     maxDrift: process.env.CONF_MAX_DRIFT ? Number(process.env.CONF_MAX_DRIFT) : (0.01 as number | null),
+    /**
+     * Holding a published call: the slack a call already up gets before it is
+     * pulled, on the tests that move with every price update.
+     *
+     * Every pass re-ran the full bar on every standing call, so a call that
+     * cleared it by a hair came down the moment a price twitched or the sharp
+     * book's quote dropped out of the feed for a pass -- and went up again
+     * when it came back. 14 of the first 15 calls pulled that way (3 to 6
+     * October 2026) went on to land, and lab deep found the calls the close
+     * would have dropped on price alone landing 80% across all three periods
+     * (production 82%). A call with real news against it still comes down:
+     * the side it backs rotated, or it falls clearly below the bar.
+     */
+    hold: {
+      /** Points of probability below the floor a standing call may sit. */
+      floor: num('CONF_HOLD_FLOOR', 0.01),
+      /** How far below fair (consensus or sharp book) its best price may fall. */
+      value: num('CONF_HOLD_VALUE', 0.02),
+      /** Extra points the money may move against it since the open. */
+      drift: num('CONF_HOLD_DRIFT', 0.02),
+    },
     /** Quarter handicap lines (-1.75, 0.25) are a split stake nobody can explain in a sentence. */
     quarterLines: process.env.CONF_QUARTER_LINES === 'true',
     /** League rank at or below which a fixture counts as marquee. */
@@ -477,6 +507,21 @@ export const config = {
     overconfidencePenalty: num('CONF_OVERCONF_PENALTY', 1),
     /** Below this many settled picks a family's measured gap is noise. */
     overconfidenceMinN: num('CONF_OVERCONF_MIN_N', 25),
+    /**
+     * Only calls made by the rule running now are counted, from when it went
+     * live (the consensus source, 27 September 2026 17:18 UTC).
+     *
+     * The gap was measured over every call ever published, and 254 handicap
+     * calls from the engine before that one had said 79% and landed 53%. That
+     * charged handicaps 26 points, a floor of 104%, so from the switch onward
+     * the live engine could not make a handicap call at all -- while in the
+     * lab, which never applied the charge, handicaps were the largest single
+     * source of calls (347 of 825) and earned in every period. Replayed day by
+     * day on the rule's own calls (lab deep penalty), the charge almost never
+     * fires: the rule has been honest about itself. It stays as a safety
+     * valve, measured on the right calls.
+     */
+    overconfidenceSince: num('CONF_OVERCONF_SINCE', 1790529496),
   },
 
   selection: {

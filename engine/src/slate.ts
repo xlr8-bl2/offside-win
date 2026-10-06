@@ -22,7 +22,7 @@ import { budgeted, keyId, spent, todays, type BudgetState } from './narrate/budg
 import { write, type Writer } from './narrate/write.ts';
 import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
-import { bucketOf, buildCandidates, confidentEligible, DayMix, driversFor, floorForRank, isLean, marketLabel, rankConfident, select, setAsideFor, type CalibrationMap } from './select.ts';
+import { bucketOf, buildCandidates, confidentEligible, confidentHolds, DayMix, whyNoCall, type NoCallReason, driversFor, floorForRank, isLean, marketLabel, rankConfident, select, setAsideFor, type CalibrationMap } from './select.ts';
 import { consensusMarkets } from './consensus.ts';
 import { readOf } from './read.ts';
 import { snapshotOf } from './odds.ts';
@@ -39,7 +39,7 @@ import { MARKET_FAMILY, type Candidate, type Factor, type MarketFamily } from '.
  * tier's 10 ms of CPU — there is nothing left for it to compute.
  */
 
-async function loadCalibration(): Promise<CalibrationMap> {
+export async function loadCalibration(): Promise<CalibrationMap> {
   const rows = await dbSelect<{
     market_family: MarketFamily;
     n: number;
@@ -63,14 +63,18 @@ async function loadCalibration(): Promise<CalibrationMap> {
    * 81.4%: honest to within a point and a half, and being fined thirteen.
    *
    * `shrink` still comes from the full table -- it scales edges, which is a
-   * question about every candidate. Only the floor's penalty is re-based, and
-   * only where there are published calls to base it on; otherwise it keeps the
-   * family figure, which errs strict rather than loose.
+   * question about every candidate. Only the floor's penalty is re-based.
+   *
+   * And only on calls the rule running now has made (config.confident.
+   * overconfidenceSince). A family with none yet is not charged: falling back
+   * to the family figure, or to calls from an earlier engine, is how
+   * handicaps came to need 104% and stopped being called at all.
    */
   const called = await dbSelect<{ market: string; model_prob: number; result: string }>(
     `SELECT market, model_prob, result FROM pick
-     WHERE kind = 'CONFIDENT' AND settled_at IS NOT NULL
+     WHERE kind = 'CONFIDENT' AND settled_at IS NOT NULL AND created_at >= ?
        AND result IN ('WON', 'LOST', 'HALF_WON', 'HALF_LOST')`,
+    [config.confident.overconfidenceSince],
   );
   const acc = new Map<MarketFamily, { n: number; p: number; hit: number }>();
   for (const c of called) {
@@ -82,12 +86,11 @@ async function loadCalibration(): Promise<CalibrationMap> {
     a.hit += c.result === 'WON' ? 1 : c.result === 'HALF_WON' ? 0.5 : 0;
     acc.set(fam, a);
   }
-  for (const [fam, a] of acc) {
-    const row = map.get(fam);
-    if (!row) continue;
-    row.n = a.n;
-    row.mean_model_p = a.p / a.n;
-    row.mean_actual = a.hit / a.n;
+  for (const [fam, row] of map) {
+    const a = acc.get(fam);
+    row.n = a?.n ?? 0;
+    row.mean_model_p = a ? a.p / a.n : null;
+    row.mean_actual = a ? a.hit / a.n : null;
   }
   return map;
 }
@@ -535,6 +538,8 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
       // Set when this fixture's slip leg is still priced but no longer clears
       // its bar, so the leg is withdrawn rather than held (see below).
       let slipLegDropped = false;
+      // Why this match has no call, from the rule that makes the calls.
+      let noCall: NoCallReason | null = null;
       const confidentVerdicts = (() => {
         const useProvider = config.confident.source === 'provider';
         if (useProvider && !prediction) return [];
@@ -593,6 +598,17 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
             // may well have been made before the sheet was out (context/xi.ts).
             const unrotated = theirCands.filter((c) => !backsRotatedSide(c, ctx.lineups.changes));
             const ranked = rankConfident(unrotated, floor, calibration);
+            // A call already up stays up while it still holds (config.confident.hold):
+            // a price twitch or the sharp book missing for one pass is not a
+            // reason to pull it. Rotation is: `unrotated` has already left it out.
+            const standingCall = fresh ? undefined : incumbents.get(analysis.fixture_id);
+            if (standingCall && !ranked.some(matchesPin(standingCall))) {
+              const still = unrotated.find(matchesPin(standingCall));
+              if (still && confidentHolds(still, floor, calibration)) ranked.unshift(still);
+            }
+            noCall = ranked.length ? 'mix'
+              : rankConfident(theirCands, floor, calibration).length ? 'rotated'
+              : whyNoCall(unrotated, floor, calibration);
             // Matches under way keep whatever they had; the mix is for calls
             // still to be made.
             if (analysis.kickoff <= Math.floor(Date.now() / 1000)) return ranked.slice(0, 1);
@@ -791,8 +807,13 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
       // "Nothing to take on Netherlands v Germany ... the closest was double
       // chance 1X at 1.47" -- a sentence that contradicts the card, and one
       // that named a market and its odds to readers who had not paid.
-      const passNarrative = selection.passReason && publishedVerdicts.length === 0
-        ? narratePass(selection.passReason, analysis.home_team, analysis.away_team, analysis.fixture_id)
+      //
+      // And the reason is the call rule's own (select.ts, whyNoCall). It was
+      // the old value selector's, which judges something else: a mismatch
+      // read "too close to call", and a match where that selector found
+      // something read nothing at all.
+      const passNarrative = publishedVerdicts.length === 0 && noCall
+        ? narratePass(noCall, analysis.home_team, analysis.away_team, analysis.fixture_id)
         : null;
 
       /*
@@ -996,7 +1017,7 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
           drivers: v.drivers.map(forStorage),
           set_aside: v.set_aside.map(forStorage),
         })),
-        pass_reason: publishedVerdicts.length ? null : selection.passReason,
+        pass_reason: publishedVerdicts.length ? null : noCall ? `call rule: ${noCall}` : selection.passReason,
         // Written for a match with no call (above); free, like the rest of it.
         preview,
         external: analysis.external,

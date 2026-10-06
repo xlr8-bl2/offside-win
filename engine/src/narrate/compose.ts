@@ -324,8 +324,25 @@ export function narratePass(reason: string, homeTeam: string, awayTeam: string, 
     `${homeTeam} v ${awayTeam} is one to leave alone.`,
     `Nothing to take on ${homeTeam} against ${awayTeam}.`,
   ];
-  return `${choose(openers, rng).item} ${plainPass(reason)}`;
+  return `${choose(openers, rng).item} ${NO_CALL[reason] ?? plainPass(reason)}`;
 }
+
+/**
+ * The call rule's own reasons (select.ts, whyNoCall), in a reader's words.
+ * These replaced the value selector's on the page: that one judged something
+ * else, and told readers a mismatch like Albania v San Marino was "too close
+ * to call".
+ */
+export const NO_CALL: Record<string, string> = {
+  'no-prices': 'No bookmaker is pricing it yet.',
+  short: 'The likely outcome is priced too short to be worth taking, and nothing else is sure enough to call.',
+  value: 'There is a likely outcome here, but every bookmaker has it shorter than it deserves, so there is nothing to take.',
+  drift: 'The money has gone against the likeliest outcome since the betting opened, and we do not back into that.',
+  close: 'There is a lean, but not a strong enough one to call.',
+  open: 'It is too open to call with any conviction.',
+  rotated: 'The side we would have backed has changed its expected eleven, so we are leaving it.',
+  mix: 'Today already carries its share of calls on the same kind of bet, so this one sits out.',
+};
 
 /**
  * Why there is no call, said the way a reader would say it.
