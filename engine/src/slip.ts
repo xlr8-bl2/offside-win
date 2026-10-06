@@ -8,11 +8,20 @@ import type { MarketCode, Outcome } from './types.ts';
  *
  * The brief, in the owner's words: "the most probable to enter, the highest
  * confidence to reach, like two or three odds combined", and then, plainly,
- * "the top most confident picks should be there". So the slip is built from
- * the top of the board down: the most confident call goes on first, then the
- * next, until the total odds reach 2.00. A call that would push the total
- * past 3.00 is skipped and the next one tried. The call we are surest of is
- * always on the slip.
+ * "the top most confident picks should be there". So the call we are surest
+ * of always goes on first. After it come the longest prices among the rest,
+ * until the total odds reach 2.00; a call that would push the total past
+ * 3.00 is skipped and the next one tried.
+ *
+ * Longest first, rather than surest first, because of what 780 of the new
+ * engine's calls did (lab: deep slip study). Every call here has already
+ * cleared the confident floor, and past it they land about equally often
+ * whatever their price: 87% at 1.13 to 1.19, 89% at 1.20 to 1.29. Surest
+ * first filled the slip with 1.13s and needed five of them to reach 2.00;
+ * longest first needs three or four, and each leg left off is one fewer
+ * chance for the slip to die. Over 56 days it came in 69% of the time against
+ * 49%, ahead in both halves of the history and in 98% of resampled draws.
+ * The rule learns nothing from results, so neither half was used to fit it.
  *
  * An earlier version searched every combination for the best joint chance
  * inside the band, which is a sound objective and the wrong product: it would
@@ -52,11 +61,16 @@ export interface SlipOptions {
   maxOdds: number;
   minLegs: number;
   maxLegs: number;
-  /** How many of the most likely calls to search over. */
+  /** How many calls to search over. */
   pool: number;
+  /**
+   * After the surest call: 'longest' price first (the slip), or 'surest'
+   * first (the rule before 6 October 2026, kept so the lab can compare).
+   */
+  order?: 'longest' | 'surest';
 }
 
-export const SLIP_DEFAULTS: SlipOptions = { minOdds: 2, maxOdds: 3, minLegs: 2, maxLegs: 6, pool: 14 };
+export const SLIP_DEFAULTS: SlipOptions = { minOdds: 2, maxOdds: 3, minLegs: 2, maxLegs: 6, pool: 14, order: 'longest' };
 
 /**
  * The combination of calls with the best chance of all landing, whose total
@@ -73,7 +87,10 @@ export function buildSlip(candidates: Leg[], opts: SlipOptions = SLIP_DEFAULTS):
     const prev = best.get(c.fixture_id);
     if (!prev || c.model_prob > prev.model_prob) best.set(c.fixture_id, c);
   }
-  const pool = [...best.values()].sort((a, b) => b.model_prob - a.model_prob).slice(0, opts.pool);
+  const [top, ...others] = [...best.values()].sort((a, b) => b.model_prob - a.model_prob);
+  const pool = !top ? [] : (opts.order ?? 'longest') === 'surest'
+    ? [top, ...others].slice(0, opts.pool)
+    : [top, ...others.sort((a, b) => b.odds - a.odds || b.model_prob - a.model_prob)].slice(0, opts.pool);
 
   // Top of the board down. A leg that would take the total past the band is
   // skipped, not the end of the search: the next most confident call may

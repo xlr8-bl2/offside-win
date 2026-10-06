@@ -16,7 +16,7 @@
 
 import { chooseDay, grade, optionsFor, type HistRow, type Option, type Policy } from './markets.ts';
 import { byDay, PROD } from './tune.ts';
-import { buildSlip, type Leg } from '../slip.ts';
+import { buildSlip, SLIP_DEFAULTS, type Leg } from '../slip.ts';
 import { config } from '../config.ts';
 import { bootstrap } from './learned.ts';
 
@@ -32,7 +32,7 @@ function factor(result: string, odds: number): number {
   return 0;
 }
 
-function run(policy: Policy, part: HistRow[], cache: Map<number, Option[]>): Tally {
+function run(policy: Policy, part: HistRow[], cache: Map<number, Option[]>, order: 'longest' | 'surest' = 'surest'): Tally {
   const t: Tally = { days: 0, slips: 0, legs: 0, odds: 0, said: 0, won: 0, lost: 0, voided: 0, pnl: 0 };
   for (const day of byDay(part)) {
     t.days++;
@@ -45,7 +45,7 @@ function run(policy: Policy, part: HistRow[], cache: Map<number, Option[]>): Tal
     }));
     // The slate takes only calls at or above the confident floor for a slip
     // (refreshSlip): a lower-ranked league's lower floor does not reach it.
-    const slip = buildSlip(legs.filter((l) => l.model_prob >= config.confident.floor));
+    const slip = buildSlip(legs.filter((l) => l.model_prob >= config.confident.floor), { ...SLIP_DEFAULTS, order });
     if (!slip) continue;
     let f = 1;
     let played = 0;
@@ -90,6 +90,9 @@ export function runSlipBack(rows: HistRow[]): Record<string, unknown> {
       out[`${label} ${p.name}`] = t;
       console.log(line(p.name === 'old engine' ? 'old' : 'new', t));
     }
+    const t = run(NEW, part, cache, 'longest');
+    out[`${label} new engine, longest first`] = t;
+    console.log(line('now', t));
   }
   return out;
 }
@@ -147,10 +150,10 @@ const sharpBand = (l: LegX) => l.option.sharp === null ? 'no sharp price' : l.op
 
 type Builder = (legs: LegX[]) => LegX[] | null;
 
-function slipOf(legs: LegX[], prob: (l: LegX) => number, maxLegs = 6): LegX[] | null {
+function slipOf(legs: LegX[], prob: (l: LegX) => number, maxLegs = 6, order: 'longest' | 'surest' = 'surest'): LegX[] | null {
   const asLeg = (l: LegX): Leg => ({ fixture_id: l.row.id, kickoff: l.row.kickoff, home: '', away: '', league: null,
     market: l.option.market, outcome: String(l.option.outcome), line: l.option.line, odds: l.option.odds, bookmaker: null, model_prob: prob(l) });
-  const s = buildSlip(legs.map(asLeg), { minOdds: 2, maxOdds: 3, minLegs: 2, maxLegs, pool: 14 });
+  const s = buildSlip(legs.map(asLeg), { minOdds: 2, maxOdds: 3, minLegs: 2, maxLegs, pool: 14, order });
   if (!s) return null;
   const ids = new Set(s.legs.map((x) => x.fixture_id));
   return legs.filter((l) => ids.has(l.row.id));
@@ -252,6 +255,7 @@ export function runSlipStudy(rows: HistRow[]): Record<string, unknown> {
     [`without ${worst ?? '-'}`, (ls) => slipOf(ls.filter((l) => l.option.family !== worst), p)],
     ['longest price first', (ls) => longFirst(ls, false)],
     ['top call, then longest', (ls) => longFirst(ls, true)],
+    ['the slip as built now', (ls) => slipOf(ls, p, 6, 'longest')],
     ['best joint, by price', (ls) => jointBest(ls, bandRate)],
     ['top call, joint by price', (ls) => jointBest(ls, (l) => l === [...ls].sort((a, b) => b.p - a.p)[0] ? 2 : bandRate(l))],
   ];
