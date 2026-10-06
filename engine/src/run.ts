@@ -294,10 +294,11 @@ const commands: Record<string, () => Promise<unknown>> = {
       await runPulls();
       return;
     }
-    if (study === 'deep slip') {
+    if (study === 'deep slip' || study === 'deep slip study') {
       const { loadHistory } = await import('./lab/run.ts');
-      const { runSlipBack } = await import('./lab/slipback.ts');
-      runSlipBack(await loadHistory());
+      const { runSlipBack, runSlipStudy } = await import('./lab/slipback.ts');
+      const rows = await loadHistory();
+      if (study === 'deep slip') runSlipBack(rows); else runSlipStudy(rows);
       return;
     }
     if (study === 'deep insight' || study === 'deep insight write') {

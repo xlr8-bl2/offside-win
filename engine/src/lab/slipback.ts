@@ -18,6 +18,7 @@ import { chooseDay, grade, optionsFor, type HistRow, type Option, type Policy } 
 import { byDay, PROD } from './tune.ts';
 import { buildSlip, type Leg } from '../slip.ts';
 import { config } from '../config.ts';
+import { bootstrap } from './learned.ts';
 
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
@@ -88,6 +89,168 @@ export function runSlipBack(rows: HistRow[]): Record<string, unknown> {
       const t = run(p, part, cache);
       out[`${label} ${p.name}`] = t;
       console.log(line(p.name === 'old engine' ? 'old' : 'new', t));
+    }
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------------
+ * `deep slip study`: can the slip be built better?
+ *
+ * Two kinds of evidence, because a slip a day is too few to judge on alone.
+ *
+ *   1. Legs. Every call the slip could have used (about fifteen a day), by
+ *      price, by market family, by how sure we were and by whether the sharp
+ *      book agreed: how often each kind landed against how often we said it
+ *      would. A kind of leg that lands less often than said is a slip-killer
+ *      however sure it looks; one that lands more often is what a slip wants.
+ *   2. Slips. Six other ways of building the slip, each against the current
+ *      one on the same days. Anything learned from the results (which family
+ *      to drop, how far to trust each family) is learned on the oldest half
+ *      only and judged on the newer half it never saw.
+ * ---------------------------------------------------------------------- */
+
+
+interface LegX { day: number; row: HistRow; option: Option; p: number; ev: number; result: string }
+
+const landedOf = (r: string) => r === 'WON' || r === 'HALF_WON';
+const countsOf = (r: string) => r !== 'PUSH' && r !== 'VOID';
+
+function legsByDay(policy: Policy, part: HistRow[], cache: Map<number, Option[]>): LegX[][] {
+  return byDay(part).map((day) => chooseDay(policy, day, cache)
+    .filter((p) => p.p >= config.confident.floor)
+    .map((p) => ({
+      day: Math.floor((p.row.kickoff + 3600) / 86400), row: p.row, option: p.option, p: p.p, ev: p.ev,
+      result: grade(p.row, p.option)?.result ?? 'VOID',
+    })));
+}
+
+function legTable(title: string, legs: LegX[], key: (l: LegX) => string) {
+  const g = new Map<string, { n: number; won: number; said: number; pnl: number }>();
+  for (const l of legs) {
+    if (!countsOf(l.result)) continue;
+    const k = key(l);
+    const e = g.get(k) ?? { n: 0, won: 0, said: 0, pnl: 0 };
+    e.n++; e.said += l.p; if (landedOf(l.result)) e.won++;
+    e.pnl += factor(l.result, l.option.odds) - 1;
+    g.set(k, e);
+  }
+  console.log(`\n  legs by ${title}:`);
+  for (const [k, e] of [...g.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    console.log(`    ${k.padEnd(22)} ${String(e.n).padStart(4)} legs  landed ${pct(e.won / e.n).padStart(6)}  said ${pct(e.said / e.n).padStart(6)}  gap ${((e.won - e.said) / e.n * 100).toFixed(1).padStart(5)} pts  return ${pct(e.pnl / e.n).padStart(6)}`);
+  }
+}
+
+const oddsBand = (o: number) => o < 1.2 ? '1.13-1.19' : o < 1.3 ? '1.20-1.29' : o < 1.45 ? '1.30-1.44' : '1.45 and up';
+const probBand = (p: number) => p < 0.82 ? '78-81%' : p < 0.86 ? '82-85%' : p < 0.9 ? '86-89%' : '90% and up';
+const sharpBand = (l: LegX) => l.option.sharp === null ? 'no sharp price' : l.option.sharp >= l.p ? 'sharp as sure or surer' : 'sharp less sure';
+
+type Builder = (legs: LegX[]) => LegX[] | null;
+
+function slipOf(legs: LegX[], prob: (l: LegX) => number, maxLegs = 6): LegX[] | null {
+  const asLeg = (l: LegX): Leg => ({ fixture_id: l.row.id, kickoff: l.row.kickoff, home: '', away: '', league: null,
+    market: l.option.market, outcome: String(l.option.outcome), line: l.option.line, odds: l.option.odds, bookmaker: null, model_prob: prob(l) });
+  const s = buildSlip(legs.map(asLeg), { minOdds: 2, maxOdds: 3, minLegs: 2, maxLegs, pool: 14 });
+  if (!s) return null;
+  const ids = new Set(s.legs.map((x) => x.fixture_id));
+  return legs.filter((l) => ids.has(l.row.id));
+}
+
+/** The best joint chance inside the band, with the day's top call always on it. */
+function jointBest(legs: LegX[], prob: (l: LegX) => number): LegX[] | null {
+  const pool = [...legs].sort((a, b) => prob(b) - prob(a)).slice(0, 10);
+  if (pool.length < 2) return null;
+  const top = pool[0]!;
+  let best: LegX[] | null = null;
+  let bestP = -1;
+  const rest = pool.slice(1);
+  const walk = (i: number, picked: LegX[], odds: number, p: number) => {
+    if (odds > 3) return;
+    if (picked.length >= 2 && odds >= 2 && p > bestP) { best = [...picked]; bestP = p; }
+    if (picked.length >= 6 || i >= rest.length) return;
+    for (let k = i; k < rest.length; k++) {
+      const l = rest[k]!;
+      walk(k + 1, [...picked, l], odds * l.option.odds, p * prob(l));
+    }
+  };
+  walk(0, [top], top.option.odds, prob(top));
+  return best;
+}
+
+function settle(slip: LegX[]): { f: number; played: number } {
+  let f = 1, played = 0;
+  for (const l of slip) { if (countsOf(l.result)) played++; f *= factor(l.result, l.option.odds); }
+  return { f, played };
+}
+
+export function runSlipStudy(rows: HistRow[]): Record<string, unknown> {
+  const sorted = [...rows].sort((a, b) => a.kickoff - b.kickoff);
+  const half = Math.floor(sorted.length * 0.5);
+  const learnRows = sorted.slice(0, half);
+  const testRows = sorted.slice(half);
+  const cache = new Map(sorted.map((r) => [r.id, optionsFor(r, PROD.modelWeight)]));
+  const NEW: Policy = { ...PROD, name: 'new engine' };
+  const learnDays = legsByDay(NEW, learnRows, cache);
+  const testDays = legsByDay(NEW, testRows, cache);
+  const all = [...learnDays, ...testDays].flat();
+  const iso = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
+  console.log(`lab deep slip study: ${all.length} legs the slip could use; learned on ${iso(learnRows[0]!.kickoff)} to ${iso(learnRows[learnRows.length - 1]!.kickoff)}, judged on ${iso(testRows[0]!.kickoff)} to ${iso(testRows[testRows.length - 1]!.kickoff)}`);
+
+  // 1. Legs.
+  legTable('price', all, (l) => oddsBand(l.option.odds));
+  legTable('how sure we were', all, (l) => probBand(l.p));
+  legTable('market family', all, (l) => l.option.family);
+  legTable('the sharp book', all, sharpBand);
+  legTable('price, newer half only', testDays.flat(), (l) => oddsBand(l.option.odds));
+  legTable('family, newer half only', testDays.flat(), (l) => l.option.family);
+
+  // What the older half says about each family, for the variants that learn.
+  const fam = new Map<string, { won: number; said: number; n: number }>();
+  for (const l of learnDays.flat()) {
+    if (!countsOf(l.result)) continue;
+    const e = fam.get(l.option.family) ?? { won: 0, said: 0, n: 0 };
+    e.n++; e.said += l.p; if (landedOf(l.result)) e.won++;
+    fam.set(l.option.family, e);
+  }
+  // Trust in each family, shrunk towards one with ten imaginary legs.
+  const trust = (f: string) => { const e = fam.get(f); return e ? (e.won + 10) / (e.said + 10) : 1; };
+  const worst = [...fam.entries()].filter(([, e]) => e.n >= 30).sort((a, b) => (a[1].won - a[1].said) / a[1].n - (b[1].won - b[1].said) / b[1].n)[0]?.[0];
+  console.log(`\n  learned on the older half: trust ${[...fam.keys()].map((f) => `${f} ${trust(f).toFixed(2)}`).join(', ')}; worst family ${worst ?? 'none'}`);
+
+  const p = (l: LegX) => l.p;
+  const adj = (l: LegX) => Math.min(0.99, l.p * trust(l.option.family));
+  const builders: Array<[string, Builder]> = [
+    ['current: surest first', (ls) => slipOf(ls, p)],
+    ['best joint chance', (ls) => jointBest(ls, p)],
+    ['surest first, trusted', (ls) => slipOf(ls, adj)],
+    ['best joint, trusted', (ls) => jointBest(ls, adj)],
+    ['three legs at most', (ls) => slipOf(ls, p, 3)],
+    ['sharp book agrees', (ls) => slipOf(ls.filter((l) => l.option.sharp !== null && l.option.sharp >= l.p - 0.02), p)],
+    [`without ${worst ?? '-'}`, (ls) => slipOf(ls.filter((l) => l.option.family !== worst), p)],
+  ];
+
+  const out: Record<string, unknown> = {};
+  for (const [label, days] of [['older half (some rules learned here)', learnDays], ['newer half (out of sample)', testDays], ['all', [...learnDays, ...testDays]]] as const) {
+    console.log(`\n  ${label}: ${days.length} days`);
+    const maps: Array<Map<number, { n: number; won: number; pnl: number }>> = [];
+    for (const [name, build] of builders) {
+      const m = new Map<number, { n: number; won: number; pnl: number }>();
+      let slips = 0, won = 0, pnl = 0, legs = 0, odds = 0, said = 0;
+      for (const ls of days) {
+        const s = build(ls);
+        if (!s) continue;
+        const { f, played } = settle(s);
+        if (!played) continue;
+        slips++; legs += s.length; pnl += f - 1; if (f >= 1) won++;
+        odds += s.reduce((a, l) => a * l.option.odds, 1);
+        said += s.reduce((a, l) => a * l.p, 1);
+        m.set(s[0]!.day, { n: 1, won: f >= 1 ? 1 : 0, pnl: f - 1 });
+      }
+      maps.push(m);
+      const vs = maps.length > 1 ? bootstrap(m, maps[0]!, 4000) : null;
+      console.log(`    ${name.padEnd(24)} ${String(slips).padStart(3)} slips  ${slips ? (legs / slips).toFixed(1) : '-'} legs  odds ${slips ? (odds / slips).toFixed(2) : '-'}  came in ${slips ? pct(won / slips).padStart(6) : '-'} (said ${slips ? pct(said / slips) : '-'})  return ${slips ? pct(pnl / slips).padStart(7) : '-'}`
+        + (vs ? `  ahead of current in ${pct(vs.roiAhead)} of draws` : ''));
+      out[`${label} ${name}`] = { slips, won, pnl };
     }
   }
   return out;
