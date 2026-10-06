@@ -215,3 +215,25 @@ test('the front page is the landing page: its words and FAQ data, and no photogr
   assert.match(html, /"@type":"FAQPage"/);
   assert.match(html, /Do your calls always come in\?/);
 });
+
+test('the match event carries everything Google requires, and nests no other event', async () => {
+  const p = (await matchPage(env({ get_fixture: FIX }) as any, 212602, 'https://offside.win'))!;
+  const ld = p.jsonLd[0] as any;
+  assert.equal(ld['@type'], 'SportsEvent');
+  assert.ok(ld.startDate && ld.endDate && Date.parse(ld.endDate) - Date.parse(ld.startDate) === 7200_000);
+  assert.equal(ld.location.address['@type'], 'PostalAddress');
+  assert.equal(ld.performer.length, 2);
+  assert.ok(ld.organizer.url.startsWith('https://offside.win/'));
+  assert.ok(Array.isArray(ld.image) && ld.image.length === 1);
+  // Any other Event in the tree is one Google would read on its own, without a date or a place.
+  const events: any[] = [];
+  const walk = (x: any) => { if (x && typeof x === 'object') { if (/Event$/.test(String(x['@type'] ?? ''))) events.push(x); Object.values(x).forEach(walk); } };
+  walk(p.jsonLd);
+  assert.equal(events.length, 1);
+});
+
+test('a match with no ground named gets no event rather than one with a made-up place', async () => {
+  const p = (await matchPage(env({ get_fixture: { ...FIX, venue: null } }) as any, 212602, 'https://offside.win'))!;
+  assert.ok(!p.jsonLd.some((x: any) => x['@type'] === 'SportsEvent'));
+  assert.ok(p.jsonLd.length >= 1, 'the breadcrumbs stay');
+});
