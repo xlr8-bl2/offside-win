@@ -109,7 +109,7 @@ export function sideInsights(team: string, side: 'home' | 'away', games: TeamGam
     if (stolen >= 3) {
       out.push({
         text: `${team} have won ${w(stolen)} of their last ${w(xg.length)} games in which the other side made the better chances. Results like that rarely last`,
-        side, lean: -1, weight: 98,
+        side, lean: 0, weight: 98,
       });
     }
     if (robbed >= 3) {
@@ -117,7 +117,7 @@ export function sideInsights(team: string, side: 'home' | 'away', games: TeamGam
         text: robbedLost >= 3
           ? `${team} have lost ${w(robbedLost)} of their last ${w(xg.length)} games in which they made the better chances. Their football is better than their results`
           : `${team} have failed to win ${w(robbed)} of their last ${w(xg.length)} games in which they made the better chances. Their football is better than their results`,
-        side, lean: 1, weight: 98,
+        side, lean: 0, weight: 98,
       });
     }
 
@@ -128,14 +128,14 @@ export function sideInsights(team: string, side: 'home' | 'away', games: TeamGam
     const allowed = xg.reduce((a, g) => a + g.xa!, 0);
     const span = `in their last ${w(xg.length)}`;
     if (goals - chances >= 4 && goals >= chances * 1.4) {
-      out.push({ text: `${team} have scored ${goals} ${span} from chances that would usually bring about ${Math.round(chances)}. That finishing is running hot`, side, lean: -1, weight: 94 });
+      out.push({ text: `${team} have scored ${goals} ${span} from chances that would usually bring about ${Math.round(chances)}. That finishing is running hot`, side, lean: 0, weight: 94 });
     } else if (chances - goals >= 4 && chances >= goals * 1.4) {
-      out.push({ text: `${team} have scored only ${goals} ${span} from chances that would usually bring about ${Math.round(chances)}. The goals are coming`, side, lean: 1, weight: 94 });
+      out.push({ text: `${team} have scored only ${goals} ${span} from chances that would usually bring about ${Math.round(chances)}. The goals are coming`, side, lean: 0, weight: 94 });
     }
     if (conceded - allowed >= 4 && conceded >= allowed * 1.4) {
-      out.push({ text: `${team} have conceded ${conceded} ${span} from chances that would usually cost about ${Math.round(allowed)}. They have been punished for very little`, side, lean: 1, weight: 90 });
+      out.push({ text: `${team} have conceded ${conceded} ${span} from chances that would usually cost about ${Math.round(allowed)}. They have been punished for very little`, side, lean: 0, weight: 90 });
     } else if (allowed - conceded >= 4 && allowed >= conceded * 1.4) {
-      out.push({ text: `${team} have conceded only ${conceded} ${span} when the chances they allowed would usually cost about ${Math.round(allowed)}. Their goalkeeper and their luck have carried them`, side, lean: -1, weight: 92 });
+      out.push({ text: `${team} have conceded only ${conceded} ${span} when the chances they allowed would usually cost about ${Math.round(allowed)}. Their goalkeeper and their luck have carried them`, side, lean: 0, weight: 92 });
     }
 
     // 7. Which way it is moving: the last four against the games before.

@@ -39,9 +39,12 @@ export interface PubFact {
   /** The fit player a threat line is about (a name key), so the slate can rest them next time. */
   threat?: string;
   /**
-   * A read underneath the results (insight.ts), and which way it points for
-   * the side it is about: 1 good for them, -1 bad, 0 neither. Only reads carry
-   * it, which is how the paragraph built without the writer finds them.
+   * A read underneath the results (insight.ts), and what it says about how
+   * good the side it is about is: 1 good, -1 poor, 0 nothing either way --
+   * the reads about luck (results ahead of or behind the chances) are 0,
+   * since they say the results will move, not how good the side is. Only
+   * reads carry it, which is how the paragraph built without the writer
+   * finds them.
    */
   lean?: -1 | 0 | 1;
   /** On the read that puts both sides together: whose game it is. */
