@@ -217,8 +217,31 @@ export function runSlipStudy(rows: HistRow[]): Record<string, unknown> {
   const worst = [...fam.entries()].filter(([, e]) => e.n >= 30).sort((a, b) => (a[1].won - a[1].said) / a[1].n - (b[1].won - b[1].said) / b[1].n)[0]?.[0];
   console.log(`\n  learned on the older half: trust ${[...fam.keys()].map((f) => `${f} ${trust(f).toFixed(2)}`).join(', ')}; worst family ${worst ?? 'none'}`);
 
+  // The same, by price band: how often each band landed in the older half.
+  const band = new Map<string, { won: number; n: number }>();
+  for (const l of learnDays.flat()) {
+    if (!countsOf(l.result)) continue;
+    const e = band.get(oddsBand(l.option.odds)) ?? { won: 0, n: 0 };
+    e.n++; if (landedOf(l.result)) e.won++;
+    band.set(oddsBand(l.option.odds), e);
+  }
+  const overall = [...band.values()].reduce((a, e) => ({ won: a.won + e.won, n: a.n + e.n }), { won: 0, n: 0 });
+  // Shrunk towards the overall rate with twenty imaginary legs.
+  const bandRate = (l: LegX) => { const e = band.get(oddsBand(l.option.odds)) ?? { won: 0, n: 0 }; return (e.won + 20 * overall.won / Math.max(1, overall.n)) / (e.n + 20); };
+  console.log(`  learned on the older half, by price: ${[...band.entries()].map(([k, e]) => `${k} ${pct(e.won / e.n)} of ${e.n}`).join(', ')}`);
+
   const p = (l: LegX) => l.p;
   const adj = (l: LegX) => Math.min(0.99, l.p * trust(l.option.family));
+  // Longest price first among calls we are sure of: fewer legs to reach 2.00.
+  const longFirst = (ls: LegX[], keepTop: boolean) => {
+    const byP = [...ls].sort((a, b) => b.p - a.p);
+    const top = byP[0];
+    const rest = [...ls].filter((l) => !keepTop || l !== top).sort((a, b) => b.option.odds - a.option.odds);
+    const order = keepTop && top ? [top, ...rest] : rest;
+    // slipOf sorts by the probability it is handed, so hand it the order.
+    const rank = new Map(order.map((l, i) => [l, 1 - i / 1000]));
+    return slipOf(order, (l) => rank.get(l)!);
+  };
   const builders: Array<[string, Builder]> = [
     ['current: surest first', (ls) => slipOf(ls, p)],
     ['best joint chance', (ls) => jointBest(ls, p)],
@@ -227,6 +250,10 @@ export function runSlipStudy(rows: HistRow[]): Record<string, unknown> {
     ['three legs at most', (ls) => slipOf(ls, p, 3)],
     ['sharp book agrees', (ls) => slipOf(ls.filter((l) => l.option.sharp !== null && l.option.sharp >= l.p - 0.02), p)],
     [`without ${worst ?? '-'}`, (ls) => slipOf(ls.filter((l) => l.option.family !== worst), p)],
+    ['longest price first', (ls) => longFirst(ls, false)],
+    ['top call, then longest', (ls) => longFirst(ls, true)],
+    ['best joint, by price', (ls) => jointBest(ls, bandRate)],
+    ['top call, joint by price', (ls) => jointBest(ls, (l) => l === [...ls].sort((a, b) => b.p - a.p)[0] ? 2 : bandRate(l))],
   ];
 
   const out: Record<string, unknown> = {};
