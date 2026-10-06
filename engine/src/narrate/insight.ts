@@ -97,7 +97,7 @@ export function sideInsights(team: string, side: 'home' | 'away', games: TeamGam
     if (better >= Math.ceil(xg.length * 0.7)) {
       out.push({ text: `${team} have created the better chances in ${share(better, xg.length)} games`, side, weight: 96 });
     } else if (worse >= Math.ceil(xg.length * 0.6)) {
-      out.push({ text: `${team} have been out-created in ${share(worse, xg.length)} games: the other side had the better chances`, side, weight: 96 });
+      out.push({ text: `${team} have been out-created in ${share(worse, xg.length)} games`, side, weight: 96 });
     } else if (better <= 1 && worse <= 1 && xg.length >= 6) {
       out.push({ text: `${team}'s games are tight: neither side made clearly the better chances in ${share(xg.length - better - worse, xg.length)} games`, side, weight: 70 });
     }

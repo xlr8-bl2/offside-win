@@ -50,3 +50,13 @@ test('matches with no score yet, or of other teams, are left out', () => {
   const rows = [row(1, 5, 9, true, 1, 0, 1, 1), { ...row(2, 5, 9, true, 1, 0, 1, 1), home_goals: null }, row(3, 6, 9, true, 1, 0, 1, 1)];
   assert.equal(teamGames(rows, 5).length, 1);
 });
+
+test('a draft that strings the fact lines together is sent back', async () => {
+  const { copiedFact, validate } = await import('../src/narrate/write.ts');
+  const facts = [{ text: 'Czechia have been out-created in all of their last eight games', side: 'away' as const, weight: 96 }];
+  assert.ok(copiedFact('England will dominate. Czechia have been out-created in all of their last eight games, and it shows.', facts));
+  assert.equal(copiedFact('Czechia have not made the better chances once in two months, and England should dominate.', facts), null);
+  const req = { home: 'England', away: 'Czechia', competition: 'x', call: '', facts, previewOnly: true };
+  const long = 'England should dominate this. ' + 'Czechia have been out-created in all of their last eight games. '.repeat(1) + 'word '.repeat(60);
+  assert.ok(validate(long, req).includes('copied-fact'));
+});

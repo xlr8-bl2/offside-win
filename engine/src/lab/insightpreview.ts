@@ -37,7 +37,10 @@ export async function runInsightPreview(): Promise<void> {
     [now, now + 3 * 86400],
   );
   const key = process.env['GEMINI_API_KEY'];
-  const writer = key ? geminiWriter({ apiKey: key, model: process.env['GEMINI_MODEL']?.trim() || 'gemini-3.6-flash', ratePerMinute: 6 }) : null;
+  // The slate's own fallback order: the first model that answers writes.
+  const models = [...new Set([process.env['GEMINI_MODEL']?.trim(), 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview'].filter(Boolean) as string[])];
+  const writers = key ? models.map((model) => geminiWriter({ apiKey: key, model, ratePerMinute: 6 })) : [];
+  const writer = writers.length ? writers[0]! : null;
   let drafted = 0;
   for (const f of fixtures) {
     const [hm, am] = await Promise.all([recent(Number(f.home_team_id), Number(f.kickoff)), recent(Number(f.away_team_id), Number(f.kickoff))]);
@@ -53,7 +56,7 @@ export async function runInsightPreview(): Promise<void> {
     let b: Record<string, unknown> = {};
     try { b = JSON.parse(f.bundle_json); } catch { /* no bundle yet */ }
     const before = typeof b['preview'] === 'string' ? b['preview'] as string : null;
-    if (!writer || drafted >= 3 || reads.length < 2) continue;
+    if (!writer || drafted >= 4 || reads.length < 2) continue;
     drafted++;
     const facts = pubFacts({
       home: f.home_team, away: f.away_team,
@@ -63,7 +66,11 @@ export async function runInsightPreview(): Promise<void> {
     });
     console.log('  facts the writer gets, in order:');
     for (const x of facts.slice(0, 18)) console.log(`    - ${x.text}`);
-    const res = await write({ home: f.home_team, away: f.away_team, competition: String(b['league'] ?? 'this competition'), call: '', facts, previewOnly: true }, writer);
+    let res = await write({ home: f.home_team, away: f.away_team, competition: String(b['league'] ?? 'this competition'), call: '', facts, previewOnly: true }, writer);
+    for (const other of writers.slice(1)) {
+      if (res.text || !res.error) break;
+      res = await write({ home: f.home_team, away: f.away_team, competition: String(b['league'] ?? 'this competition'), call: '', facts, previewOnly: true }, other);
+    }
     console.log(`  BEFORE: ${before ?? '(none stored)'}`);
     console.log(`  AFTER:  ${res.text ?? `(rejected: ${res.rejections.join(', ')}${res.error ? `; ${res.error}` : ''})`}`);
   }

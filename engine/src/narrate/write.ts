@@ -50,7 +50,7 @@ export interface Writer {
 }
 
 /** Why a draft was thrown away, for the run log. */
-export type Rejection = 'banned-term' | 'invented-number' | 'too-short' | 'too-long' | 'error';
+export type Rejection = 'banned-term' | 'invented-number' | 'too-short' | 'too-long' | 'copied-fact' | 'error';
 
 export interface WriteResult {
   text: string | null;
@@ -122,7 +122,8 @@ export function buildPrompt(req: WriteRequest): string {
   // What the reader pays for: the read underneath the results, not the lookups.
   const analysis = `- Lead with what is happening underneath the results: who makes the better chances, whose results are ahead of or behind their football, who is finishing above or below their chances, what each side gives up at the back. The facts that say this come first in the list. Build on at least two of them.
 - Join them into an argument about how this game goes: who controls it, where the chances come from, and what that means for the score.
-- Mention an absence only by what it changes on the pitch ("without their scorer, the chances they make will be harder to finish"), never as a list of names.
+- Mention an absence only when you can say what it changes on the pitch for that side, and never as a list of names.
+- The facts are your evidence, not your sentences. Say each one in your own words and tie it to the next; never copy a fact, and never repeat a line from these instructions.
 - Have a take, and back it. Be willing to say a side's results are flattering them, or that they are better than the table says.`;
 
   if (req.previewOnly) {
@@ -181,6 +182,8 @@ export function feedback(preview: string, why: string | null, req: WriteRequest)
   if (nums.length) notes.push(`It used ${nums.map((n) => `"${n}"`).join(', ')}, which ${nums.length === 1 ? 'is' : 'are'} not in the facts. Leave ${nums.length === 1 ? 'it' : 'them'} out entirely.`);
   const banned = [...new Set([...findBannedInProse(preview, allowed), ...(why ? findBannedInProse(why, whyAllowed) : [])].map((v) => v.term))];
   if (banned.length) notes.push(`It used ${banned.map((t) => `"${t}"`).join(', ')}, which ${banned.length === 1 ? 'is' : 'are'} not allowed. Say it another way.`);
+  const copied = copiedFact(preview, req.facts);
+  if (copied) notes.push(`It copied a fact word for word ("${copied}"). Every fact must be said in your own words.`);
   const words = (t: string) => t.trim().split(/\s+/).filter(Boolean).length;
   const pw = words(preview);
   if (pw < MIN_WORDS) notes.push(`PREVIEW was ${pw} words. Write 70 to 120.`);
@@ -239,7 +242,26 @@ export function validate(text: string, req: WriteRequest): Rejection[] {
   // Every digit and every number-word has to be traceable to a fact.
   if (inventedNumber(text, allowed)) out.push('invented-number');
 
+  // A paragraph made of the fact lines strung together is the list the
+  // reader already had, not analysis of it.
+  if (copiedFact(text, req.facts)) out.push('copied-fact');
+
   return out;
+}
+
+const WINDOW = 10;
+const wordsOf = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, ' ').split(/\s+/).filter(Boolean);
+
+/** The first fact the text repeats word for word, ten words or more in a row; null when none. */
+export function copiedFact(text: string, facts: PubFact[]): string | null {
+  const hay = ` ${wordsOf(text).join(' ')} `;
+  for (const f of facts) {
+    const w = wordsOf(f.text);
+    for (let i = 0; i + WINDOW <= w.length; i++) {
+      if (hay.includes(` ${w.slice(i, i + WINDOW).join(' ')} `)) return f.text;
+    }
+  }
+  return null;
 }
 
 /**
