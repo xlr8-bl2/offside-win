@@ -26,7 +26,7 @@ type Cache = Map<number, Option[]>;
 
 /** The floor a policy asks of an option on a fixture. */
 export function floorOf(policy: Policy, row: HistRow, o: Option): number {
-  return policy.rankFloor?.[row.rank] ?? policy.familyFloor?.[o.family] ?? policy.minProb;
+  return (policy.rankFloor?.[row.rank] ?? policy.familyFloor?.[o.family] ?? policy.minProb) + (policy.floorBump?.[o.family] ?? 0);
 }
 
 /** The first of the policy's tests an option fails, or null when it passes them all. */
@@ -483,4 +483,50 @@ export async function runBooks(): Promise<void> {
     const all = new Set(qs.map((q) => q.bookmaker_slug));
     console.log(`  ${r.id} rank ${r.rank}: ${qs.length} quotes from ${all.size} books; result market: ${Object.entries(per).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}`);
   }
+}
+
+/**
+ * `lab deep penalty`: does charging a family's floor with what it has been
+ * overclaiming help? Replayed day by day: each day's floor is charged with
+ * the gap measured on the calls the charged rule itself made before that day
+ * (pushes left out, half results as half), as the live engine does, and
+ * compared with no charge on the same three periods.
+ */
+export function runPenalty(rows: HistRow[]): Record<string, unknown> {
+  const sorted = [...rows].sort((a, b) => a.kickoff - b.kickoff);
+  const a = sorted.slice(0, Math.floor(sorted.length * 0.5));
+  const b = sorted.slice(a.length, Math.floor(sorted.length * 0.75));
+  const cache: Cache = new Map(sorted.map((r) => [r.id, optionsFor(r, PROD.modelWeight)]));
+  const periodOf = (r: HistRow) => (r.kickoff < b[0]!.kickoff ? 'A' : r.kickoff <= b[b.length - 1]!.kickoff ? 'B' : 'C');
+  const out: Record<string, unknown> = {};
+  for (const [label, scale, minN, window] of [
+    ['no charge', 0, 25, Infinity], ['charge, all history', 1, 25, Infinity], ['charge, last 30 days', 1, 25, 30],
+    ['charge, last 14 days', 1, 25, 14], ['half charge, all history', 0.5, 25, Infinity], ['charge, 60 calls before it counts', 1, 60, Infinity],
+  ] as const) {
+    const made: Array<{ t: number; fam: MarketFamily; p: number; y: number }> = [];
+    const tallies: Record<string, Tally> = { A: empty(), B: empty(), C: empty() };
+    for (const day of byDay(sorted)) {
+      const t0 = day[0]!.kickoff;
+      const bump: Partial<Record<MarketFamily, number>> = {};
+      if (scale > 0) {
+        const acc = new Map<MarketFamily, { n: number; p: number; y: number }>();
+        for (const m of made) {
+          if (m.t >= t0 - 3 * 3600 || t0 - m.t > window * 86400) continue;
+          const e = acc.get(m.fam) ?? { n: 0, p: 0, y: 0 };
+          e.n++; e.p += m.p; e.y += m.y; acc.set(m.fam, e);
+        }
+        for (const [f, e] of acc) if (e.n >= minN) bump[f] = Math.max(0, (e.p - e.y) / e.n) * scale;
+      }
+      for (const pk of chooseDay({ ...PROD, floorBump: bump }, day, cache)) {
+        const g = grade(pk.row, pk.option);
+        if (!g || g.result === 'VOID') continue;
+        add(tallies[periodOf(pk.row)]!, pk.row, pk);
+        if (g.result !== 'PUSH') made.push({ t: pk.row.kickoff, fam: pk.option.family, p: pk.p, y: g.result === 'WON' ? 1 : g.result === 'HALF_WON' ? 0.5 : 0 });
+      }
+    }
+    out[label] = tallies;
+    console.log(`  ${label}`);
+    for (const l of ['A', 'B', 'C']) console.log(`    ${l}  ${show(tallies[l]!)}`);
+  }
+  return out;
 }

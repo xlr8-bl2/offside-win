@@ -277,12 +277,13 @@ const commands: Record<string, () => Promise<unknown>> = {
       await runBooks();
       return;
     }
-    if (study === 'deep' || study === 'deep anatomy' || study === 'deep live') {
+    if (study === 'deep' || study === 'deep anatomy' || study === 'deep live' || study === 'deep penalty') {
       const { loadHistory } = await import('./lab/run.ts');
-      const { runDeep, runAnatomy, runLiveGap } = await import('./lab/deep.ts');
+      const { runDeep, runAnatomy, runLiveGap, runPenalty } = await import('./lab/deep.ts');
       const { kvSetJSON } = await import('./store.ts');
       const rows = await loadHistory();
-      const report = study === 'deep' ? runDeep(rows) : study === 'deep live' ? await runLiveGap(rows) : runAnatomy(rows);
+      const report = study === 'deep' ? runDeep(rows) : study === 'deep live' ? await runLiveGap(rows)
+        : study === 'deep penalty' ? runPenalty(rows) : runAnatomy(rows);
       await kvSetJSON(`lab:${study.replace(' ', ':')}`, { at: Math.floor(Date.now() / 1000), ...report });
       return;
     }

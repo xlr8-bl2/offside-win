@@ -347,6 +347,8 @@ export interface Policy {
   rankFloor?: Record<number, number>;
   /** A different floor for some market families, where no rank floor applies. */
   familyFloor?: Partial<Record<MarketFamily, number>>;
+  /** Added to whatever floor applies, per family: the live engine's overclaim charge. */
+  floorBump?: Partial<Record<MarketFamily, number>>;
   /** Markets (bucketOf) and league ranks this rule leaves alone. */
   excludeBuckets?: string[];
   excludeRanks?: number[];
@@ -500,7 +502,7 @@ export function ranked(policy: Policy, row: HistRow, options?: Option[]): Pick[]
     // book that has not updated, not an opportunity anyone could take.
     if (o.odds * o.book > policy.maxGap) continue;
     const p = probOf(policy, o);
-    if (p === null || p < (policy.rankFloor?.[row.rank] ?? policy.familyFloor?.[o.family] ?? policy.minProb) || p > policy.maxProb) continue;
+    if (p === null || p < (policy.rankFloor?.[row.rank] ?? policy.familyFloor?.[o.family] ?? policy.minProb) + (policy.floorBump?.[o.family] ?? 0) || p > policy.maxProb) continue;
     const ev = evOf(p, o);
     if (ev < policy.minEv) continue;
     const score = policy.rankBy === 'ev' ? ev
