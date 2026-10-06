@@ -436,6 +436,12 @@ const commands: Record<string, () => Promise<unknown>> = {
     return mailSetup(process.argv[3] ?? (process.env['GRANT_EMAIL'] || undefined));
   },
 
+  // Mail to support@ and hello@, forwarded to the owner's inbox (Cloudflare Email Routing).
+  async 'mail:route'() {
+    const { mailRoute } = await import('./mailroute.ts');
+    return mailRoute(process.argv[3] ?? (process.env['GRANT_EMAIL'] || undefined));
+  },
+
   // Sign-in emails: from the Worker in the site's design, or back to Supabase's.
   async 'mail:auth'() {
     return authMail(process.argv[3] ?? (process.env['GRANT_EMAIL'] || 'status'));
