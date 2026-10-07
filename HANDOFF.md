@@ -1,214 +1,241 @@
-# Handoff
+# Handoff: read this first
 
-Read this if you are picking the project up in a session scoped to
-**`xlr8-bl2/offside-win`**. It is the account whose Actions actually run.
+**Last updated:** 7 October 2026, 01:45 UTC, by the Claude Code session working on branch
+`claude/offside-win-context-sync-6k7yi7`.
 
-## Where things stand
+**Keep this file current.** The owner may move the work to a different coding agent or account
+at any time. Whoever is working updates the "Right now" section and the checklist after every
+meaningful step, and commits it with that step, not at the end of the day.
 
-Live and running. The site is at <https://offside-win.ashleymbaht.workers.dev>, all eight
-workflows are registered and green on schedule, and 100 tests pass.
+---
 
-**The data lives in Supabase, not D1.** The engine writes to Postgres over the session pooler;
-the Worker reads through PostgREST with the anon key, confined to reading by row-level security
-and SELECT-only grants declared in `schema.pg.sql`. D1 is still reachable with `DB_BACKEND=d1`
-for comparison, but nothing is scheduled against it and the site no longer reads it.
+## Right now
 
-Why the move: D1's free tier caps daily row writes, and an 88-league backfill exhausted it in 27
-minutes. The same work on Postgres wrote 66,782 rows in 402 queries. The tracked set is now every
-league the provider covers.
+### The site is down: Supabase has blocked the project
 
-**The Worker parses nothing.** Each endpoint calls one STABLE function in `schema.pg.sql`
-(`get_board`, `get_fixture`, `get_picks`, `get_model`, `get_health`) that returns the finished
-response body as a single json value, and the Worker streams those bytes straight through.
-Reassembling a 300-fixture board in the Worker would blow Cloudflare's free-tier budget of 10 ms
-of CPU per request. If you add an endpoint, add a function — do not add a JSON.parse.
+Since the night of 6 to 7 October 2026 (between 21:10 and 00:58 UTC), every request to the site's
+data has failed. Supabase answers `402 exceed_egress_quota`: the project used more than the free
+plan's 5 GB of transfer for the month, and Supabase restricted it.
 
-**The backtest passes.** 0.6200 log loss over 34,210 matches across 64 leagues and 1,554 refits,
-against a naive Poisson baseline it beats decisively and a base rate of 0.6277 it beats by
-~0.008. That last figure is the honest one: the model is better than guessing the base rate, and
-not by much yet. Run `backtest` after any change to pricing or context.
+- **Blocked:** Supabase's REST API (PostgREST) and Auth (GoTrue). The Worker reads everything
+  through these, so every `/api/*` call returns 502 and pages open empty. Sign-in is down too.
+- **Still working:** the direct Postgres connection (`SUPABASE_DB_URL`, session pooler).
+  `supabase-check` confirmed it at 01:07 UTC. The engine's workflows can still read and write.
+- **Do not** route the site through the direct connection to get around the block. That evades
+  Supabase's restriction and risks the project being suspended outright. Use the connection only
+  to get the data out.
 
-## What has never been verified
+**Why it happened.** The database is only 92 MB. The transfer came from the engine re-reading
+match history every 15 minutes (`slate.yml` loops for 5.5 hours per run), plus about ten lab
+backtests on 6 October that each read the whole history. Visitors barely touch the database:
+`/api/*` responses are cached at Cloudflare's edge (`worker/src/edge.ts`).
 
-**No part of this has touched the live provider API.** It was written without a key. Every field
-the provider types as `any` — `weather`, `head_to_head`, `unavailable_players`,
-`appointment_effect`, prediction `markets` — is read through alias lists in
-`engine/src/history.ts` and `engine/src/context/gather.ts`, returning `null` on a miss rather than
-guessing or zeroing.
+**Decision (owner, 7 October):** move off Supabase to **Cloudflare D1**. It is included in the
+Workers Paid plan the owner already pays ($5/month): 25 billion rows read, 50 million rows written
+and 5 GB of storage a month, with **no charge for data transfer**. The owner does not want to pay
+for Supabase Pro. Doing it in two stages:
 
-**The first real job is to run the `probe` workflow and read its log.** It prints the actual field
-shapes and which endpoints the account's tier serves. Then tighten those alias lists against what
-came back.
+1. **Stage 1: the public site back.** Board, match pages, picks, results, leagues, players,
+   teams, bet slip and search are served from D1, and the engine writes to D1. Members' calls show
+   locked to everyone until stage 2. No one has paid yet, so no one loses anything.
+2. **Stage 2: accounts.** Sign-in (email link and Google), profiles, membership, Whop payments,
+   the admin dashboard and support tickets, all without Supabase.
 
-### What the probe found when it was finally run
+### The data is secured
 
-The alias lists largely survived contact. `expected_goals` and `xg.actual` both arrive on finished
-matches and both are in the list; `xg.estimated` is a **flag, not a value**. Cards come back `null`
-even on a finished match, so `extractCardsFromIncidents` is not a fallback for odd feeds — it is the
-only path that ever populates cards, and the incidents feed does carry them.
+`db:export` ran at 01:30 UTC on 7 October, run 37557342873.
 
-**`PITCH_SCALE_MAX` cannot be set, and the instruction to set it should not be followed.** The
-probe measured `pitch_condition` across 400 upcoming fixtures: it is populated on **none** of them.
-It carries a number only on fixtures already played, which is exactly when §6.3 can no longer use
-it. So there is no observed range to read a scale from, and §6.3 is inert for want of data rather
-than for want of configuration. Setting the variable to a guessed maximum would activate a real
-price adjustment on a field that is always absent at pricing time. Leave it unset; the factor
-correctly reports itself unavailable. Revisit only if the provider starts populating it pre-match.
+- **What:** all 40 public tables plus `auth.users` (6) and `auth.identities` (7): 82,807 rows. The
+  database is 92 MB on disk.
+- **Where:** artifact `offside-export` (ID 11454972318), 14.7 MB, kept until about 5 January 2027.
+- **Format:** `tar` of `export/<schema>.<table>.jsonl.gz` plus `export/manifest.json` (columns,
+  types, row counts), encrypted with
+  `openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:EXPORT_KEY`.
+- **Key:** `EXPORT_KEY` is the Actions secret `SUPABASE_SERVICE_KEY`. Only a workflow can decrypt
+  it. The repository and its artifacts are public, so never upload it unencrypted.
+- **To decrypt in a workflow:**
+  `openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:EXPORT_KEY -in offside-export.tar.enc | tar -xf -`.
+- **If the data changes before the cutover**, run `pg.yml` with command `db:export` again while
+  the direct connection still works. The engine keeps writing picks until it is pointed at D1.
 
-**Odds are served, but only near kickoff.** An early sample said 0 of 30 leagues carried any odds,
-including the Premier League, which reads like a tier problem and is not one: it was sampling each
-league's *first* fixture in a five-day window. Sampling each league's *soonest* fixture instead
-gives 24 of 30 leagues priced — La Liga, the Championship and the Carabao Cup all at 62 rows. Before
-concluding anything about entitlement from an empty `results: []`, check how far out the fixture is.
+### Migration checklist
 
-## The user
+Tick each line as it lands, with the commit or run that did it.
 
-Works entirely from a phone and cannot run anything locally. Do not hand back instructions that
-assume a terminal, and prefer triggering workflows and reading logs directly over asking them to
-tap through the Actions UI.
+Stage 1, the public site:
+- [x] Encrypted export of every table (`engine/src/dbexport.ts`, run 37557342873).
+- [ ] `schema.sql` rewritten as the full D1 (SQLite) schema: all 40 tables, indexes, no RLS or
+      functions. The current `schema.sql` is the September D1 schema and is stale.
+- [ ] D1 database created (`offside-win` or a new one) and its ID in `worker/wrangler.toml`
+      `[[d1_databases]]`, binding `DB`.
+- [ ] `db:import`: decrypt the export in a workflow and load it into D1, batched.
+- [ ] Engine writes to D1. `engine/src/store.d1.ts` (Cloudflare REST API) still exists from
+      September. Mind the API's rate limit, about 1,200 requests per 5 minutes per user: the slate
+      makes many queries. The plan is a Worker-side batch endpoint, below.
+- [ ] Postgres-only SQL in the engine ported or guarded. Known spots: `slate.ts` around line 1590
+      (the market snapshot uses `jsonb`, `LATERAL`, `extract(epoch)`), and the `config.dbBackend ===
+      'postgres'` branches in `slate.ts` and `settle.ts`.
+- [ ] Worker serves the public endpoints from D1. Each Postgres function the Worker calls through
+      PostgREST is reimplemented over the `DB` binding: `get_board`, `get_fixture`, `get_picks`,
+      `get_hero`, `get_health`, `get_slip`, `get_plans`, `get_promos`, `get_model`, `get_league`,
+      `get_leagues`, `get_player`, `get_team`, `get_record`, `get_how_sure`, `get_pulled`,
+      `search_games`. Verify each by diffing its JSON against the Postgres function on the same
+      exported data.
+- [ ] Workflows switched to `DB_BACKEND=d1`, with the cadence cut so the engine reads far less.
+- [ ] Deployed and checked live: every page at 390px and 1440px (`.claude/skills/ui-verify`).
 
-The four secrets are already set on this repo. They are not readable — GitHub only decrypts them
-inside a running job — which is correct and not a problem to solve.
+Stage 2, accounts:
+- [ ] Sessions issued by the Worker: email link sent through Cloudflare Email Service, which
+      already sends the site's mail (`worker/src/mail.ts`); Google sign-in (`GOOGLE_CLIENT_ID` is
+      already a Worker variable). The 6 existing accounts are carried over by email.
+- [ ] Membership, Whop webhook and sweep, entitlements, goodwill, pulled-call alerts and
+      account deletion over D1.
+- [ ] Admin dashboard and support tickets over D1. PR #154 (support tickets) is built on Supabase
+      and **not merged**. Port it rather than merging it as it stands.
+- [ ] Supabase removed: secrets, `schema.pg.sql` kept for reference or deleted, and docs updated.
 
-## Running it
+### Design for D1, and why
 
-After syncing, setup is complete and the system starts itself: every entry point applies the schema,
-and the pricing run cold-starts by backfilling and fitting when it finds no ratings. To see it
-sooner rather than waiting for a schedule, trigger in this order:
+- **The Worker may parse now.** The "parse nothing, stream one Postgres function's bytes" rule in
+  older notes came from the free plan's 10 ms CPU limit. The account is on Workers Paid now
+  (30 seconds of CPU), so building a response in the Worker from D1 rows is fine. Keep large
+  pre-rendered JSON as stored text (`fixture.bundle_json` and the like) and splice it in rather
+  than re-serialising it.
+- **The engine reaches D1 through the Worker, not the REST API.** The plan is an internal
+  endpoint (`POST /internal/db`) that runs a batch of statements on the `DB` binding, guarded by a
+  shared secret derived from an existing Actions secret. No new secret is needed, and the owner
+  cannot easily add one from a phone. This avoids the REST API's rate limit and makes one request
+  per batch instead of per query.
+- **Read less, whatever the database.** The engine should not re-read all match history every
+  15 minutes. It should keep what it needs between passes (Actions cache or a summary table) and
+  run the full pass less often when no match is near.
 
-```
-probe      ~1 min    does the provider key work, and what shapes come back
-deploy     ~2 min    creates tables, publishes the site, prints its URL
-bootstrap  30-90 min full history, ratings, first board
-backtest   manual    the only evidence the model works — run it
-```
+### Other things in flight
 
-## Things worth not re-deriving
+- **PR #154, support tickets:** open and not merged. It needs Supabase (see stage 2).
+- **Support mail:** support@ and hello@offside.win forward to the owner's iCloud through
+  Cloudflare Email Routing (set 6 October with `mail:route`). This works and does not depend on
+  Supabase.
+- **Gemini:** the free daily quota for the analysis writer resets at 08:00 UK time. When it is
+  spent, `narrate/rescue.ts` writes a paragraph from the insight reads.
+- **Bet slip:** since 6 October it is built surest call first, then the longest prices. Lab study
+  `deep slip study`: it came in 67% against 50%.
+
+---
+
+## The owner
+
+- **Works from a phone only.** Never hand back steps that need a computer. Trigger workflows and
+  read their logs yourself (GitHub MCP tools, or `gh api`).
+- **Wants plain answers.** Say what happened and what it means; keep internals out of replies.
+- **Ask before merging a PR, before writing to the live database, and before anything outward-
+  facing.** The owner says "merge" when they want a merge.
+- **Is cost-sensitive:** prefers free options and declined iCloud+ and Supabase Pro.
+- **Commits:** author `xlr8-bl2 <ashleymbah56@gmail.com>`. No model names in commits, PRs or code.
+- **Standing rules are in `CLAUDE.md`.** Secrets stay in Actions secrets and never go in chat; the
+  repository is public, so logs print shapes, never values. Read the `offside-ui`, `offside-voice`
+  and `ui-verify` skills before any user-facing change. There is also the list of dev tooling to
+  remove at launch.
+- **Never** present backtested results as the published record, and never publish a profit claim.
+  The public record restarted with the new engine on 6 October 2026 (`record:reset`; old rows are
+  in the `*_archive` tables).
+
+## How it fits together
+
+- **`engine/`** (TypeScript, runs on GitHub Actions) fetches the sports data provider (`BSD_API_KEY`),
+  rates teams, analyses upcoming matches, chooses calls, writes the analysis (Gemini, with
+  fallbacks), settles results and builds the bet slip. Entry point `engine/src/run.ts`; commands are
+  exposed through `pg.yml` (`command` plus `arg`).
+- **`worker/`** (Cloudflare Worker `offside-win`) serves `public/` and `/api/*`, the Whop webhook
+  and sweep, emails (`mail.ts`), the admin API (`admin.ts`), live scores (`live.ts`) and SEO pages
+  (`seo.ts`). Deployed by `deploy.yml` on push to `main` and daily.
+- **`public/`** is the front end: plain ES modules, no framework, no build beyond
+  `scripts/build-public.mjs` (versioning and minifying into `dist/`). Hash router in `public/app.js`.
+- **Database today:** Supabase Postgres, `schema.pg.sql` (40 tables, 62 functions, RLS on every
+  table). Being replaced by D1; see above.
+- **Workflows** (`.github/workflows`):
+
+  | Workflow | When | What |
+  |---|---|---|
+  | `slate.yml` | every 15 min, loops for 5.5 h | analysis and calls |
+  | `settle.yml` | hourly at :25 | results |
+  | `cards.yml` | :07 and :37 | social cards |
+  | `ratings.yml` | 04:00 and 16:00 | ratings |
+  | `images.yml` | 04:40 | images |
+  | `renew.yml` | 06:10 | renewals |
+  | `deploy.yml` | push to `main`, 03:15 | deploy |
+  | `pg.yml` | manual | any engine command |
+  | `ci.yml` | pull requests | tests |
+
+- **Secrets** (names only): `BSD_API_KEY`, `SUPABASE_DB_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
+  `SUPABASE_SERVICE_KEY`, `SUPABASE_ACCESS_TOKEN`, `CF_API_TOKEN`, `CF_ACCOUNT_ID`,
+  `CF_D1_DATABASE_ID` (from September), `GEMINI_API_KEY`, `WHOP_API_KEY`, `WHOP_WEBHOOK_SECRET`,
+  `SPORTRADAR_GETTY_KEY`, `BREVO_API_KEY` (empty), `COINFLOW_*` (unused).
+  - `CF_API_TOKEN` currently has: Workers Scripts, D1, Zone Settings (edit), Analytics, Email
+    Routing Rules (edit), Email Routing Addresses (edit) and DNS (edit).
+- **Tests:** `npm test -w engine` and `npm test -w worker`; typecheck with `npm run typecheck -w …`.
+  `engine/test/schema.test.ts` enforces RLS and grants on the Postgres schema. It needs a D1
+  equivalent once the move is done.
+
+## Recent work, newest first
+
+- **6 to 7 October:**
+  - #154 (open): support tickets.
+  - `mail:route`, so support@ and hello@ forward to the owner.
+  - #153: the analysis leads with the insight reads, with a fallback paragraph built from them.
+    Picks are laid out like a bookmaker's slip (selection, market name, "If the final result
+    is / Your bet" table). The bet slip is built surest call first, then the longest prices.
+- **6 October:**
+  - #152: the results line.
+  - #151: the record reset to the new engine.
+  - #150: Whop pixel behind consent.
+  - #149: SEO events JSON-LD.
+  - #148: engine lab findings, the hold rule and honest no-call reasons.
+
+---
+
+## History and things worth not re-deriving
+
+These notes date from September, when the project moved from D1 to Supabase. Some describe
+constraints that no longer apply: the 10 ms CPU limit and D1's free-tier write cap are gone on
+Workers Paid. They are kept because the reasoning still matters.
+
+**Why it left D1 in September.** D1's *free* tier caps daily row writes, and an 88-league backfill
+exhausted it in 27 minutes. On Workers Paid the allowance is 50 million rows written a month, so
+that reason no longer holds. `6f8be39` is the cutover commit; its message explains the old read
+path.
 
 **Actions is blocked on the original account** (`xlr8-bl`). Runs there end in seconds with no
-runner, no logs and no steps. That is why the project moved accounts. It is not a code problem.
+runner and no logs. That is why the project moved to `xlr8-bl2/offside-win`. It is not a code
+problem.
 
-**Workflows must be touched before they exist.** `xlr8-bl2/offside-win` was created with GitHub's
-importer, which copies workflow files into git without registering them with Actions. An
-unregistered workflow is invisible to the API: it is not listed by `list_workflows`, and
-dispatching it returns a bare `404` whether you aim at the default branch or any other. It becomes
-real only once a push has **modified that file** on the default branch — merging commits that
-leave the file untouched is not enough, which is why the first sync registered only the workflows
-it happened to change. All eight have since been touched, so this should not recur. If a new
-workflow ever 404s on dispatch, this is the reason, and the fix is a one-line edit to it on the
-default branch — not permissions and not secrets.
+**A workflow must be modified on the default branch before it can be dispatched.** A workflow
+file that has never been changed on `main` returns a bare 404 when dispatched. A new workflow file
+pushed only on a branch cannot be dispatched until it reaches `main`, so add a command to `pg.yml`
+instead; `pg.yml` dispatched with `ref` set to a branch runs that branch's copy.
 
-**The root package.json must forward every script a workflow calls.** `bootstrap` died immediately
-on `Missing script: "migrate"`: the root forwarded probe, history, ratings, slate, settle and
-backtest to the engine workspace but not migrate, though `engine/package.json` defines it. `deploy`
-applies the schema through wrangler instead, so it never noticed, and the gap stayed invisible until
-a workflow actually ran. Fixed, but check the whole list if a new entry point is ever added.
+**The root package.json must forward every script a workflow calls.** Add any new engine command
+to both `engine/package.json` and the root `package.json`, and to `pg.yml`'s `options`.
 
-**D1 caps bound parameters at 100 per query, not SQLite's much larger limit.** `insertMany` chunks
-on total parameters — the right shape — but with a ceiling of 480, so the first bulk write of the
-backfill went out at 480 parameters and came back `7500: too many SQL variables`. Every bulk write
-in the engine would have hit it. The cap now comes from `config.d1.maxParams`.
+**D1 caps bound parameters at 100 per query.** `insertMany` chunks on that
+(`config.d1.maxParams`).
 
-**The UI has now been rendered, and it works.** All four views were driven in Chromium at 390px and
-360px against live data: board, picks, model and a fixture detail, with **no JavaScript errors** on
-any of them. The page never scrolls sideways at either width — the wide stats tables live in
-`.scroll` containers (`overflow-x: auto`, `table { min-width: 560px }`), so they scroll inside
-themselves, which looks like a clipped column in a screenshot and is the intended behaviour rather
-than a layout bug. The model page carries the real backtest verdict and still refuses to print an
-ROI; the picks page still says 0 settled picks is too few to judge.
+**Rendering the UI in a sandbox:** serve `public/` locally and proxy `/api/*` through Node
+(`.claude/skills/ui-verify/scripts/serve.mjs`); Chromium cannot reach the live site through the
+egress proxy. Never disable certificate verification.
 
-To render it yourself in a sandbox: the egress proxy re-terminates TLS and Chromium's own root store
-does not pick up its CA, so the browser cannot reach the Worker directly. Serve `public/` from
-127.0.0.1 and proxy `/api/*` through Node, which does trust the CA. Never disable certificate
-verification to get around it.
+**Tracking is what everything reads.** `ratings`, `slate` and `backtest` work from
+`league.tracked = 1`. If something that worked yesterday reports nothing today, check `tracked`
+first.
 
-**Tracking is what everything reads, and it is one fetch away from empty.** `ratings`, `slate` and
-`backtest` all work from `league.tracked = 1`. A scheduled `history` run with no `LEAGUES` set,
-firing while the provider quota was exhausted, discovered zero leagues and untracked all fifteen —
-silently, in two log lines, taking ratings and the backtest down while the board carried on serving
-its last good result. Narrowing now requires an explicit pin and a non-empty discovery, discovery
-returning nothing is a hard error, and `ratings.yml` and `slate.yml` pin `LEAGUES` (override with a
-repository variable of that name). If something that worked yesterday reports nothing today, check
-`tracked` first.
+**The provider's own model is the bookmakers' price.** A head-to-head and a de-vig comparison in
+September showed the provider's model sits within one point of the de-vigged market, while ours
+was about 8.5 points away. Do not compare our multi-binary log loss (0.62) with their three-way
+one (1.01); they are different quantities. The number that decides whether there is a business is
+our calls against the closing price, which `pick.closing_odds` and `clv` accumulate as calls
+settle.
 
-**The backtest is the claim.** The model must beat both a naive Poisson and the league base rate on
-log loss. Until it has run, the model page says outright there is no evidence any of this works —
-keep it that way rather than softening it.
+**Pitch condition is never populated before kick-off.** Leave `PITCH_SCALE_MAX` unset.
 
-A backtest that scores **nothing** now says "No verdict" and exits non-zero, rather than announcing
-that the model fails. Every comparison is `NaN` in that case and `NaN > 0` is false, so the empty
-run used to fall straight into the failure branch and publish "Model does NOT beat the naive
-Poisson" off zero matches — a far stronger claim than the data supports, and the opposite of the
-honesty the rest of this document insists on. Distinguishing "no evidence" from "it failed" is not
-softening the verdict; printing a verdict nobody measured is what would be. (That change, and the
-report-path fix below, were committed under 9e7b0a8, whose message covers only the tracking bug.)
-
-**`backtest-report.json` is written relative to `engine/`.** `npm -w engine run backtest` sets the
-working directory to the workspace, so the old `engine/backtest-report.json` path resolved to
-`engine/engine/…`, threw, and was swallowed by a bare `catch` — the upload step then only warned.
-Same shape as the probe output-path bug; worth suspecting first whenever an artifact step warns that
-it found no files.
-
-**The provider's 86.7% is real, reproducible, and beats us — on the markets they publish.**
-`npm run h2h` prices the same fourteen selections from both models over recent finished matches
-and publishes under their rule: every market clearing a confidence bar, several to a match.
-569 matches, walk-forward on our side:
-
-| confidence bar | them | us | their calls/match |
-|---|---|---|---|
-| >= 80% | **86.3%** (384/445) | 80.3% (326/406) | 0.78 |
-| >= 75% | **81.5%** (807/990) | 76.8% (677/882) | 1.74 |
-| >= 70% | **77.9%** (1351/1735) | 75.3% (1264/1678) | 3.05 |
-
-86.3% against the 86.7% their own page claims, from an independent sample, which is what says
-the method is right and the claim is honest. At matched volume it holds: 86.2% to 80.3%.
-
-**Our defect is specific and in the goal lines.** Per selection at the 80% bar: under 3.5 —
-us 71.7% on 113 calls against their 75.6% on 45; over 1.5 — us 82.2% on 169 against their 86.6%
-on 134; home-or-draw — us 88.3% against their 89.4%, near parity. So the double chance is fine
-and the totals are not: we call goal lines more often, at higher stated confidence, and land them
-less. A model saying 80%+ and hitting 71.7% is overconfident, not unlucky — Poisson totals are
-too tight for real football, and the fix is over-dispersion in the totals distribution
-(negative binomial or a Poisson mixture), not more context.
-
-**What the hit rate does not say.** Break-even odds on their calls are 1.16, and double chance on
-a strong home side prices 1.15-1.25. Their own page says so in the footer: "A confidence, not a
-tip. We do not claim these beat the bookmakers'." Do not republish 86.7% without that caveat —
-they are careful about it, and they are the ones with the better number.
-
-**The provider's model is the bookmakers' price.** `npm run market` de-vigs live 1x2 quotes and
-measures how far each model sits from the fair price, per outcome, over 87 upcoming fixtures:
-
-| | distance from the de-vigged market |
-|---|---|
-| provider | **0.93 pts** |
-| us | **8.52 pts** |
-
-0.93 points is inside the noise of de-vig method choice. Their `dc-blend-v1` is the market with a
-hat on, which explains all of it at once: an 86.7% hit rate (the market is well calibrated), every
-`recommendations` flag false (nothing to recommend when you agree with the price), and their own
-footer refusing to claim an edge. Their number is unbeatable on that scoreboard and worthless as
-one, because a price cannot be bet into itself.
-
-**Ours is genuinely independent, and that is not yet good news.** 8.52 points from the market is a
-long way. Combined with a backtest that beats the league base rate by only 0.008 log loss, the
-likeliest reading is that we are noisy rather than contrarian — a model with real information
-would sit closer to the price and diverge *selectively*. Nothing here has established an edge, and
-the distance alone is not evidence of one.
-
-**Do not compare our 0.6200 to their 1.0102.** Repeated several times in this project and wrong
-every time. 0.6200 is the mean of seven *binary* log losses (1x2 outcomes, BTTS, three goal
-lines); 1.0102 is a *three-way categorical* log loss on 1x2 alone. A uniform guess scores 0.693 on
-the first scale and 1.0986 on the second. They are not the same quantity and the comparison
-flattered us every time.
-
-**The test that decides whether there is a business** is our model against the de-vigged closing
-price on finished matches — not against a base rate, and not on hit rate. It needs historical
-odds, which are not stored. The `pick` table already carries `closing_odds` and `clv`, so settling
-real picks accumulates it; that is the number to wait for before any claim is published.
-
-**Six context factors are still dark**, losing 19 of the weight: `stakes.table` (6),
-`manager.home` (5), `style.press_matchup` (3), `environment.pitch` (2), `environment.venue` (2),
-`market.prediction_market` (1). `npm run board:stats` prints the current tally per factor.
-`stakes.table` and `manager.home` had their parsers fixed and are still UNAVAILABLE, so the gap
-is upstream of the parser — diagnose before writing more parsing code.
+**Odds are only served near kick-off.** Before deciding an empty `results: []` means the tier is
+not entitled, check how far out the fixture is.

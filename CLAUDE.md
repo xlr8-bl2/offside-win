@@ -1,5 +1,9 @@
 # offside.win — notes for Claude
 
+**Read `HANDOFF.md` first, and keep it current.** It holds the live state of the project (right now:
+the move off Supabase to Cloudflare D1), the migration checklist and the context a new agent needs.
+Update it with every meaningful step, in the same commit.
+
 ## Before launch: remove all the dev tooling
 
 The owner asked for this to be remembered. Everything below exists only so the
