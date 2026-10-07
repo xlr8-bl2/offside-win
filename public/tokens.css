@@ -93,6 +93,7 @@
   --ucl-night:      #06036a;
   --ucl-night-deep: #01014a;
   --ucl-glow:       #0a14b8; /* the bright blue behind the ball, as in the artwork */
+  --ucl-star:       #e8eeff; /* the starlight: the silver-white of the ball's lit edges */
 
   /* --------------------------------------------------------------- borders */
 
@@ -377,6 +378,28 @@
      while the bar is up (0 otherwise), so the page can end above it and the
      floating cookie card can sit on top of it. */
   --pb-h: 0px;
+}
+
+/*
+ * A Champions League night (owner, October 2026: "it should feel like a
+ * different level of football, a step above the other pages"). On the
+ * competition's own page and on its matches (body[data-comp="ucl"], set by
+ * the router), the whole page moves from the warm black to the
+ * competition's ultramarine night: the ground, every surface, the rules and
+ * the accent. Only here; everywhere else the violet stays the identity.
+ * The same names, so every component follows without being touched.
+ */
+body[data-comp="ucl"] {
+  --pitch:     #030628;
+  --stand:     #0a0f45;
+  --terrace:   #121a5e;
+  --stand-hi:  #1b2578;
+  --chalk-2:   #c9d2f2;
+  --chalk-3:   #93a0d4;
+  --hairline:  rgba(168, 190, 255, 0.16);
+  --floodlight:     #3d6bff;
+  --floodlight-hi:  #9db6ff;
+  --floodlight-dim: rgba(61, 107, 255, 0.2);
 }
 
 /* Numerals everywhere. Tabular figures are the single highest ratio of effort

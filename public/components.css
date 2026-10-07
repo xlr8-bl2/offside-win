@@ -3299,8 +3299,12 @@
 }
 /* The ground today's games are played at, low behind the words: a photograph
    at a third of its strength, darkened most where the type sits. No tint. */
-.ld-bg { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
-.ld-shot { position: absolute; inset: 0; }
+.ld-bg { position: absolute; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+/* Depth, back to front: the ground (taller than the header, so it can sit
+   further back and move slower as the page scrolls, landingDepth in
+   app.js), drifting very slowly closer; a floodlight falling from the top
+   right; the edges falling away into the dark; the words. */
+.ld-shot { position: absolute; inset: -12% 0 -12%; will-change: transform; }
 .ld-shot-img {
   position: absolute;
   inset: 0;
@@ -3308,18 +3312,45 @@
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  filter: saturate(0.75);
+  filter: saturate(0.8) contrast(1.05);
+  transform: scale(1.04);
   transition: opacity 900ms ease;
+  animation: ld-drift 48s ease-in-out infinite alternate;
 }
-.ld-shot-img.is-in { opacity: 0.38; }
+.ld-shot-img.is-in { opacity: 0.42; }
+@keyframes ld-drift { to { transform: scale(1.12) translate(-1.5%, -1%); } }
+.ld-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: radial-gradient(55% 60% at 82% -5%, rgba(255, 246, 225, 0.13), transparent 70%);
+}
 .ld-bg::after {
   content: '';
   position: absolute;
   inset: 0;
+  z-index: 1;
   background:
-    linear-gradient(90deg, var(--pitch) 0%, rgba(10, 10, 12, 0.82) 42%, rgba(10, 10, 12, 0.45) 100%),
-    linear-gradient(0deg, var(--pitch) 0%, transparent 30%);
+    linear-gradient(90deg, var(--pitch) 0%, rgba(10, 10, 12, 0.8) 40%, rgba(10, 10, 12, 0.35) 100%),
+    radial-gradient(140% 120% at 70% 40%, transparent 50%, rgba(10, 10, 12, 0.7) 100%),
+    linear-gradient(0deg, var(--pitch) 0%, transparent 35%);
 }
+/* The lead story sits in front of the ground: frosted, so the stand shows
+   faintly through it, and lifted off it by a deep, soft shade. */
+.ld-hero .ld-lead {
+  background: color-mix(in srgb, var(--stand) 78%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.75);
+}
+@supports not (backdrop-filter: blur(1px)) { .ld-hero .ld-lead { background: var(--stand); } }
+/* A Champions League free call: the night and the ball instead. */
+.ld-hero.theme-ucl { background: var(--ucl-night-deep); }
+.ld-hero.theme-ucl .ld-bg::before, .ld-hero.theme-ucl .ld-bg::after { display: none; }
+.ld-hero.theme-ucl .comp-art-ucl .starball { top: 50%; left: 46%; width: min(1300px, 84vw); margin-top: calc(min(1300px, 84vw) / -2); }
+.ld-hero.theme-ucl .ld-lead { background: color-mix(in srgb, var(--ucl-night-deep) 70%, transparent); }
+@media (prefers-reduced-motion: reduce) { .ld-shot-img { animation: none; } }
 .ld-hero-in {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
@@ -3610,8 +3641,11 @@
 
 @media (max-width: 900px) {
   .ld-bg::after {
-    background: linear-gradient(180deg, rgba(10, 10, 12, 0.55) 0%, rgba(10, 10, 12, 0.85) 40%, var(--pitch) 75%);
+    background:
+      linear-gradient(180deg, rgba(10, 10, 12, 0.5) 0%, rgba(10, 10, 12, 0.82) 40%, var(--pitch) 78%),
+      radial-gradient(120% 70% at 50% 0%, transparent 40%, rgba(10, 10, 12, 0.6) 100%);
   }
+  .ld-hero.theme-ucl .comp-art-ucl .starball { top: -30vw; left: 18vw; width: 140vw; margin-top: 0; }
   .ld-hero-in { grid-template-columns: minmax(0, 1fr); gap: var(--space-9); padding-block: var(--space-9) var(--space-10); }
   .ld-split { grid-template-columns: minmax(0, 1fr); }
   .ld-sec { padding-block: var(--space-10) 0; }
@@ -6521,6 +6555,94 @@ html.dd-locked, html.dd-locked body { overflow: hidden; }
 .mo-card.theme-ucl .comp-art-ucl .starball { top: -34%; left: 18%; width: 125%; margin-top: 0; }
 .mo-card.theme-ucl .comp-art-ucl::after {
   background: linear-gradient(180deg, transparent 0%, rgba(1, 1, 74, 0.45) 24%, rgba(1, 1, 74, 0.9) 50%, var(--ucl-night-deep) 100%);
+}
+
+/* ------------------------------------------------ a Champions League night
+ *
+ * The competition's own page and its matches (body[data-comp="ucl"], the
+ * colours in tokens.css). A step above every other page: the ground is the
+ * competition's ultramarine with the light of the ball coming from the top
+ * right, and a field of stars sits behind everything, some of them slowly
+ * brightening and fading. Two fixed layers, painted once; the twinkle is an
+ * opacity change, so it costs nothing to scroll.
+ */
+body[data-comp="ucl"]::before,
+body[data-comp="ucl"]::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+body[data-comp="ucl"]::before {
+  /* Three tiles of stars at different sizes and spacings, so the field never
+     repeats in a grid the eye can find, over the night's own light. */
+  background:
+    radial-gradient(1px 1px at 20px 30px, var(--ucl-star), transparent 100%) 0 0 / 173px 151px,
+    radial-gradient(1px 1px at 90px 110px, rgba(232, 238, 255, 0.7), transparent 100%) 0 0 / 229px 197px,
+    radial-gradient(1.5px 1.5px at 140px 60px, var(--ucl-star), transparent 100%) 0 0 / 311px 277px,
+    radial-gradient(1px 1px at 47px 83px, rgba(232, 238, 255, 0.5), transparent 100%) 0 0 / 97px 131px,
+    radial-gradient(120% 80% at 85% -10%, var(--ucl-glow), transparent 55%),
+    radial-gradient(90% 60% at 0% 110%, var(--ucl-night), transparent 70%),
+    var(--pitch);
+  opacity: 0.95;
+}
+body[data-comp="ucl"]::after {
+  /* The ones that brighten and fade. */
+  background:
+    radial-gradient(1.5px 1.5px at 60px 40px, var(--ucl-star), transparent 100%) 0 0 / 263px 239px,
+    radial-gradient(2px 2px at 30px 150px, var(--ucl-star), transparent 100%) 0 0 / 401px 353px;
+  animation: ucl-twinkle 5.5s ease-in-out infinite alternate;
+}
+@keyframes ucl-twinkle { from { opacity: 0.15; } to { opacity: 0.85; } }
+body[data-comp="ucl"] { background: var(--pitch); }
+body[data-comp="ucl"] .top { background: color-mix(in srgb, var(--pitch) 72%, transparent); }
+
+/* The competition's page: its night and its ball behind the title. */
+.ph-theme { -webkit-mask-image: none; mask-image: none; }
+.ph-theme::after { display: none; }
+.ph-theme .comp-art-ucl {
+  -webkit-mask-image: linear-gradient(180deg, #000 60%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 60%, transparent 100%);
+}
+.ph-theme .comp-art-ucl .starball {
+  top: 50%;
+  left: auto;
+  right: -8vw;
+  width: clamp(520px, 52vw, 980px);
+  margin-top: calc(clamp(520px, 52vw, 980px) / -2);
+}
+@media (max-width: 760px) {
+  .ph-theme .comp-art-ucl .starball { top: -24vw; right: -46vw; width: 120vw; margin-top: 0; }
+}
+
+/* The title on its night: set in the starlight, a touch wider. */
+body[data-comp="ucl"] .league-title h1,
+body[data-comp="ucl"] .fx-top h1 { color: var(--ucl-star); }
+
+/* Its games, wherever they are listed among the rest: on the night, with a
+   star beside the competition's name. The one competition that is set
+   apart on the board. */
+.league-block.comp-ucl {
+  background: linear-gradient(180deg, var(--ucl-night-deep), color-mix(in srgb, var(--ucl-night-deep) 40%, var(--stand)));
+  border-color: rgba(168, 190, 255, 0.22);
+}
+.league-block.comp-ucl .league-head a::after {
+  content: '';
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin-left: var(--space-2);
+  vertical-align: -0.05em;
+  background: var(--ucl-star);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7L12 17.3 5.8 20.9l1.6-7L2 9.2l7.1-.6z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7L12 17.3 5.8 20.9l1.6-7L2 9.2l7.1-.6z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.league-block.comp-ucl .row { border-top-color: rgba(168, 190, 255, 0.14); }
+.league-block.comp-ucl .row:hover { background: rgba(61, 107, 255, 0.12); }
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-comp="ucl"]::after { animation: none; opacity: 0.5; }
 }
 
 /* The landing page closes on its own call to action; the footer's band would be

@@ -2092,7 +2092,7 @@ function rowHTML(f) {
       : '';
 
   return `
-  <a class="row is-${state.kind}${played ? ' is-played' : ''}${terse ? ' is-terse' : ''}${isClub ? ' is-club' : ''}${kind ? ` is-${kind}` : ''}" href="#/fixture/${encodeURIComponent(f.id)}"
+  <a class="row is-${state.kind}${played ? ' is-played' : ''}${terse ? ' is-terse' : ''}${isClub ? ' is-club' : ''}${kind ? ` is-${kind}` : ''}${themeOf(f.league_id) ? ` comp-${themeOf(f.league_id)}` : ''}" href="#/fixture/${encodeURIComponent(f.id)}"
      aria-label="${esc(f.home)} versus ${esc(f.away)}">
     <div class="row-when">
       ${state.kind === 'upcoming'
@@ -2535,6 +2535,30 @@ function excerpt(text, max = 260) {
   return cleanProse(out.trim()) ?? '';
 }
 
+/*
+ * Depth behind the landing header: the photograph sits further back than
+ * the words, so it moves at a third of the page's speed as the reader
+ * scrolls, the way a stand behind a pitch does when the camera pans. One
+ * transform on one layer, only while the header is on screen, and never
+ * for a reader who asked for less motion.
+ */
+function landingDepth() {
+  const layer = app.querySelector('.ld-shot');
+  const hero = app.querySelector('.ld-hero');
+  if (!layer || !hero || layer.dataset.depth || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  layer.dataset.depth = '1';
+  let raf = 0;
+  const move = () => {
+    raf = 0;
+    if (!layer.isConnected) { removeEventListener('scroll', onScroll); return; }
+    const y = Math.min(scrollY, hero.offsetHeight);
+    layer.style.transform = `translate3d(0, ${Math.round(y * 0.32)}px, 0)`;
+  };
+  const onScroll = () => { if (!raf) raf = requestAnimationFrame(move); };
+  addEventListener('scroll', onScroll, { passive: true });
+  move();
+}
+
 async function viewLanding() {
   const nav = navTicket;
   document.body.dataset.page = 'landing';
@@ -2602,12 +2626,21 @@ async function viewLanding() {
      * browser works down the list until one is a real photograph (venueShot).
      */
     const shot = app.querySelector('[data-ld="shot"]');
+    // A Champions League free call brings the competition's night and its
+    // ball in place of the ground.
+    const theme = fx && why ? themeOf(fx.league_id) : null;
+    const ldHero = app.querySelector('.ld-hero');
+    if (theme && ldHero && !ldHero.classList.contains(`theme-${theme}`)) {
+      ldHero.classList.add(`theme-${theme}`);
+      if (shot) shot.innerHTML = themeArt(theme);
+    }
     const venues = [...new Set([hero?.shot_venue_id, fx?.venue_id, ...fixtures.filter(hasCall).map((f) => f.venue_id), ...fixtures.map((f) => f.venue_id)].filter(Boolean))];
-    if (shot && !shot.querySelector('img') && venues.length) {
+    if (!theme && shot && !shot.querySelector('img') && venues.length) {
       shot.innerHTML = venueShot(venues.slice(0, 6), 'ld-shot-img', true);
       const img = shot.querySelector('img');
       img?.addEventListener('load', () => img.classList.add('is-in'), { once: true });
     }
+    landingDepth();
   }
   if (!(fx && why)) {
     app.querySelector('.ld-lead')?.remove();
@@ -3280,7 +3313,7 @@ async function viewBoard(params = new URLSearchParams()) {
     const block = ([name, g], unit) => {
       const cut = unit === 'game' && g.list.length > FIRST + 1 && !openGroups.has(name);
       return `
-            <section class="league-block">
+            <section class="league-block${themeOf(g.id) ? ` comp-${themeOf(g.id)}` : ''}">
               <h3 class="league-head">
                 ${g.id ? `<a href="#/league/${encodeURIComponent(g.id)}">${crest(name, 'xs', g.id, 'league')}${esc(name)}</a>`
                        : `${crest(name, 'xs', g.id, 'league')}${esc(name)}`}
@@ -4895,6 +4928,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
   // A competition with its own look (a Champions League night) takes the
   // masthead instead of the ground and the clubs' colours.
   const theme = themeOf(f.league_id);
+  state.comp = theme;
   const wash = !theme && (homeC || awayC)
     ? ` has-colors" style="--home-c:${homeC ?? 'transparent'};--away-c:${awayC ?? 'transparent'}`
     : '';
@@ -8481,6 +8515,7 @@ async function route({ soft = false } = {}) {
   live.watching = false;
   live.focus = null;
   state.liveFixture = null;
+  state.comp = null;
   clearInterval(state.tick);
   clearInterval(state.poll);
   if (state.onVisible) { removeEventListener('visibilitychange', state.onVisible); state.onVisible = null; }
@@ -8547,6 +8582,23 @@ async function headDepth(name, parts, ticket) {
   if (DEPTH_SKIP.has(name) || app.querySelector('.hero, .ld-hero')) { old?.remove(); return; }
   const head = app.querySelector('.page-head') ?? app.querySelector('h1')?.closest('.section-head') ?? app.querySelector('.seo h1');
   if (!head) { old?.remove(); return; }
+  // A competition with a look of its own (the Champions League) gets its
+  // night and its ball behind the title, as its matches do.
+  const theme = name === 'league' ? themeOf(parts[1]) : null;
+  if (theme) {
+    let art = old?.dataset.key === `theme:${theme}` ? old : null;
+    if (!art) {
+      old?.remove();
+      art = document.createElement('div');
+      art.className = `ph-bg ph-theme theme-${theme}`;
+      art.dataset.key = `theme:${theme}`;
+      art.setAttribute('aria-hidden', 'true');
+      art.innerHTML = themeArt(theme);
+      app.prepend(art);
+    }
+    art.style.height = `${Math.round(head.getBoundingClientRect().bottom - app.getBoundingClientRect().top + 160)}px`;
+    return;
+  }
   const board = state.board ?? await loadBoard().catch(() => null);
   if (ticket !== navTicket || !head.isConnected) return;
   const fixtures = board?.fixtures ?? [];
@@ -8604,6 +8656,10 @@ function finishRoute(name, soft, keepY, backTo) {
     crawlable(app);
     appLinks(app);
     pageTitle(name);
+    // A competition with a look of its own (comptheme.js) dresses the whole
+    // page: its own page, and its matches.
+    const comp = name === 'league' ? themeOf(parseHash().parts[1]) : name === 'fixture' ? state.comp : null;
+    if (comp) document.body.dataset.comp = comp; else delete document.body.dataset.comp;
     headDepth(name, parseHash().parts, navTicket).catch(() => {});
     // A match page's address becomes the match's real one, so a link copied
     // from the address bar unfurls into that match's share card rather than

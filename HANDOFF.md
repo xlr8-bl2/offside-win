@@ -88,6 +88,21 @@ and faint; a player page its club's crest; the results page the ground of the la
 every other page the ground of today's biggest game. Pages with their own masthead (a match,
 the members' front page, the landing page) are left alone.
 
+### Champions League a step above, faster ball, landing depth (7 October)
+
+- **Champions League night** (`body[data-comp="ucl"]`, set in `finishRoute` for league 7 and its
+  matches): the page's tokens move to the competition's ultramarine (scoped block in `tokens.css`),
+  a fixed star field with a slow twinkle sits behind everything, the competition page gets the
+  star ball behind its title (`headDepth`), and UCL games are set apart in any list (night block,
+  star by the name: `.league-block.comp-ucl`, `.row.comp-ucl`). A UCL free call puts the night and
+  the ball behind the landing header.
+- **Ball speed:** first paint is `brand/starball-480.webp` (52KB, was the 205KB still); the full
+  still only where WebGL is missing; the shader compiles when the browser is idle; on 3x screens
+  it starts at 2x and steps up (`comptheme.js`, `starball.js`).
+- **Landing depth:** the ground moves at a third of the scroll speed (`landingDepth`), drifts
+  slowly closer, a floodlight falls from the top right, the edges fall into the dark, and the
+  lead card is frosted with a deep shade.
+
 ### What happened: Supabase blocked the project
 
 Since the night of 6 to 7 October 2026 (between 21:10 and 00:58 UTC), every request to the site's
