@@ -71,7 +71,7 @@ function canon(v: Json): string {
     ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, (x as Record<string, unknown>)[k]])) : x));
 }
 /** Every array with its items sorted: two answers that differ only in the order of ties compare equal. */
-function sorted(v: Json): Json {
+export function sorted(v: Json): Json {
   if (Array.isArray(v)) {
     // Rows with an id line up by it; anything else by its text.
     const key = (x: Json) => (x && typeof x === 'object' && !Array.isArray(x) && 'id' in x ? `id:${String((x as { id: unknown }).id)}` : canon(x));
@@ -92,6 +92,17 @@ const CUT: Record<string, Array<{ key: string; limit: number }>> = {
   get_board: [{ key: 'fixtures', limit: 300 }],
 };
 function trimCut(fn: string, a: Json, b: Json): void {
+  // search_games' competitions: Postgres took any six that matched (LIMIT 6
+  // with no order) and then sorted them; D1 takes the first six by name. With
+  // more than six matching, only the count can agree.
+  if (fn === 'search_games') {
+    const x = (a as Record<string, unknown> | null)?.['leagues'];
+    const y = (b as Record<string, unknown> | null)?.['leagues'];
+    if (Array.isArray(x) && Array.isArray(y) && x.length === 6 && y.length === 6) {
+      (a as Record<string, unknown>)['leagues'] = [];
+      (b as Record<string, unknown>)['leagues'] = [];
+    }
+  }
   for (const { key, limit } of CUT[fn] ?? []) {
     const x = (a as Record<string, unknown> | null)?.[key];
     const y = (b as Record<string, unknown> | null)?.[key];
@@ -213,6 +224,7 @@ export async function d1Verify(dir = 'export'): Promise<void> {
     else if (!diff(sorted(got), sorted(want)).length) t.order++;
     else {
       t.differ++;
+      d.splice(0, d.length, ...diff(sorted(got), sorted(want)));
       // Search differs by which games match: name the term and the games on
       // one side only. Match ids and club names are the site's public content.
       if (a.fn === 'search_games') {
