@@ -996,15 +996,6 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .foot-brand { display: inline-flex; align-items: center; }
 .foot-brand .wordmark { font-size: var(--text-2xl); }
 .foot-about { max-width: 56ch; margin: var(--space-4) 0 0; font-size: var(--text-sm); color: var(--chalk-3); }
-.foot-stats { display: grid; grid-template-columns: repeat(4, auto); gap: var(--space-4) var(--space-8); }
-.foot-stats div b {
-  display: block;
-  font-family: var(--display);
-  font-weight: var(--weight-bold);
-  font-size: var(--text-xl);
-  font-variation-settings: 'wdth' var(--condensed);
-}
-.foot-stats div span { font-size: var(--text-xs); color: var(--chalk-3); }
 
 /*
  * Where we think the reader is.
@@ -1046,13 +1037,11 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   .foot-base { grid-template-columns: minmax(0, 1fr); align-items: start; }
   .foot-follow { justify-items: start; }
   .foot-follow .foot-follow-note { text-align: left; }
-  .foot-stats { grid-template-columns: repeat(4, auto); justify-content: start; }
 }
 @media (max-width: 760px) {
   .foot-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-7) var(--space-6); }
   /* The live lists get the full width on a phone: names are long. */
   .foot-col-next, #foot-comps-col { grid-column: 1 / -1; }
-  .foot-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5) var(--space-6); }
 }
 
 /* ------------------------------------------------------------ utilities */

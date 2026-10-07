@@ -8,16 +8,15 @@
  * internal vocabulary. engine/test/front.test.ts runs it through the rule.
  */
 
-export const LANDING_HEADLINE = ['Football predictions', 'that show their working.'];
+export const LANDING_HEADLINE = ['Football predictions,', 'argued properly.'];
 
-export const LANDING_LEDE = 'Team news, form and what’s riding on it, read properly, then one call. The biggest game’s call is free every day, and every result stays on the record.';
+export const LANDING_LEDE = 'Team news, form and what’s riding on it, for every big game. We make a call when we’d back it ourselves, say why when we wouldn’t, and keep every result on the record. The misses too.';
 
-/** What every match page gives you: the landing page's benefits, in order. */
+/** What every match page gives you: the landing page's three, in order. */
 export const LANDING_GETS = [
   ['Team news that matters', 'Who’s out, who’s back, and whether it changes anything. A missing centre-back matters more than a missing third-choice keeper, and we say so.'],
   ['Form you’d quote down the pub', 'The last six, home and away, clean sheets and goals. Nothing from a spreadsheet.'],
-  ['One call, or a pass', 'Only when we’d back it ourselves, with the reason in plain English. Most games get no call, and we tell you why.'],
-  ['Read again till kick-off', 'Line-ups, late injuries and the table get another look every fifteen minutes, right up to the whistle.'],
+  ['A call, or a straight pass', 'Only when we’d back it ourselves, with the reason in plain English. Most games get no call, and the page tells you why. Read again every fifteen minutes up to kick-off.'],
 ];
 
 export const LANDING_STEPS = [

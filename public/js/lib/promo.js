@@ -585,7 +585,10 @@ export async function runPromos({ route, signedIn, member, returning = false, an
   const all = await livePromos();
   const mem = memory();
   const mine = all.filter((p) => eligible(p, { signedIn, member, returning }));
-  const bar = mine.find((p) => !(mem.closed ?? []).includes(p.id));
+  // Only a notice runs as a bar. A deal or a trial with a clock ticking down
+  // along the foot of every page read as a pressure tactic (owner, October
+  // 2026); those offers are still made, in the popup and at checkout.
+  const bar = mine.find((p) => p.kind === 'notice' && !(mem.closed ?? []).includes(p.id));
   const shown = document.getElementById('promo-bar');
   // On a phone the cookie question is a sheet along the bottom edge, and the
   // bar would stack on it. It waits for the answer, then comes up as usual.
