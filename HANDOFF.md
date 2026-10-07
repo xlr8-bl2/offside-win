@@ -75,8 +75,9 @@ divided by hairline rules, the record as a results table with Landed/Missed in w
 glowing day shout, the stadium photo and scrim, the slam-in animations, the ticket card with the
 gradient band, the filled W/L squares (three times over), the giant stat numbers, the coloured card
 edges. Copy in `public/js/lib/front.js`; styles in the landing block of `components.css`.
-Not touched: the site-wide promo bar with its countdown (an owner-set offer) and the footer's
-stat tiles; both are worth a look next.
+Then, on the owner's word: the offer bar with its countdown no longer runs for deals and trials
+(only a plain notice can be a bar; offers still show in the popup and at checkout,
+`runPromos` in `public/js/lib/promo.js`), and the footer's four stat tiles are gone.
 
 ### What happened: Supabase blocked the project
 

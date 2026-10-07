@@ -9138,14 +9138,6 @@ function paintFooter(board) {
     }
   }
 
-  const stats = document.getElementById('foot-stats');
-  if (stats) {
-    stats.innerHTML = `
-      <div><b data-cover-count>80+</b><span>Competitions we cover</span></div>
-      <div><b>${fixtures.length.toLocaleString()}</b><span>Games on the board</span></div>
-      <div><b>15 min</b><span>Between analysis updates</span></div>
-      <div><b>30 sec</b><span>Between live score updates</span></div>`;
-  }
   const year = document.getElementById('foot-year');
   if (year) year.textContent = String(new Date().getFullYear());
   fillCoverCount();
