@@ -1,6 +1,6 @@
 # Handoff: read this first
 
-**Last updated:** 7 October 2026, 02:05 UTC, by the Claude Code session working on branch
+**Last updated:** 7 October 2026, 02:10 UTC, by the Claude Code session working on branch
 `claude/offside-win-context-sync-6k7yi7`.
 
 **Keep this file current.** The owner may move the work to a different coding agent or account
@@ -94,7 +94,8 @@ Stage 1, the public site:
       `pg.yml` with command `db:import` (input `export_run`, default the run above): it finds or
       creates the D1 database `offside` (`engine/src/d1setup.ts`, `d1:create`), applies
       `schema.sql`, empties and refills every table over the REST API's batch form, and reads the
-      counts back. Not run yet.
+      counts back. Trial run 37559421357 (export 37557342873): every table landed, counts equal,
+      67 seconds. Run it again with a fresh export at the cut-over.
 - [ ] Engine writes to D1. Built: the Worker's `POST /api/internal/db` (`worker/src/enginedb.ts`)
       runs a batch of statements on the `DB` binding behind `x-engine-key`; `engine/src/store.d1.ts`
       sends there when `ENGINE_DB_URL` is set (REST API otherwise). Still to do: deploy.yml setting
@@ -111,7 +112,10 @@ Stage 1, the public site:
       `rpc()` in `worker/src/index.ts`, `read()` in `seo.ts` and `social.ts` use it whenever the
       `DB` binding exists. Verify with `pg.yml` command `db:verify` (`engine/src/d1verify.ts`): it
       loads the export into a throwaway Postgres and a local SQLite and compares every answer
-      field by field, printing paths only. Passed on synthetic data; real-data run pending.
+      field by field, printing paths only. **Passed on the real export** (run 37560367756): all 658
+      fixture pages, 170 player pages, picks, slip, hero, plans, promos, how-sure and previews are
+      identical; board, team, competition, pulled and search lists hold the same rows, some in a
+      different order where Postgres broke ties arbitrarily (D1 breaks them by id).
       Name order uses case-insensitive sorting, so `get_leagues` may differ in order only.
       Original note: each Postgres function the Worker calls through
       PostgREST is reimplemented over the `DB` binding: `get_board`, `get_fixture`, `get_picks`,
