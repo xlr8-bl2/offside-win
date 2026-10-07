@@ -209,6 +209,17 @@ export async function d1Verify(dir = 'export'): Promise<void> {
     else if (!diff(sorted(got), sorted(want)).length) t.order++;
     else {
       t.differ++;
+      // Search differs by which games match: name the term and the games on
+      // one side only. Match ids and club names are the site's public content.
+      if (a.fn === 'search_games') {
+        for (const key of ['analysed', 'later'] as const) {
+          const ids = (v: Json) => new Map(((v as Record<string, Array<Record<string, unknown>>>)[key] ?? []).map((r) => [Number(r['id']), `${String(r['home'])} v ${String(r['away'])} (${String(r['league'])})`]));
+          const g = ids(got);
+          const w = ids(want);
+          for (const [id, name] of g) if (!w.has(id)) console.log(`  search "${String(a.args.p_q)}" ${key}: only D1 has ${id} ${name}`);
+          for (const [id, name] of w) if (!g.has(id)) console.log(`  search "${String(a.args.p_q)}" ${key}: only Postgres has ${id} ${name}`);
+        }
+      }
       for (const p of d) {
         const shape = `${a.fn} ${p.replace(/\[\d+\]/g, '[]')}`;
         paths.set(shape, (paths.get(shape) ?? 0) + 1);

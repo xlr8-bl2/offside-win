@@ -1,6 +1,6 @@
 # Handoff: read this first
 
-**Last updated:** 7 October 2026, 01:45 UTC, by the Claude Code session working on branch
+**Last updated:** 7 October 2026, 02:05 UTC, by the Claude Code session working on branch
 `claude/offside-win-context-sync-6k7yi7`.
 
 **Keep this file current.** The owner may move the work to a different coding agent or account
@@ -57,6 +57,25 @@ for Supabase Pro. Doing it in two stages:
   `openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:EXPORT_KEY -in offside-export.tar.enc | tar -xf -`.
 - **If the data changes before the cutover**, run `pg.yml` with command `db:export` again while
   the direct connection still works. The engine keeps writing picks until it is pointed at D1.
+
+### Cut-over: how stage 1 goes live
+
+Everything for stage 1 is on branch `claude/offside-win-context-sync-6k7yi7`, open as **PR #154**
+(it also carries the support-ticket work, which stays inactive until stage 2). The steps, in order,
+all from the phone through Actions:
+
+1. `pg.yml`, command `db:export`, run on the branch: a fresh export, so D1 gets the picks the engine
+   has written to Supabase since 01:30. Note the run id.
+2. `pg.yml`, command `db:import`, `export_run` = that id: empties and refills D1, then prints each
+   table's count exported against its count in D1. Any `MISMATCH` stops here.
+3. Optionally `pg.yml` `db:verify` with the same id: expect no `DIFFER` lines.
+4. Merge PR #154 (owner's OK first). deploy.yml runs: finds D1, applies `schema.sql`, binds `DB`,
+   pushes `ENGINE_DB_KEY`, deploys, then checks `/api/health` and `/api/board`.
+5. Dispatch `slate.yml` once so the board refreshes from the engine through D1; check its log for
+   `D1 error` and the live site at 390px and 1440px.
+
+Until step 4 the live site still points at Supabase and stays down; nothing on the branch touches
+production before the merge (the import writes only to the new, unused D1 database).
 
 ### Migration checklist
 
