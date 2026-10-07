@@ -14,10 +14,10 @@
  * that: the same rows go into both, and the outputs are compared field by
  * field.
  *
- * Stage 1 has no sign-in (accounts come back in stage 2), so nobody holds a
- * membership here: `member` is always false, and open calls are walled for
- * everyone exactly as they were for a signed-out reader. Settled calls, the
- * free call of the day and finished matches stay public, as before.
+ * Who is reading arrives as a `Viewer` (worker/src/auth.ts resolves the
+ * session): `member` is has_membership(), decided once per request. Without
+ * one, open calls are walled exactly as they were for a signed-out reader.
+ * Settled calls, the free call of the day and finished matches stay public.
  */
 
 export interface D1Stmt {
@@ -165,8 +165,7 @@ async function boardCards(db: D1Read, fixtures: Rec[], member: boolean, freeId: 
  * get_board(p_from, p_to, p_league). Ties in the order (same day, rank and
  * kick-off) are broken by id here; Postgres broke them however it liked.
  */
-export async function getBoard(db: D1Read, from: number, to: number, league?: number | null): Promise<Rec> {
-  const member = false;
+export async function getBoard(db: D1Read, from: number, to: number, league?: number | null, member = false): Promise<Rec> {
   const freeId = await freeFixtureId(db);
   const fx = league
     ? await rows(db, `SELECT ${CARD_COLS} FROM fixture f WHERE f.kickoff BETWEEN ? AND ? AND f.league_id = ?
@@ -199,8 +198,7 @@ const laterRow = (x: Rec) => ({
 });
 
 /** search_games(p_q). */
-export async function searchGames(db: D1Read, q: string): Promise<Rec> {
-  const member = false;
+export async function searchGames(db: D1Read, q: string, member = false): Promise<Rec> {
   const term = (q ?? '').trim();
   const n = [...term].length;
   const pat = fold(term);
@@ -232,8 +230,7 @@ export async function searchGames(db: D1Read, q: string): Promise<Rec> {
 }
 
 /** get_team(p_id). */
-export async function getTeam(db: D1Read, id: number): Promise<Rec | null> {
-  const member = false;
+export async function getTeam(db: D1Read, id: number, member = false): Promise<Rec | null> {
   const t = now();
   const games = await rows(db, `SELECT ${CARD_COLS}, f.home_team, f.away_team FROM fixture f
     WHERE (f.home_team_id = ? OR f.away_team_id = ?) AND f.kickoff BETWEEN ? AND ?
@@ -295,8 +292,7 @@ export async function fixturePreview(db: D1Read, id: number): Promise<Rec | null
 }
 
 /** get_fixture(p_id): the whole match page, or the preview, or null. */
-export async function getFixture(db: D1Read, id: number): Promise<Rec | null> {
-  const member = false;
+export async function getFixture(db: D1Read, id: number, member = false): Promise<Rec | null> {
   const f = await one(db, 'SELECT * FROM fixture WHERE id = ?', id);
   if (!f) return fixturePreview(db, id);
   const freeId = await freeFixtureId(db);
@@ -338,7 +334,7 @@ export async function getFixture(db: D1Read, id: number): Promise<Rec | null> {
 }
 
 /** get_picks(p_limit, p_settled). */
-export async function getPicks(db: D1Read, limit = 60, settled?: string | null): Promise<Rec> {
+export async function getPicks(db: D1Read, limit = 60, settled?: string | null, member = false): Promise<Rec> {
   const freeId = await freeFixtureId(db);
   const sum = await one(db, `SELECT count(*) AS n, sum(CASE WHEN result IN ('WON', 'HALF_WON') THEN 1 ELSE 0 END) AS wins,
       sum(pnl) AS pnl, avg(odds) AS avg_odds
@@ -351,8 +347,8 @@ export async function getPicks(db: D1Read, limit = 60, settled?: string | null):
         f.home_team_id, f.away_team_id, pk.postmortem_json, pk.opening_odds, pk.closing_odds, pk.why,
         f.report_json AS _report
       FROM pick pk LEFT JOIN fixture f ON f.id = pk.fixture_id
-      WHERE pk.kind = 'CONFIDENT' AND (pk.settled_at IS NOT NULL OR pk.fixture_id IS ?) ${which}
-      ORDER BY pk.kickoff DESC LIMIT ?`, freeId, Math.max(1, Math.min(200, limit)));
+      WHERE pk.kind = 'CONFIDENT' AND (pk.settled_at IS NOT NULL OR ? = 1 OR pk.fixture_id IS ?) ${which}
+      ORDER BY pk.kickoff DESC LIMIT ?`, member ? 1 : 0, freeId, Math.max(1, Math.min(200, limit)));
   const picks = got.map(({ _report, ...p }): Rec => ({ ...p, goals: reportGoals(_report) }))
     .sort((a, b) => b.kickoff - a.kickoff);
   return {
@@ -461,7 +457,7 @@ export async function getLeagues(db: D1Read): Promise<Rec[]> {
 }
 
 /** get_league(p_id): a competition's own page. */
-export async function getLeague(db: D1Read, id: number): Promise<Rec> {
+export async function getLeague(db: D1Read, id: number, member = false): Promise<Rec> {
   const t = now();
   const [lg, st, sc, nx, ls, rec, recent] = await db.batch([
     db.prepare('SELECT id, name, country FROM league WHERE id = ?').bind(id),
@@ -517,7 +513,7 @@ export async function getLeague(db: D1Read, id: number): Promise<Rec> {
   });
   const l = (lg?.results ?? [])[0] as Rec | undefined;
   const r = ((rec?.results ?? [])[0] ?? { n: 0, wins: 0 }) as Rec;
-  const board = await getBoard(db, t - 3 * 86400, t + 10 * 86400, id);
+  const board = await getBoard(db, t - 3 * 86400, t + 10 * 86400, id, member);
   return {
     league: l ? { id: l.id, name: l.name, country: l.country } : null,
     standings: standingRows,
@@ -708,8 +704,7 @@ async function slipLegs(db: D1Read, legsJson: unknown): Promise<Rec[]> {
 }
 
 /** get_slip(). */
-export async function getSlip(db: D1Read): Promise<Rec> {
-  const member = false;
+export async function getSlip(db: D1Read, member = false): Promise<Rec> {
   const [cur, recent, rec] = await db.batch([
     db.prepare('SELECT id, odds, chance, first_kickoff, legs_json FROM slip WHERE settled_at IS NULL ORDER BY created_at DESC LIMIT 1'),
     db.prepare('SELECT id, odds, chance, result, first_kickoff, legs_json FROM slip WHERE settled_at IS NOT NULL ORDER BY first_kickoff DESC LIMIT 10'),
@@ -737,6 +732,67 @@ export function getAccountSignedOut(): Rec {
   return { email: null, membership: null, returning: false, whop: null, receipts: [], profile: null, follows: [] };
 }
 
+export async function sha256Hex(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+/** has_membership() for one account: a live card membership, or a live entitlement on its email. */
+export async function hasMembership(db: D1Read, id: string, email: string): Promise<boolean> {
+  const t = now();
+  const r = await one<{ ok: number }>(db, `SELECT (
+      EXISTS (SELECT 1 FROM membership WHERE user_id = ? AND expires_at > ?)
+      OR EXISTS (SELECT 1 FROM entitlement WHERE lower(email) = lower(?) AND status = 'active' AND expires_at > ?)
+    ) AS ok`, id, t, email, t);
+  return Boolean(r?.ok);
+}
+
+const PROFILE_COLS = `display_name, odds_format, avatar_style, avatar_color, club_id, club_name, clock, username, call_alerts`;
+
+/** get_account() for a signed-in reader. */
+export async function getAccount(db: D1Read, v: { id: string; email: string }): Promise<Rec> {
+  const t = now();
+  const email = v.email.toLowerCase();
+  const [live, card, whop, receipts, profile, follows, back] = await db.batch([
+    db.prepare(`SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4, via, manage_url FROM (
+        SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4, 'card' AS via, NULL AS manage_url
+          FROM membership WHERE user_id = ? AND expires_at > ?
+        UNION ALL
+        SELECT plan_id, expires_at,
+               CASE WHEN renew_stopped_at IS NULL AND plan_id <> 'matchday' THEN 1 ELSE 0 END,
+               renew_stopped_at, source, NULL, source, manage_url
+          FROM entitlement WHERE lower(email) = ? AND status = 'active' AND expires_at > ?)
+      ORDER BY expires_at DESC LIMIT 1`).bind(v.id, t, email, t),
+    db.prepare(`SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4, 'card' AS via
+      FROM membership WHERE user_id = ?`).bind(v.id),
+    db.prepare(`SELECT manage_url, expires_at FROM entitlement
+      WHERE lower(email) = ? AND status = 'active' AND source = 'whop' AND plan_id <> 'matchday'
+        AND renew_stopped_at IS NULL AND expires_at > ? LIMIT 1`).bind(email, t),
+    db.prepare(`SELECT created_at, plan_id, amount_minor, currency, status FROM payment
+      WHERE user_id = ? ORDER BY created_at DESC LIMIT 24`).bind(v.id),
+    db.prepare(`SELECT ${PROFILE_COLS} FROM profile WHERE user_id = ?`).bind(v.id),
+    db.prepare('SELECT kind, ref_id AS id, label FROM follow WHERE user_id = ? ORDER BY created_at').bind(v.id),
+    db.prepare(`SELECT (
+        EXISTS (SELECT 1 FROM membership WHERE user_id = ?)
+        OR EXISTS (SELECT 1 FROM payment WHERE user_id = ?)
+        OR EXISTS (SELECT 1 FROM entitlement WHERE email = ?)
+        OR EXISTS (SELECT 1 FROM former_member WHERE email_sha256 = ?)) AS ok`)
+      .bind(v.id, v.id, email, await sha256Hex(email.trim())),
+  ]);
+  const first = (r: { results?: unknown[] } | undefined) => ((r?.results ?? [])[0] as Rec | undefined) ?? null;
+  const w = first(whop);
+  const p = first(profile);
+  return {
+    email: v.email,
+    membership: first(live) ?? first(card),
+    returning: Boolean(first(back)?.ok),
+    whop: w ? { renewing: true, manage_url: w.manage_url, until: w.expires_at } : null,
+    receipts: (receipts?.results ?? []) as Rec[],
+    profile: p ? { ...p, call_alerts: p.call_alerts === null ? null : Boolean(p.call_alerts) } : null,
+    follows: (follows?.results ?? []) as Rec[],
+  };
+}
+
 /** record_view(): one more view of a page today, London time. */
 export async function recordView(db: D1Read, page: string): Promise<void> {
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -745,6 +801,9 @@ export async function recordView(db: D1Read, page: string): Promise<void> {
 }
 
 type Args = Record<string, string | number | undefined>;
+
+/** Who is reading: an account and whether it holds a live membership. */
+export interface Viewer { id: string; email: string; member: boolean }
 const int = (v: unknown) => (v === undefined || v === null || v === '' ? null : Number(v));
 
 /**
@@ -752,26 +811,27 @@ const int = (v: unknown) => (v === undefined || v === null || v === '' ? null : 
  * Undefined means this function is not served from D1 (yet), and the caller
  * should say so rather than guess.
  */
-export async function serve(db: D1Read, fn: string, args: Args): Promise<unknown> {
+export async function serve(db: D1Read, fn: string, args: Args, viewer: Viewer | null = null): Promise<unknown> {
+  const member = viewer?.member ?? false;
   switch (fn) {
-    case 'get_board': return getBoard(db, Number(args.p_from), Number(args.p_to), int(args.p_league));
-    case 'get_fixture': return getFixture(db, Number(args.p_id));
-    case 'get_picks': return getPicks(db, int(args.p_limit) ?? 60, args.p_settled === undefined ? null : String(args.p_settled));
+    case 'get_board': return getBoard(db, Number(args.p_from), Number(args.p_to), int(args.p_league), member);
+    case 'get_fixture': return getFixture(db, Number(args.p_id), member);
+    case 'get_picks': return getPicks(db, int(args.p_limit) ?? 60, args.p_settled === undefined ? null : String(args.p_settled), member);
     case 'get_model': return getModel(db);
     case 'get_hero': return getHero(db);
     case 'get_record': return getRecord(db);
     case 'get_how_sure': return getHowSure(db);
     case 'get_leagues': return getLeagues(db);
-    case 'get_league': return getLeague(db, Number(args.p_id));
+    case 'get_league': return getLeague(db, Number(args.p_id), member);
     case 'get_player': return getPlayer(db, Number(args.p_id), int(args.p_league));
-    case 'get_team': return getTeam(db, Number(args.p_id));
-    case 'search_games': return searchGames(db, String(args.p_q ?? ''));
+    case 'get_team': return getTeam(db, Number(args.p_id), member);
+    case 'search_games': return searchGames(db, String(args.p_q ?? ''), member);
     case 'get_health': return getHealth(db);
     case 'get_plans': return getPlans(db);
     case 'get_promos': return getPromos(db);
     case 'get_pulled': return getPulled(db, int(args.p_limit) ?? 20);
-    case 'get_slip': return getSlip(db);
-    case 'get_account': return getAccountSignedOut();
+    case 'get_slip': return getSlip(db, member);
+    case 'get_account': return viewer ? getAccount(db, viewer) : getAccountSignedOut();
     case 'fixture_preview': return fixturePreview(db, Number(args.p_id));
     default: return undefined;
   }

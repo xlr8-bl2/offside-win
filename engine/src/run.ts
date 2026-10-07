@@ -453,6 +453,10 @@ const commands: Record<string, () => Promise<unknown>> = {
     const { d1Import } = await import('./d1import.ts');
     return d1Import();
   },
+  async 'db:accounts'() {
+    const { d1Accounts } = await import('./d1accounts.ts');
+    return d1Accounts();
+  },
   async 'db:verify'() {
     const { d1Verify } = await import('./d1verify.ts');
     return d1Verify();

@@ -12,6 +12,7 @@
  * this file is a mistake against the whole database.
  */
 
+import { sessionAccount, type AuthDb } from './auth.ts';
 import { accessEndedMail, membershipMail, receiptMail, renewalStoppedMail, renewedMail, sendMail, type MailEnv } from './mail.ts';
 import { createCheckoutLink, parseWebhook, type CoinflowConfig } from './coinflow.ts';
 import { verifyWebhook } from './webhook.ts';
@@ -19,6 +20,8 @@ import { sha256Hex } from './admin.ts';
 import { WhopError, cancelWhopAtPeriodEnd, createWhopCheckout, createWhopPayment, parseWhop, verifyWhop, whopAccountId, whopPeriodEnd } from './whop.ts';
 
 export interface PayEnv extends MailEnv {
+  /** D1, where the sessions are (auth.ts). */
+  DB?: AuthDb;
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_KEY?: string;
@@ -103,6 +106,11 @@ function coinflow(env: PayEnv): CoinflowConfig {
  */
 export async function identify(env: PayEnv, jwt: string | null): Promise<{ id: string; email: string | null } | null> {
   if (!jwt) return null;
+  // Sessions are the Worker's own since the move off Supabase (auth.ts).
+  if (env.DB) {
+    const a = await sessionAccount(env.DB, jwt);
+    return a ? { id: a.id, email: a.email } : null;
+  }
   const res = await fetch(new URL('/auth/v1/user', env.SUPABASE_URL), {
     headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${jwt}` },
   });

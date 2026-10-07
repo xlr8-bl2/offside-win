@@ -24,6 +24,7 @@
 
 import { NETWORKS, profileUrl, saveSocials, socials, type SocialEnv, type Socials } from './social.ts';
 import type { PayEnv } from './pay.ts';
+import { sessionAccount } from './auth.ts';
 import { composeReply, replySubject, sendSupport } from './support.ts';
 import { accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, goodwillEndMail, goodwillStartMail, membershipMail, noticeMail, pulledMail, receiptMail, renewalStoppedMail, renewedMail, sendMail } from './mail.ts';
 
@@ -52,6 +53,13 @@ export async function whoIsAdmin(env: AdminEnv, jwt: string | null): Promise<{ i
   if (!jwt) return { error: 'Sign in first.', status: 401 };
   const allowed = (env.ADMIN_EMAIL_SHA256 ?? '').split(',').map((s) => s.trim().toLowerCase()).filter((s) => /^[0-9a-f]{64}$/.test(s));
   if (!allowed.length || !env.SUPABASE_SERVICE_KEY) return { error: 'The dashboard is not switched on.', status: 503 };
+  // Sessions are the Worker's own since the move off Supabase (auth.ts).
+  if (env.DB) {
+    const a = await sessionAccount(env.DB, jwt);
+    if (!a) return { error: 'Your sign-in has expired. Sign in again.', status: 401 };
+    if (!allowed.includes(await sha256Hex(a.email.trim().toLowerCase()))) return { error: 'This account is not an admin.', status: 403 };
+    return { id: a.id, email: a.email };
+  }
   const who = await fetch(new URL('/auth/v1/user', env.SUPABASE_URL), {
     headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${jwt}` },
   });

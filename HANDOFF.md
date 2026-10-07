@@ -1,7 +1,7 @@
 # Handoff: read this first
 
-**Last updated:** 7 October 2026, 02:20 UTC, by the Claude Code session working on branch
-`claude/offside-win-context-sync-6k7yi7`.
+**Last updated:** 7 October 2026, about 12:30 UTC, by the Claude Code session working on branch
+`claude/amazing-galileo-isfeue`.
 
 **Keep this file current.** The owner may move the work to a different coding agent or account
 at any time. Whoever is working updates the "Right now" section and the checklist after every
@@ -11,7 +11,55 @@ meaningful step, and commits it with that step, not at the end of the day.
 
 ## Right now
 
-### The site is down: Supabase has blocked the project
+### Stage 1 is live: the public site runs on Cloudflare D1
+
+Since about 02:20 UTC on 7 October the site reads from D1 and the engine writes to it (PR #154,
+merged as 4cd3684; deploy run 37561380007 passed, including its own health and board check).
+Checked by hand afterwards: every public `/api/*` endpoint answers 200 from D1, the engine door
+answers 404 without its key, and `#/`, `#/board`, a match page, `#/results`, `#/leagues` and
+`#/slip` render clean at 390px and 1440px (ui-verify `check.mjs`). The first D1 slate
+(run 37561498163) wrote its first pass through the Worker at 02:24.
+
+Not working until stage 2, by design: sign-in and accounts (Supabase Auth is still blocked),
+membership and Whop payments, the admin dashboard and support tickets, team photos and share
+cards (still in Supabase Storage, to move to R2), and the Worker's crons (Whop sweep, pulled-call
+alerts, goodwill), which still call Supabase and fail quietly. Members' calls show locked to all.
+
+**Next: stage 2** (checklist below). Supabase keeps the 6 accounts; the export artifacts
+(runs 37557342873 and 37560985337, kept 90 days) hold them too.
+
+### Stage 2, part 1: sign-in from D1 (built, on branch `claude/amazing-galileo-isfeue`, not merged)
+
+- **Worker** `worker/src/auth.ts`: `POST /api/auth/link` (email link, one use, one hour, 5 an hour
+  per address and 300 an hour site-wide), `POST /api/auth/verify`, `POST /api/auth/google` (Google
+  ID token checked against Google's keys, `GOOGLE_CLIENT_ID` and the nonce), `GET /api/auth/me`,
+  `POST /api/auth/signout`. Sessions are random tokens, stored as SHA-256 in `auth_session`, 60
+  days, extended while used. The Worker's 10-minute cron clears spent ones.
+- **Reads are member-aware again:** `rpc()` turns the bearer token into a `Viewer`
+  (`viewerFor`), and `d1read.ts` takes `member` from it (board, match, picks, team, league,
+  search, slip). `get_account` is served from D1 (`getAccount`).
+- **Account settings** `worker/src/profile.ts`: `POST /api/account/save_profile`, `set_follow`,
+  `set_call_alerts`, same checks and answers as the old Postgres functions.
+- **Payments and admin** now identify the reader by the new session (`identify` in pay.ts,
+  `whoIsAdmin` in admin.ts), but their own data still goes to Supabase: part 2.
+- **Front end** `public/js/lib/auth.js`: no Supabase SDK. Session in `ow.session`; old `sb-*`
+  keys are cleared on load (so everyone is signed out once at the switch). Email links land on
+  `/?signin=<token>`, redeemed by a POST from the page.
+- **Accounts:** `pg.yml` command `db:accounts` (`engine/src/d1accounts.ts`) upserts the export's
+  `auth.users` into `account`, keeping the Supabase ids so memberships and profiles still match.
+  Touches only `account`; safe while the engine runs. Default export is run 37560985337.
+- **Checked:** worker tests 207 pass (10 new in `worker/test/auth.test.ts`, on a SQLite built
+  from `schema.sql`), engine 637 pass, typecheck clean; ui-verify clean on `#/signin`, `#/board`,
+  `#/`, and a browser run of the whole email-link flow with the auth routes stubbed.
+- **To go live (owner's OK needed):** merge, then dispatch `pg.yml` `db:accounts`, then sign in
+  on the phone by email and by Google.
+
+Still broken until part 2: checkout and the Whop webhook/sweep (they write to Supabase), the
+admin dashboard's data, account deletion, support tickets, goodwill, pulled-call alerts, and the
+`images` and `cards` jobs (Supabase Storage, failing every run since the block; the site falls
+back to the default share picture, nothing else is affected).
+
+### What happened: Supabase blocked the project
 
 Since the night of 6 to 7 October 2026 (between 21:10 and 00:58 UTC), every request to the site's
 data has failed. Supabase answers `402 exceed_egress_quota`: the project used more than the free
@@ -97,13 +145,13 @@ Stage 1, the public site:
       binds it as `DB` with `database_id = "REPLACE_WITH_D1_DATABASE_ID"`, which deploy.yml fills
       in after finding the database by name. The September D1 (secret `CF_D1_DATABASE_ID`) is a
       stale copy in an older schema; it is not used and can be deleted later.
-- [ ] `db:import`: built (`engine/src/d1import.ts`, statements from `engine/src/d1load.ts`). Run
+- [x] `db:import`: built (`engine/src/d1import.ts`, statements from `engine/src/d1load.ts`). Run
       `pg.yml` with command `db:import` (input `export_run`, default the run above): it finds or
       creates the D1 database `offside` (`engine/src/d1setup.ts`, `d1:create`), applies
       `schema.sql`, empties and refills every table over the REST API's batch form, and reads the
       counts back. Trial run 37559421357 (export 37557342873): every table landed, counts equal,
       67 seconds. Run it again with a fresh export at the cut-over.
-- [ ] Engine writes to D1. Built: the Worker's `POST /api/internal/db` (`worker/src/enginedb.ts`)
+- [x] Engine writes to D1 (live since the merge). Built: the Worker's `POST /api/internal/db` (`worker/src/enginedb.ts`)
       runs a batch of statements on the `DB` binding behind `x-engine-key`; `engine/src/store.d1.ts`
       sends there when `ENGINE_DB_URL` is set (REST API otherwise). Still to do: deploy.yml setting
       `ENGINE_DB_KEY`, and the workflows' env.
@@ -114,7 +162,7 @@ Stage 1, the public site:
       Original note: Known spots: `slate.ts` around line 1590
       (the market snapshot uses `jsonb`, `LATERAL`, `extract(epoch)`), and the `config.dbBackend ===
       'postgres'` branches in `slate.ts` and `settle.ts`.
-- [ ] Worker serves the public endpoints from D1. Built: `worker/src/d1read.ts` rebuilds every
+- [x] Worker serves the public endpoints from D1 (live). Built: `worker/src/d1read.ts` rebuilds every
       get_* function (plus `fixture_preview`, `record_view`, and a signed-out `get_account`);
       `rpc()` in `worker/src/index.ts`, `read()` in `seo.ts` and `social.ts` use it whenever the
       `DB` binding exists. Verify with `pg.yml` command `db:verify` (`engine/src/d1verify.ts`): it
@@ -130,17 +178,18 @@ Stage 1, the public site:
       `get_leagues`, `get_player`, `get_team`, `get_record`, `get_how_sure`, `get_pulled`,
       `search_games`. Verify each by diffing its JSON against the Postgres function on the same
       exported data.
-- [ ] Workflows switched to `DB_BACKEND=d1`: done on the branch for slate, settle, ratings,
+- [x] Workflows switched to `DB_BACKEND=d1` (on main): slate, slate, settle, ratings,
       images, cards, renew, backtest and bootstrap (`ENGINE_DB_URL=https://offside.win/api/internal/db`,
       `CF_API_TOKEN`). The slate loop is every 30 minutes (`SLATE_LOOP_EVERY`), because each query
       is a Worker request and 15-minute passes alone would use the 10M a month in the plan.
       deploy.yml now applies `schema.sql` to D1 and pushes `ENGINE_DB_KEY`. Takes effect on merge.
-- [ ] Deployed and checked live: every page at 390px and 1440px (`.claude/skills/ui-verify`).
+- [x] Deployed and checked live: every page at 390px and 1440px (`.claude/skills/ui-verify`).
 
 Stage 2, accounts:
-- [ ] Sessions issued by the Worker: email link sent through Cloudflare Email Service, which
-      already sends the site's mail (`worker/src/mail.ts`); Google sign-in (`GOOGLE_CLIENT_ID` is
-      already a Worker variable). The 6 existing accounts are carried over by email.
+- [ ] Sessions issued by the Worker: built on `claude/amazing-galileo-isfeue` (see "Stage 2,
+      part 1" above). Not merged; then `db:accounts` carries the 6 accounts over.
+- [ ] Share cards and team photos off Supabase Storage (R2, or the Worker serving them from D1).
+      Needs either R2 enabled with an R2 permission on `CF_API_TOKEN`, or a D1 blob table.
 - [ ] Membership, Whop webhook and sweep, entitlements, goodwill, pulled-call alerts and
       account deletion over D1.
 - [ ] Admin dashboard and support tickets over D1. PR #154 (support tickets) is built on Supabase

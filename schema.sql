@@ -600,3 +600,45 @@ CREATE INDEX IF NOT EXISTS support_message_ticket ON support_message (ticket_id,
 CREATE UNIQUE INDEX IF NOT EXISTS support_message_mid ON support_message (message_id) WHERE (message_id IS NOT NULL);
 
 CREATE INDEX IF NOT EXISTS pulled_call_fixture ON pulled_call (fixture_id);
+
+-- ------------------------------------------------------------ accounts (stage 2)
+--
+-- Sign-in without Supabase (worker/src/auth.ts). An account is an email
+-- address; the six accounts from Supabase keep their ids (`db:accounts` loads
+-- them from the export), so membership, profile and follow rows still point at
+-- them. Times are unix seconds. Emails are stored lower-cased.
+CREATE TABLE IF NOT EXISTS account (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  name TEXT,
+  avatar_url TEXT,
+  provider TEXT NOT NULL DEFAULT 'email',
+  google_sub TEXT UNIQUE,
+  created_at INTEGER NOT NULL,
+  last_sign_in_at INTEGER
+);
+
+-- A signed-in browser. Only the SHA-256 of its token is kept, so a copy of the
+-- table signs nobody in.
+CREATE TABLE IF NOT EXISTS auth_session (
+  token_sha256 TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  seen_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS auth_session_account ON auth_session (account_id);
+
+-- A sign-in link sent by email: one use, one hour. Hashed like the sessions.
+CREATE TABLE IF NOT EXISTS auth_link (
+  token_sha256 TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS auth_link_email ON auth_link (email, created_at);
+
+CREATE INDEX IF NOT EXISTS auth_link_created ON auth_link (created_at);

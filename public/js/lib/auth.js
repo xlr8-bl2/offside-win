@@ -1,36 +1,31 @@
 /**
  * Signing in.
  *
- * Supabase Auth, talked to directly from the browser. The Worker is not in the
- * path at all — it has 10ms of CPU and no business verifying tokens — so this
- * module's whole job is to obtain a JWT and hand it to `getJSON`, which puts it
- * in a header that the Worker forwards to Postgres unexamined.
+ * The Worker issues the sessions (worker/src/auth.ts, since the move off
+ * Supabase in October 2026). Signing in ends with a session token, kept in
+ * this browser under `ow.session` and sent as `Authorization: Bearer` with
+ * every read, which the Worker turns into the reader's account and membership.
  *
- * Three decisions worth knowing about, because each of them is load-bearing.
+ * Two ways in:
  *
- * PKCE, NOT THE IMPLICIT FLOW. The implicit flow returns the session in the URL
- * fragment, as `#access_token=…`. The router does `location.hash.slice(2)` and
- * would read that as a route named `ccess_token=…`, fail to match anything and
- * silently render the home page, having thrown the session away. PKCE returns
- * `?code=…` in the query string instead, which the hash router never looks at.
+ * EMAIL LINK. The email links to the site with `?signin=<token>`, and
+ * completeSignIn() redeems it with a POST before the router runs. The link
+ * itself does nothing when opened, so a mail scanner that follows every link
+ * cannot spend it. The query string, not the hash: the hash router would read
+ * a token there as a route.
  *
- * THE SDK IS NOT LOADED FOR PEOPLE WHO ARE NOT SIGNED IN. Almost everyone
- * arriving here is signed out, and making them download an auth library to be
- * told so would be a tax on the page that matters most. Supabase persists its
- * session in localStorage under a predictable key, so the presence of a session
- * can be decided locally, in microseconds, without loading anything. The import
- * happens only when there is a session to restore or a sign-in to perform.
+ * GOOGLE. Google hands back a signed ID token (by redirect, or from its own
+ * button), which goes to the Worker with the nonce Google was asked to sign.
  *
- * NOTHING HERE DECIDES WHAT A READER MAY SEE. A tampered token buys nothing:
- * the Worker forwards it, Postgres rejects it, and the reply is the free copy.
- * Treat everything below as a convenience for the person using the site rather
- * than as a control.
+ * NOTHING HERE DECIDES WHAT A READER MAY SEE. A made-up token buys nothing:
+ * the Worker finds no session for it and answers with the free copy. Treat
+ * everything below as a convenience for the person using the site rather than
+ * as a control.
  */
 
 const CONFIG_URL = '/api/config';
-const SDK = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+const KEY = 'ow.session';
 
-let clientPromise = null;
 let cachedConfig = null;
 
 async function config() {
@@ -43,103 +38,86 @@ async function config() {
   return cachedConfig;
 }
 
-/** The site's public settings (the anon key, Whop's public account id). */
+/** The site's public settings (Google's client id, Whop's public account id). */
 export const siteConfig = () => config();
 
-/**
- * Is there a session in this browser at all?
- *
- * Supabase stores it under `sb-<project-ref>-auth-token`. Reading the key
- * rather than the value is deliberate — we only need to know whether loading
- * the SDK is worth it, and the token itself is the SDK's business.
- *
- * Wrapped because localStorage throws outright in some privacy modes rather
- * than returning null, and a signed-out reader hitting an exception here would
- * take the whole page down.
+/*
+ * Supabase's saved sessions, from before the move. They sign nobody in any
+ * more, and left in place they would keep the page acting signed in. Cleared
+ * once, on load. Wrapped because localStorage throws outright in some privacy
+ * modes rather than returning null.
  */
-export function hasStoredSession() {
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) return true;
-    }
-  } catch { /* private mode: treat as signed out */ }
-  return false;
-}
+try {
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) localStorage.removeItem(k);
+  }
+} catch { /* private mode */ }
 
-/**
- * The session Supabase saved in this browser, if its token has more than a
- * minute left. Read, never written: refreshing it is the library's job.
- */
-function storedSession() {
+/** The saved session, if it has not run out: `{ token, expires_at, user }`. */
+function stored() {
   try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (!k || !k.startsWith('sb-') || !k.endsWith('-auth-token')) continue;
-      const raw = JSON.parse(localStorage.getItem(k) ?? 'null');
-      const s = raw?.access_token ? raw : raw?.currentSession;
-      if (s?.access_token && s?.user?.id && Number(s.expires_at) * 1000 > Date.now() + 60_000) return s;
-    }
-  } catch { /* private mode, or a value we do not recognise: ask the library */ }
+    const s = JSON.parse(localStorage.getItem(KEY) ?? 'null');
+    if (s?.token && s?.user?.id && Number(s.expires_at) * 1000 > Date.now()) return s;
+  } catch { /* private mode, or a value we do not recognise */ }
   return null;
 }
 
-let warmed = false;
-function warmLater() {
-  if (warmed) return;
-  warmed = true;
-  const go = () => client().catch(() => { clientPromise = null; warmed = false; });
+function save(s) {
+  try {
+    if (s) localStorage.setItem(KEY, JSON.stringify({ token: s.session ?? s.token, expires_at: s.expires_at, user: s.user }));
+    else localStorage.removeItem(KEY);
+  } catch { /* private mode: signed in for this page only */ }
+  memory = s ? { token: s.session ?? s.token, expires_at: s.expires_at, user: s.user } : null;
+}
+/** For a browser that will not store anything: the session lives as long as the page. */
+let memory = null;
+
+/** Is there a session in this browser at all? Decided locally, without a request. */
+export function hasStoredSession() {
+  return Boolean(stored() ?? memory);
+}
+
+async function post(path, body, token) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body ?? {}),
+  });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(out?.error || `HTTP ${res.status}`), { status: res.status });
+  return out;
+}
+
+/*
+ * Once per page, after it has drawn: ask the Worker whether the session still
+ * stands. It extends a session in use, and a session ended elsewhere (signed
+ * out everywhere, or the account deleted) is forgotten here too.
+ */
+let checked = false;
+function checkLater() {
+  if (checked) return;
+  checked = true;
+  const go = async () => {
+    const s = stored() ?? memory;
+    if (!s) return;
+    try {
+      const res = await fetch('/api/auth/me', { headers: { authorization: `Bearer ${s.token}` }, cache: 'no-store' });
+      if (res.status === 401) { save(null); return; }
+      if (!res.ok) return;
+      const me = await res.json();
+      save({ token: s.token, expires_at: me.expires_at ?? s.expires_at, user: me.user ?? s.user });
+    } catch { /* offline: keep what we have */ }
+  };
   if ('requestIdleCallback' in window) requestIdleCallback(go, { timeout: 4000 });
   else setTimeout(go, 1500);
 }
 
-/** The Supabase client, imported on first genuine need and then reused. */
-export async function client() {
-  if (!clientPromise) {
-    clientPromise = (async () => {
-      const cfg = await config();
-      const { createClient } = await import(SDK);
-      return createClient(cfg.supabaseUrl, cfg.anonKey, {
-        auth: {
-          flowType: 'pkce',
-          persistSession: true,
-          autoRefreshToken: true,
-          // We run the code exchange ourselves, before the router, so that a
-          // half-finished sign-in cannot race a view into rendering.
-          detectSessionInUrl: false,
-        },
-      });
-    })();
-  }
-  return clientPromise;
-}
-
-/**
- * The current session, or null.
- *
- * Returns null without loading anything when no session is stored, which is the
- * common case and the reason this is not simply `getSession()`.
- */
+/** The current session, or null. */
 export async function session() {
-  if (!hasStoredSession()) return null;
-  // A saved token that is still good is used as it is. Loading the auth
-  // library to hand back the same token was a CDN download, a parse and a
-  // round trip for the config in front of every signed-in reader's first
-  // read of the board. The library is still loaded, after the page has drawn,
-  // so it can refresh the token before it runs out.
-  const saved = storedSession();
-  if (saved) {
-    warmLater();
-    return saved;
-  }
-  try {
-    const { data } = await (await client()).auth.getSession();
-    return data.session ?? null;
-  } catch {
-    // A failed refresh, a cleared project, a network blip. Signed out is the
-    // honest answer and the safe one.
-    return null;
-  }
+  const s = stored() ?? memory;
+  if (s) checkLater();
+  return s;
 }
 
 /** Convenience for the views: who is signed in, in the two fields they use. */
@@ -171,14 +149,14 @@ export async function currentUser({ real = false } = {}) {
   // What the account page shows about the person: the name and picture
   // Google hands over (nothing, for an email sign-in), how they signed in,
   // and since when.
-  const meta = s.user.user_metadata ?? {};
+  const u = s.user;
   return {
-    id: s.user.id,
-    email: s.user.email,
-    name: meta.full_name || meta.name || null,
-    avatar: typeof meta.avatar_url === 'string' && /^https:\/\//.test(meta.avatar_url) ? meta.avatar_url : null,
-    provider: s.user.app_metadata?.provider ?? 'email',
-    since: s.user.created_at ?? null,
+    id: u.id,
+    email: u.email,
+    name: u.name || null,
+    avatar: typeof u.avatar === 'string' && /^https:\/\//.test(u.avatar) ? u.avatar : null,
+    provider: u.provider ?? 'email',
+    since: u.since ?? null,
   };
 }
 
@@ -192,7 +170,7 @@ export async function currentUser({ real = false } = {}) {
 export async function authHeaders({ real = false } = {}) {
   if (!real && viewingAsFree()) return {};
   const s = await session();
-  return s?.access_token ? { authorization: `Bearer ${s.access_token}` } : {};
+  return s?.token ? { authorization: `Bearer ${s.token}` } : {};
 }
 
 /** Where a sign-in should land. Absolute, and without any existing query. */
@@ -201,35 +179,29 @@ function redirectTo() {
 }
 
 export async function signInWithEmail(email) {
-  const { error } = await (await client()).auth.signInWithOtp({
-    email,
-    options: { emailRedirectTo: redirectTo() },
-  });
-  if (error) throw new Error(error.message);
+  await post('/api/auth/link', { email, redirect: redirectTo() });
 }
 
+/** Google by redirect is the only Google there is now; kept under the old name for the sign-in page. */
 export async function signInWithGoogle() {
-  const { error } = await (await client()).auth.signInWithOAuth({
-    provider: 'google',
-    options: { redirectTo: redirectTo() },
-  });
-  if (error) throw new Error(error.message);
+  return signInWithGoogleRedirect();
+}
+
+/** Google's ID token for a session. `nonce` is the original, whose hash Google signed. */
+async function googleSession(token, nonce) {
+  save(await post('/api/auth/google', { id_token: token, nonce }));
 }
 
 /*
  * Google's own "Sign in with Google" button.
  *
- * The redirect flow (signInWithGoogle below) sends the reader through
- * Supabase's address, so Google's window says "continue to
- * <project>.supabase.co". This button runs on offside.win itself and hands
- * back a signed ID token, so the window says "Sign in to offside.win"; the
- * token goes to Supabase, which checks it against the same Google client and
- * starts the session. Nothing about the account changes, only what the reader
- * is shown.
+ * Used only while the redirect (GOOGLE_REDIRECT) is switched off. It runs on
+ * offside.win itself and hands back a signed ID token, which goes to the
+ * Worker (worker/src/auth.ts) to be checked and turned into a session.
  *
- * The nonce: Google is given its SHA-256 and signs that into the token;
- * Supabase is given the original and checks the two match, so a token
- * lifted from somewhere else cannot be replayed here.
+ * The nonce: Google is given its SHA-256 and signs that into the token; the
+ * Worker is given the original and checks the two match, so a token lifted
+ * from somewhere else cannot be replayed here.
  *
  * Google's script is loaded only when the sign-in page asks for the button.
  */
@@ -262,7 +234,6 @@ export function warmSignIn() {
     if (cfg.googleRedirect) prepareGoogleRedirect();
     else loadGsi().catch(() => { gsiPromise = null; });
   }).catch(() => {});
-  client().catch(() => { clientPromise = null; });
 }
 
 /*
@@ -274,10 +245,10 @@ export function warmSignIn() {
  * arrived late, flickered, and hung after the tap. Here the button is ours,
  * drawn with the page, and the tap is an ordinary page load.
  *
- * Google returns a signed ID token in the address fragment; Supabase checks it
- * against the same client, exactly as for the frame's token. The nonce works
- * the same way (Google signs its hash; Supabase is given the original), and
- * the state value ties the answer to the tab that asked.
+ * Google returns a signed ID token in the address fragment; the Worker checks
+ * it, exactly as for the frame's token. The nonce works the same way (Google
+ * signs its hash; the Worker is given the original), and the state value ties
+ * the answer to the tab that asked.
  */
 const GOOGLE_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
 const PENDING = 'offside-google-pending';
@@ -341,8 +312,7 @@ async function completeGoogleReturn() {
   if (!pending || pending.state !== back.get('state')) throw fail('state');
   const token = back.get('id_token');
   if (!token) throw fail('no token');
-  const { error } = await (await client()).auth.signInWithIdToken({ provider: 'google', token, nonce: pending.raw });
-  if (error) throw fail(error.message);
+  try { await googleSession(token, pending.raw); } catch (err) { throw fail(err.message); }
   return true;
 }
 
@@ -353,11 +323,8 @@ async function completeGoogleReturn() {
  * fall back to the redirect button.
  */
 export async function renderGoogleButton(el, { onSignedIn, onError, onWorking } = {}) {
-  // The config, Google's script and our auth library are fetched side by side,
-  // not one after the other: in a row they were most of a second on a phone
-  // before the button showed. The library is warmed here, not after Google's
-  // window closes, so the tap does not stall on a download at the last step.
-  client().catch(() => { clientPromise = null; });
+  // The config and Google's script are fetched side by side, not one after
+  // the other: in a row they were most of a second on a phone.
   let cfg, gsi;
   try { [cfg, gsi] = await Promise.all([config(), loadGsi()]); } catch { gsiPromise = null; return false; }
   if (!cfg.googleClientId) return false;
@@ -370,8 +337,7 @@ export async function renderGoogleButton(el, { onSignedIn, onError, onWorking } 
     callback: async ({ credential }) => {
       onWorking?.();
       try {
-        const { error } = await (await client()).auth.signInWithIdToken({ provider: 'google', token: credential, nonce: raw });
-        if (error) throw new Error(error.message);
+        await googleSession(credential, raw);
         await onSignedIn?.();
       } catch (err) {
         onError?.(err);
@@ -396,55 +362,43 @@ function googleButtonWidth(el) {
  * device, which is what someone wants after using a shared computer.
  */
 export async function signOut({ everywhere = false } = {}) {
-  if (!hasStoredSession()) return;
-  try { await (await client()).auth.signOut({ scope: everywhere ? 'global' : 'local' }); } catch { /* already gone */ }
+  const s = stored() ?? memory;
+  save(null);
+  if (!s) return;
+  try { await post('/api/auth/signout', { everywhere }, s.token); } catch { /* already gone */ }
 }
 
-/** Call one of the account's own database functions with the reader's session. */
+/** One of the account's own settings, written with the reader's session (worker/src/profile.ts). */
 export async function accountRpc(fn, args) {
-  const { data, error } = await (await client()).rpc(fn, args);
-  if (error) throw new Error(error.message);
-  return data;
+  const s = stored() ?? memory;
+  if (!s) throw new Error('sign in first');
+  return post(`/api/account/${encodeURIComponent(fn)}`, args, s.token);
 }
 
 /**
- * Finish a sign-in that is arriving back from a magic link or from Google.
+ * Finish a sign-in that is arriving back from an email link or from Google.
  *
- * Called once, before the router runs. The `?code=` is removed from the address
- * bar afterwards whatever the outcome: a code is single-use, so leaving it
- * there means a refresh trying to redeem it again and failing, which would look
- * to a reader like being signed out for no reason.
+ * Called once, before the router runs. The token is removed from the address
+ * bar afterwards whatever the outcome: it is single-use, so leaving it there
+ * means a refresh trying to redeem it again and failing, which would look to
+ * a reader like being signed out for no reason.
  *
  * Returns true when a session was established, so the caller can re-render.
  */
 export async function completeSignIn() {
   if (isGoogleReturn()) return completeGoogleReturn();
   const url = new URL(location.href);
-  // Our own emails link here with the token itself (worker/src/authhook.ts),
-  // so the button reads offside.win rather than a supabase.co address.
-  const tokenHash = url.searchParams.get('token_hash');
-  if (tokenHash) {
-    const type = url.searchParams.get('type') || 'magiclink';
-    url.searchParams.delete('token_hash');
-    url.searchParams.delete('type');
-    history.replaceState(null, '', url.toString());
-    const { error } = await (await client()).auth.verifyOtp({ token_hash: tokenHash, type });
-    if (error) throw new Error(error.message);
-    return true;
-  }
-  const code = url.searchParams.get('code');
-  const failed = url.searchParams.get('error_description') ?? url.searchParams.get('error');
-  if (!code && !failed) return false;
-
-  url.searchParams.delete('code');
-  url.searchParams.delete('error');
-  url.searchParams.delete('error_description');
-  url.searchParams.delete('state');
+  const token = url.searchParams.get('signin');
+  // Links sent by Supabase before the move: they can no longer be redeemed.
+  const old = url.searchParams.get('token_hash') || url.searchParams.get('code');
+  if (!token && !old) return false;
+  for (const k of ['signin', 'token_hash', 'type', 'code', 'error', 'error_description', 'state']) url.searchParams.delete(k);
   history.replaceState(null, '', url.toString());
-
-  if (failed) throw new Error(failed);
-
-  const { error } = await (await client()).auth.exchangeCodeForSession(code);
-  if (error) throw new Error(error.message);
+  if (!token) throw new Error('expired');
+  try {
+    save(await post('/api/auth/verify', { token }));
+  } catch (err) {
+    throw new Error(err.status === 401 ? 'expired' : err.message);
+  }
   return true;
 }
