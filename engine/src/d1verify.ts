@@ -213,6 +213,12 @@ export async function d1Verify(dir = 'export'): Promise<void> {
       // one side only. Match ids and club names are the site's public content.
       if (a.fn === 'search_games') {
         for (const key of ['analysed', 'later'] as const) {
+          const list = (v: Json) => ((v as Record<string, Array<Record<string, unknown>>>)[key] ?? []).map((r) => String(r['id']));
+          const g = list(got).join(',');
+          const w = list(want).join(',');
+          if (g !== w) console.log(`  search "${String(a.args.p_q)}" ${key}\n    D1:       ${g}\n    Postgres: ${w}`);
+        }
+        for (const key of ['analysed', 'later'] as const) {
           const ids = (v: Json) => new Map(((v as Record<string, Array<Record<string, unknown>>>)[key] ?? []).map((r) => [Number(r['id']), `${String(r['home'])} v ${String(r['away'])} (${String(r['league'])})`]));
           const g = ids(got);
           const w = ids(want);
