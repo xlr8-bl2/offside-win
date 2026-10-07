@@ -348,7 +348,10 @@ export function startBall(canvas, { still = false, speed = 0.12, t: t0 = 0, frag
    * ball showed the same steps. The cost is kept in hand by `quality`, which
    * steps down while frames come too slowly and back up when there is room.
    */
-  let quality = 1;
+  // On a 3x screen the first frames are drawn at 2x and grow to full
+  // density once frames are coming quickly (below): the first frame is the
+  // one a reader waits for, and it was the slowest at full density.
+  let quality = (devicePixelRatio || 1) > 2 ? 2 / devicePixelRatio : 1;
   const size = () => {
     const box = canvas.getBoundingClientRect();
     const zoom = Math.max(1, (typeof visualViewport !== 'undefined' && visualViewport?.scale) || 1);

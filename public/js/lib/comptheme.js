@@ -34,8 +34,12 @@ export const themeOf = (leagueId) => THEMES.get(Number(leagueId)) ?? null;
  */
 export function themeArt(theme) {
   if (theme === 'ucl') {
+    // The first paint is a small still (about 50KB, against 205KB for the
+    // full one): the live ball replaces it within a second, so its detail is
+    // never studied. The full still is fetched only where the live ball
+    // cannot run (start below).
     return `<div class="comp-art comp-art-ucl" aria-hidden="true"><div class="starball">
-      <img class="starball-still" src="/brand/starball.webp" alt="" decoding="async">
+      <img class="starball-still" src="/brand/starball-480.webp" alt="" decoding="async" fetchpriority="high" width="480" height="480">
       <canvas class="starball-live"></canvas></div></div>`;
   }
   return '';
@@ -48,13 +52,28 @@ export function themeArt(theme) {
  * one frame, the same as the still.
  */
 const running = new Map();
+const pending = new WeakSet();
 function start(canvas) {
-  if (running.has(canvas)) return;
+  if (running.has(canvas) || pending.has(canvas)) return;
+  pending.add(canvas);
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  import('./starball.js').then(({ startBall }) => {
+  // The shader's module is fetched at once, but compiled and first drawn
+  // only once the page has painted and the browser is idle: compiling it
+  // on the first frame held up the words and the still it sits behind.
+  const mod = import('./starball.js');
+  const go = () => mod.then(({ startBall }) => {
+    pending.delete(canvas);
     if (!canvas.isConnected || running.has(canvas)) return;
-    running.set(canvas, startBall(canvas, { still }) ?? (() => {}));
-  }).catch(() => {});
+    const stop = startBall(canvas, { still });
+    if (!stop) {
+      // No live ball here (no WebGL): the full still in place of the small one.
+      const img = canvas.parentElement?.querySelector('.starball-still');
+      if (img) img.src = '/brand/starball.webp';
+    }
+    running.set(canvas, stop ?? (() => {}));
+  }).catch(() => { pending.delete(canvas); });
+  if ('requestIdleCallback' in window) requestIdleCallback(go, { timeout: 900 });
+  else setTimeout(go, 300);
 }
 function sweep() {
   for (const c of document.querySelectorAll('canvas.starball-live')) start(c);

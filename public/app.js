@@ -2092,7 +2092,7 @@ function rowHTML(f) {
       : '';
 
   return `
-  <a class="row is-${state.kind}${played ? ' is-played' : ''}${terse ? ' is-terse' : ''}${isClub ? ' is-club' : ''}${kind ? ` is-${kind}` : ''}" href="#/fixture/${encodeURIComponent(f.id)}"
+  <a class="row is-${state.kind}${played ? ' is-played' : ''}${terse ? ' is-terse' : ''}${isClub ? ' is-club' : ''}${kind ? ` is-${kind}` : ''}${themeOf(f.league_id) ? ` comp-${themeOf(f.league_id)}` : ''}" href="#/fixture/${encodeURIComponent(f.id)}"
      aria-label="${esc(f.home)} versus ${esc(f.away)}">
     <div class="row-when">
       ${state.kind === 'upcoming'
@@ -2463,6 +2463,7 @@ function landingDate(now = new Date()) {
 function landingHTML() {
   return `
   <section class="ld-hero">
+    <div class="ld-bg" aria-hidden="true"><div class="ld-shot" data-ld="shot"></div></div>
     <div class="wrap ld-hero-in">
       <div class="ld-copy">
         <p class="ld-dateline"><span>${esc(landingDate())}</span><span data-ld="count"></span></p>
@@ -2534,6 +2535,30 @@ function excerpt(text, max = 260) {
   return cleanProse(out.trim()) ?? '';
 }
 
+/*
+ * Depth behind the landing header: the photograph sits further back than
+ * the words, so it moves at a third of the page's speed as the reader
+ * scrolls, the way a stand behind a pitch does when the camera pans. One
+ * transform on one layer, only while the header is on screen, and never
+ * for a reader who asked for less motion.
+ */
+function landingDepth() {
+  const layer = app.querySelector('.ld-shot');
+  const hero = app.querySelector('.ld-hero');
+  if (!layer || !hero || layer.dataset.depth || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  layer.dataset.depth = '1';
+  let raf = 0;
+  const move = () => {
+    raf = 0;
+    if (!layer.isConnected) { removeEventListener('scroll', onScroll); return; }
+    const y = Math.min(scrollY, hero.offsetHeight);
+    layer.style.transform = `translate3d(0, ${Math.round(y * 0.32)}px, 0)`;
+  };
+  const onScroll = () => { if (!raf) raf = requestAnimationFrame(move); };
+  addEventListener('scroll', onScroll, { passive: true });
+  move();
+}
+
 async function viewLanding() {
   const nav = navTicket;
   document.body.dataset.page = 'landing';
@@ -2592,7 +2617,32 @@ async function viewLanding() {
         <span>${crest(fx.away, 'md', fx.away_id)}${esc(fx.away)}</span></a></h2>
       <p class="ld-lead-why">${esc(why)}</p>
       <a class="ld-lead-go" href="#/fixture/${encodeURIComponent(fx.id)}">Read the whole call, free</a>`);
-  } else {
+  }
+  {
+    /*
+     * The ground behind the header, kept low so the words stay easy to read
+     * (owner, October 2026). The engine names a ground it has a photograph
+     * for (shot_venue_id); then the free call's own, then the board's. The
+     * browser works down the list until one is a real photograph (venueShot).
+     */
+    const shot = app.querySelector('[data-ld="shot"]');
+    // A Champions League free call brings the competition's night and its
+    // ball in place of the ground.
+    const theme = fx && why ? themeOf(fx.league_id) : null;
+    const ldHero = app.querySelector('.ld-hero');
+    if (theme && ldHero && !ldHero.classList.contains(`theme-${theme}`)) {
+      ldHero.classList.add(`theme-${theme}`);
+      if (shot) shot.innerHTML = themeArt(theme);
+    }
+    const venues = [...new Set([hero?.shot_venue_id, fx?.venue_id, ...fixtures.filter(hasCall).map((f) => f.venue_id), ...fixtures.map((f) => f.venue_id)].filter(Boolean))];
+    if (!theme && shot && !shot.querySelector('img') && venues.length) {
+      shot.innerHTML = venueShot(venues.slice(0, 6), 'ld-shot-img', true);
+      const img = shot.querySelector('img');
+      img?.addEventListener('load', () => img.classList.add('is-in'), { once: true });
+    }
+    landingDepth();
+  }
+  if (!(fx && why)) {
     app.querySelector('.ld-lead')?.remove();
     app.querySelector('.ld-hero')?.classList.add('ld-solo');
     /*
@@ -3263,7 +3313,7 @@ async function viewBoard(params = new URLSearchParams()) {
     const block = ([name, g], unit) => {
       const cut = unit === 'game' && g.list.length > FIRST + 1 && !openGroups.has(name);
       return `
-            <section class="league-block">
+            <section class="league-block${themeOf(g.id) ? ` comp-${themeOf(g.id)}` : ''}">
               <h3 class="league-head">
                 ${g.id ? `<a href="#/league/${encodeURIComponent(g.id)}">${crest(name, 'xs', g.id, 'league')}${esc(name)}</a>`
                        : `${crest(name, 'xs', g.id, 'league')}${esc(name)}`}
@@ -4878,6 +4928,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
   // A competition with its own look (a Champions League night) takes the
   // masthead instead of the ground and the clubs' colours.
   const theme = themeOf(f.league_id);
+  state.comp = theme;
   const wash = !theme && (homeC || awayC)
     ? ` has-colors" style="--home-c:${homeC ?? 'transparent'};--away-c:${awayC ?? 'transparent'}`
     : '';
@@ -8464,6 +8515,7 @@ async function route({ soft = false } = {}) {
   live.watching = false;
   live.focus = null;
   state.liveFixture = null;
+  state.comp = null;
   clearInterval(state.tick);
   clearInterval(state.poll);
   if (state.onVisible) { removeEventListener('visibilitychange', state.onVisible); state.onVisible = null; }
@@ -8507,6 +8559,84 @@ function unstick() {
 }
 addEventListener('pageshow', (e) => { if (e.persisted) unstick(); });
 
+/*
+ * Depth behind every page header (owner, October 2026: "bring depth that
+ * makes sense to every header background"). What sits behind a header is
+ * about that page's subject:
+ *
+ *   a competition    the ground of its next game, and its crest, large and
+ *                    faint, behind the title;
+ *   a player         their club's crest the same way;
+ *   the results      the ground of the latest match played;
+ *   everything else  the ground of today's biggest game, as on the landing
+ *                    page.
+ *
+ * One layer under the page, darkened most where the words are and faded out
+ * below the header, so nothing has to be restyled to sit on it. Pages that
+ * draw their own masthead (a match, the members' front page, the landing
+ * page) are left alone. Added after the page is drawn and never waited for.
+ */
+const DEPTH_SKIP = new Set(['fixture', 'checkout', 'dev', 'admin', 'trace']);
+async function headDepth(name, parts, ticket) {
+  const old = app.querySelector(':scope > .ph-bg');
+  if (DEPTH_SKIP.has(name) || app.querySelector('.hero, .ld-hero')) { old?.remove(); return; }
+  const head = app.querySelector('.page-head') ?? app.querySelector('h1')?.closest('.section-head') ?? app.querySelector('.seo h1');
+  if (!head) { old?.remove(); return; }
+  // A competition with a look of its own (the Champions League) gets its
+  // night and its ball behind the title, as its matches do.
+  const theme = name === 'league' ? themeOf(parts[1]) : null;
+  if (theme) {
+    let art = old?.dataset.key === `theme:${theme}` ? old : null;
+    if (!art) {
+      old?.remove();
+      art = document.createElement('div');
+      art.className = `ph-bg ph-theme theme-${theme}`;
+      art.dataset.key = `theme:${theme}`;
+      art.setAttribute('aria-hidden', 'true');
+      art.innerHTML = themeArt(theme);
+      app.prepend(art);
+    }
+    art.style.height = `${Math.round(head.getBoundingClientRect().bottom - app.getBoundingClientRect().top + 160)}px`;
+    return;
+  }
+  const board = state.board ?? await loadBoard().catch(() => null);
+  if (ticket !== navTicket || !head.isConnected) return;
+  const fixtures = board?.fixtures ?? [];
+  const soon = (f) => ['upcoming', 'live'].includes(matchState(f).kind);
+  const byRank = (a, b) => (a.rank ?? 9) - (b.rank ?? 9) || (a.kickoff ?? 0) - (b.kickoff ?? 0);
+  let pool = fixtures;
+  if (name === 'league') pool = fixtures.filter((f) => Number(f.league_id) === Number(parts[1]));
+  const played = (f) => matchState(f).kind === 'ft';
+  const venues = [...new Set(name === 'results'
+    ? [
+      ...fixtures.filter((f) => played(f) && hasCall(f)).sort((a, b) => b.kickoff - a.kickoff).map((f) => f.venue_id),
+      ...fixtures.filter(played).sort(byRank).map((f) => f.venue_id),
+    ].filter(Boolean)
+    : [
+      ...(name === 'league' || name === 'player' ? [] : [state.hero?.shot_venue_id]),
+      ...pool.filter((f) => soon(f) && hasCall(f)).sort(byRank).map((f) => f.venue_id),
+      ...pool.filter(soon).sort(byRank).map((f) => f.venue_id),
+    ].filter(Boolean))].slice(0, 6);
+  // The subject's own mark: the crest the header already shows, if it has one.
+  const mark = name === 'league' || name === 'player' ? head.querySelector('.crest img')?.getAttribute('src') : null;
+  const key = `${name}:${parts[1] ?? ''}:${venues[0] ?? ''}`;
+  let layer = old;
+  if (!layer || layer.dataset.key !== key) {
+    old?.remove();
+    if (!venues.length && !mark) return;
+    layer = document.createElement('div');
+    layer.className = 'ph-bg';
+    layer.dataset.key = key;
+    layer.setAttribute('aria-hidden', 'true');
+    layer.innerHTML = `${venues.length ? venueShot(venues, 'ph-shot', true) : ''}${mark ? `<img class="ph-mark" src="${esc(mark)}" alt="" decoding="async">` : ''}`;
+    for (const img of layer.querySelectorAll('img')) img.addEventListener('load', () => img.classList.add('is-in'), { once: true });
+    app.prepend(layer);
+  }
+  // Down to just under the header, measured now the page is drawn.
+  const top = app.getBoundingClientRect().top;
+  layer.style.height = `${Math.round(head.getBoundingClientRect().bottom - top + 96)}px`;
+}
+
 function finishRoute(name, soft, keepY, backTo) {
   {
     if (!soft) setReading(name);
@@ -8526,6 +8656,11 @@ function finishRoute(name, soft, keepY, backTo) {
     crawlable(app);
     appLinks(app);
     pageTitle(name);
+    // A competition with a look of its own (comptheme.js) dresses the whole
+    // page: its own page, and its matches.
+    const comp = name === 'league' ? themeOf(parseHash().parts[1]) : name === 'fixture' ? state.comp : null;
+    if (comp) document.body.dataset.comp = comp; else delete document.body.dataset.comp;
+    headDepth(name, parseHash().parts, navTicket).catch(() => {});
     // A match page's address becomes the match's real one, so a link copied
     // from the address bar unfurls into that match's share card rather than
     // the front page's. Only a plain match route is rewritten; one carrying
