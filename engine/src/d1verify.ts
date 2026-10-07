@@ -72,7 +72,11 @@ function canon(v: Json): string {
 }
 /** Every array with its items sorted: two answers that differ only in the order of ties compare equal. */
 function sorted(v: Json): Json {
-  if (Array.isArray(v)) return v.map(sorted).sort((x, y) => (canon(x) < canon(y) ? -1 : canon(x) > canon(y) ? 1 : 0));
+  if (Array.isArray(v)) {
+    // Rows with an id line up by it; anything else by its text.
+    const key = (x: Json) => (x && typeof x === 'object' && !Array.isArray(x) && 'id' in x ? `id:${String((x as { id: unknown }).id)}` : canon(x));
+    return v.map(sorted).sort((x, y) => (key(x) < key(y) ? -1 : key(x) > key(y) ? 1 : 0));
+  }
   if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, sorted(x)]));
   return v;
 }
