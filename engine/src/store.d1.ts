@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { config } from './config.ts';
 import { splitStatements } from './sql-split.ts';
 
@@ -23,7 +24,59 @@ interface D1Response<T> {
 
 export const dbStats = { queries: 0, rowsWritten: 0, rowsRead: 0 };
 
+/**
+ * The key the Worker's engine door checks (worker/src/enginedb.ts): an HMAC of
+ * the Cloudflare API token under a fixed label. deploy.yml derives the same
+ * value with openssl and stores it as the Worker secret ENGINE_DB_KEY.
+ */
+export function engineDbKey(token = config.d1.token): string {
+  return createHmac('sha256', token).update('offside-engine-db-v1').digest('hex');
+}
+
+/**
+ * Statements through the Worker (`ENGINE_DB_URL`), as one D1 batch: one
+ * transaction, one round trip. The REST API allows about 1,200 requests in
+ * five minutes per user; a slate pass makes close to 4,000 queries.
+ */
+async function viaWorker<T>(statements: Array<{ sql: string; params: unknown[] }>): Promise<T[][]> {
+  let lastErr = '';
+  for (let attempt = 0; attempt <= 4; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 2 ** attempt * 500));
+    try {
+      dbStats.queries += statements.length;
+      const res = await fetch(config.d1.gateway, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-engine-key': engineDbKey() },
+        body: JSON.stringify({ statements }),
+      });
+      if (res.status === 429 || res.status >= 500) {
+        lastErr = `${res.status} ${(await res.text()).slice(0, 200)}`;
+        continue;
+      }
+      const body = await res.json().catch(() => null) as { results?: Array<{ rows: T[] }>; error?: string } | null;
+      if (!res.ok || !body?.results) {
+        // A SQL error will not succeed on retry.
+        throw new Error(`D1 error: ${body?.error ?? res.status}\nSQL: ${statements[0]?.sql.slice(0, 400)}`);
+      }
+      const out = body.results.map((r) => r.rows ?? []);
+      for (const rows of out) dbStats.rowsRead += rows.length;
+      return out;
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('D1 error:')) throw err;
+      lastErr = err instanceof Error ? err.message : String(err);
+    }
+  }
+  throw new Error(`D1 request failed after retries: ${lastErr}`);
+}
+
+/** D1 wants plain values: booleans as 0/1, undefined as null, objects as JSON text. */
+function bindable(params: unknown[]): unknown[] {
+  return params.map((v) => (v === undefined ? null : typeof v === 'boolean' ? (v ? 1 : 0)
+    : v !== null && typeof v === 'object' && !(v instanceof Uint8Array) ? JSON.stringify(v) : v));
+}
+
 async function request<T>(sql: string, params: unknown[]): Promise<T[]> {
+  if (config.d1.gateway) return (await viaWorker<T>([{ sql, params: bindable(params) }]))[0] ?? [];
   const url = `${API}/accounts/${config.d1.accountId}/d1/database/${config.d1.databaseId}/query`;
 
   let lastErr = '';
@@ -115,26 +168,24 @@ export async function insertMany(
           .join(', ')}`
       : '');
 
-  let written = 0;
+  const statements: Array<{ sql: string; params: unknown[] }> = [];
   for (let i = 0; i < rows.length; i += chunkRows) {
     const chunk = rows.slice(i, i + chunkRows);
     const sql =
       `INSERT INTO ${table} (${colList}) VALUES ` +
       chunk.map(() => placeholders).join(', ') +
       (conflict ? ` ${conflict}` : '');
-    const params = chunk.flatMap((row) =>
-      columns.map((c) => {
-        const v = row[c];
-        if (v === undefined) return null;
-        if (typeof v === 'boolean') return v ? 1 : 0;
-        return v;
-      }),
-    );
-    await request(sql, params);
-    written += chunk.length;
-    dbStats.rowsWritten += chunk.length;
+    const params = chunk.flatMap((row) => bindable(columns.map((c) => row[c])));
+    statements.push({ sql, params });
   }
-  return written;
+  // Through the Worker, many chunks to a request; over REST, one at a time.
+  if (config.d1.gateway) {
+    for (let i = 0; i < statements.length; i += config.d1.batchSize) await viaWorker(statements.slice(i, i + config.d1.batchSize));
+  } else {
+    for (const st of statements) await request(st.sql, st.params);
+  }
+  dbStats.rowsWritten += rows.length;
+  return rows.length;
 }
 
 // ------------------------------------------------------------------- kv

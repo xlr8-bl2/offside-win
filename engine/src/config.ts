@@ -95,6 +95,12 @@ export const config = {
     accountId: process.env.CF_ACCOUNT_ID ?? '',
     databaseId: process.env.CF_D1_DATABASE_ID ?? '',
     token: process.env.CF_API_TOKEN ?? '',
+    /**
+     * The Worker's engine door (worker/src/enginedb.ts), e.g.
+     * https://offside.win/api/internal/db. When set, every statement goes
+     * through it instead of the REST API; the key is derived from the token.
+     */
+    gateway: process.env.ENGINE_DB_URL ?? '',
     /** D1 REST caps statements per batch; stay well under it. */
     batchSize: num('D1_BATCH', 40),
     /**

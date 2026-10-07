@@ -64,14 +64,16 @@ Tick each line as it lands, with the commit or run that did it.
 
 Stage 1, the public site:
 - [x] Encrypted export of every table (`engine/src/dbexport.ts`, run 37557342873).
-- [ ] `schema.sql` rewritten as the full D1 (SQLite) schema: all 40 tables, indexes, no RLS or
-      functions. The current `schema.sql` is the September D1 schema and is stale.
+- [x] `schema.sql` rewritten as the full D1 (SQLite) schema: all 40 tables, 28 indexes, no RLS or
+      functions. Generated from `schema.pg.sql` once; hand-maintained from now on. Applies twice
+      cleanly on SQLite.
 - [ ] D1 database created (`offside-win` or a new one) and its ID in `worker/wrangler.toml`
       `[[d1_databases]]`, binding `DB`.
 - [ ] `db:import`: decrypt the export in a workflow and load it into D1, batched.
-- [ ] Engine writes to D1. `engine/src/store.d1.ts` (Cloudflare REST API) still exists from
-      September. Mind the API's rate limit, about 1,200 requests per 5 minutes per user: the slate
-      makes many queries. The plan is a Worker-side batch endpoint, below.
+- [ ] Engine writes to D1. Built: the Worker's `POST /api/internal/db` (`worker/src/enginedb.ts`)
+      runs a batch of statements on the `DB` binding behind `x-engine-key`; `engine/src/store.d1.ts`
+      sends there when `ENGINE_DB_URL` is set (REST API otherwise). Still to do: deploy.yml setting
+      `ENGINE_DB_KEY`, and the workflows' env.
 - [ ] Postgres-only SQL in the engine ported or guarded. Known spots: `slate.ts` around line 1590
       (the market snapshot uses `jsonb`, `LATERAL`, `extract(epoch)`), and the `config.dbBackend ===
       'postgres'` branches in `slate.ts` and `settle.ts`.

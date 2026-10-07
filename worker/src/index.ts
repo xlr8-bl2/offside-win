@@ -36,6 +36,7 @@ const GOODWILL_CRON = '20 6 * * *';
 import { authEmailHook, type HookEnv } from './authhook.ts';
 import { admin, type AdminEnv } from './admin.ts';
 import { inbound, type InboundMessage } from './support.ts';
+import { engineDb, type EngineDbEnv } from './enginedb.ts';
 import { socials, type SocialEnv } from './social.ts';
 import { fixtureChanges, liveList, liveMatch, type LiveEnv } from './live.ts';
 import { EDGE_PATHS, edgeCached } from './edge.ts';
@@ -172,6 +173,9 @@ const worker = {
       }
       return env.ASSETS.fetch(request);
     }
+
+    // The engine's way into D1 (enginedb.ts). Keyed; a 404 without the key.
+    if (path === '/api/internal/db') return await engineDb(request, env as unknown as EngineDbEnv);
 
     const jwt = bearer(request);
 
