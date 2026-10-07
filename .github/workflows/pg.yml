@@ -19,7 +19,7 @@ on:
         # Free text for the commands that take one. `grant` reads an email and
         # an optional second word: "you@example.com", "you@example.com 30",
         # "you@example.com off".
-        description: 'Argument for the command (grant: "email [days|off]"; plans: "id <checkout url | price in pence>"; trace: the code from #/trace; mail:setup: an email to send a test to; mail:route: the inbox support@ and hello@ forward to, or blank to check; mail:auth: on, off or blank; record:reset: dry, undo or blank)'
+        description: 'Argument for the command (grant: "email [days|off]"; plans: "id <checkout url | price in pence>"; trace: the code from #/trace; mail:setup: an email to send a test to; mail:route: the inbox support@ and hello@ forward to, or blank to check; mail:auth: on, off or blank; record:reset: dry, undo, undo-dry or blank)'
         type: string
         default: ''
       leagues:
@@ -98,7 +98,10 @@ jobs:
           echo "$(ls engine/export | wc -l) files"
       - name: Run ${{ inputs.command }} against Postgres
         env:
-          DB_BACKEND: postgres
+          # D1 since the move off Supabase (HANDOFF.md). db:export and db:verify
+          # still read Postgres: the old database and the throwaway one.
+          DB_BACKEND: ${{ (inputs.command == 'db:export' || inputs.command == 'db:verify') && 'postgres' || 'd1' }}
+          ENGINE_DB_URL: ${{ (inputs.command == 'db:export' || inputs.command == 'db:verify' || inputs.command == 'db:import' || inputs.command == 'db:accounts') && '' || 'https://offside.win/api/internal/db' }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           BSD_API_KEY: ${{ secrets.BSD_API_KEY }}
           LEAGUES: ${{ inputs.leagues == 'all' && '' || inputs.leagues }}
