@@ -21,6 +21,8 @@
  */
 
 import { accountOf, provider, stopRenewals, type PayEnv } from './pay.ts';
+import { sessionAccount } from './auth.ts';
+import { deleteAccountData } from './paydb.ts';
 import { accountDeletedMail, sendMail } from './mail.ts';
 
 interface Env extends PayEnv {
@@ -40,6 +42,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export async function deleteAccount(request: Request, env: Env, jwt: string | null): Promise<Response> {
   if (request.method !== 'POST') return say('method not allowed', 405);
   if (!jwt) return say('Sign in first.', 401);
+  // On D1 since the move off Supabase: the session names the account, and
+  // removing the account row is removing the sign-in.
+  if (env.DB) return deleteOnD1(env, jwt);
   if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return say('The database is not configured.', 503);
   if (!env.SUPABASE_SERVICE_KEY) {
     return say('Deleting an account from the site is not switched on yet. Write to support@offside.win and it will be done by hand.', 503);
@@ -80,5 +85,24 @@ export async function deleteAccount(request: Request, env: Env, jwt: string | nu
   // The receipt for the deletion. The address is used once, here, and kept
   // nowhere: the account it belonged to is already gone.
   if (email) await sendMail(env, email, accountDeletedMail({ stoppedRenewal: renewing }));
+  return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
+}
+
+async function deleteOnD1(env: Env, jwt: string): Promise<Response> {
+  const db = env.DB!;
+  const me = await sessionAccount(db, jwt);
+  if (!me) return say('Your sign-in has expired. Sign in again, then delete the account.', 401);
+  const whop = provider(env) === 'whop' && Boolean(env.WHOP_API_KEY);
+  const renewing = whop && Boolean((await accountOf(env, jwt).catch(() => null))?.whop);
+  if (whop && !(await stopRenewals(env, { id: me.id, email: me.email }))) {
+    return say('Nothing was deleted: your membership with Whop could not be stopped just now, and deleting would leave it charging. Try again in a minute.', 503);
+  }
+  try {
+    await deleteAccountData(db, me.id, me.email);
+  } catch (err) {
+    console.error('delete:', err instanceof Error ? err.message : String(err));
+    return say('Nothing was deleted: the database refused. Try again in a minute.', 502);
+  }
+  await sendMail(env, me.email, accountDeletedMail({ stoppedRenewal: renewing }));
   return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
 }

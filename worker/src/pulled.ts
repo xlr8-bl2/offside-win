@@ -11,11 +11,15 @@
 
 import { pulledMail, sendMail, type MailEnv } from './mail.ts';
 import { matchPath } from './seo.ts';
+import type { AuthDb } from './auth.ts';
+import { pulledClaim } from './jobsdb.ts';
 
 export interface PulledEnv extends MailEnv {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_KEY?: string;
+  /** D1, since the move off Supabase (jobsdb.ts). */
+  DB?: AuthDb;
 }
 
 type Rec = Record<string, any>;
@@ -25,19 +29,10 @@ export interface PulledOutcome { members: number; sent: number; failed: number }
 
 export async function pulledAlerts(env: PulledEnv): Promise<PulledOutcome> {
   const out: PulledOutcome = { members: 0, sent: 0, failed: 0 };
-  if (!env.SUPABASE_SERVICE_KEY) return out;
+  if (!env.SUPABASE_SERVICE_KEY && !env.DB) return out;
   // No way to send mail yet: leave them unclaimed rather than mark them sent.
   if (!env.EMAIL && !env.BREVO_API_KEY) return out;
-  const res = await fetch(new URL('/rest/v1/rpc/pulled_claim', env.SUPABASE_URL), {
-    method: 'POST',
-    headers: {
-      apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      'content-type': 'application/json', accept: 'application/json',
-    },
-    body: '{}',
-  });
-  if (!res.ok) throw new Error(`pulled_claim: database ${res.status}`);
-  const bundles = (await res.json()) as Rec[];
+  const bundles = env.DB ? await pulledClaim(env.DB) : await claimFromSupabase(env);
   for (const b of Array.isArray(bundles) ? bundles : []) {
     const calls = (Array.isArray(b['calls']) ? b['calls'] : []) as Rec[];
     if (typeof b['email'] !== 'string' || !calls.length) continue;
@@ -53,4 +48,17 @@ export async function pulledAlerts(env: PulledEnv): Promise<PulledOutcome> {
   // Shapes only: never an address.
   if (out.members) console.log('pulled:', JSON.stringify(out));
   return out;
+}
+
+async function claimFromSupabase(env: PulledEnv): Promise<Rec[]> {
+  const res = await fetch(new URL('/rest/v1/rpc/pulled_claim', env.SUPABASE_URL), {
+    method: 'POST',
+    headers: {
+      apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      'content-type': 'application/json', accept: 'application/json',
+    },
+    body: '{}',
+  });
+  if (!res.ok) throw new Error(`pulled_claim: database ${res.status}`);
+  return (await res.json()) as Rec[];
 }

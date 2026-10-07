@@ -13,6 +13,8 @@
  */
 
 import { sessionAccount, type AuthDb } from './auth.ts';
+import * as pdb from './paydb.ts';
+import { getAccount, getPromos, type D1Read } from './d1read.ts';
 import { accessEndedMail, membershipMail, receiptMail, renewalStoppedMail, renewedMail, sendMail, type MailEnv } from './mail.ts';
 import { createCheckoutLink, parseWebhook, type CoinflowConfig } from './coinflow.ts';
 import { verifyWebhook } from './webhook.ts';
@@ -58,7 +60,20 @@ const json = (body: unknown, status = 200) =>
  * mistake. Reads go through the Worker's ordinary path with the reader's own
  * token; this exists for the webhook, which has no reader.
  */
-async function rpcAsService(env: PayEnv, fn: string, args: Record<string, unknown>) {
+async function rpcAsService(env: PayEnv, fn: string, args: Record<string, unknown>): Promise<any> {
+  // On D1 since the move off Supabase (paydb.ts), with the same answers.
+  if (env.DB) {
+    const db = env.DB;
+    const a = args as any;
+    switch (fn) {
+      case 'record_entitlement': return pdb.recordEntitlement(db, a);
+      case 'revoke_entitlement': return pdb.revokeEntitlement(db, String(a.p_email ?? ''), a.p_status ?? null);
+      case 'stop_entitlement_renewal': return pdb.stopEntitlementRenewal(db, String(a.p_email ?? ''));
+      case 'record_payment': return pdb.recordPayment(db, a);
+      case 'revoke_membership': return pdb.revokeMembership(db, String(a.p_provider), String(a.p_ref), String(a.p_status));
+      default: throw new Error(`no D1 version of ${fn}`);
+    }
+  }
   if (!env.SUPABASE_SERVICE_KEY) throw new Error('no service credentials configured');
 
   const res = await fetch(new URL(`/rest/v1/rpc/${fn}`, env.SUPABASE_URL), {
@@ -153,6 +168,12 @@ export const NO_CONSENT = 'Tick both boxes above the payment first. Nothing has 
  */
 export async function recordConsent(env: PayEnv, jwt: string, planId: string, c: Consent): Promise<void> {
   try {
+    if (env.DB) {
+      const a = await sessionAccount(env.DB, jwt);
+      if (a) await pdb.recordConsent(env.DB, a.id, planId, c.terms);
+      else console.error('consent: not recorded, no session');
+      return;
+    }
     const res = await fetch(new URL('/rest/v1/rpc/record_consent', env.SUPABASE_URL), {
       method: 'POST',
       headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${jwt}`, 'content-type': 'application/json' },
@@ -198,8 +219,19 @@ export function switchTerms(
   return { ok: true, terms: { from: current.plan_id, until: Number(current.expires_at), trialDays: days } };
 }
 
+/** get_account() for the session's account, from D1. */
+async function accountD1(env: PayEnv, jwt: string): Promise<Record<string, unknown> | null> {
+  const a = env.DB ? await sessionAccount(env.DB, jwt) : null;
+  return a ? getAccount(env.DB as unknown as D1Read, { id: a.id, email: a.email }) : null;
+}
+
 /** The reader's live membership, read with their own token. */
 async function liveMembershipOf(env: PayEnv, jwt: string): Promise<{ plan_id: string; expires_at: number; via: string | null } | null> {
+  if (env.DB) {
+    const m = (await accountD1(env, jwt))?.membership as { plan_id?: string; expires_at?: number; via?: string } | null | undefined;
+    if (!m?.plan_id || !(Number(m.expires_at) > Date.now() / 1000)) return null;
+    return { plan_id: m.plan_id, expires_at: Number(m.expires_at), via: m.via ?? null };
+  }
   const res = await fetch(new URL('/rest/v1/rpc/get_account', env.SUPABASE_URL), {
     method: 'POST',
     headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${jwt}`, 'content-type': 'application/json' },
@@ -213,6 +245,11 @@ async function liveMembershipOf(env: PayEnv, jwt: string): Promise<{ plan_id: st
 
 /** The reader's account, read with their own token: the live membership and any Whop subscription still renewing. */
 export async function accountOf(env: PayEnv, jwt: string): Promise<{ whop: { manage_url?: string | null; until?: number | null } | null; plan: string | null } | null> {
+  if (env.DB) {
+    const a = await accountD1(env, jwt);
+    if (!a) return null;
+    return { whop: (a.whop as { manage_url?: string | null; until?: number | null } | null) ?? null, plan: (a.membership as { plan_id?: string } | null)?.plan_id ?? null };
+  }
   const res = await fetch(new URL('/rest/v1/rpc/get_account', env.SUPABASE_URL), {
     method: 'POST',
     headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${jwt}`, 'content-type': 'application/json' },
@@ -274,12 +311,17 @@ export async function offerFor(
 ): Promise<Offer | { error: string } | null> {
   if (promoId === undefined || promoId === null || promoId === '') return null;
   if (typeof promoId !== 'string' || !/^[a-z0-9_-]{1,40}$/i.test(promoId)) return { error: 'That offer is not running. Nothing has been charged.' };
-  const res = await fetch(new URL('/rest/v1/rpc/get_promos', env.SUPABASE_URL), {
-    method: 'POST',
-    headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_ANON_KEY}`, 'content-type': 'application/json', accept: 'application/json' },
-    body: '{}',
-  });
-  const live = res.ok ? await res.json() as Array<Record<string, unknown>> : [];
+  let live: Array<Record<string, unknown>> = [];
+  if (env.DB) {
+    live = await getPromos(env.DB as unknown as D1Read) as Array<Record<string, unknown>>;
+  } else {
+    const res = await fetch(new URL('/rest/v1/rpc/get_promos', env.SUPABASE_URL), {
+      method: 'POST',
+      headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_ANON_KEY}`, 'content-type': 'application/json', accept: 'application/json' },
+      body: '{}',
+    });
+    live = res.ok ? await res.json() as Array<Record<string, unknown>> : [];
+  }
   const p = Array.isArray(live) ? live.find((x) => x['id'] === promoId) : undefined;
   if (!p) return { error: 'That offer has ended. Nothing has been charged.' };
   if (p['plan_id'] !== plan.id) return { error: 'That offer is for a different plan. Nothing has been charged.' };
@@ -299,6 +341,7 @@ export async function offerFor(
 
 /** Whether an account has ever had a membership, by any route. */
 async function hadMembership(env: PayEnv, user: { id: string; email: string | null }): Promise<boolean> {
+  if (env.DB) return pdb.hadMembership(env.DB, user);
   // Without the service key the answer cannot be checked, so the trial is refused rather than given twice.
   if (!env.SUPABASE_SERVICE_KEY) return true;
   const as = { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, accept: 'application/json' };
@@ -324,6 +367,16 @@ async function hadMembership(env: PayEnv, user: { id: string; email: string | nu
   return answers.some(Boolean);
 }
 
+/** One plan on sale, by id. */
+async function planRow(env: PayEnv, planId: string): Promise<Record<string, unknown> | null> {
+  if (env.DB) return pdb.activePlan(env.DB, planId) as Promise<Record<string, unknown> | null>;
+  const rows = await fetch(
+    new URL(`/rest/v1/plan?id=eq.${encodeURIComponent(planId)}&active=eq.1&select=id,name,amount_minor,currency,days,checkout_url`, env.SUPABASE_URL),
+    { headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_ANON_KEY}`, accept: 'application/json' } },
+  );
+  return (rows.ok ? await rows.json() as any[] : [])[0] ?? null;
+}
+
 export async function checkout(request: Request, env: PayEnv, jwt: string | null): Promise<Response> {
   // There is a real window where the code is deployed and the merchant account
   // is not. Saying so plainly beats a 500 that reads like the site is broken.
@@ -345,12 +398,7 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
   } catch { /* an empty body means the default plan, and no consent */ }
   if (!consent) return json({ error: NO_CONSENT }, 400);
 
-  const rows = await fetch(
-    new URL(`/rest/v1/plan?id=eq.${encodeURIComponent(planId)}&active=eq.1&select=id,name,amount_minor,currency,days,checkout_url`, env.SUPABASE_URL),
-    { headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_ANON_KEY}`, accept: 'application/json' } },
-  );
-  const plans = rows.ok ? await rows.json() as any[] : [];
-  const plan = plans[0];
+  const plan = await planRow(env, planId) as any;
   if (!plan) return json({ error: 'That plan is not available.' }, 404);
   await recordConsent(env, jwt!, String(plan.id), consent);
 
@@ -465,6 +513,12 @@ export async function renewal(request: Request, env: PayEnv, jwt: string | null)
     }
   }
 
+  if (env.DB) {
+    const user = await identify(env, jwt);
+    if (!user) return json({ error: 'Sign in first.' }, 401);
+    await pdb.setAutoRenew(env.DB, user.id, on);
+    return json({ auto_renew: on });
+  }
   const now = Math.floor(Date.now() / 1000);
   const res = await fetch(new URL('/rest/v1/membership', env.SUPABASE_URL), {
     method: 'PATCH',
@@ -581,10 +635,11 @@ const eventTypeOf = (raw: string): string | null => {
  * which carries the buyer's details.
  */
 async function noteWebhook(env: PayEnv, note: Record<string, unknown>): Promise<void> {
-  if (!env.SUPABASE_SERVICE_KEY) return;
+  if (!env.SUPABASE_SERVICE_KEY && !env.DB) return;
   const now = Math.floor(Date.now() / 1000);
   const o = note['outcome'] as Record<string, unknown> | null | undefined;
   const safe = { ...note, at: now, outcome: o ? { ok: o['ok'], applied: o['applied'], reason: o['reason'], ignored: o['ignored'], skipped: o['skipped'], error: o['error'] } : null };
+  if (env.DB) { await pdb.kvSet(env.DB, 'pay:last_webhook', JSON.stringify(safe)).catch(() => {}); return; }
   try {
     await fetch(new URL('/rest/v1/kv', env.SUPABASE_URL), {
       method: 'POST',
@@ -667,6 +722,7 @@ async function handleWhop(raw: string, via: string, env: PayEnv): Promise<Respon
 
 /** The sign-in email of an account, asked of GoTrue with the service key. */
 async function accountEmail(env: PayEnv, userId: string): Promise<string | null> {
+  if (env.DB) return pdb.accountEmail(env.DB, userId);
   if (!env.SUPABASE_SERVICE_KEY) return null;
   const res = await fetch(new URL(`/auth/v1/admin/users/${userId}`, env.SUPABASE_URL), {
     headers: { apikey: env.SUPABASE_SERVICE_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
@@ -679,11 +735,15 @@ async function accountEmail(env: PayEnv, userId: string): Promise<string | null>
 /** Our plan id for Whop's, matched on the checkout link the plan row carries. */
 async function planForWhop(env: PayEnv, planRef: string | null): Promise<string> {
   if (!planRef) return 'monthly';
-  const res = await fetch(
-    new URL('/rest/v1/plan?active=eq.1&select=id,checkout_url', env.SUPABASE_URL),
-    { headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY ?? env.SUPABASE_ANON_KEY}`, accept: 'application/json' } },
-  );
-  const plans = res.ok ? await res.json() as Array<{ id: string; checkout_url: string | null }> : [];
+  let plans: Array<{ id: string; checkout_url: string | null }> = [];
+  if (env.DB) plans = await pdb.activePlans(env.DB);
+  else {
+    const res = await fetch(
+      new URL('/rest/v1/plan?active=eq.1&select=id,checkout_url', env.SUPABASE_URL),
+      { headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY ?? env.SUPABASE_ANON_KEY}`, accept: 'application/json' } },
+    );
+    plans = res.ok ? await res.json() as Array<{ id: string; checkout_url: string | null }> : [];
+  }
   const hit = plans.find((p) => typeof p.checkout_url === 'string' && p.checkout_url.includes(planRef));
   return hit?.id ?? 'monthly';
 }
@@ -708,6 +768,7 @@ export async function payStatus(env: PayEnv): Promise<Response> {
       webhook_secret_format: env.WHOP_WEBHOOK_SECRET ? (env.WHOP_WEBHOOK_SECRET.startsWith('ws_') ? 'ws_' : env.WHOP_WEBHOOK_SECRET.startsWith('whsec_') ? 'whsec_' : 'other') : null,
     },
     service_key: Boolean(env.SUPABASE_SERVICE_KEY),
+    database: env.DB ? 'd1' : 'supabase',
     last_webhook: await lastWebhook(env),
     last_sweep: await lastKv(env, 'pay:last_sweep'),
   });
@@ -715,6 +776,7 @@ export async function payStatus(env: PayEnv): Promise<Response> {
 
 const lastWebhook = (env: PayEnv) => lastKv(env, 'pay:last_webhook');
 async function lastKv(env: PayEnv, key: string): Promise<unknown> {
+  if (env.DB) return pdb.kvGetJson(env.DB, key).catch(() => null);
   if (!env.SUPABASE_SERVICE_KEY) return null;
   try {
     const res = await fetch(new URL(`/rest/v1/kv?k=eq.${encodeURIComponent(key)}&select=v`, env.SUPABASE_URL), {
@@ -779,6 +841,7 @@ export async function listWhopMemberships(env: PayEnv, sinceDays: number, pages 
 
 let planDays: Record<string, number> | null = null;
 async function daysOf(env: PayEnv, plan: string): Promise<number> {
+  if (!planDays && env.DB) planDays = await pdb.planDays(env.DB);
   if (!planDays) {
     const res = await fetch(new URL('/rest/v1/plan?select=id,days', env.SUPABASE_URL), {
       headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_ANON_KEY}`, accept: 'application/json' },
@@ -847,6 +910,7 @@ export async function grantFromMembership(env: PayEnv, m: Rec): Promise<GrantOut
 
 /** Whether an earlier period of this Whop membership was granted (refs are `<membership>:<period end>`). */
 async function grantedBefore(env: PayEnv, membershipId: string, current: string): Promise<boolean> {
+  if (env.DB) return pdb.grantedBefore(env.DB, membershipId, current).catch(() => false);
   if (!env.SUPABASE_SERVICE_KEY || !/^[A-Za-z0-9_-]{1,80}$/.test(membershipId)) return false;
   try {
     const res = await fetch(new URL(`/rest/v1/entitlement_grant?ref=like.${encodeURIComponent(`${membershipId}:*`)}&ref=neq.${encodeURIComponent(current)}&select=ref&limit=1`, env.SUPABASE_URL), {
@@ -860,7 +924,8 @@ async function grantedBefore(env: PayEnv, membershipId: string, current: string)
 async function confirmByEmail(env: PayEnv, email: string, plan: string, until: number, uid: string | null): Promise<void> {
   try {
     let consent: { at: number; terms: string } | null = null;
-    if (uid && env.SUPABASE_SERVICE_KEY) {
+    if (uid && env.DB) consent = await pdb.latestConsent(env.DB, uid);
+    else if (uid && env.SUPABASE_SERVICE_KEY) {
       const res = await fetch(new URL(`/rest/v1/purchase_consent?user_id=eq.${uid}&select=created_at,terms_version&order=created_at.desc&limit=1`, env.SUPABASE_URL), {
         headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, accept: 'application/json' },
       });
@@ -902,7 +967,7 @@ export async function sweepWhop(env: PayEnv): Promise<{ checked: number; granted
   // The first failure's message, for the status check. Messages here are the
   // database's or Whop's own error text, never a key or a payload.
   const fail = (err: unknown) => { tally.errors++; tally.error ??= (err instanceof Error ? err.message : String(err)).slice(0, 300); };
-  if (provider(env) !== 'whop' || !env.WHOP_API_KEY || !env.SUPABASE_SERVICE_KEY) return tally;
+  if (provider(env) !== 'whop' || !env.WHOP_API_KEY || (!env.SUPABASE_SERVICE_KEY && !env.DB)) return tally;
   let list: Rec[] = [];
   // Every membership that can still be renewing, not only recent ones: a
   // monthly subscription's second and later renewals were outside a 40-day
@@ -917,7 +982,8 @@ export async function sweepWhop(env: PayEnv): Promise<{ checked: number; granted
   }
   const now = Math.floor(Date.now() / 1000);
   try {
-    await fetch(new URL('/rest/v1/kv', env.SUPABASE_URL), {
+    if (env.DB) await pdb.kvSet(env.DB, 'pay:last_sweep', JSON.stringify({ at: now, ...tally }));
+    else await fetch(new URL('/rest/v1/kv', env.SUPABASE_URL), {
       method: 'POST',
       headers: {
         apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
@@ -959,11 +1025,7 @@ export async function charge(request: Request, env: PayEnv, jwt: string | null):
   const token = typeof body.confirmation_token === 'string' && /^ctok_[A-Za-z0-9_]{4,200}$/.test(body.confirmation_token) ? body.confirmation_token : '';
   if (!planId || !token) return json({ error: 'The card details did not come through. Nothing has been charged. Try again.' }, 400);
 
-  const rows = await fetch(
-    new URL(`/rest/v1/plan?id=eq.${encodeURIComponent(planId)}&active=eq.1&select=id,name,amount_minor,currency,days`, env.SUPABASE_URL),
-    { headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_ANON_KEY}`, accept: 'application/json' } },
-  );
-  const plan = (rows.ok ? await rows.json() as any[] : [])[0];
+  const plan = await planRow(env, planId) as any;
   if (!plan) return json({ error: 'That plan is not available.' }, 404);
   // A reader with a membership running is switching, and a switch charges
   // nothing today: that goes through Whop's own checkout, never a card charge

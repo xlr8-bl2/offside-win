@@ -1,6 +1,6 @@
 # Handoff: read this first
 
-**Last updated:** 7 October 2026, about 12:30 UTC, by the Claude Code session working on branch
+**Last updated:** 7 October 2026, about 13:00 UTC, by the Claude Code session working on branch
 `claude/amazing-galileo-isfeue`.
 
 **Keep this file current.** The owner may move the work to a different coding agent or account
@@ -28,36 +28,36 @@ alerts, goodwill), which still call Supabase and fail quietly. Members' calls sh
 **Next: stage 2** (checklist below). Supabase keeps the 6 accounts; the export artifacts
 (runs 37557342873 and 37560985337, kept 90 days) hold them too.
 
-### Stage 2, part 1: sign-in from D1 (built, on branch `claude/amazing-galileo-isfeue`, not merged)
+### Stage 2: accounts, payments and the rest, on D1
 
-- **Worker** `worker/src/auth.ts`: `POST /api/auth/link` (email link, one use, one hour, 5 an hour
-  per address and 300 an hour site-wide), `POST /api/auth/verify`, `POST /api/auth/google` (Google
-  ID token checked against Google's keys, `GOOGLE_CLIENT_ID` and the nonce), `GET /api/auth/me`,
-  `POST /api/auth/signout`. Sessions are random tokens, stored as SHA-256 in `auth_session`, 60
-  days, extended while used. The Worker's 10-minute cron clears spent ones.
-- **Reads are member-aware again:** `rpc()` turns the bearer token into a `Viewer`
-  (`viewerFor`), and `d1read.ts` takes `member` from it (board, match, picks, team, league,
-  search, slip). `get_account` is served from D1 (`getAccount`).
-- **Account settings** `worker/src/profile.ts`: `POST /api/account/save_profile`, `set_follow`,
-  `set_call_alerts`, same checks and answers as the old Postgres functions.
-- **Payments and admin** now identify the reader by the new session (`identify` in pay.ts,
-  `whoIsAdmin` in admin.ts), but their own data still goes to Supabase: part 2.
-- **Front end** `public/js/lib/auth.js`: no Supabase SDK. Session in `ow.session`; old `sb-*`
-  keys are cleared on load (so everyone is signed out once at the switch). Email links land on
-  `/?signin=<token>`, redeemed by a POST from the page.
-- **Accounts:** `pg.yml` command `db:accounts` (`engine/src/d1accounts.ts`) upserts the export's
-  `auth.users` into `account`, keeping the Supabase ids so memberships and profiles still match.
-  Touches only `account`; safe while the engine runs. Default export is run 37560985337.
-- **Checked:** worker tests 207 pass (10 new in `worker/test/auth.test.ts`, on a SQLite built
-  from `schema.sql`), engine 637 pass, typecheck clean; ui-verify clean on `#/signin`, `#/board`,
-  `#/`, and a browser run of the whole email-link flow with the auth routes stubbed.
-- **To go live (owner's OK needed):** merge, then dispatch `pg.yml` `db:accounts`, then sign in
-  on the phone by email and by Google.
+**Part 1, sign-in (live since about 11:50 UTC on 7 October, PR #155):**
+- `worker/src/auth.ts`: email link (`POST /api/auth/link`, one use, one hour, 5 an hour per
+  address, 300 an hour site-wide), `POST /api/auth/verify`, `POST /api/auth/google` (ID token
+  checked against Google's keys, `GOOGLE_CLIENT_ID` and the nonce), `GET /api/auth/me`,
+  `POST /api/auth/signout`. Sessions are random tokens stored as SHA-256 in `auth_session`,
+  60 days, extended while used; the 10-minute cron clears spent ones.
+- Reads are member-aware: `rpc()` turns the bearer token into a `Viewer` and `d1read.ts` takes
+  `member` from it. `get_account` and the account settings (`worker/src/profile.ts`) run on D1.
+- Front end `public/js/lib/auth.js`: no Supabase SDK; session in `ow.session`; old `sb-*` keys
+  cleared on load. Email links land on `/?signin=<token>`, redeemed by a POST from the page.
+- `db:accounts` (pg.yml) copied the 6 Supabase accounts into `account` with their ids:
+  run 37616517389, 6 accounts, 5 with Google, no membership without an account.
 
-Still broken until part 2: checkout and the Whop webhook/sweep (they write to Supabase), the
-admin dashboard's data, account deletion, support tickets, goodwill, pulled-call alerts, and the
-`images` and `cards` jobs (Supabase Storage, failing every run since the block; the site falls
-back to the default share picture, nothing else is affected).
+**Part 2, everything else (branch `claude/amazing-galileo-isfeue`, see the PR after #155):**
+- `worker/src/paydb.ts`: record_entitlement, revoke_entitlement, stop_entitlement_renewal,
+  record_payment, revoke_membership, consent, plans, kv, account deletion. `pay.ts` uses it
+  whenever `DB` is bound: checkout, the Whop webhook, the 10-minute sweep, confirm, renewal.
+- `worker/src/jobsdb.ts`: goodwill (credit, Whop applied, noted, ended) and pulled-call alerts.
+- `worker/src/admindb.ts`: every admin_* function and support_inbound; `admin.ts` and
+  `support.ts` call it through their one database helper.
+- `worker/src/account.ts`: deleting an account on D1 (stops Whop first, as before).
+- Pictures: share cards and team photos go to D1's `image` table (base64) through the engine's
+  door (`engine/src/images/store.ts`), served at `/og/<id>.jpg` and `/img/<path>`. Nothing on
+  the site reads `team_shot` today; the cards are what readers see.
+- The Supabase code paths are still there, used only when `DB` is not bound (the older tests run
+  them). Remove them with the rest of Supabase at the end of stage 2.
+- Tests: `worker/test/stage2.test.ts` (10, on a SQLite from `schema.sql`, with any call to
+  Supabase failing the test) and `worker/test/auth.test.ts` (10). Shared helper `worker/test/d1.ts`.
 
 ### What happened: Supabase blocked the project
 
@@ -186,14 +186,14 @@ Stage 1, the public site:
 - [x] Deployed and checked live: every page at 390px and 1440px (`.claude/skills/ui-verify`).
 
 Stage 2, accounts:
-- [ ] Sessions issued by the Worker: built on `claude/amazing-galileo-isfeue` (see "Stage 2,
-      part 1" above). Not merged; then `db:accounts` carries the 6 accounts over.
-- [ ] Share cards and team photos off Supabase Storage (R2, or the Worker serving them from D1).
-      Needs either R2 enabled with an R2 permission on `CF_API_TOKEN`, or a D1 blob table.
-- [ ] Membership, Whop webhook and sweep, entitlements, goodwill, pulled-call alerts and
-      account deletion over D1.
-- [ ] Admin dashboard and support tickets over D1. PR #154 (support tickets) is built on Supabase
-      and **not merged**. Port it rather than merging it as it stands.
+- [x] Sessions issued by the Worker (PR #155), and the 6 accounts carried over (`db:accounts`).
+- [x] Share cards and team photos off Supabase Storage: D1 `image` table (part 2).
+- [x] Membership, Whop webhook and sweep, entitlements, goodwill, pulled-call alerts and
+      account deletion over D1 (part 2).
+- [x] Admin dashboard and support tickets over D1 (part 2).
+- [ ] After part 2 is live: sign in by email and by Google on the phone, open `#/admin`, check
+      `/api/pay/status` shows `database: d1` and a recent `last_sweep`, and the next `cards` run
+      draws cards.
 - [ ] Supabase removed: secrets, `schema.pg.sql` kept for reference or deleted, and docs updated.
 
 ### Design for D1, and why
