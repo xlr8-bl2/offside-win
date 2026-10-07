@@ -25,6 +25,8 @@
 import { NETWORKS, profileUrl, saveSocials, socials, type SocialEnv, type Socials } from './social.ts';
 import type { PayEnv } from './pay.ts';
 import { sessionAccount } from './auth.ts';
+import { adminCall } from './admindb.ts';
+import { accountEmail } from './paydb.ts';
 import { composeReply, replySubject, sendSupport } from './support.ts';
 import { accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, goodwillEndMail, goodwillStartMail, membershipMail, noticeMail, pulledMail, receiptMail, renewalStoppedMail, renewedMail, sendMail } from './mail.ts';
 
@@ -52,7 +54,7 @@ export async function sha256Hex(text: string): Promise<string> {
 export async function whoIsAdmin(env: AdminEnv, jwt: string | null): Promise<{ id: string; email: string } | { error: string; status: number }> {
   if (!jwt) return { error: 'Sign in first.', status: 401 };
   const allowed = (env.ADMIN_EMAIL_SHA256 ?? '').split(',').map((s) => s.trim().toLowerCase()).filter((s) => /^[0-9a-f]{64}$/.test(s));
-  if (!allowed.length || !env.SUPABASE_SERVICE_KEY) return { error: 'The dashboard is not switched on.', status: 503 };
+  if (!allowed.length || (!env.SUPABASE_SERVICE_KEY && !env.DB)) return { error: 'The dashboard is not switched on.', status: 503 };
   // Sessions are the Worker's own since the move off Supabase (auth.ts).
   if (env.DB) {
     const a = await sessionAccount(env.DB, jwt);
@@ -73,6 +75,16 @@ export async function whoIsAdmin(env: AdminEnv, jwt: string | null): Promise<{ i
 }
 
 async function db(env: AdminEnv, fn: string, args: Record<string, unknown> = {}): Promise<Response> {
+  // On D1 since the move off Supabase (admindb.ts): same answers.
+  if (env.DB) {
+    let out: unknown;
+    try { out = await adminCall(env.DB, fn, args); } catch (err) {
+      console.error(`admin ${fn}:`, err instanceof Error ? err.message : String(err));
+      return refuse('The database refused. Nothing was changed.', 502);
+    }
+    if (out && typeof out === 'object' && 'error' in (out as Record<string, unknown>)) return reply(out, 400);
+    return reply(out ?? null);
+  }
   const res = await fetch(new URL(`/rest/v1/rpc/${fn}`, env.SUPABASE_URL), {
     method: 'POST',
     headers: {
@@ -114,6 +126,7 @@ async function body(request: Request): Promise<Record<string, unknown>> {
 
 /** An account's sign-in email, from GoTrue with the service key. */
 async function emailOf(env: AdminEnv, user: string): Promise<string | null> {
+  if (env.DB) return accountEmail(env.DB, user).catch(() => null);
   const res = await fetch(new URL(`/auth/v1/admin/users/${user}`, env.SUPABASE_URL), {
     headers: { apikey: env.SUPABASE_SERVICE_KEY ?? '', authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` },
   }).catch(() => null);

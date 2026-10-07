@@ -1,7 +1,7 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
+import { localD1 } from './d1.ts';
 import worker from '../src/index.ts';
 import { cleanEmail, landing, verifyGoogle } from '../src/auth.ts';
 import { sha256Hex } from '../src/d1read.ts';
@@ -12,39 +12,17 @@ import { sha256Hex } from '../src/d1read.ts';
  * caught by a fake EMAIL binding so the link can be read back out of it.
  */
 
-function d1(db: DatabaseSync) {
-  const clean = (vs: unknown[]) => vs.map((v) => (typeof v === 'boolean' ? (v ? 1 : 0) : v === undefined ? null : v));
-  const make = (sql: string, params: unknown[]): any => ({
-    bind: (...values: unknown[]) => make(sql, clean(values)),
-    async all() { return { results: db.prepare(sql).all(...(params as never[])) }; },
-    async first() { return db.prepare(sql).get(...(params as never[])) ?? null; },
-    async run() { const r = db.prepare(sql).run(...(params as never[])); return { meta: { changes: Number(r.changes) } }; },
-  });
-  return {
-    prepare: (sql: string) => make(sql, []),
-    async batch(sts: any[]) {
-      db.exec('BEGIN');
-      try {
-        const out = [];
-        for (const s of sts) out.push(/^\s*(SELECT|WITH)/i.test(s.sql ?? '') ? await s.all() : await s.all());
-        db.exec('COMMIT');
-        return out;
-      } catch (e) { db.exec('ROLLBACK'); throw e; }
-    },
-  };
-}
-
 let sqlite: DatabaseSync;
 let ENV: any;
 let sent: Array<{ to: string; raw: string }>;
 const realFetch = globalThis.fetch;
 
 beforeEach(() => {
-  sqlite = new DatabaseSync(':memory:');
-  sqlite.exec(readFileSync(new URL('../../schema.sql', import.meta.url), 'utf8'));
+  const local = localD1();
+  sqlite = local.sqlite;
   sent = [];
   ENV = {
-    DB: d1(sqlite),
+    DB: local.db,
     SITE_URL: 'https://offside.win',
     GOOGLE_CLIENT_ID: 'client-1',
     ASSETS: { fetch: async () => new Response('page') },

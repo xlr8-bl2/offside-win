@@ -642,3 +642,16 @@ CREATE TABLE IF NOT EXISTS auth_link (
 CREATE INDEX IF NOT EXISTS auth_link_email ON auth_link (email, created_at);
 
 CREATE INDEX IF NOT EXISTS auth_link_created ON auth_link (created_at);
+
+-- Pictures the engine draws or re-hosts (share cards at og/<id>.jpg, team
+-- photographs at team/<id>.jpg), served by the Worker at /img/<path> and
+-- /og/<id>.jpg. Base64 text, because the engine writes through the Worker's
+-- JSON door (worker/src/enginedb.ts). They lived in Supabase Storage until
+-- the October 2026 block.
+CREATE TABLE IF NOT EXISTS image (
+  path TEXT PRIMARY KEY,
+  content_type TEXT NOT NULL,
+  data TEXT NOT NULL,
+  cache_control TEXT,
+  updated_at INTEGER NOT NULL
+);

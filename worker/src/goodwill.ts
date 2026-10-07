@@ -21,17 +21,31 @@
 
 import { goodwillEndMail, goodwillStartMail, sendMail, type MailEnv } from './mail.ts';
 import { ukMidnight } from './landing.ts';
+import type { AuthDb } from './auth.ts';
+import * as jobs from './jobsdb.ts';
 
 export interface GoodwillEnv extends MailEnv {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_KEY?: string;
   WHOP_API_KEY?: string;
+  /** D1, since the move off Supabase (jobsdb.ts). */
+  DB?: AuthDb;
 }
 
 type Rec = Record<string, any>;
 
 async function rpc(env: GoodwillEnv, fn: string, args: Record<string, unknown>): Promise<any> {
+  if (env.DB) {
+    const a = args as Rec;
+    switch (fn) {
+      case 'goodwill_credit': return jobs.goodwillCredit(env.DB, Number(a.p_day));
+      case 'goodwill_whop_applied': return jobs.goodwillWhopApplied(env.DB, Number(a.p_day), String(a.p_account), a.p_membership ?? null, a.p_until ?? null);
+      case 'goodwill_noted': return jobs.goodwillNoted(env.DB, String(a.p_account), Number(a.p_stretch), String(a.p_kind));
+      case 'goodwill_ended': return jobs.goodwillEnded(env.DB, Number(a.p_day));
+      default: throw new Error(`no D1 version of ${fn}`);
+    }
+  }
   const res = await fetch(new URL(`/rest/v1/rpc/${fn}`, env.SUPABASE_URL), {
     method: 'POST',
     headers: {
@@ -75,7 +89,7 @@ export interface GoodwillOutcome { day: number; lean: boolean; whop: number; sta
 export async function goodwill(env: GoodwillEnv, now = Math.floor(Date.now() / 1000)): Promise<GoodwillOutcome> {
   const day = ukMidnight(now, -1);
   const out: GoodwillOutcome = { day, lean: false, whop: 0, started: 0, ended: 0, errors: 0 };
-  if (!env.SUPABASE_SERVICE_KEY) return out;
+  if (!env.SUPABASE_SERVICE_KEY && !env.DB) return out;
 
   const r = await rpc(env, 'goodwill_credit', { p_day: day });
   out.lean = Boolean(r?.lean);

@@ -803,8 +803,32 @@ ${urls.map(([loc, lastmod, freq]) => `  <url><loc>${esc(loc)}</loc><lastmod>${la
  * added, or the workflow has not run) gets the site's own picture rather than
  * a broken image, and is not cached for long so the real card replaces it.
  */
+/**
+ * A picture the engine stored in D1's `image` table (engine/src/images/store.ts),
+ * or null. Kept as base64 text; decoded here.
+ */
+export async function storedImage(env: SeoEnv, path: string, maxAge = 600): Promise<Response | null> {
+  if (!env.DB || !/^[a-z0-9_-]{1,20}\/[A-Za-z0-9_.-]{1,80}$/.test(path)) return null;
+  const row = await env.DB.prepare('SELECT content_type, data FROM image WHERE path = ?').bind(path)
+    .first<{ content_type: string; data: string }>().catch(() => null);
+  if (!row || !/^image\//.test(row.content_type)) return null;
+  const bytes = Uint8Array.from(atob(row.data), (c) => c.charCodeAt(0));
+  return new Response(bytes, { headers: { 'content-type': row.content_type, 'cache-control': `public, max-age=${maxAge}` } });
+}
+
 export async function cardImage(env: SeoEnv, id: number, origin: string): Promise<Response> {
   const bucket = env.IMAGE_BUCKET ?? 'shots';
+  const stored = await storedImage(env, cardPath(id));
+  if (stored) {
+    stored.headers.set('x-card', 'match');
+    return stored;
+  }
+  if (env.DB) {
+    const fallback = await env.ASSETS.fetch(new Request(`${origin}/og.png`));
+    return new Response(fallback.body, {
+      headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=300', 'x-card': 'fallback' },
+    });
+  }
   try {
     const res = await fetch(new URL(`/storage/v1/object/public/${bucket}/${cardPath(id)}`, env.SUPABASE_URL), {
       cf: { cacheTtl: 300, cacheEverything: true },

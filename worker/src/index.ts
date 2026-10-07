@@ -24,7 +24,7 @@
  * telling one reader from another is one header.
  */
 
-import { cardImage, seoResponse, sitemap } from './seo.ts';
+import { cardImage, seoResponse, sitemap, storedImage } from './seo.ts';
 import { bearer, jsonHeaders } from './http.ts';
 import { charge, checkout, confirm, payStatus, sweepWhop, renewal, webhook, type PayEnv } from './pay.ts';
 import { deleteAccount } from './account.ts';
@@ -179,6 +179,11 @@ const worker = {
       if (path === '/sitemap.xml') return await sitemap(env, url.origin);
       const card = path.match(/^\/og\/(\d{1,12})\.jpg$/);
       if (card) return await cardImage(env, Number(card[1]), url.origin);
+      // Pictures the engine keeps in D1 (team photographs and the like).
+      if (path.startsWith('/img/')) {
+        const img = await storedImage(env, path.slice('/img/'.length), 86400);
+        return img ?? new Response('Not found', { status: 404, headers: { 'cache-control': 'public, max-age=60' } });
+      }
       try {
         // The readable pages are the same for everyone (the app adds the
         // reader's own view once it runs), so they come from the edge's copy

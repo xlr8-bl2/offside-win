@@ -20,6 +20,8 @@
  * made a ticket, so an autoresponder cannot reopen a closed one forever.
  */
 
+import { adminCall } from './admindb.ts';
+import { kvGetJson } from './paydb.ts';
 import PostalMime from 'postal-mime';
 import type { AdminEnv } from './admin.ts';
 
@@ -41,6 +43,13 @@ export interface InboundMessage {
 }
 
 async function rpc(env: AdminEnv, fn: string, args: Record<string, unknown>): Promise<{ ok: boolean; body: any }> {
+  // On D1 since the move off Supabase (admindb.ts).
+  if (env.DB) {
+    try { return { ok: true, body: await adminCall(env.DB, fn, args) }; } catch (err) {
+      console.error('support:', fn, err instanceof Error ? err.message : String(err));
+      return { ok: false, body: null };
+    }
+  }
   const res = await fetch(new URL(`/rest/v1/rpc/${fn}`, env.SUPABASE_URL), {
     method: 'POST',
     headers: {
@@ -57,6 +66,10 @@ async function rpc(env: AdminEnv, fn: string, args: Record<string, unknown>): Pr
 
 /** The owner's inbox for the copies, or null when none is set. */
 export async function forwardAddress(env: AdminEnv): Promise<string | null> {
+  if (env.DB) {
+    const v = await kvGetJson<{ to?: unknown }>(env.DB, FORWARD_KEY).catch(() => null);
+    return typeof v?.to === 'string' && /^[^@\s]+@[^@\s]+$/.test(v.to) ? v.to : null;
+  }
   if (!env.SUPABASE_SERVICE_KEY) return null;
   try {
     const res = await fetch(new URL(`/rest/v1/kv?k=eq.${encodeURIComponent(FORWARD_KEY)}&select=v`, env.SUPABASE_URL), {
@@ -133,7 +146,7 @@ export async function inbound(message: InboundMessage, env: AdminEnv): Promise<v
     }
     if (automatic(message.headers, from)) {
       console.log('support: automatic mail, forwarded only');
-    } else if (env.SUPABASE_SERVICE_KEY) {
+    } else if (env.SUPABASE_SERVICE_KEY || env.DB) {
       const r = await rpc(env, 'support_inbound', {
         p_from: from, p_name: name, p_to: message.to, p_subject: subject,
         p_body: body.slice(0, MAX_BODY) || '(No text in this email.)',

@@ -13,6 +13,16 @@
  */
 
 import { config } from '../config.ts';
+import { exec } from '../store.ts';
+
+/*
+ * Since the move off Supabase (October 2026) the pictures go to D1's `image`
+ * table through the engine's usual door, and the Worker serves them from
+ * offside.win/img/<path>. Supabase Storage is kept below only for a run with
+ * DB_BACKEND=postgres.
+ */
+const SITE = (process.env['SITE'] ?? 'https://offside.win').replace(/\/$/, '');
+const inD1 = () => config.dbBackend === 'd1';
 
 function must(): { url: string; key: string } {
   const { url, key } = config.storage;
@@ -30,6 +40,7 @@ function must(): { url: string; key: string } {
  * Worker that has a ten-millisecond CPU budget.
  */
 export async function ensureBucket(): Promise<void> {
+  if (inD1()) return;
   const { url, key } = must();
   const res = await fetch(`${url}/storage/v1/bucket`, {
     method: 'POST',
@@ -69,6 +80,14 @@ export async function ensureBucket(): Promise<void> {
 
 /** Upload, overwriting whatever was at that path. Returns the public URL. */
 export async function put(path: string, body: Uint8Array, contentType: string, cacheControl = 'public, max-age=604800'): Promise<string> {
+  if (inD1()) {
+    if (body.byteLength > 1_400_000) throw new Error(`${path} is too large to keep (${body.byteLength} bytes)`);
+    await exec(`INSERT INTO image (path, content_type, data, cache_control, updated_at) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT (path) DO UPDATE SET content_type = excluded.content_type, data = excluded.data,
+        cache_control = excluded.cache_control, updated_at = excluded.updated_at`,
+    [path, contentType, Buffer.from(body).toString('base64'), cacheControl, Math.floor(Date.now() / 1000)]);
+    return `${SITE}/img/${path}`;
+  }
   const { url, key } = must();
   const res = await fetch(`${url}/storage/v1/object/${config.storage.bucket}/${path}`, {
     method: 'POST',
@@ -86,5 +105,6 @@ export async function put(path: string, body: Uint8Array, contentType: string, c
 }
 
 export function publicUrl(path: string): string {
+  if (inD1()) return `${SITE}/img/${path}`;
   return `${config.storage.url}/storage/v1/object/public/${config.storage.bucket}/${path}`;
 }
