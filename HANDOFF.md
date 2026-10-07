@@ -67,6 +67,17 @@ and `pg.yml` runs engine commands against D1 (`db:export` and `db:verify` still 
 Share cards were redrawn under a new kv key (`cards:keys:d1`), because the old key listed cards
 that only existed in Supabase Storage.
 
+### Landing page rebuilt (7 October, branch `claude/amazing-galileo-isfeue`)
+
+The owner called the landing page "vibe coded". Rebuilt as a sport section: dateline, two-line
+headline ("Football predictions, argued properly."), today's free call as the lead story, sections
+divided by hairline rules, the record as a results table with Landed/Missed in words. Gone: the
+glowing day shout, the stadium photo and scrim, the slam-in animations, the ticket card with the
+gradient band, the filled W/L squares (three times over), the giant stat numbers, the coloured card
+edges. Copy in `public/js/lib/front.js`; styles in the landing block of `components.css`.
+Not touched: the site-wide promo bar with its countdown (an owner-set offer) and the footer's
+stat tiles; both are worth a look next.
+
 ### What happened: Supabase blocked the project
 
 Since the night of 6 to 7 October 2026 (between 21:10 and 00:58 UTC), every request to the site's

@@ -2439,98 +2439,75 @@ function trapHTML(t, { on = 'landing' } = {}) {
     </article>`;
 }
 
-/**
- * The shout over the headline, for the day it is and, once the board is in,
- * for what is actually on it: a Champions League night says so, a Monday
- * with a big-league game is Monday night football, and a day with nothing
- * left to play does not shout "football's on" over an empty board.
- */
-function landingShout(now = new Date(), fixtures = null) {
-  const d = now.getDay();
-  if (Array.isArray(fixtures) && fixtures.length) {
-    const t = now.getTime() / 1000;
-    const end = new Date(now); end.setHours(24, 0, 0, 0);
-    const left = fixtures.filter((f) => matchState(f).kind !== 'ft' && f.kickoff < end.getTime() / 1000);
-    if (left.some((f) => Number(f.league_id) === 7)) return 'Champions League night. Let’s go.';
-    if (!left.length) {
-      const next = fixtures.filter((f) => f.kickoff > t).sort((a, b) => a.kickoff - b.kickoff)[0];
-      const day = dayLabel(next?.kickoff ?? 0);
-      return next ? `Quiet one today. Back ${/^(Today|Tomorrow)$/.test(day) ? day.toLowerCase() : `on ${day}`}.` : 'Quiet one today.';
-    }
-    const big = left.some((f) => LANDING_COMPS.some(([id]) => id === Number(f.league_id)));
-    if (d === 1 && big) return 'Monday night football. Let’s go.';
-  }
-  if (d === 5 || d === 6 || d === 0) return 'Weekend’s here. Let’s gooo.';
-  if (d === 2 || d === 3) return 'Midweek football. Let’s go.';
-  return 'Football’s on. Let’s gooo.';
-}
-
 /*
  * The landing page, built to what a landing page is for: one job (get a
  * visitor to read today's free call; membership is the second step, never a
  * competing first one), in the order that earns it. Say what it is, plainly,
  * above the fold, with the proof beside the button; show the product; show
- * what you get; show the receipts, misses included; price it; answer the
- * doubts; ask again. Everything shown is real data from the board.
+ * the receipts, misses included; price it; answer the doubts; ask again.
+ * Everything shown is real data from the board.
+ *
+ * Laid out like a football section rather than a software launch (October
+ * 2026 rebuild): a dateline, a two-line headline, today's free call as the
+ * lead story, then sections divided by rules. No photograph behind the
+ * words, no glowing kicker, no filled W/L squares, no cards inside cards,
+ * no countdowns. The colour goes on the one button and the won/lost words.
  */
 const LANDING_COMPS = [[1, 'Premier League'], [7, 'Champions League'], [3, 'La Liga'], [4, 'Serie A'], [5, 'Bundesliga'], [6, 'Ligue 1']];
+
+/** The dateline over the headline: today, in London, the way a paper prints it. */
+function landingDate(now = new Date()) {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', weekday: 'long', day: 'numeric', month: 'long' }).format(now);
+}
 
 function landingHTML() {
   return `
   <section class="ld-hero">
-    <div class="ld-bg" aria-hidden="true">
-      <div class="ld-shot" data-ld="shot"></div>
-      <div class="ld-scrim"></div>
-    </div>
     <div class="wrap ld-hero-in">
       <div class="ld-copy">
-        <p class="ld-shout">${esc(landingShout(new Date(), state.board?.fixtures))}</p>
-        <h1 class="ld-h1"><span class="ld-l">${esc(LANDING_HEADLINE[0])}</span> <span class="ld-l ld-lit">${esc(LANDING_HEADLINE[1])}</span></h1>
+        <p class="ld-dateline"><span>${esc(landingDate())}</span><span data-ld="count"></span></p>
+        <h1 class="ld-h1">${esc(LANDING_HEADLINE[0])}<br>${esc(LANDING_HEADLINE[1])}</h1>
         <p class="ld-lede">${esc(LANDING_LEDE)}</p>
         <div class="ld-actions">
-          <a class="btn btn-primary btn-lg ld-go" href="#/board" data-ld="free">Get today’s free call</a>
-          <a class="ld-alt" href="#/pricing" data-sell="alt" data-public-price>or see membership, from £3.49</a>
+          <a class="btn btn-primary btn-lg ld-go" href="#/board" data-ld="free">Read today’s free call</a>
+          <a class="ld-alt" href="#/board">See today’s games</a>
         </div>
-        <p class="ld-assure">Today’s free call needs no sign-up and no card.</p>
-        <div class="ld-proof" data-ld="proof"></div>
-        <p class="ld-small">18+. No guaranteed winners, because there’s no such thing.</p>
+        <p class="ld-assure">Free, no sign-up, no card. 18+, and no guaranteed winners, because there’s no such thing.</p>
+        <p class="ld-proof" data-ld="proof"></p>
       </div>
-      <aside class="ld-call" data-ld="call" aria-label="Today’s free call"><div class="ld-call-wait"></div></aside>
+      <article class="ld-lead" data-ld="call" aria-label="Today’s free call"><div class="ld-lead-wait"></div></article>
     </div>
   </section>
 
-  <section class="ld-comps" aria-label="Competitions we cover">
-    <div class="wrap ld-comps-in">
-      <p>Every big league, and eighty-odd more</p>
-      <ul>${LANDING_COMPS.map(([id, name]) => `<li><a href="#/league/${id}">${crest(name, 'sm', id, 'league')}<span>${esc(name)}</span></a></li>`).join('')}
-        <li><a class="ld-comps-all" href="#/leagues?show=all">All of them</a></li></ul>
+  <nav class="wrap ld-comps" aria-label="Competitions we cover">
+    <p>Every big league, and eighty-odd more:</p>
+    <ul>${LANDING_COMPS.map(([id, name]) => `<li><a href="#/league/${id}">${crest(name, 'xs', id, 'league')}<span>${esc(name)}</span></a></li>`).join('')}
+      <li><a href="#/leagues?show=all">all of them</a></li></ul>
+  </nav>
+
+  <section class="wrap ld-sec ld-split">
+    <div class="ld-side">
+      <h2 class="ld-h2">What’s on every match page</h2>
+      <p class="ld-sub">Free, for every game we cover. The examples are from today’s free call.</p>
     </div>
+    <ol class="ld-gets">${LANDING_GETS.map(([h, p], i) => `
+      <li><h3>${esc(h)}</h3><p>${esc(p)}</p><div class="ld-get-show" data-ld="get-${i}"></div></li>`).join('')}</ol>
   </section>
 
   <section class="wrap ld-sec" data-ld="trap"></section>
-
-  <section class="wrap ld-sec">
-    <h2 class="ld-h2">What’s on every match page</h2>
-    <p class="ld-sub">Free for every game we cover. Shown here on today’s free call.</p>
-    <ol class="ld-gets">${LANDING_GETS.map(([h, p], i) => `
-      <li><div class="ld-get-text"><h3>${esc(h)}</h3><p>${esc(p)}</p></div><div class="ld-get-show" data-ld="get-${i}"></div></li>`).join('')}</ol>
-  </section>
-
   <section class="wrap ld-sec" data-ld="record"></section>
   <section class="wrap ld-sec" data-ld="plans"></section>
 
-  <section class="wrap ld-sec ld-faq-sec">
-    <h2 class="ld-h2">Straight answers</h2>
+  <section class="wrap ld-sec ld-split">
+    <div class="ld-side"><h2 class="ld-h2">Straight answers</h2></div>
     <div class="ld-faq">${LANDING_FAQ.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}</div>
   </section>
 
-  <section class="ld-end">
-    <div class="wrap ld-end-in">
-      <h2 class="ld-h2" data-ld="end-title">Your game’s probably on the board already.</h2>
-      <div class="ld-actions">
-        <a class="btn btn-primary btn-lg" href="#/board" data-ld="end-go">Get today’s free call</a>
-        <a class="ld-alt" href="#/pricing" data-sell="alt" data-public-price>or see membership, from £3.49</a>
-      </div>
+  <section class="wrap ld-sec ld-end">
+    <h2 class="ld-h2" data-ld="end-title">Your game’s probably on the board already.</h2>
+    <div class="ld-actions">
+      <a class="btn btn-primary btn-lg" href="#/board" data-ld="end-go">Read today’s free call</a>
+      <a class="ld-alt" href="#/pricing" data-sell="alt" data-public-price>or see membership</a>
     </div>
   </section>`;
 }
@@ -2546,11 +2523,11 @@ function excerpt(text, max = 260) {
   // A decimal point is not a full stop: hold it while splitting, so "at
   // 1.14. This reads..." does not come out as "14. This reads...", and the
   // sentence holding it is dropped below like any other price.
-  const held = String(text ?? '').replace(/(\d)\.(\d)/g, '$1\u2024$2');
+  const held = String(text ?? '').replace(/(\d)\.(\d)/g, '$1․$2');
   const sentences = held.match(/[^.!?]+[.!?]+(\s|$)/g) ?? [];
   let out = '';
   for (const s of sentences) {
-    if (/\d\u2024\d|\bodds\b|\bback(ing)?\b/i.test(s)) continue;
+    if (/\d․\d|\bodds\b|\bback(ing)?\b/i.test(s)) continue;
     if ((out + s).length > max && out) break;
     out += s;
   }
@@ -2562,77 +2539,37 @@ async function viewLanding() {
   document.body.dataset.page = 'landing';
   /*
    * Drawn once. A page opened from the saved copy is fetched again behind it
-   * and, when anything has changed, routed again (softRefresh); that used to
-   * rebuild the landing page from nothing and play the intro a second time,
-   * so it looked as if it had loaded twice. When the landing page is already
-   * on screen, the sections below are filled in again in place and nothing
-   * animates.
+   * and, when anything has changed, routed again (softRefresh); the sections
+   * below are then filled in again in place. One quiet fade on the first
+   * draw, and none at all for a reader who asked for less motion.
    */
   const again = !!app.querySelector('.ld-hero');
   if (!again) app.innerHTML = landingHTML();
   if (!again && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    /*
-     * One entrance, at the top: the shout slams on, the headline rises and
-     * the second line fills with light from left to right. Nothing below the
-     * hero moves.
-     */
-    const EXPO = 'cubic-bezier(0.16, 1, 0.3, 1)';
-    // Quick and light on a phone: transform and opacity only, every delay
-    // short, and nothing held once it has played ('backwards' rather than
-    // 'both'), so no layer is kept alive after the intro. The blur on the
-    // shout, the four floodlight beams and the lamps were the heaviest things
-    // on the page to draw and are gone.
-    app.querySelector('.ld-shout')?.animate([
-      { transform: 'scale(1.6) rotate(-4deg)', opacity: 0 },
-      { transform: 'none', opacity: 1 }], { duration: 420, delay: 120, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'backwards' });
-    app.querySelectorAll('.ld-l').forEach((l, i) => l.animate([{ transform: 'translateY(30%)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 600, delay: 220 + i * 110, easing: EXPO, fill: 'backwards' }));
-    const lit = app.querySelector('.ld-lit');
-    if (lit) {
-      lit.style.setProperty('background-position', '0% 0');
-      lit.animate([{ backgroundPosition: '100% 0' }, { backgroundPosition: '0% 0' }], { duration: 800, delay: 500, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', fill: 'backwards' });
-    }
-    for (const [sel, d] of [['.ld-lede', 420], ['.ld-actions', 480], ['.ld-proof', 540], ['.ld-small', 580]]) {
-      app.querySelector(`.ld-hero ${sel}`)?.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 500, delay: d, easing: EXPO, fill: 'backwards' });
-    }
-  } else {
-    app.querySelector('.ld-lit')?.style.setProperty('background-position', '0% 0');
+    app.querySelectorAll('.ld-copy > *').forEach((el, i) => el.animate(
+      [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }],
+      { duration: 420, delay: 40 + i * 50, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'backwards' }));
   }
 
-  const [board, hero, picks, plans, sure] = await Promise.all([
+  const [board, hero, picks, plans] = await Promise.all([
     loadBoard().catch(() => null),
     getJSON('/api/hero').catch(() => null),
     getJSON('/api/picks?limit=60&settled=true').then((r) => r.picks ?? []).catch(() => []),
     getJSON('/api/plans').catch(() => []),
-    getJSON('/api/how-sure').catch(() => null),
   ]);
   /*
-   * The record is the calls we published, and nothing else.
-   *
-   * It used to splice in the newest engine's replay (lab/record.ts): what it
-   * would have called on games played before it went live. Those rows showed
-   * "Landed" on matches whose own page, rightly, said "We did not call this
-   * one" -- Athletic Club v Sport Recife was one -- and a backtest shown as a
-   * track record is a misleading claim. Every number and card here now comes
-   * from the pick table, the same rows the results page and the match pages
-   * read, so a reader who taps through always finds the call.
+   * The record is the calls we published, and nothing else: the pick table,
+   * the same rows the results page and the match pages read, so a reader who
+   * taps through always finds the call. Never a replay of an engine over
+   * games it did not call.
    */
   if (nav !== navTicket) return;
   const fixtures = board?.fixtures ?? [];
-  // Counted as the board's own "To play" tab counts them: games still to
-  // kick off. The whole list carries the ones already played and graded, so
-  // the landing page said fourteen calls were up while the board showed two.
+  // Counted as the board's own "To play" tab counts them.
   const ahead = fixtures.filter((f) => ['upcoming', 'off'].includes(matchState(f).kind));
   const called = ahead.filter(hasCall).length;
-  // The shout, now the board is in (landingShout).
-  const shout = app.querySelector('.ld-shout');
-  const shouted = landingShout(new Date(), fixtures);
-  if (shout && shout.textContent !== shouted) shout.textContent = shouted;
   const put = (key, html) => { const el = app.querySelector(`[data-ld="${key}"]`); if (el) { el.innerHTML = html; smartQuotes(el); } return el; };
-
-  // The trap of the day, where there is one.
-  const trap = trapHTML(hero?.trap);
-  if (trap) put('trap', trap);
-  else app.querySelector('[data-ld="trap"]')?.remove();
+  if (ahead.length) put('count', `${ahead.length} games still to play`);
 
   // Today's free call: the match and the reasoning, linked. No pick, no price.
   const freeId = hero?.free_fixture_id ?? fixtures.find((f) => f.free_call)?.id ?? null;
@@ -2640,74 +2577,28 @@ async function viewLanding() {
   const detail = freeId ? await getJSON(`/api/fixture/${freeId}`).catch(() => null) : null;
   if (nav !== navTicket) return;
   const fx = detail?.fixture ?? detail ?? freeRow;
-  // The write-up's reasoning, or the record's when the two have come apart
-  // (a slate pass cut off between rewriting the one and settling the other):
-  // the call is still up, so the front page still shows it.
   const why = excerpt((fx?.verdicts ?? []).map((v) => v.why ?? v.narrative).find(Boolean))
     || excerpt((fx?.published ?? []).map((p) => p.why ?? p.narrative).find(Boolean));
-  const cta = app.querySelector('[data-ld="free"]');
   if (fx && why) {
     for (const a of app.querySelectorAll('[data-ld="free"], [data-ld="end-go"]')) a.setAttribute('href', `#/fixture/${encodeURIComponent(fx.id)}`);
     const endTitle = app.querySelector('[data-ld="end-title"]');
     if (endTitle) endTitle.textContent = `Today’s free call is ${fx.home} v ${fx.away}.`;
-    const hex = (c) => (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c : null);
-    const hc = hex(fx.colors?.home) ?? '#5b4ad6';
-    const ac = hex(fx.colors?.away) ?? '#c9334a';
+    const soon = fx.kickoff > Date.now() / 1000;
     put('call', `
-      <div class="ld-tk-band" style="--home-c:${hc};--away-c:${ac}" aria-hidden="true">
-        <div class="ld-tk-h"></div><div class="ld-tk-a"></div><div class="ld-tk-seam"></div>
-        <span class="ld-tk-crest ld-tk-ch">${crest(fx.home, 'xl', fx.home_id)}</span>
-        <span class="ld-tk-crest ld-tk-ca">${crest(fx.away, 'xl', fx.away_id)}</span>
-      </div>
-      <div class="ld-tk-perf" aria-hidden="true"></div>
-      <div class="ld-tk-body">
-        <p class="ld-call-tag">Today’s free call</p>
-        <p class="ld-tk-teams"><b>${esc(fx.home)}</b> <em>v</em> <b>${esc(fx.away)}</b></p>
-        <p class="ld-tk-meta">${fx.league ? `<span class="ld-tk-comp">${crest(fx.league, 'xs', fx.league_id, 'league')}${esc(fx.league)}</span>` : ''}<span>${esc(kickoffLabel(fx.kickoff))}</span>${fx.kickoff > Date.now() / 1000 ? `<span class="ld-tk-count">Kick-off in <b data-countdown="${Number(fx.kickoff)}" data-done="now">—</b></span>` : ''}</p>
-        <blockquote class="ld-call-why">${esc(why)}</blockquote>
-        <a class="ld-call-go" href="#/fixture/${encodeURIComponent(fx.id)}">Read the whole call, free</a>
-      </div>`);
-    const card = app.querySelector('.ld-call');
-    if (card && !again && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      // The ticket is handed over: in on a tilt, and the two sides of the
-      // band slam together behind the crests.
-      card.animate([{ opacity: 0, transform: 'translateY(30px) rotate(3deg) scale(0.96)' }, { opacity: 1, transform: 'rotate(-1deg)', offset: 0.7 }, { opacity: 1, transform: 'none' }], { duration: 1000, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
-      card.querySelector('.ld-tk-h')?.animate([{ transform: 'translateX(-105%)' }, { transform: 'none' }], { duration: 560, delay: 200, easing: 'cubic-bezier(0.7, 0, 0.84, 0)', fill: 'backwards' });
-      card.querySelector('.ld-tk-a')?.animate([{ transform: 'translateX(105%)' }, { transform: 'none' }], { duration: 560, delay: 200, easing: 'cubic-bezier(0.7, 0, 0.84, 0)', fill: 'backwards' });
-      card.querySelectorAll('.ld-tk-crest').forEach((c, i) => c.animate([{ transform: `translateX(${i ? '' : '-'}160%) scale(1.4)`, opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 700, delay: 520, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)', fill: 'backwards' }));
-      card.querySelector('.ld-tk-seam')?.animate([{ opacity: 0 }, { opacity: 1, offset: 0.15 }, { opacity: 0.6 }], { duration: 900, delay: 760, fill: 'both' });
-    }
-    // A Champions League free call brings the competition's night with it,
-    // in place of the ground.
-    const theme = themeOf(fx.league_id);
-    const ldHero = app.querySelector('.ld-hero');
-    if (theme && ldHero && !ldHero.classList.contains(`theme-${theme}`)) {
-      ldHero.classList.add(`theme-${theme}`);
-      app.querySelector('.ld-bg')?.insertAdjacentHTML('afterbegin', themeArt(theme));
-    }
-    // The ground it is played at, behind the whole hero.
-    const shot = theme ? null : app.querySelector('[data-ld="shot"]');
-    // The engine names a ground it found a photograph for (shot_venue_id);
-    // then the match's own, then the rest of the board's. The browser works
-    // down the list until one is a real photograph (venueShot).
-    const venues = [...new Set([hero?.shot_venue_id, fx.venue_id, ...fixtures.filter(hasCall).map((f) => f.venue_id), ...fixtures.map((f) => f.venue_id)].filter(Boolean))];
-    // Not on a phone: a 200KB photograph shown at under half strength behind
-    // a dark scrim, with up to a dozen fallbacks tried in turn, was most of
-    // what the landing page downloaded and drew there.
-    if (shot && !shot.querySelector('img') && venues.length && matchMedia('(min-width: 900px)').matches) {
-      shot.innerHTML = venueShot(venues.slice(0, 4), 'ld-shot-img', true);
-      const img = shot.querySelector('img');
-      img?.addEventListener('load', () => img.classList.add('is-in'), { once: true });
-    }
+      <p class="ld-lead-tag">Today’s free call</p>
+      <p class="ld-lead-comp">${fx.league ? `${crest(fx.league, 'xs', fx.league_id, 'league')}<span>${esc(fx.league)}</span>` : ''}<span>${esc(kickoffLabel(fx.kickoff))}</span>${soon ? `<span>kick-off in <b data-countdown="${Number(fx.kickoff)}" data-done="now">—</b></span>` : ''}</p>
+      <h2 class="ld-lead-teams"><a href="#/fixture/${encodeURIComponent(fx.id)}">
+        <span>${crest(fx.home, 'md', fx.home_id)}${esc(fx.home)}</span>
+        <span>${crest(fx.away, 'md', fx.away_id)}${esc(fx.away)}</span></a></h2>
+      <p class="ld-lead-why">${esc(why)}</p>
+      <a class="ld-lead-go" href="#/fixture/${encodeURIComponent(fx.id)}">Read the whole call, free</a>`);
   } else {
-    app.querySelector('.ld-call')?.remove();
+    app.querySelector('.ld-lead')?.remove();
     app.querySelector('.ld-hero')?.classList.add('ld-solo');
     /*
-     * No free call today, yet: the board can be empty of calls for hours
-     * before team news lands. The main button said "Get today's free call"
-     * regardless and led to a board saying there was none, the first thing
-     * a visitor tapped broken on its first tap. Say what is there instead,
-     * and when the call usually arrives.
+     * No free call yet today: the board can be empty of calls for hours
+     * before team news lands. Say what is there instead, and when the call
+     * usually arrives, rather than a button that leads to nothing.
      */
     if (!freeId) {
       for (const a of app.querySelectorAll('[data-ld="free"], [data-ld="end-go"]')) {
@@ -2719,82 +2610,55 @@ async function viewLanding() {
     }
   }
 
-  // Three numbers, all of them real and all of them pub numbers.
-  // The record: the last forty settled calls, oldest first.
-  const all = picks.filter((x) => x.result).slice(0, 40).reverse();
+  // The record: settled calls, newest first, voids aside.
   const isW = (x) => x.result === 'WON' || x.result === 'HALF_WON';
   const isL = (x) => x.result === 'LOST' || x.result === 'HALF_LOST';
-  const fw = all.filter(isW).length;
-  const fl = all.filter(isL).length;
-  const chip = (x) => { const k = isW(x) ? 'w' : isL(x) ? 'l' : 'v'; return `<li class="ld-chip is-${k}" title="${esc(`${x.home_team ?? ''} v ${x.away_team ?? ''}`)}">${k.toUpperCase()}</li>`; };
+  const graded = picks.filter((x) => isW(x) || isL(x));
+  const last = graded.slice(0, 40);
+  const fw = last.filter(isW).length;
+  const fl = last.length - fw;
+  if (last.length) put('proof', `<b>${fw} of our last ${last.length}</b> calls landed. Every miss is on <a href="#/results">the results page</a>.`);
+  else app.querySelector('[data-ld="proof"]')?.remove();
 
-  // Proof beside the button: the record in one line and the last ten.
-  if (fw + fl) {
-    // Two kinds of proof, both checkable: the record, and that our confidence
-    // means something (how-sure). Specific numbers beat adjectives.
-    const tenths = sure?.n >= 50 ? Math.round(Number(sure.said) * 10) : 0;
-    const honest = tenths && Math.abs(Number(sure.landed) / Number(sure.n) - Number(sure.said)) <= 0.04;
-    put('proof', `<ol class="ld-form ld-form-sm" aria-hidden="true">${all.slice(-10).map(chip).join('')}</ol>
-      <p><b>${fw} of our last ${fw + fl}</b> calls landed, misses counted. <a href="#/results">See the results</a></p>
-      ${honest ? `<p>When we say ${esc(TENTHS[tenths])} in ten, ${esc(TENTHS[tenths])} in ten land. <a href="#/how-sure">How we check</a></p>` : ''}`);
-  } else app.querySelector('[data-ld="proof"]')?.remove();
-
-  // What's on every match page, shown on today's free call.
+  // What's on every match page, shown on today's free call, as text.
   const side = (k) => (k === 'home' ? fx?.home : fx?.away);
   const out = (fx?.players ?? []).filter((p) => p.status && p.status !== 'fit').slice(0, 3);
-  put('get-0', out.length
-    ? `<ul class="ld-news">${out.map((p) => `<li><b>${esc(p.name)}</b><span>${esc(p.team ?? side(p.side) ?? '')}</span><em>${esc(p.status === 'doubtful' ? 'Doubt' : 'Out')}</em></li>`).join('')}</ul>`
-    : `<p class="ld-show-note">${fx ? `Both squads checked for ${esc(fx.home)} v ${esc(fx.away)}: nobody important missing.` : 'Checked for every game we cover.'}</p>`);
+  put('get-0', fx ? (out.length
+    ? `<p class="ld-eg">For ${esc(fx.home)} v ${esc(fx.away)}: ${out.map((p) => `<b>${esc(p.name)}</b> (${esc(p.team ?? side(p.side) ?? '')}) ${p.status === 'doubtful' ? 'a doubt' : 'out'}`).join(', ')}.</p>`
+    : `<p class="ld-eg">For ${esc(fx.home)} v ${esc(fx.away)}: both squads checked, nobody important missing.</p>`) : '');
   const seq = (k) => String(fx?.form?.[k]?.sequence ?? '').slice(-6).split('').filter((c) => 'WDL'.includes(c));
   put('get-1', fx && (seq('home').length || seq('away').length)
-    ? `<div class="ld-formrows">${['home', 'away'].map((k) => `<div>${crest(side(k), 'xs', fx[`${k}_id`])}<b>${esc(side(k))}</b>
-        <ol class="ld-form ld-form-sm" aria-label="${esc(`${side(k)}, last six, oldest first`)}">${seq(k).map((c) => `<li class="ld-chip is-${c === 'W' ? 'w' : c === 'L' ? 'l' : 'v'}">${c}</li>`).join('')}</ol></div>`).join('')}</div>`
-    : '<p class="ld-show-note">The last six for both sides, on every match page.</p>');
-  put('get-2', ahead.length
-    ? `<p class="ld-bignum"><b>${called}</b><span>of the ${ahead.length} games still to play have a call right now. The rest get the reasons we passed.</span></p>`
+    ? `<dl class="ld-eg ld-formrows">${['home', 'away'].map((k) => `<div><dt>${esc(side(k))}</dt><dd aria-label="last six, oldest first">${seq(k).map((c) => `<span class="ld-res is-${c === 'W' ? 'w' : c === 'L' ? 'l' : 'd'}">${c}</span>`).join('')}</dd></div>`).join('')}</dl>`
     : '');
-  const ago = fx?.computed_at ? Math.max(1, Math.round((Date.now() / 1000 - Number(fx.computed_at)) / 60)) : null;
-  put('get-3', ago && ago < 24 * 60
-    ? `<p class="ld-bignum"><b>${ago < 60 ? `${ago} min` : `${Math.round(ago / 60)} hr`}</b><span>since we last read ${esc(fx.home)} v ${esc(fx.away)}. Next look within fifteen minutes.</span></p>`
-    : '<p class="ld-show-note">Every fifteen minutes, right up to kick-off.</p>');
+  put('get-2', ahead.length ? `<p class="ld-eg">Right now ${called === 1 ? 'one' : called} of the ${ahead.length} games still to play ${called === 1 ? 'has' : 'have'} a call. The rest have the reasons we passed.</p>` : '');
   app.querySelectorAll('.ld-get-show').forEach((el) => { if (!el.innerHTML.trim()) el.remove(); });
 
-  // The receipts: the call, and how it finished. The latest three, and if
-  // none of them missed, the latest miss in place of the third, because a
-  // record that only shows wins is an advert. The write-up where the call
-  // has one, the call in words where it does not.
-  const said = picks.filter((x) => x.result && (isW(x) || isL(x)));
-  const shown = said.slice(0, 3);
-  if (shown.length === 3 && !shown.some(isL)) { const miss = said.find(isL); if (miss) shown[2] = miss; }
-  if (all.length) {
+  // The trap of the day, where there is one.
+  const trap = trapHTML(hero?.trap);
+  if (trap) put('trap', trap);
+  else app.querySelector('[data-ld="trap"]')?.remove();
+
+  // The receipts: the latest six settled calls, as a results table. If none
+  // of them missed, the latest miss takes the last row: a record that only
+  // shows wins is an advert.
+  const shown = graded.slice(0, 6);
+  if (shown.length === 6 && !shown.some(isL)) { const miss = graded.find(isL); if (miss) shown[5] = miss; }
+  if (shown.length) {
     put('record', `
-      <div class="ld-sec-head"><h2 class="ld-h2">The call, then the score.</h2>
-        <a class="btn btn-ghost btn-sm" href="#/results">Every result</a></div>
-      <p class="ld-sub">Our last ${all.length} calls: ${fw} landed, ${fl} missed. The misses stay in.</p>
-      <ol class="ld-form" aria-label="The last ${all.length} calls, oldest first">${all.map(chip).join('')}</ol>
-      ${shown.length ? `<ul class="ld-receipts">${shown.map((x) => `
-        <li class="${isW(x) ? 'is-w' : 'is-l'}">
-          <p class="ld-rc-top"><span class="ld-rc-tag">${isW(x) ? 'Landed' : 'Missed'}</span><span>${esc(new Date(Number(x.kickoff) * 1000).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }))}</span></p>
-          <p class="ld-rc-score">${crest(x.home_team, 'xs', x.home_team_id)}<b>${esc(x.home_team)}</b><span class="ld-rc-goals">${Number(x.home_goals)}–${Number(x.away_goals)}</span><b>${esc(x.away_team)}</b>${crest(x.away_team, 'xs', x.away_team_id)}</p>
-          ${(() => {
-            const text = excerpt(x.narrative ?? x.why, 200);
-            return text
-              ? `<p class="ld-rc-said"><span>What we said</span>${esc(text)}</p>`
-              : `<p class="ld-rc-said"><span>The call</span>${esc(betText(market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team })))}</p>`;
-          })()}
-          ${(() => {
-            const went = wentLine(x);
-            return went ? `<p class="ld-rc-went"><span>How it went</span>${esc(went)}</p>` : '';
-          })()}
-          <a href="#/fixture/${encodeURIComponent(x.fixture_id)}">The match</a>
-        </li>`).join('')}</ul>` : ''}`);
+      <div class="ld-sec-head"><h2 class="ld-h2">The call, then the score</h2><a class="ld-more" href="#/results">Every result</a></div>
+      <p class="ld-sub">Our last ${last.length} calls: ${fw} landed, ${fl} missed. Nothing comes off the page.</p>
+      <ol class="ld-results">${shown.map((x) => `
+        <li>
+          <span class="ld-r-when">${esc(new Date(Number(x.kickoff) * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}</span>
+          <a class="ld-r-match" href="#/fixture/${encodeURIComponent(x.fixture_id)}"><b>${esc(x.home_team)} ${Number(x.home_goals)}–${Number(x.away_goals)} ${esc(x.away_team)}</b>
+            <span>${esc(betText(market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team })))}</span></a>
+          <span class="ld-r-out ${isW(x) ? 'is-w' : 'is-l'}">${isW(x) ? 'Landed' : 'Missed'}</span>
+        </li>`).join('')}</ol>`);
   } else app.querySelector('[data-ld="record"]')?.remove();
 
   // The price per week, which is how a subscription is easiest to weigh
   // against a pint. Only for the plans that run longer than a week.
   const perWeek = (p) => (p.days > 7 ? `About ${money(Math.round(p.amount_minor / (p.days / 7)), p.currency)} a week` : null);
-  // The plans, each with its own button. The matchday pass is one payment
-  // and stops by itself, which is worth saying where people decide.
   const PLAN = {
     matchday: ['One payment, seven days, and it stops by itself.', 'Get the matchday pass'],
     monthly: ['Thirty days of every call, every big night.', 'Go monthly'],
@@ -2802,20 +2666,22 @@ async function viewLanding() {
   };
   const list = (Array.isArray(plans) ? plans : []).filter((p) => p && p.amount_minor).sort((a, b) => a.amount_minor - b.amount_minor);
   if (list.length) {
-    // What is waiting behind the wall today, counted from the board: a real
-    // number, said once, right where the decision is made.
     const behind = Math.max(0, called - 1);
     put('plans', `
-      <h2 class="ld-h2" data-sell="head" data-public-price>Every call, from ${esc(money(list[0].amount_minor, list[0].currency))}</h2>
-      <p class="ld-sub">${behind > 1 ? `${called} calls are up on the board. One is free. Members see the other ${behind}, with the odds and the reason, the moment each goes up. ` : ''}The match pages, the free call and the record stay free whatever you do.</p>
-      <ul class="ld-plans">${list.map((p) => `
-        <li${p.id === 'monthly' ? ' class="is-pick"' : ''} data-sell-plan="${esc(p.id)}" data-public-price>
-          <b>${esc(p.name)}</b>
-          <span class="ld-price">${esc(money(p.amount_minor, p.currency))}</span>
-          ${perWeek(p) ? `<span class="ld-week">${esc(perWeek(p))}</span>` : ''}
-          <span class="ld-blurb">${esc(PLAN[p.id]?.[0] ?? `${p.days} days of every call.`)}</span>
-          <a class="btn ${p.id === 'monthly' ? 'btn-primary' : 'btn-ghost'}" href="#/checkout?plan=${encodeURIComponent(p.id)}">${esc(PLAN[p.id]?.[1] ?? `Get ${p.name}`)}</a>
-        </li>`).join('')}</ul>`);
+      <div class="ld-split">
+        <div class="ld-side">
+          <h2 class="ld-h2" data-sell="head" data-public-price>Every call, from ${esc(money(list[0].amount_minor, list[0].currency))}</h2>
+          <p class="ld-sub">${behind > 1 ? `${called} calls are up on the board. One is free. Members see the other ${behind}, with the odds and the reason, the moment each goes up. ` : ''}The match pages, the free call and the record stay free whatever you do.</p>
+        </div>
+        <ul class="ld-plans">${list.map((p) => `
+          <li${p.id === 'monthly' ? ' class="is-pick"' : ''} data-sell-plan="${esc(p.id)}" data-public-price>
+            <b>${esc(p.name)}</b>
+            <span class="ld-price">${esc(money(p.amount_minor, p.currency))}</span>
+            ${perWeek(p) ? `<span class="ld-week">${esc(perWeek(p))}</span>` : ''}
+            <span class="ld-blurb">${esc(PLAN[p.id]?.[0] ?? `${p.days} days of every call.`)}</span>
+            <a class="btn ${p.id === 'monthly' ? 'btn-primary' : 'btn-ghost'}" href="#/checkout?plan=${encodeURIComponent(p.id)}">${esc(PLAN[p.id]?.[1] ?? `Get ${p.name}`)}</a>
+          </li>`).join('')}</ul>
+      </div>`);
   } else app.querySelector('[data-ld="plans"]')?.remove();
   tickCountdowns();
 }

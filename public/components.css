@@ -3282,332 +3282,322 @@
 /* ========================================================= the landing page
  *
  * "/" for anyone who is not a member (viewLanding in app.js). The football
- * media register (offside-ui, "Two registers"): roomy, analysis-led, no
- * odds. One loud thing, the headline in signage type across the top with
- * today's free call beside it as the proof; everything under it is quiet,
- * left-aligned, and earns its place with something real: the record, the
- * games, the prices.
+ * media register (offside-ui, "Two registers"), set like a sport section:
+ * a dateline, a two-line headline, today's free call as the lead story, and
+ * sections divided by hairline rules rather than boxed in cards. One button
+ * carries the accent; won and lost are the only other colours. No
+ * photograph or glow behind the words, no filled result squares, no
+ * coloured card edges (rebuilt October 2026, after the owner called the old
+ * one "vibe coded").
  */
 .ld-hero {
-  position: relative;
-  isolation: isolate;
-  display: grid;
-  align-items: center;
-  min-height: min(92vh, 860px);
-  min-height: min(92dvh, 860px);
-  padding: var(--space-13) 0 var(--space-11);
-  background: var(--pitch);
   border-bottom: var(--border) solid var(--hairline);
-  overflow: hidden;
-}
-/* The ground, the dark, and the lights. */
-.ld-bg { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
-.ld-shot { position: absolute; inset: 0; }
-.ld-shot-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: 50% 40%;
-  opacity: 0;
-  transition: opacity 0.8s var(--ease-out);
-}
-.ld-shot-img.is-in { opacity: 0.36; }
-.ld-scrim {
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(90deg, var(--pitch) 0%, rgba(10, 10, 12, 0.88) 38%, rgba(10, 10, 12, 0.35) 75%, rgba(10, 10, 12, 0.55) 100%),
-    linear-gradient(0deg, var(--pitch) 0%, rgba(10, 10, 12, 0) 40%),
-    radial-gradient(70% 90% at 85% 0%, var(--floodlight-dim), transparent 70%);
+  background: var(--pitch);
 }
 .ld-hero-in {
-  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.9fr);
-  gap: var(--space-11);
-  align-items: center;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: var(--space-12);
+  align-items: start;
+  padding-block: var(--space-12) var(--space-11);
 }
-.ld-hero.ld-solo .ld-hero-in { grid-template-columns: minmax(0, 1fr); max-width: 900px; }
-/* The shout: slams on in sodium before the headline. */
-.ld-shout {
-  display: inline-block;
-  margin: 0 0 var(--space-5);
-  font-family: var(--display);
-  font-size: var(--text-2xl);
-  font-weight: var(--weight-black);
-  line-height: 1;
-  color: var(--sodium);
-  text-shadow: 0 0 28px rgba(245, 165, 36, 0.5);
-  transform-origin: 0 60%;
+.ld-hero.ld-solo .ld-hero-in { grid-template-columns: minmax(0, 1fr); max-width: 760px; }
+.ld-copy { min-width: 0; }
+
+.ld-dateline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin: 0 0 var(--space-6);
+  padding-bottom: var(--space-4);
+  border-bottom: var(--border) solid var(--hairline);
+  color: var(--chalk-3);
+  font-size: var(--text-sm);
 }
+.ld-dateline span:first-child { color: var(--chalk-2); }
+.ld-dateline span:empty { display: none; }
+
 .ld-h1 {
-  margin: 0 0 var(--space-7);
+  margin: 0;
   font-family: var(--display);
-  font-size: clamp(3.25rem, 1.9rem + 5.2vw, 7rem);
-  font-weight: var(--weight-black);
-  line-height: 0.88;
+  font-size: clamp(2.75rem, 1.9rem + 3.6vw, 5rem);
+  font-weight: 700;
+  line-height: 0.95;
   letter-spacing: var(--tracking-hero);
   color: var(--chalk);
   text-wrap: balance;
 }
-.ld-l { display: block; }
-/* The second line starts as an outline and fills with light, left to right.
-   The fill is the background, clipped to the letters; the outline is the
-   stroke underneath. Final state, and the reduced-motion state: filled. */
-.ld-lit {
-  color: transparent;
-  -webkit-text-stroke: 1.5px rgba(244, 246, 250, 0.7);
-  background: linear-gradient(90deg, var(--chalk) 0 50%, transparent 50% 100%);
-  background-size: 200% 100%;
-  background-position: 100% 0;
-  -webkit-background-clip: text;
-  background-clip: text;
-  /* Room for the descenders: the fill is the box's background, and a "g"
-     hanging below the box was left as a bare outline. */
-  padding-bottom: 0.16em;
-  margin-bottom: -0.16em;
-}
 .ld-lede {
-  max-width: 54ch;
-  margin: 0 0 var(--space-8);
-  font-size: calc(var(--text-read) * 1.125);
-  line-height: var(--leading-normal);
+  margin: var(--space-7) 0 0;
+  max-width: 34em;
   color: var(--chalk-2);
-}
-.ld-actions { display: flex; flex-wrap: wrap; gap: var(--space-4); }
-.ld-go { box-shadow: 0 10px 30px -10px rgba(122, 90, 248, 0.8); }
-.ld-small { margin: var(--space-5) 0 0; font-size: var(--text-sm); color: var(--chalk-3); }
-/* The reassurance sits right under the button, where the doubt is. */
-.ld-assure { margin: var(--space-3) 0 0; font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--chalk-2); }
-
-/* Today's free call, as a matchday ticket: the two clubs' colours meeting at
-   a seam with the crests on them, a perforation, then the match and the
-   reasoning, word for word. */
-.ld-call {
-  position: relative;
-  border: var(--border) solid var(--rule);
-  border-radius: var(--radius-lg);
-  background: var(--stand);
-  box-shadow: 0 40px 100px -30px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(0, 0, 0, 0.4);
-  overflow: hidden;
-}
-.ld-call-wait { min-height: 420px; }
-.ld-tk-band { position: relative; height: 128px; overflow: hidden; background: var(--pitch); }
-.ld-tk-h, .ld-tk-a { position: absolute; inset: 0; }
-.ld-tk-h { clip-path: polygon(0 0, 56% 0, 44% 100%, 0 100%); background: linear-gradient(180deg, transparent 40%, rgba(0, 0, 0, 0.5)), radial-gradient(120% 120% at 0 0, var(--home-c), color-mix(in srgb, var(--home-c) 40%, var(--pitch))); }
-.ld-tk-a { clip-path: polygon(56% 0, 100% 0, 100% 100%, 44% 100%); background: linear-gradient(180deg, transparent 40%, rgba(0, 0, 0, 0.5)), radial-gradient(120% 120% at 100% 100%, var(--away-c), color-mix(in srgb, var(--away-c) 40%, var(--pitch))); }
-.ld-tk-seam { position: absolute; inset: 0; clip-path: polygon(55.6% 0, 56.4% 0, 44.4% 100%, 43.6% 100%); background: var(--chalk); opacity: 0.6; }
-.ld-tk-crest { position: absolute; top: 50%; margin-top: -38px; filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.55)); }
-.ld-tk-ch { left: 16%; }
-.ld-tk-ca { right: 16%; }
-/* The tear-off line: notches either side and a dashed rule between. */
-.ld-tk-perf { position: relative; height: 0; border-top: 2px dashed var(--rule); }
-.ld-tk-perf::before, .ld-tk-perf::after {
-  content: '';
-  position: absolute;
-  top: -11px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--pitch);
-}
-.ld-tk-perf::before { left: -11px; }
-.ld-tk-perf::after { right: -11px; }
-.ld-tk-body { padding: var(--space-7) var(--space-8) var(--space-8); }
-.ld-call-tag { margin: 0 0 var(--space-3); font-size: var(--text-sm); font-weight: var(--weight-bold); color: var(--sodium); }
-.ld-tk-teams {
-  margin: 0 0 var(--space-3);
-  font-family: var(--display);
-  font-size: var(--text-2xl);
-  font-weight: var(--weight-black);
-  line-height: var(--leading-tight);
-  color: var(--chalk);
-}
-.ld-tk-teams em { font-style: normal; font-weight: var(--weight-normal); color: var(--chalk-3); }
-.ld-tk-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-5); margin: 0 0 var(--space-6); font-size: var(--text-sm); color: var(--chalk-3); font-variant-numeric: tabular-nums; }
-.ld-tk-comp { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--chalk-2); }
-.ld-tk-count { color: var(--floodlight-hi); font-weight: var(--weight-medium); }
-.ld-tk-count b { font-weight: var(--weight-bold); }
-.ld-call-why {
-  margin: 0 0 var(--space-6);
-  padding-left: var(--space-5);
-  border-left: 3px solid var(--floodlight);
   font-size: var(--text-read);
   line-height: var(--leading-read);
-  color: var(--chalk);
+  text-wrap: pretty;
 }
-.ld-call-go { font-weight: var(--weight-bold); color: var(--floodlight-hi); text-decoration: none; }
-.ld-call-go:hover { text-decoration: underline; text-underline-offset: 3px; }
-.ld-ticker:empty { display: none; }
+.ld-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-7);
+  margin-top: var(--space-8);
+}
+.ld-alt {
+  color: var(--chalk);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  text-decoration: underline;
+  text-decoration-color: var(--chalk-3);
+  text-underline-offset: 4px;
+}
+.ld-alt:hover { text-decoration-color: var(--chalk); }
+.ld-assure {
+  margin: var(--space-5) 0 0;
+  color: var(--chalk-3);
+  font-size: var(--text-sm);
+  max-width: 40em;
+}
+.ld-proof {
+  margin: var(--space-7) 0 0;
+  padding-top: var(--space-5);
+  border-top: var(--border) solid var(--hairline);
+  color: var(--chalk-2);
+  font-size: var(--text-md);
+}
+.ld-proof b { color: var(--chalk); font-weight: var(--weight-bold); }
+.ld-proof a { color: var(--chalk); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--chalk-3); }
 
-/*
- * Below the hero, everything is quiet on purpose. The hero is the one loud
- * thing on the page (the stadium, the lights, the shout); a second and third
- * loud thing under it made the page shout over itself, and the owner's
- * verdict was "overwhelming". So: one type size for section heads, no motion,
- * generous space, and each section saying one thing.
- */
-.ld-sec { padding-block: var(--space-12) 0; }
-.ld-sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-5); margin: 0 0 var(--space-4); }
-.ld-h2 {
-  margin: 0 0 var(--space-4);
+/* The lead story: today's free call, on the stand surface, no inner boxes. */
+.ld-lead {
+  min-width: 0;
+  padding: var(--space-8);
+  background: var(--stand);
+  border: var(--border) solid var(--hairline);
+  border-radius: var(--radius-lg);
+}
+.ld-lead-wait { min-height: 320px; }
+.ld-lead-tag {
+  margin: 0;
+  color: var(--floodlight-hi);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+}
+.ld-lead-comp {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-3) 0 0;
+  color: var(--chalk-3);
+  font-size: var(--text-sm);
+}
+.ld-lead-comp .crest { margin-right: calc(var(--space-3) * -1); }
+.ld-lead-comp b { color: var(--chalk-2); font-weight: var(--weight-medium); font-family: var(--display-figures); }
+.ld-lead-teams { margin: var(--space-6) 0 0; }
+.ld-lead-teams a {
+  display: grid;
+  gap: var(--space-3);
+  color: var(--chalk);
   font-family: var(--display);
   font-size: var(--text-3xl);
-  font-weight: var(--weight-black);
-  line-height: var(--leading-display);
+  font-weight: 700;
+  line-height: 1;
+  font-variation-settings: 'wdth' var(--condensed);
+}
+.ld-lead-teams span { display: flex; align-items: center; gap: var(--space-4); min-width: 0; overflow-wrap: anywhere; }
+.ld-lead-teams .crest { flex: none; }
+.ld-lead-teams a:hover { color: var(--floodlight-hi); }
+.ld-lead-why {
+  margin: var(--space-7) 0 0;
+  padding-top: var(--space-6);
+  border-top: var(--border) solid var(--hairline);
   color: var(--chalk);
+  font-size: var(--text-read);
+  line-height: var(--leading-read);
+  text-wrap: pretty;
+  hyphens: auto;
 }
-.ld-sec-head .ld-h2 { margin: 0; }
-.ld-h2 .nowrap { white-space: nowrap; }
-@media (max-width: 520px) { .ld-sec-head { flex-wrap: wrap; } }
-.ld-sub { max-width: 62ch; margin: 0 0 var(--space-7); font-size: var(--text-read); line-height: var(--leading-normal); color: var(--chalk-2); }
-
-/* The record as a form guide, and nothing else. */
-.ld-form { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
-.ld-chip {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-xs);
+.ld-lead-go {
+  display: inline-block;
+  margin-top: var(--space-6);
+  color: var(--floodlight-hi);
   font-weight: var(--weight-bold);
-  color: #fff;
 }
-.ld-chip.is-w { background: var(--won); }
-.ld-chip.is-l { background: var(--lost); }
-.ld-chip.is-v { background: var(--stand-hi); color: var(--chalk-2); }
+.ld-lead-go:hover { color: var(--chalk); }
 
-/* The plans. */
-.ld-plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-5); margin: 0; padding: 0; list-style: none; }
+/* The competitions, as one line of links. */
+.ld-comps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-6);
+  padding-block: var(--space-7);
+  /* A rule the width of the words, not of the padded box. */
+  background: linear-gradient(var(--hairline), var(--hairline)) 50% 100% / calc(100% - 2 * var(--gutter)) var(--border) no-repeat;
+  color: var(--chalk-3);
+  font-size: var(--text-sm);
+}
+.ld-comps p { margin: 0; }
+.ld-comps ul { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-6); margin: 0; padding: 0; list-style: none; }
+.ld-comps a { display: inline-flex; align-items: center; gap: var(--space-3); color: var(--chalk-2); }
+.ld-comps a:hover { color: var(--chalk); }
+.ld-comps li:last-child a { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--chalk-3); }
+
+/* Sections: a rule above, the heading beside the content on a wide screen. */
+.ld-sec {
+  padding-block: var(--space-12) 0;
+}
+.ld-sec + .ld-sec {
+  margin-top: var(--space-12);
+  background: linear-gradient(var(--hairline), var(--hairline)) 50% 0 / calc(100% - 2 * var(--gutter)) var(--border) no-repeat;
+}
+.ld-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+  gap: var(--space-8) var(--space-12);
+  align-items: start;
+}
+.ld-side { min-width: 0; }
+@media (min-width: 901px) {
+  .ld-split > .ld-side { position: sticky; top: calc(var(--header-h) + var(--space-8)); }
+}
+.ld-h2 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: var(--text-3xl);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--chalk);
+  text-wrap: balance;
+}
+.ld-sub {
+  margin: var(--space-4) 0 0;
+  max-width: 36em;
+  color: var(--chalk-3);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+}
+.ld-sec-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-4); }
+.ld-more { color: var(--chalk); font-size: var(--text-md); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--chalk-3); }
+
+/* What's on every match page: a numbered list, the live example under each. */
+.ld-gets { margin: 0; padding: 0; list-style: none; counter-reset: get; }
+.ld-gets > li {
+  counter-increment: get;
+  display: grid;
+  grid-template-columns: var(--space-9) minmax(0, 1fr);
+  column-gap: var(--space-5);
+  padding-block: var(--space-6);
+  border-top: var(--border) solid var(--hairline);
+}
+.ld-gets > li:first-child { border-top: 0; padding-top: 0; }
+.ld-gets > li::before {
+  content: counter(get);
+  grid-row: span 3;
+  color: var(--chalk-3);
+  font-family: var(--display-figures);
+  font-size: var(--text-xl);
+  line-height: 1.1;
+}
+.ld-gets h3 { margin: 0; color: var(--chalk); font-size: var(--text-lg); font-weight: var(--weight-bold); }
+.ld-gets p { margin: var(--space-2) 0 0; color: var(--chalk-2); font-size: var(--text-md); line-height: var(--leading-normal); }
+.ld-get-show { grid-column: 2; }
+.ld-eg { margin: var(--space-4) 0 0; color: var(--chalk-3); font-size: var(--text-sm); }
+.ld-eg b { color: var(--chalk-2); font-weight: var(--weight-medium); }
+.ld-formrows { display: grid; gap: var(--space-2); }
+.ld-formrows > div { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: baseline; }
+.ld-formrows dt { min-width: 9em; color: var(--chalk-2); }
+.ld-formrows dd { margin: 0; display: flex; gap: var(--space-2); font-family: var(--display-figures); font-size: var(--text-md); }
+.ld-res.is-w { color: var(--won); }
+.ld-res.is-l { color: var(--lost); }
+.ld-res.is-d { color: var(--chalk-3); }
+
+/* The trap keeps its own component; on the landing page, without the tape. */
+.ld-sec .trap-tape { display: none; }
+
+/* The record: a results table, the outcome in words. */
+.ld-results { margin: var(--space-7) 0 0; padding: 0; list-style: none; }
+.ld-results li {
+  display: grid;
+  grid-template-columns: 4.5em minmax(0, 1fr) auto;
+  gap: var(--space-5);
+  align-items: baseline;
+  padding-block: var(--space-4);
+  border-top: var(--border) solid var(--hairline);
+}
+.ld-results li:last-child { border-bottom: var(--border) solid var(--hairline); }
+.ld-r-when { color: var(--chalk-3); font-size: var(--text-sm); }
+.ld-r-match { min-width: 0; color: var(--chalk); }
+.ld-r-match b { display: block; font-weight: var(--weight-medium); overflow-wrap: anywhere; }
+.ld-r-match span { display: block; margin-top: var(--space-1); color: var(--chalk-3); font-size: var(--text-sm); }
+.ld-r-match:hover b { text-decoration: underline; text-underline-offset: 3px; }
+.ld-r-out { font-size: var(--text-sm); font-weight: var(--weight-bold); }
+.ld-r-out.is-w { color: var(--won); }
+.ld-r-out.is-l { color: var(--lost); }
+
+/* The plans: three columns divided by rules; the monthly one has the filled button. */
+.ld-plans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: var(--border) solid var(--hairline);
+}
 .ld-plans li {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-7);
-  border: var(--border) solid var(--rule);
-  border-radius: var(--radius-lg);
-  background: var(--stand);
-  color: var(--chalk);
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-6) var(--space-6) var(--space-6) 0;
 }
-.ld-plans li .btn { align-self: stretch; margin-top: auto; }
-.ld-plans b { font-size: var(--text-md); color: var(--chalk-2); }
-.ld-plans .ld-week { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--won); }
-/* Our recommendation, marked by the accent rather than by a claim about other
-   people's choices. */
-.ld-plans li.is-pick { border-color: var(--floodlight); }
-.ld-price { font-family: var(--display-figures); font-size: var(--text-3xl); font-weight: var(--weight-black); line-height: 1; font-variant-numeric: tabular-nums; }
-.ld-blurb { font-size: var(--text-md); line-height: var(--leading-normal); color: var(--chalk-2); }
+.ld-plans li + li { padding-left: var(--space-6); border-left: var(--border) solid var(--hairline); }
+.ld-plans b { color: var(--chalk-2); font-size: var(--text-md); font-weight: var(--weight-medium); }
+.ld-price { color: var(--chalk); font-family: var(--display-figures); font-size: var(--text-2xl); font-weight: 700; line-height: 1.1; }
+.ld-week { color: var(--chalk-3); font-size: var(--text-sm); }
+.ld-blurb { color: var(--chalk-2); font-size: var(--text-sm); line-height: var(--leading-normal); flex: 1; }
+.ld-plans .btn { margin-top: var(--space-4); align-self: flex-start; }
 
-/* Straight answers. */
-.ld-faq { max-width: 760px; border-top: var(--border) solid var(--hairline); }
-.ld-faq details { border-bottom: var(--border) solid var(--hairline); }
+/* The answers. */
+.ld-faq details { border-top: var(--border) solid var(--hairline); }
+.ld-faq details:last-child { border-bottom: var(--border) solid var(--hairline); }
 .ld-faq summary {
   display: flex;
-  align-items: center;
   justify-content: space-between;
   gap: var(--space-5);
-  padding: var(--space-6) 0;
-  font-size: var(--text-lg);
-  font-weight: var(--weight-bold);
+  padding-block: var(--space-5);
   color: var(--chalk);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-medium);
   cursor: pointer;
   list-style: none;
 }
 .ld-faq summary::-webkit-details-marker { display: none; }
-.ld-faq summary::after { content: '+'; flex: none; font-size: var(--text-xl); font-weight: var(--weight-normal); color: var(--chalk-3); transition: transform var(--dur-fast) var(--ease-out); }
-.ld-faq details[open] summary::after { transform: rotate(45deg); }
-.ld-faq p { max-width: 62ch; margin: 0 0 var(--space-6); font-size: var(--text-read); line-height: var(--leading-read); color: var(--chalk-2); }
+.ld-faq summary::after { content: '+'; color: var(--chalk-3); }
+.ld-faq details[open] summary::after { content: '\2212'; }
+.ld-faq p { margin: 0 0 var(--space-6); max-width: 38em; color: var(--chalk-2); font-size: var(--text-md); line-height: var(--leading-read); }
 
-.ld-end { margin-top: var(--space-12); padding: var(--space-11) 0; border-top: var(--border) solid var(--hairline); }
-.ld-end .ld-h2 { max-width: 22ch; margin-bottom: var(--space-6); }
-
-/* The second way in, a quiet link beside the button: one job per screen. */
-.ld-alt { align-self: center; font-weight: var(--weight-medium); color: var(--chalk-2); text-decoration: underline; text-decoration-color: var(--rule-firm); text-underline-offset: 4px; }
-.ld-alt:hover { color: var(--chalk); text-decoration-color: var(--chalk); }
-
-/* Proof beside the button: the record in a line and the last ten. */
-.ld-proof { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-4); margin-top: var(--space-6); }
-.ld-proof p { margin: 0; font-size: var(--text-sm); color: var(--chalk-2); }
-.ld-proof b { color: var(--chalk); }
-.ld-proof a { color: var(--chalk-2); text-decoration: underline; text-underline-offset: 3px; }
-.ld-form-sm { gap: 3px; }
-.ld-form-sm .ld-chip { width: 20px; height: 20px; font-size: 10px; }
-
-/* The competitions, by their own logos. */
-.ld-comps { border-bottom: var(--border) solid var(--hairline); background: var(--stand); }
-.ld-comps-in { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4) var(--space-8); padding-block: var(--space-6); }
-.ld-comps-in p { margin: 0; font-size: var(--text-sm); color: var(--chalk-3); }
-.ld-comps ul { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-6); margin: 0; padding: 0; list-style: none; }
-.ld-comps a { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--chalk-2); text-decoration: none; }
-.ld-comps a:hover { color: var(--chalk); }
-.ld-comps-all { text-decoration: underline !important; text-underline-offset: 3px; }
-
-/* What's on every match page: the claim on the left, today's game proving
-   it on the right, one row each, ruled like a team sheet. */
-.ld-gets { margin: 0; padding: 0; list-style: none; border-top: var(--border) solid var(--hairline); }
-.ld-gets > li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--space-9);
-  align-items: center;
-  padding-block: var(--space-7);
-  border-bottom: var(--border) solid var(--hairline);
-}
-.ld-get-text h3 { margin: 0 0 var(--space-2); font-family: var(--display); font-size: var(--text-xl); font-weight: var(--weight-black); line-height: var(--leading-display); color: var(--chalk); }
-.ld-get-text p { max-width: 46ch; margin: 0; font-size: var(--text-read); line-height: var(--leading-normal); color: var(--chalk-2); }
-.ld-get-show { min-width: 0; }
-.ld-show-note { margin: 0; font-size: var(--text-md); color: var(--chalk-3); }
-.ld-news { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
-.ld-news li { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; align-items: baseline; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: var(--border) solid var(--hairline); border-radius: var(--radius); background: var(--stand); }
-.ld-news b { min-width: 0; overflow-wrap: anywhere; color: var(--chalk); }
-.ld-news span { min-width: 0; font-size: var(--text-sm); color: var(--chalk-3); }
-.ld-news em { font-style: normal; font-size: var(--text-xs); font-weight: var(--weight-bold); color: var(--lost); }
-.ld-formrows { display: grid; gap: var(--space-3); }
-.ld-formrows > div { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); }
-.ld-formrows b { min-width: 0; overflow-wrap: anywhere; color: var(--chalk); }
-.ld-bignum { display: flex; align-items: baseline; gap: var(--space-4); margin: 0; }
-.ld-bignum b { flex: none; font-family: var(--display-figures); font-size: var(--text-3xl); font-weight: var(--weight-black); line-height: 1; font-variant-numeric: tabular-nums; color: var(--floodlight-hi); }
-.ld-bignum span { font-size: var(--text-md); line-height: var(--leading-normal); color: var(--chalk-2); }
-
-/* The receipts: what we said, and the score that answered it. */
-.ld-receipts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-5); margin: var(--space-8) 0 0; padding: 0; list-style: none; }
-.ld-receipts li { display: grid; grid-template-rows: auto auto 1fr; gap: var(--space-4); padding: var(--space-6); border: var(--border) solid var(--rule); border-top: 3px solid var(--won); border-radius: var(--radius-lg); background: var(--stand); }
-.ld-receipts li.is-l { border-top-color: var(--lost); }
-.ld-rc-top { display: flex; justify-content: space-between; gap: var(--space-3); margin: 0; font-size: var(--text-sm); color: var(--chalk-3); }
-.ld-rc-tag { font-weight: var(--weight-bold); color: var(--won); }
-.is-l .ld-rc-tag { color: var(--lost); }
-.ld-rc-score { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); margin: 0; }
-.ld-rc-score b { min-width: 0; font-size: var(--text-md); overflow-wrap: anywhere; color: var(--chalk); }
-.ld-rc-score b:last-of-type { text-align: right; }
-.ld-rc-goals { padding: 0 var(--space-2); font-family: var(--display-figures); font-size: var(--text-xl); font-weight: var(--weight-black); font-variant-numeric: tabular-nums; color: var(--chalk); }
-.ld-rc-said { margin: 0; font-size: var(--text-md); line-height: var(--leading-read); color: var(--chalk-2); }
-.ld-rc-said span { display: block; margin-bottom: var(--space-1); font-size: var(--text-xs); font-weight: var(--weight-bold); color: var(--chalk-3); }
-.ld-rc-went { margin: 0; font-size: var(--text-sm); line-height: var(--leading-normal); color: var(--chalk); }
-.ld-rc-went span { display: block; margin-bottom: var(--space-1); font-size: var(--text-xs); font-weight: var(--weight-bold); color: var(--chalk-3); }
-.ld-receipts a { font-size: var(--text-sm); font-weight: var(--weight-bold); color: var(--floodlight-hi); }
+/* Asked again, once, at the end. */
+.ld-end { padding-bottom: var(--space-13); }
+.ld-end .ld-h2 { max-width: 18em; }
 
 @media (max-width: 900px) {
-  .ld-gets > li { grid-template-columns: minmax(0, 1fr); gap: var(--space-5); }
-  .ld-receipts { grid-template-columns: minmax(0, 1fr); }
-  .ld-hero { min-height: 0; padding: var(--space-11) 0 var(--space-10); }
-  .ld-scrim { background: linear-gradient(180deg, rgba(10, 10, 12, 0.6) 0%, rgba(10, 10, 12, 0.85) 45%, var(--pitch) 100%), radial-gradient(90% 60% at 80% 0%, var(--floodlight-dim), transparent 70%); }
-  .ld-hero-in { grid-template-columns: minmax(0, 1fr); gap: var(--space-9); }
-  .ld-plans { grid-template-columns: minmax(0, 1fr); gap: var(--space-6); }
+  .ld-hero-in { grid-template-columns: minmax(0, 1fr); gap: var(--space-9); padding-block: var(--space-9) var(--space-10); }
+  .ld-split { grid-template-columns: minmax(0, 1fr); }
+  .ld-sec { padding-block: var(--space-10) 0; }
+  .ld-sec + .ld-sec { margin-top: var(--space-10); }
 }
-@media (max-width: 520px) {
-  .ld-tk-body { padding: var(--space-6); }
-  .ld-tk-band { height: 112px; }
-  .ld-tk-ch { left: 10%; }
-  .ld-tk-ca { right: 10%; }
-  .ld-call-wait { min-height: 380px; }
-  .ld-shout { font-size: var(--text-xl); }
+@media (max-width: 560px) {
+  .ld-lead { padding: var(--space-6); }
+  .ld-lead-teams a { font-size: var(--text-2xl); }
   .ld-actions .btn { flex: 1 1 100%; }
-  .ld-sec { padding-top: var(--space-11); }
   .ld-h2 { font-size: var(--text-2xl); }
-  .ld-alt { flex: 1 1 100%; text-align: center; }
-  .ld-comps ul { gap: var(--space-3) var(--space-5); }
-  .ld-bignum b { font-size: var(--text-2xl); }
+  .ld-plans li, .ld-plans li + li { padding: var(--space-6) 0; border-left: 0; }
+  .ld-plans li + li { border-top: var(--border) solid var(--hairline); }
+  .ld-results li { grid-template-columns: minmax(0, 1fr) auto; }
+  .ld-r-when { grid-column: 1 / -1; }
+  .ld-formrows dt { min-width: 7em; }
 }
 
 /* ===================================================== reduced motion */
@@ -6419,8 +6409,6 @@ html.dd-locked, html.dd-locked body { overflow: hidden; }
 .starball:has(.starball-live.is-live) .starball-still { opacity: 0; }
 @keyframes starball-in { from { opacity: 0; scale: 0.94; translate: 4% 0; } }
 
-/* The landing hero: the ball's left half, a star facing us. */
-.ld-hero .comp-art-ucl .starball { top: 50%; left: 38%; width: min(1400px, 90vw); margin-top: calc(min(1400px, 90vw) / -2); }
 /* A match masthead is shorter: a smaller ball, still cropped by the edge. */
 .hero .comp-art-ucl .starball { top: 50%; left: 50%; width: clamp(620px, 64vw, 1180px); margin-top: calc(clamp(620px, 64vw, 1180px) / -2); }
 /* The words' side, kept dark enough to read over the ball's edge. */
@@ -6435,7 +6423,6 @@ html.dd-locked, html.dd-locked body { overflow: hidden; }
 
 /* On a phone the ball rises behind the top right and the words sit under it. */
 @media (max-width: 760px) {
-  .ld-hero .comp-art-ucl .starball,
   .hero .comp-art-ucl .starball { top: -34vw; left: 22vw; width: 150vw; margin-top: 0; }
   .comp-art-ucl::after {
     background: linear-gradient(180deg, transparent 0%, rgba(1, 1, 74, 0.35) 28%, rgba(1, 1, 74, 0.88) 56%, var(--pitch) 100%);
@@ -6448,9 +6435,7 @@ html.dd-locked, html.dd-locked body { overflow: hidden; }
 
 /* What the theme replaces: the photograph, the scrim and the clubs' glows. */
 .hero.theme-ucl .hero-media,
-.hero.theme-ucl .fx-wash,
-.ld-hero.theme-ucl .ld-shot,
-.ld-hero.theme-ucl .ld-scrim { display: none; }
+.hero.theme-ucl .fx-wash { display: none; }
 .hero.theme-ucl .matchcentre { background: rgba(1, 1, 74, 0.72); }
 
 /* The Champions League night card: the ball rises behind its top corner. */
