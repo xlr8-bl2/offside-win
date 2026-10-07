@@ -584,6 +584,9 @@ CREATE INDEX IF NOT EXISTS fixture_away_team ON fixture (away_team_id, kickoff);
 
 CREATE INDEX IF NOT EXISTS schedule_kickoff ON schedule (kickoff);
 
+-- Which competitions have games to come (search, get_leagues in worker/src/d1read.ts).
+CREATE INDEX IF NOT EXISTS schedule_league ON schedule (league_id, kickoff);
+
 CREATE INDEX IF NOT EXISTS admin_log_at ON admin_log (at DESC);
 
 CREATE INDEX IF NOT EXISTS purchase_consent_user ON purchase_consent (user_id, created_at);
