@@ -59,6 +59,14 @@ alerts, goodwill), which still call Supabase and fail quietly. Members' calls sh
 - Tests: `worker/test/stage2.test.ts` (10, on a SQLite from `schema.sql`, with any call to
   Supabase failing the test) and `worker/test/auth.test.ts` (10). Shared helper `worker/test/d1.ts`.
 
+### The earlier calls back on the results page (owner, 7 October)
+
+The owner asked for the calls made before the 6 October record reset to show again. `record:reset`
+now runs on D1 (`undo-dry` counts, `undo` puts the archived pick, pulled_call and slip rows back),
+and `pg.yml` runs engine commands against D1 (`db:export` and `db:verify` still use Postgres).
+Share cards were redrawn under a new kv key (`cards:keys:d1`), because the old key listed cards
+that only existed in Supabase Storage.
+
 ### What happened: Supabase blocked the project
 
 Since the night of 6 to 7 October 2026 (between 21:10 and 00:58 UTC), every request to the site's

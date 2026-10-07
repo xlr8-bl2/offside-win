@@ -23,7 +23,10 @@ import { cardKey, cardPath } from '../../../public/js/lib/cards.js';
 
 const SITE = (process.env['SITE'] ?? 'https://offside.win').replace(/\/$/, '');
 const MAX = Number(process.env['CARDS_MAX'] ?? 120);
-const KV = 'cards:keys';
+// The cards drawn, by the key of what each said. Its own name since the move
+// to D1 (October 2026): the cards in the old store are not in the new one, so
+// every card is drawn again once.
+const KV = 'cards:keys:d1';
 
 export async function syncCards(): Promise<{ seen: number; drawn: number; failed: number; kept: number }> {
   const res = await fetch(`${SITE}/api/board?hours=96`, { headers: { accept: 'application/json' } });
