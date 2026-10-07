@@ -79,6 +79,15 @@ Then, on the owner's word: the offer bar with its countdown no longer runs for d
 (only a plain notice can be a bar; offers still show in the popup and at checkout,
 `runPromos` in `public/js/lib/promo.js`), and the footer's four stat tiles are gone.
 
+### Depth behind every header (7 October)
+
+The landing page has its stadium photograph back (low, under a scrim heaviest where the words
+are, no tint). Every other page header gets a layer too (`headDepth` in `app.js`, styles `.ph-bg`
+in `components.css`): a competition page shows the ground of its next game and its crest, large
+and faint; a player page its club's crest; the results page the ground of the latest match played;
+every other page the ground of today's biggest game. Pages with their own masthead (a match,
+the members' front page, the landing page) are left alone.
+
 ### What happened: Supabase blocked the project
 
 Since the night of 6 to 7 October 2026 (between 21:10 and 00:58 UTC), every request to the site's

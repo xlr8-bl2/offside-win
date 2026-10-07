@@ -3291,8 +3291,34 @@
  * one "vibe coded").
  */
 .ld-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   border-bottom: var(--border) solid var(--hairline);
   background: var(--pitch);
+}
+/* The ground today's games are played at, low behind the words: a photograph
+   at a third of its strength, darkened most where the type sits. No tint. */
+.ld-bg { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+.ld-shot { position: absolute; inset: 0; }
+.ld-shot-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  filter: saturate(0.75);
+  transition: opacity 900ms ease;
+}
+.ld-shot-img.is-in { opacity: 0.38; }
+.ld-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, var(--pitch) 0%, rgba(10, 10, 12, 0.82) 42%, rgba(10, 10, 12, 0.45) 100%),
+    linear-gradient(0deg, var(--pitch) 0%, transparent 30%);
 }
 .ld-hero-in {
   display: grid;
@@ -3583,6 +3609,9 @@
 .ld-end .ld-h2 { max-width: 18em; }
 
 @media (max-width: 900px) {
+  .ld-bg::after {
+    background: linear-gradient(180deg, rgba(10, 10, 12, 0.55) 0%, rgba(10, 10, 12, 0.85) 40%, var(--pitch) 75%);
+  }
   .ld-hero-in { grid-template-columns: minmax(0, 1fr); gap: var(--space-9); padding-block: var(--space-9) var(--space-10); }
   .ld-split { grid-template-columns: minmax(0, 1fr); }
   .ld-sec { padding-block: var(--space-10) 0; }
@@ -3792,6 +3821,54 @@
  * the one taking up the most room.
  */
 .page-head { margin-bottom: var(--space-7); }
+
+/* Depth behind a page header (headDepth in app.js): the ground of the game
+   the page is about, and the subject's crest, under a scrim heaviest where
+   the words sit, faded out just below the header. No tint, no glow. */
+main#app { position: relative; isolation: isolate; }
+.ph-bg {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
+}
+.ph-shot {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  filter: saturate(0.75);
+  transition: opacity 900ms ease;
+}
+.ph-shot.is-in { opacity: 0.3; }
+.ph-mark {
+  position: absolute;
+  top: 50%;
+  right: max(var(--gutter), calc((100% - var(--maxw)) / 2 + var(--gutter)));
+  width: clamp(180px, 30vw, 380px);
+  height: auto;
+  translate: 0 -50%;
+  opacity: 0;
+  filter: grayscale(0.2);
+  transition: opacity 900ms ease;
+}
+.ph-mark.is-in { opacity: 0.1; }
+.ph-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--pitch) 0%, rgba(10, 10, 12, 0.8) 45%, rgba(10, 10, 12, 0.5) 100%);
+}
+@media (max-width: 760px) {
+  .ph-bg::after { background: linear-gradient(180deg, rgba(10, 10, 12, 0.6) 0%, rgba(10, 10, 12, 0.85) 100%); }
+  .ph-mark { right: calc(var(--gutter) * -2); width: 220px; }
+}
+@media (prefers-reduced-motion: reduce) { .ph-shot, .ph-mark { transition: none; } }
 .page-sub {
   margin-top: var(--space-3);
   max-width: 56ch;
