@@ -1525,7 +1525,7 @@ export async function pruneBoard(): Promise<void> {
   );
   await restoreCalledFixtures();
   // Deleted accounts' fingerprints go after the six years the privacy policy gives them.
-  if (config.dbBackend === 'postgres') await dbExec('DELETE FROM former_member WHERE at < ?', [Math.floor(Date.now() / 1000) - 6 * 365 * 86400]);
+  await dbExec('DELETE FROM former_member WHERE at < ?', [Math.floor(Date.now() / 1000) - 6 * 365 * 86400]);
 }
 
 /**
@@ -1539,7 +1539,6 @@ export async function pruneBoard(): Promise<void> {
  * cannot name is remembered and not asked about again.
  */
 export async function restoreCalledFixtures(perPass = 12): Promise<number> {
-  if (config.dbBackend !== 'postgres') return 0;
   const skip = new Set<number>(((await kvGetJSON<number[]>('restore:unnamed')) ?? []).map(Number));
   const gone = await dbSelect<{ fixture_id: number; kickoff: number }>(
     `SELECT p.fixture_id, max(p.kickoff) AS kickoff FROM pick p
@@ -1589,7 +1588,36 @@ export async function restoreCalledFixtures(perPass = 12): Promise<number> {
 
 /** Copy finished fixtures' snapshots older than `before` into market_snapshot. */
 export async function archiveSnapshots(before: number): Promise<void> {
-  if (config.dbBackend !== 'postgres') return;
+  if (config.dbBackend !== 'postgres') {
+    // The same row in SQLite's JSON functions. A report that is not JSON
+    // counts as no report, as try_json made it in Postgres.
+    await dbExec(
+      `INSERT INTO market_snapshot (fixture_id, league_id, kickoff, home_goals, away_goals, snapshot, archived_at)
+       SELECT f.id, f.league_id, f.kickoff, f.home_goals, f.away_goals,
+              json_object(
+                'rank', f.rank,
+                'markets', json(f.bundle_json -> '$.markets'),
+                'lambda', json_array(json(f.bundle_json -> '$.lambda_home'), json(f.bundle_json -> '$.lambda_away')),
+                'confidence', json(f.bundle_json -> '$.confidence'),
+                'provider', json(f.bundle_json -> '$.external.bsd_prediction'),
+                'corners', CASE WHEN r.j ->> '$.stats.home.corners' IS NOT NULL AND r.j ->> '$.stats.away.corners' IS NOT NULL
+                                THEN json_array(CAST(r.j ->> '$.stats.home.corners' AS INTEGER), CAST(r.j ->> '$.stats.away.corners' AS INTEGER)) END,
+                'reds', CASE WHEN json_type(r.j, '$.stats.home') IS NOT NULL
+                             THEN coalesce(CAST(r.j ->> '$.stats.home.red' AS INTEGER), 0) + coalesce(CAST(r.j ->> '$.stats.away.red' AS INTEGER), 0) END
+              ),
+              unixepoch()
+         FROM fixture f
+         JOIN (SELECT id, CASE WHEN json_valid(report_json) THEN report_json END AS j FROM fixture) r ON r.id = f.id
+        WHERE f.kickoff < ? AND f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
+          AND json_valid(f.bundle_json) AND json_type(f.bundle_json, '$.markets') = 'array'
+          AND NOT EXISTS (SELECT 1 FROM market_snapshot s WHERE s.fixture_id = f.id
+                            AND s.snapshot NOT LIKE '%"source":"backfill"%')
+       ON CONFLICT (fixture_id) DO UPDATE SET snapshot = excluded.snapshot, archived_at = excluded.archived_at
+        WHERE market_snapshot.snapshot LIKE '%"source":"backfill"%'`,
+      [before],
+    );
+    return;
+  }
   await dbExec(
     `INSERT INTO market_snapshot (fixture_id, league_id, kickoff, home_goals, away_goals, snapshot, archived_at)
      SELECT f.id, f.league_id, f.kickoff, f.home_goals, f.away_goals,
@@ -1608,7 +1636,7 @@ export async function archiveSnapshots(before: number): Promise<void> {
        FROM fixture f
        CROSS JOIN LATERAL (SELECT try_json(f.bundle_json)::jsonb AS j) b
        CROSS JOIN LATERAL (SELECT try_json(f.report_json)::jsonb AS j) r
-      WHERE f.kickoff < $1 AND f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
+      WHERE f.kickoff < ? AND f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
         AND jsonb_typeof(b.j->'markets') = 'array'
         -- Matches kept for their call (pruneBoard) are archived once, not
         -- read again on every pass.

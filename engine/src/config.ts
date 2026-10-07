@@ -605,8 +605,9 @@ export function requireEnv(opts: { provider?: boolean } = {}): void {
   if (config.dbBackend === 'postgres') {
     if (!config.pg.url) missing.push('SUPABASE_DB_URL');
   } else {
-    if (!config.d1.accountId) missing.push('CF_ACCOUNT_ID');
-    if (!config.d1.databaseId) missing.push('CF_D1_DATABASE_ID');
+    // Through the Worker (ENGINE_DB_URL) the token is all it takes: the key is derived from it.
+    if (!config.d1.gateway && !config.d1.accountId) missing.push('CF_ACCOUNT_ID');
+    if (!config.d1.gateway && !config.d1.databaseId) missing.push('CF_D1_DATABASE_ID');
     if (!config.d1.token) missing.push('CF_API_TOKEN');
   }
   if (missing.length) {

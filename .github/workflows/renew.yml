@@ -32,8 +32,10 @@ jobs:
       - run: npm ci
       - name: Charge the memberships falling due
         env:
-          DB_BACKEND: postgres
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          # D1 through the Worker's engine door (HANDOFF.md, "The move to D1").
+          DB_BACKEND: d1
+          ENGINE_DB_URL: https://offside.win/api/internal/db
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           COINFLOW_API_KEY: ${{ secrets.COINFLOW_API_KEY }}
           COINFLOW_BASE_URL: ${{ vars.COINFLOW_BASE_URL || 'https://api-sandbox.coinflow.cash' }}
           COINFLOW_WALLET: ${{ vars.COINFLOW_WALLET }}

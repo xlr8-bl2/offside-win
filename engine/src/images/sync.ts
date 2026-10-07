@@ -78,7 +78,7 @@ async function teamsByName(): Promise<Map<string, number[]>> {
 async function fresh(): Promise<Set<number>> {
   const cutoff = Math.floor(Date.now() / 1000) - STALE_DAYS * 86_400;
   const rows = await select<{ team_id: number }>(
-    'SELECT team_id FROM team_shot WHERE updated_at > $1',
+    'SELECT team_id FROM team_shot WHERE updated_at > ?',
     [cutoff],
   );
   return new Set(rows.map((r) => Number(r.team_id)));
@@ -103,7 +103,7 @@ async function wantedSlugs(done: Set<number>): Promise<string[]> {
   const onTheBoard = await select<{ league_id: number; league: string }>(
     `SELECT DISTINCT f.league_id, l.name AS league
        FROM fixture f JOIN league l ON l.id = f.league_id
-      WHERE f.kickoff BETWEEN $1 AND $2`,
+      WHERE f.kickoff BETWEEN ? AND ?`,
     [now - 3 * 86_400, now + 10 * 86_400],
   );
 
@@ -217,7 +217,7 @@ export async function syncTeamShots(now = new Date()): Promise<SyncReport> {
             const url = await put(`team/${teamId}.${ext}`, body, type);
             await exec(
               `INSERT INTO team_shot (team_id, url, credit, title, asset_id, width, height, taken_at, updated_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (team_id) DO UPDATE SET
                  url = EXCLUDED.url, credit = EXCLUDED.credit, title = EXCLUDED.title,
                  asset_id = EXCLUDED.asset_id, width = EXCLUDED.width, height = EXCLUDED.height,

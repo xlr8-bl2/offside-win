@@ -67,8 +67,10 @@ Stage 1, the public site:
 - [x] `schema.sql` rewritten as the full D1 (SQLite) schema: all 40 tables, 28 indexes, no RLS or
       functions. Generated from `schema.pg.sql` once; hand-maintained from now on. Applies twice
       cleanly on SQLite.
-- [ ] D1 database created (`offside-win` or a new one) and its ID in `worker/wrangler.toml`
-      `[[d1_databases]]`, binding `DB`.
+- [x] D1 database created: `offside` (pg.yml `d1:create`, run 37559148025). `worker/wrangler.toml`
+      binds it as `DB` with `database_id = "REPLACE_WITH_D1_DATABASE_ID"`, which deploy.yml fills
+      in after finding the database by name. The September D1 (secret `CF_D1_DATABASE_ID`) is a
+      stale copy in an older schema; it is not used and can be deleted later.
 - [ ] `db:import`: built (`engine/src/d1import.ts`, statements from `engine/src/d1load.ts`). Run
       `pg.yml` with command `db:import` (input `export_run`, default the run above): it finds or
       creates the D1 database `offside` (`engine/src/d1setup.ts`, `d1:create`), applies
@@ -78,7 +80,11 @@ Stage 1, the public site:
       runs a batch of statements on the `DB` binding behind `x-engine-key`; `engine/src/store.d1.ts`
       sends there when `ENGINE_DB_URL` is set (REST API otherwise). Still to do: deploy.yml setting
       `ENGINE_DB_KEY`, and the workflows' env.
-- [ ] Postgres-only SQL in the engine ported or guarded. Known spots: `slate.ts` around line 1590
+- [x] Postgres-only SQL in the engine ported: `archiveSnapshots` has a SQLite version
+      (`json_object`, `->`), `restoreCalledFixtures`, the `former_member` purge and settle's
+      `UPDATE ... FROM` now run on both. Still Postgres-only, and fine to leave until stage 2:
+      `grant.ts`, `trace.ts` (reads auth.users), `recordreset.ts`, and the lab.
+      Original note: Known spots: `slate.ts` around line 1590
       (the market snapshot uses `jsonb`, `LATERAL`, `extract(epoch)`), and the `config.dbBackend ===
       'postgres'` branches in `slate.ts` and `settle.ts`.
 - [ ] Worker serves the public endpoints from D1. Built: `worker/src/d1read.ts` rebuilds every
@@ -94,7 +100,11 @@ Stage 1, the public site:
       `get_leagues`, `get_player`, `get_team`, `get_record`, `get_how_sure`, `get_pulled`,
       `search_games`. Verify each by diffing its JSON against the Postgres function on the same
       exported data.
-- [ ] Workflows switched to `DB_BACKEND=d1`, with the cadence cut so the engine reads far less.
+- [ ] Workflows switched to `DB_BACKEND=d1`: done on the branch for slate, settle, ratings,
+      images, cards, renew, backtest and bootstrap (`ENGINE_DB_URL=https://offside.win/api/internal/db`,
+      `CF_API_TOKEN`). The slate loop is every 30 minutes (`SLATE_LOOP_EVERY`), because each query
+      is a Worker request and 15-minute passes alone would use the 10M a month in the plan.
+      deploy.yml now applies `schema.sql` to D1 and pushes `ENGINE_DB_KEY`. Takes effect on merge.
 - [ ] Deployed and checked live: every page at 390px and 1440px (`.claude/skills/ui-verify`).
 
 Stage 2, accounts:

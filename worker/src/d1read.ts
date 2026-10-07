@@ -161,15 +161,18 @@ async function boardCards(db: D1Read, fixtures: Rec[], member: boolean, freeId: 
   });
 }
 
-/** get_board(p_from, p_to, p_league). */
+/**
+ * get_board(p_from, p_to, p_league). Ties in the order (same day, rank and
+ * kick-off) are broken by id here; Postgres broke them however it liked.
+ */
 export async function getBoard(db: D1Read, from: number, to: number, league?: number | null): Promise<Rec> {
   const member = false;
   const freeId = await freeFixtureId(db);
   const fx = league
     ? await rows(db, `SELECT ${CARD_COLS} FROM fixture f WHERE f.kickoff BETWEEN ? AND ? AND f.league_id = ?
-        ORDER BY f.kickoff / 86400, f.rank, f.kickoff LIMIT 300`, from, to, league)
+        ORDER BY f.kickoff / 86400, f.rank, f.kickoff, f.id LIMIT 300`, from, to, league)
     : await rows(db, `SELECT ${CARD_COLS} FROM fixture f WHERE f.kickoff BETWEEN ? AND ?
-        ORDER BY f.kickoff / 86400, f.rank, f.kickoff LIMIT 300`, from, to);
+        ORDER BY f.kickoff / 86400, f.rank, f.kickoff, f.id LIMIT 300`, from, to);
   return { generated_at: now(), count: fx.length, member, fixtures: await boardCards(db, fx, member, freeId) };
 }
 
@@ -208,16 +211,16 @@ export async function searchGames(db: D1Read, q: string): Promise<Rec> {
   let leagues: Rec[] = [];
   if (n >= 2 && n <= 60) {
     const cand = await rows(db, `SELECT id, home_team, away_team, json_extract(board_json, '$.league') AS league
-      FROM fixture WHERE kickoff BETWEEN ? AND ? ORDER BY kickoff`, t - 3 * 86400, t + 14 * 86400);
+      FROM fixture WHERE kickoff BETWEEN ? AND ? ORDER BY kickoff, id`, t - 3 * 86400, t + 14 * 86400);
     const ids = cand.filter((f) => hit(f.home_team, f.away_team, f.league)).slice(0, 60).map((f) => f.id as number);
     if (ids.length) {
       const freeId = await freeFixtureId(db);
-      const fx = await rows(db, `SELECT ${CARD_COLS} FROM fixture f WHERE f.id IN (${inList(ids.length)}) ORDER BY f.kickoff`, ...ids);
+      const fx = await rows(db, `SELECT ${CARD_COLS} FROM fixture f WHERE f.id IN (${inList(ids.length)}) ORDER BY f.kickoff, f.id`, ...ids);
       analysed = await boardCards(db, fx, member, freeId);
     }
     const sched = await rows(db, `SELECT s.*, l.name AS league FROM schedule s LEFT JOIN league l ON l.id = s.league_id
       WHERE s.kickoff > ? AND s.kickoff <= ? AND NOT EXISTS (SELECT 1 FROM fixture f WHERE f.id = s.id)
-      ORDER BY s.kickoff`, t, t + 14 * 86400);
+      ORDER BY s.kickoff, s.id`, t, t + 14 * 86400);
     later = sched.filter((s) => hit(s.home_team, s.away_team, s.league)).slice(0, 60).map(laterRow);
     const lg = await rows(db, `SELECT l.id, l.name, l.country FROM league l
       WHERE EXISTS (SELECT 1 FROM schedule s WHERE s.league_id = l.id)
@@ -234,11 +237,11 @@ export async function getTeam(db: D1Read, id: number): Promise<Rec | null> {
   const t = now();
   const games = await rows(db, `SELECT ${CARD_COLS}, f.home_team, f.away_team FROM fixture f
     WHERE (f.home_team_id = ? OR f.away_team_id = ?) AND f.kickoff BETWEEN ? AND ?
-    ORDER BY f.kickoff DESC LIMIT 30`, id, id, t - 60 * 86400, t + 21 * 86400);
+    ORDER BY f.kickoff DESC, f.id LIMIT 30`, id, id, t - 60 * 86400, t + 21 * 86400);
   const later = await rows(db, `SELECT s.*, l.name AS league FROM schedule s LEFT JOIN league l ON l.id = s.league_id
     WHERE (s.home_team_id = ? OR s.away_team_id = ?) AND s.kickoff > ? AND s.kickoff <= ?
       AND NOT EXISTS (SELECT 1 FROM fixture f WHERE f.id = s.id)
-    ORDER BY s.kickoff LIMIT 10`, id, id, t, t + 45 * 86400);
+    ORDER BY s.kickoff, s.id LIMIT 10`, id, id, t, t + 45 * 86400);
   const latest = [...games, ...later].sort((a, b) => b.kickoff - a.kickoff)[0];
   if (!latest) return null;
   const freeId = await freeFixtureId(db);
