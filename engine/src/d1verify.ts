@@ -218,6 +218,15 @@ export async function d1Verify(dir = 'export'): Promise<void> {
           const w = ids(want);
           for (const [id, name] of g) if (!w.has(id)) console.log(`  search "${String(a.args.p_q)}" ${key}: only D1 has ${id} ${name}`);
           for (const [id, name] of w) if (!g.has(id)) console.log(`  search "${String(a.args.p_q)}" ${key}: only Postgres has ${id} ${name}`);
+          const rowsOf = (v: Json) => new Map(((v as Record<string, Array<Record<string, unknown>>>)[key] ?? []).map((r) => [Number(r['id']), r]));
+          const gr = rowsOf(got);
+          const wr = rowsOf(want);
+          for (const [id, r] of gr) {
+            const other = wr.get(id);
+            if (!other) continue;
+            const d = diff(r, other);
+            if (d.length) console.log(`  search "${String(a.args.p_q)}" ${key}: game ${id} differs at ${d.join(', ')}`);
+          }
         }
       }
       for (const p of d) {
