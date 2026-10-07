@@ -7257,8 +7257,9 @@ async function viewSignin() {
    */
   const humanise = (err) => {
     const raw = String(err?.message ?? '');
-    if (/rate ?limit|only request this after|too many/i.test(raw)) return 'That is one too many in a row. Give it a minute and try again.';
-    if (/invalid format|unable to validate email/i.test(raw)) return 'That does not look like an email address. Check it and try again.';
+    if (/rate ?limit|only request this after|too many/i.test(raw)) return 'That is one too many in a row. Give it a while and try again.';
+    if (/could not be sent|busy/i.test(raw)) return 'The email did not go out. Try again in a minute.';
+    if (/invalid format|unable to validate email|does not look right/i.test(raw)) return 'That does not look like an email address. Check it and try again.';
     if (/signups? not allowed|disabled/i.test(raw)) return 'We cannot open new accounts by email at the moment. Try Google instead.';
     if (/failed to fetch|network/i.test(raw) || navigator.onLine === false) return 'Your device cannot reach us at the moment. Check your connection and try again.';
     if (/popup|window|closed/i.test(raw)) return 'The Google window closed before it finished. Try again.';

@@ -39,6 +39,7 @@
     "mail:route": "npm -w engine run mail:route",
     "db:export": "npm -w engine run db:export",
     "d1:create": "npm -w engine run d1:create",
+    "db:accounts": "npm -w engine run db:accounts",
     "db:import": "npm -w engine run db:import",
     "db:verify": "npm -w engine run db:verify",
     "mail:setup": "npm -w engine run mail:setup",

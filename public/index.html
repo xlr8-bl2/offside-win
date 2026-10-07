@@ -55,7 +55,7 @@
      response to a later fetch of the same address whatever headers that
      fetch carries, so a member's first board was the free copy. -->
 <script>(function () {
-  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) return; } } catch (e) { /* private mode: preload */ }
+  try { if (localStorage.getItem('ow.session')) return; } catch (e) { /* private mode: preload */ }
   const urls = ['/api/board?hours=72', '/api/hero'];
   if (!location.hash || /^#\/(home)?$/.test(location.hash)) urls.push('/api/picks?limit=40&settled=true', '/api/slip');
   for (const u of urls) { const l = document.createElement('link'); l.rel = 'preload'; l.as = 'fetch'; l.href = u; l.crossOrigin = 'anonymous'; document.head.append(l); }

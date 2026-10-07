@@ -38,13 +38,15 @@ import { admin, type AdminEnv } from './admin.ts';
 import { inbound, type InboundMessage } from './support.ts';
 import { engineDb, type EngineDbEnv } from './enginedb.ts';
 import { recordView, serve, type D1Read } from './d1read.ts';
+import { auth, authCleanup, viewerFor, type AuthDb } from './auth.ts';
+import { accountWrite } from './profile.ts';
 import { socials, type SocialEnv } from './social.ts';
 import { fixtureChanges, liveList, liveMatch, type LiveEnv } from './live.ts';
 import { EDGE_PATHS, edgeCached } from './edge.ts';
 
 interface Env extends PayEnv, LiveEnv, AdminEnv, HookEnv {
   /** Cloudflare D1. When bound, the public reads come from here (d1read.ts), not Supabase. */
-  DB?: D1Read;
+  DB?: D1Read & AuthDb;
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   GOOGLE_CLIENT_ID?: string;
@@ -79,7 +81,10 @@ async function rpc(
   // they are moved.
   if (env.DB) {
     try {
-      const value = await serve(env.DB, fn, args);
+      // A reader's own session (auth.ts) decides what is walled. An unknown or
+      // expired token reads as signed out, never as an error.
+      const viewer = jwt ? await viewerFor(env.DB as unknown as AuthDb, jwt) : null;
+      const value = await serve(env.DB, fn, args, viewer);
       if (value !== undefined) return new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json; charset=utf-8' } });
     } catch (err) {
       return fail(`database error: ${err instanceof Error ? err.message : String(err)}`, 502);
@@ -146,6 +151,8 @@ const worker = {
       return;
     }
     ctx.waitUntil(sweepWhop(env));
+    // Spent sign-in links and sessions (auth.ts).
+    ctx.waitUntil(authCleanup(env.DB as unknown as AuthDb | undefined).catch((err) => console.error('auth cleanup:', err instanceof Error ? err.message : String(err))));
     // Calls pulled since the last run: tell the members (pulled.ts).
     ctx.waitUntil(pulledAlerts(env).catch((err) => console.error('pulled:', err instanceof Error ? err.message : String(err))));
   },
@@ -209,10 +216,14 @@ const worker = {
       // Supabase's send-email hook: sign-in links, sent in the site's own
       // design. Signed by Supabase; authhook.ts checks it before anything.
       if (path === '/api/auth/email') return await authEmailHook(request, env);
+      // Signing in, from D1 (auth.ts): email link, Google, sign out.
+      if (path.startsWith('/api/auth/')) return await auth(request, env as never, path, jwt);
 
       // Deleting an account: the reader's token names the account, GoTrue
       // vouches for it, and the service key does the removing. account.ts.
       if (path === '/api/account/delete') return await deleteAccount(request, env, jwt);
+      // The account's own settings (profile.ts).
+      if (path.startsWith('/api/account/')) return await accountWrite(request, env.DB as unknown as AuthDb | undefined, path.slice('/api/account/'.length), jwt);
 
       // The owner's dashboard. Its own gate: GoTrue, then the owner's email,
       // then the service key. admin.ts.

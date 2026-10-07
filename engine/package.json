@@ -29,6 +29,7 @@
     "mail:route": "tsx src/run.ts mail:route",
     "db:export": "tsx src/run.ts db:export",
     "d1:create": "tsx src/run.ts d1:create",
+    "db:accounts": "tsx src/run.ts db:accounts",
     "db:import": "tsx src/run.ts db:import",
     "db:verify": "tsx src/run.ts db:verify",
     "mail:setup": "tsx src/run.ts mail:setup",

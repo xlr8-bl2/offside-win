@@ -13,7 +13,7 @@ on:
       command:
         description: 'Engine command to run against Postgres'
         type: choice
-        options: [migrate, history, 'history:cards', ratings, slate, 'slate:fresh', settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players', 'probe:profile', 'probe:reds', 'probe:extras', grant, plans, 'whop:check', 'gemini:check', trace, 'mail:setup', 'mail:route', 'db:export', 'db:verify', 'd1:create', 'db:import', 'mail:auth', 'record:reset', lab, 'lab:tune', 'lab:leans', 'lab:model', 'lab:losses', 'lab:slices', 'lab:live', 'lab:record', 'lab:calib', 'lab:odds', 'lab:backfill', 'leagues:refresh']
+        options: [migrate, history, 'history:cards', ratings, slate, 'slate:fresh', settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players', 'probe:profile', 'probe:reds', 'probe:extras', grant, plans, 'whop:check', 'gemini:check', trace, 'mail:setup', 'mail:route', 'db:export', 'db:verify', 'd1:create', 'db:import', 'db:accounts', 'mail:auth', 'record:reset', lab, 'lab:tune', 'lab:leans', 'lab:model', 'lab:losses', 'lab:slices', 'lab:live', 'lab:record', 'lab:calib', 'lab:odds', 'lab:backfill', 'leagues:refresh']
         default: migrate
       arg:
         # Free text for the commands that take one. `grant` reads an email and
@@ -39,9 +39,9 @@ on:
         default: '4000'
       export_run:
         # db:verify and db:import: which db:export run's encrypted artifact to load.
-        description: 'db:verify / db:import: run id of the db:export run to load'
+        description: 'db:verify / db:import / db:accounts: run id of the db:export run to load'
         type: string
-        default: '37557342873'
+        default: '37560985337'
       goal_dispersion:
         # Variance-to-mean ratio for a team's goals. 1.0 is Poisson. Exposed as
         # an input so a candidate value can be scored on the backtest's 34,210
@@ -79,7 +79,7 @@ jobs:
       # (HANDOFF.md, "The move to D1"). Decrypted on the runner only, into
       # engine/export, and removed at the end of the job.
       - name: Fetch the export
-        if: inputs.command == 'db:verify' || inputs.command == 'db:import'
+        if: inputs.command == 'db:verify' || inputs.command == 'db:import' || inputs.command == 'db:accounts'
         uses: actions/download-artifact@v4
         with:
           name: offside-export
@@ -87,7 +87,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: artifact
       - name: Decrypt the export
-        if: inputs.command == 'db:verify' || inputs.command == 'db:import'
+        if: inputs.command == 'db:verify' || inputs.command == 'db:import' || inputs.command == 'db:accounts'
         env:
           EXPORT_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
@@ -150,5 +150,5 @@ jobs:
           retention-days: 90
           compression-level: 0
       - name: Remove the export from the runner
-        if: always() && (inputs.command == 'db:verify' || inputs.command == 'db:import')
+        if: always() && (inputs.command == 'db:verify' || inputs.command == 'db:import' || inputs.command == 'db:accounts')
         run: rm -rf engine/export artifact

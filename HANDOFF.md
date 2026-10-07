@@ -1,7 +1,7 @@
 # Handoff: read this first
 
-**Last updated:** 7 October 2026, 02:25 UTC, by the Claude Code session working on branch
-`claude/offside-win-context-sync-6k7yi7`.
+**Last updated:** 7 October 2026, about 12:30 UTC, by the Claude Code session working on branch
+`claude/amazing-galileo-isfeue`.
 
 **Keep this file current.** The owner may move the work to a different coding agent or account
 at any time. Whoever is working updates the "Right now" section and the checklist after every
@@ -27,6 +27,37 @@ alerts, goodwill), which still call Supabase and fail quietly. Members' calls sh
 
 **Next: stage 2** (checklist below). Supabase keeps the 6 accounts; the export artifacts
 (runs 37557342873 and 37560985337, kept 90 days) hold them too.
+
+### Stage 2, part 1: sign-in from D1 (built, on branch `claude/amazing-galileo-isfeue`, not merged)
+
+- **Worker** `worker/src/auth.ts`: `POST /api/auth/link` (email link, one use, one hour, 5 an hour
+  per address and 300 an hour site-wide), `POST /api/auth/verify`, `POST /api/auth/google` (Google
+  ID token checked against Google's keys, `GOOGLE_CLIENT_ID` and the nonce), `GET /api/auth/me`,
+  `POST /api/auth/signout`. Sessions are random tokens, stored as SHA-256 in `auth_session`, 60
+  days, extended while used. The Worker's 10-minute cron clears spent ones.
+- **Reads are member-aware again:** `rpc()` turns the bearer token into a `Viewer`
+  (`viewerFor`), and `d1read.ts` takes `member` from it (board, match, picks, team, league,
+  search, slip). `get_account` is served from D1 (`getAccount`).
+- **Account settings** `worker/src/profile.ts`: `POST /api/account/save_profile`, `set_follow`,
+  `set_call_alerts`, same checks and answers as the old Postgres functions.
+- **Payments and admin** now identify the reader by the new session (`identify` in pay.ts,
+  `whoIsAdmin` in admin.ts), but their own data still goes to Supabase: part 2.
+- **Front end** `public/js/lib/auth.js`: no Supabase SDK. Session in `ow.session`; old `sb-*`
+  keys are cleared on load (so everyone is signed out once at the switch). Email links land on
+  `/?signin=<token>`, redeemed by a POST from the page.
+- **Accounts:** `pg.yml` command `db:accounts` (`engine/src/d1accounts.ts`) upserts the export's
+  `auth.users` into `account`, keeping the Supabase ids so memberships and profiles still match.
+  Touches only `account`; safe while the engine runs. Default export is run 37560985337.
+- **Checked:** worker tests 207 pass (10 new in `worker/test/auth.test.ts`, on a SQLite built
+  from `schema.sql`), engine 637 pass, typecheck clean; ui-verify clean on `#/signin`, `#/board`,
+  `#/`, and a browser run of the whole email-link flow with the auth routes stubbed.
+- **To go live (owner's OK needed):** merge, then dispatch `pg.yml` `db:accounts`, then sign in
+  on the phone by email and by Google.
+
+Still broken until part 2: checkout and the Whop webhook/sweep (they write to Supabase), the
+admin dashboard's data, account deletion, support tickets, goodwill, pulled-call alerts, and the
+`images` and `cards` jobs (Supabase Storage, failing every run since the block; the site falls
+back to the default share picture, nothing else is affected).
 
 ### What happened: Supabase blocked the project
 
@@ -155,9 +186,10 @@ Stage 1, the public site:
 - [x] Deployed and checked live: every page at 390px and 1440px (`.claude/skills/ui-verify`).
 
 Stage 2, accounts:
-- [ ] Sessions issued by the Worker: email link sent through Cloudflare Email Service, which
-      already sends the site's mail (`worker/src/mail.ts`); Google sign-in (`GOOGLE_CLIENT_ID` is
-      already a Worker variable). The 6 existing accounts are carried over by email.
+- [ ] Sessions issued by the Worker: built on `claude/amazing-galileo-isfeue` (see "Stage 2,
+      part 1" above). Not merged; then `db:accounts` carries the 6 accounts over.
+- [ ] Share cards and team photos off Supabase Storage (R2, or the Worker serving them from D1).
+      Needs either R2 enabled with an R2 permission on `CF_API_TOKEN`, or a D1 blob table.
 - [ ] Membership, Whop webhook and sweep, entitlements, goodwill, pulled-call alerts and
       account deletion over D1.
 - [ ] Admin dashboard and support tickets over D1. PR #154 (support tickets) is built on Supabase
