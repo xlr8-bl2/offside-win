@@ -1,6 +1,6 @@
 # Handoff: read this first
 
-**Last updated:** 7 October 2026, 02:10 UTC, by the Claude Code session working on branch
+**Last updated:** 7 October 2026, 02:20 UTC, by the Claude Code session working on branch
 `claude/offside-win-context-sync-6k7yi7`.
 
 **Keep this file current.** The owner may move the work to a different coding agent or account
@@ -58,7 +58,14 @@ for Supabase Pro. Doing it in two stages:
 - **If the data changes before the cutover**, run `pg.yml` with command `db:export` again while
   the direct connection still works. The engine keeps writing picks until it is pointed at D1.
 
-### Cut-over: how stage 1 goes live
+### Cut-over: done on 7 October, about 02:20 UTC (owner approved the merge)
+
+- The old Supabase slate job (run 37526971826) was cancelled first, so nothing more went to Supabase.
+- Fresh export: run 37560985337. Imported into D1: run 37561088157, every table's count equal.
+- Then PR #154 was merged; deploy.yml points the Worker at D1. Supabase now only holds the
+  accounts (sign-in) for stage 2, and the export artifacts are the backup.
+
+### Cut-over: how stage 1 goes live (the steps, kept for reference)
 
 Everything for stage 1 is on branch `claude/offside-win-context-sync-6k7yi7`, open as **PR #154**
 (it also carries the support-ticket work, which stays inactive until stage 2). The steps, in order,
