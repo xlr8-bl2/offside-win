@@ -34,9 +34,12 @@ import { findBannedInProse } from '../../engine/src/vocabulary.ts';
 import { HOME_DESCRIPTION, SITE_NAME, TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle } from '../../public/js/lib/titles.js';
 import { cardPath, cardState } from '../../public/js/lib/cards.js';
 import { LANDING_FAQ, LANDING_LEDE, LANDING_STEPS } from '../../public/js/lib/front.js';
+import { serve, type D1Read } from './d1read.ts';
 import { KINDS, LEGAL_PATHS, freePage, moreHTML, kindPage, legalPage, predictionsHub, searchPage, teamPage, teamPath, tomorrowPage, weekendPage } from './landing.ts';
 
 export interface SeoEnv {
+  /** Cloudflare D1; when bound, pages read from it (d1read.ts). */
+  DB?: D1Read;
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   SITE_URL?: string;
@@ -87,6 +90,10 @@ function ordinal(n: number): string {
 }
 
 export async function read<T>(env: SeoEnv, fn: string, args: Record<string, string | number | undefined>): Promise<T | null> {
+  if (env.DB) {
+    const value = await serve(env.DB, fn, args).catch(() => null);
+    if (value !== undefined) return (value ?? null) as T | null;
+  }
   const url = new URL(`/rest/v1/rpc/${fn}`, env.SUPABASE_URL);
   for (const [k, v] of Object.entries(args)) if (v !== undefined) url.searchParams.set(k, String(v));
   const res = await fetch(url, {

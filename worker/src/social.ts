@@ -12,7 +12,11 @@
  * Worker holds, and kept for five minutes per instance.
  */
 
+import type { D1Read } from './d1read.ts';
+
 export interface SocialEnv {
+  /** Cloudflare D1; when bound, the accounts are kept there. */
+  DB?: D1Read;
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_KEY?: string;
@@ -58,7 +62,13 @@ let cached: { at: number; value: Socials } | null = null;
 export async function socials(env: SocialEnv): Promise<Socials> {
   if (cached && Date.now() - cached.at < 300_000) return cached.value;
   let value: Socials = {};
-  if (env.SUPABASE_SERVICE_KEY) {
+  if (env.DB) {
+    try {
+      const row = await env.DB.prepare('SELECT v FROM kv WHERE k = ?').bind(KEY).first<{ v: string }>();
+      const stored = row ? JSON.parse(row.v) as Record<string, unknown> : {};
+      for (const n of NETWORKS) { const u = profileUrl(n, stored[n]); if (u) value[n] = u; }
+    } catch { value = {}; }
+  } else if (env.SUPABASE_SERVICE_KEY) {
     try {
       const res = await fetch(new URL(`/rest/v1/kv?k=eq.${encodeURIComponent(KEY)}&select=v`, env.SUPABASE_URL), {
         headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, accept: 'application/json' },
@@ -74,6 +84,14 @@ export async function socials(env: SocialEnv): Promise<Socials> {
 }
 
 export async function saveSocials(env: SocialEnv, next: Socials): Promise<boolean> {
+  if (env.DB) {
+    try {
+      await env.DB.batch([env.DB.prepare(`INSERT INTO kv (k, v, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT (k) DO UPDATE SET v = excluded.v, updated_at = excluded.updated_at`).bind(KEY, JSON.stringify(next), Math.floor(Date.now() / 1000))]);
+      cached = { at: Date.now(), value: next };
+      return true;
+    } catch { return false; }
+  }
   if (!env.SUPABASE_SERVICE_KEY) return false;
   const now = Math.floor(Date.now() / 1000);
   const res = await fetch(new URL('/rest/v1/kv', env.SUPABASE_URL), {

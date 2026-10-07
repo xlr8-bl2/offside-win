@@ -116,6 +116,40 @@ async function request<T>(sql: string, params: unknown[]): Promise<T[]> {
   throw new Error(`D1 request failed after retries: ${lastErr}`);
 }
 
+/**
+ * Several statements as one D1 batch (one transaction): through the Worker
+ * when `ENGINE_DB_URL` is set, else the REST API's batch form.
+ */
+export async function batch(statements: Array<{ sql: string; params: unknown[] }>): Promise<unknown[][]> {
+  if (!statements.length) return [];
+  const list = statements.map((s) => ({ sql: s.sql, params: bindable(s.params) }));
+  if (config.d1.gateway) return viaWorker(list);
+  const url = `${API}/accounts/${config.d1.accountId}/d1/database/${config.d1.databaseId}/query`;
+  let lastErr = '';
+  for (let attempt = 0; attempt <= 4; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 2 ** attempt * 750));
+    try {
+      dbStats.queries += list.length;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${config.d1.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batch: list }),
+      });
+      if (res.status === 429 || res.status >= 500) { lastErr = `${res.status} ${(await res.text()).slice(0, 200)}`; continue; }
+      const body = (await res.json()) as D1Response<unknown>;
+      if (!res.ok || !body.success) {
+        const msg = body.errors?.map((e) => `${e.code}: ${e.message}`).join('; ') ?? res.statusText;
+        throw new Error(`D1 error: ${msg}\nSQL: ${list[0]?.sql.slice(0, 200)}`);
+      }
+      return body.result.map((r) => r.results ?? []);
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('D1 error:')) throw err;
+      lastErr = err instanceof Error ? err.message : String(err);
+    }
+  }
+  throw new Error(`D1 request failed after retries: ${lastErr}`);
+}
+
 /** Run a statement and return its rows. */
 export function select<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
   return request<T>(sql, params);

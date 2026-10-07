@@ -37,11 +37,14 @@ import { authEmailHook, type HookEnv } from './authhook.ts';
 import { admin, type AdminEnv } from './admin.ts';
 import { inbound, type InboundMessage } from './support.ts';
 import { engineDb, type EngineDbEnv } from './enginedb.ts';
+import { recordView, serve, type D1Read } from './d1read.ts';
 import { socials, type SocialEnv } from './social.ts';
 import { fixtureChanges, liveList, liveMatch, type LiveEnv } from './live.ts';
 import { EDGE_PATHS, edgeCached } from './edge.ts';
 
 interface Env extends PayEnv, LiveEnv, AdminEnv, HookEnv {
+  /** Cloudflare D1. When bound, the public reads come from here (d1read.ts), not Supabase. */
+  DB?: D1Read;
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   GOOGLE_CLIENT_ID?: string;
@@ -71,6 +74,17 @@ async function rpc(
   args: Record<string, string | number | undefined>,
   jwt: string | null = null,
 ): Promise<Response> {
+  // D1 first (d1read.ts). A function it does not serve yet falls through to
+  // Supabase, which is how stage 2's account reads keep their old path until
+  // they are moved.
+  if (env.DB) {
+    try {
+      const value = await serve(env.DB, fn, args);
+      if (value !== undefined) return new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json; charset=utf-8' } });
+    } catch (err) {
+      return fail(`database error: ${err instanceof Error ? err.message : String(err)}`, 502);
+    }
+  }
   if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) {
     return fail('database is not configured', 503);
   }
@@ -369,10 +383,14 @@ const PAGES = new Set(['home', 'board', 'fixture', 'league', 'leagues', 'results
 async function hit(request: Request, env: Env): Promise<Response> {
   const done = new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
   if (request.method !== 'POST') return fail('method not allowed', 405);
-  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return done;
+  if (!env.DB && (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY)) return done;
   let page = '';
   try { page = String((JSON.parse(await request.text()) as { p?: unknown }).p ?? ''); } catch { return done; }
   if (!PAGES.has(page)) return done;
+  if (env.DB) {
+    try { await recordView(env.DB, page); } catch { /* as below */ }
+    return done;
+  }
   try {
     await fetch(new URL('/rest/v1/rpc/record_view', env.SUPABASE_URL), {
       method: 'POST',

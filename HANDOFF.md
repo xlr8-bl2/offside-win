@@ -69,7 +69,11 @@ Stage 1, the public site:
       cleanly on SQLite.
 - [ ] D1 database created (`offside-win` or a new one) and its ID in `worker/wrangler.toml`
       `[[d1_databases]]`, binding `DB`.
-- [ ] `db:import`: decrypt the export in a workflow and load it into D1, batched.
+- [ ] `db:import`: built (`engine/src/d1import.ts`, statements from `engine/src/d1load.ts`). Run
+      `pg.yml` with command `db:import` (input `export_run`, default the run above): it finds or
+      creates the D1 database `offside` (`engine/src/d1setup.ts`, `d1:create`), applies
+      `schema.sql`, empties and refills every table over the REST API's batch form, and reads the
+      counts back. Not run yet.
 - [ ] Engine writes to D1. Built: the Worker's `POST /api/internal/db` (`worker/src/enginedb.ts`)
       runs a batch of statements on the `DB` binding behind `x-engine-key`; `engine/src/store.d1.ts`
       sends there when `ENGINE_DB_URL` is set (REST API otherwise). Still to do: deploy.yml setting
@@ -77,7 +81,14 @@ Stage 1, the public site:
 - [ ] Postgres-only SQL in the engine ported or guarded. Known spots: `slate.ts` around line 1590
       (the market snapshot uses `jsonb`, `LATERAL`, `extract(epoch)`), and the `config.dbBackend ===
       'postgres'` branches in `slate.ts` and `settle.ts`.
-- [ ] Worker serves the public endpoints from D1. Each Postgres function the Worker calls through
+- [ ] Worker serves the public endpoints from D1. Built: `worker/src/d1read.ts` rebuilds every
+      get_* function (plus `fixture_preview`, `record_view`, and a signed-out `get_account`);
+      `rpc()` in `worker/src/index.ts`, `read()` in `seo.ts` and `social.ts` use it whenever the
+      `DB` binding exists. Verify with `pg.yml` command `db:verify` (`engine/src/d1verify.ts`): it
+      loads the export into a throwaway Postgres and a local SQLite and compares every answer
+      field by field, printing paths only. Passed on synthetic data; real-data run pending.
+      Name order uses case-insensitive sorting, so `get_leagues` may differ in order only.
+      Original note: each Postgres function the Worker calls through
       PostgREST is reimplemented over the `DB` binding: `get_board`, `get_fixture`, `get_picks`,
       `get_hero`, `get_health`, `get_slip`, `get_plans`, `get_promos`, `get_model`, `get_league`,
       `get_leagues`, `get_player`, `get_team`, `get_record`, `get_how_sure`, `get_pulled`,
