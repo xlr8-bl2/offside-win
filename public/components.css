@@ -294,23 +294,20 @@
 .comp-link:hover span { text-decoration: underline; text-underline-offset: 3px; }
 .comp-occasion { font-size: var(--text-sm); color: var(--chalk-2); }
 
-/* The kick-off, as a chip. First thing the reference states, and the first
-   thing anybody wants: is this on tonight. */
+/* The kick-off, first: is this on tonight. Set as a line of type in the
+   figures face, not a dark box laid over the photograph (October 2026). */
 .timechip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  margin-bottom: var(--space-6);
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-sm);
-  background: rgba(12, 11, 9, 0.66);
-  backdrop-filter: blur(6px);
-  border: var(--border) solid var(--hairline);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  font-variant-numeric: tabular-nums;
+  margin-bottom: var(--space-5);
+  font-family: var(--display-figures);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  line-height: 1;
   color: var(--chalk);
   white-space: nowrap;
+  text-shadow: 0 1px 14px rgba(10, 10, 12, 0.9);
 }
 .timechip.soon { color: var(--sodium); }
 
@@ -386,11 +383,9 @@
 .mc-block:first-child { border-top: 0; }
 .mc-label {
   display: block;
-  margin-bottom: var(--space-4);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-black);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
   color: var(--chalk-3);
 }
 
@@ -430,6 +425,19 @@
   color: var(--floodlight-hi);
 }
 .matchcentre .formbar { max-width: none; margin-bottom: 0; }
+/* Form in a masthead is read as a line of letters, the way a paper prints
+   it, coloured by result: not a row of filled squares. */
+.hero .chips, .matchcentre .chips { gap: var(--space-1); }
+.hero .chip, .matchcentre .chip {
+  width: auto;
+  height: auto;
+  padding: 0 1px;
+  background: none;
+  font-family: var(--display-figures);
+  font-size: var(--text-md);
+  font-weight: 700;
+  line-height: 1;
+}
 .matchcentre .formbar-keys { font-size: 10px; gap: var(--space-2); }
 .matchcentre .formbar-keys b { font-size: var(--text-md); }
 
@@ -1689,13 +1697,16 @@
  * same kick-off chip — just less height, because the page below it is the point.
  */
 .fx-top .hero-inner { min-height: clamp(280px, 34vw, 380px); padding-block: var(--space-6) var(--space-8); }
-/* The fixture hero has no match centre, so its copy column can be wider than
-   the front page's 340px: a long name beside a goal tally needs the room, and
-   "Netherlands 1" was breaking in half without it. */
+/* Beside the tie on a wide screen, before kick-off: the countdown, where the
+   two sit in the table and how their meetings have gone, as on the front
+   page. The empty right half of the photograph was the masthead's weakest
+   part. On a phone the tabs below carry the same, so it stays out. */
 @media (min-width: 1041px) {
-  .fx-top .hero-inner { grid-template-columns: minmax(0, 1fr) minmax(340px, 520px); }
+  .fx-top .hero-inner { grid-template-columns: minmax(0, 1fr) 340px; }
   .fx-top .hero-copy { max-width: none; }
 }
+@media (max-width: 1040px) { .fx-top .matchcentre { display: none; } }
+.fx-top .fx-follow .btn { min-height: 34px; padding: var(--space-2) var(--space-4); font-size: var(--text-sm); }
 .fx-top .back { grid-column: 1 / -1; align-self: flex-start; margin-bottom: auto; }
 /*
  * The two clubs' colours, each glowing from behind its own crest: the home
@@ -3355,7 +3366,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   gap: var(--space-12);
-  align-items: start;
+  align-items: center;
+  min-height: min(84vh, 780px);
   padding-block: var(--space-12) var(--space-11);
 }
 .ld-hero.ld-solo .ld-hero-in { grid-template-columns: minmax(0, 1fr); max-width: 760px; }
@@ -3449,7 +3461,8 @@
   font-size: var(--text-sm);
 }
 .ld-lead-comp .crest { margin-right: calc(var(--space-3) * -1); }
-.ld-lead-comp b { color: var(--chalk-2); font-weight: var(--weight-medium); font-family: var(--display-figures); }
+.ld-lead-count { margin: var(--space-5) 0 0; color: var(--chalk-3); font-size: var(--text-sm); }
+.ld-lead-count b { margin-left: var(--space-2); color: var(--chalk); font-family: var(--display-figures); font-size: var(--text-xl); font-weight: 700; }
 .ld-lead-teams { margin: var(--space-6) 0 0; }
 .ld-lead-teams a {
   display: grid;
@@ -3646,7 +3659,7 @@
       radial-gradient(120% 70% at 50% 0%, transparent 40%, rgba(10, 10, 12, 0.6) 100%);
   }
   .ld-hero.theme-ucl .comp-art-ucl .starball { top: -30vw; left: 18vw; width: 140vw; margin-top: 0; }
-  .ld-hero-in { grid-template-columns: minmax(0, 1fr); gap: var(--space-9); padding-block: var(--space-9) var(--space-10); }
+  .ld-hero-in { grid-template-columns: minmax(0, 1fr); gap: var(--space-9); min-height: 0; padding-block: var(--space-9) var(--space-10); }
   .ld-split { grid-template-columns: minmax(0, 1fr); }
   .ld-sec { padding-block: var(--space-10) 0; }
   .ld-sec + .ld-sec { margin-top: var(--space-10); }
@@ -4555,7 +4568,45 @@ main#app { position: relative; isolation: isolate; }
 
 /* ============================================================= turnstile */
 
-.turnstile-aside { margin: 0 0 var(--space-2); font-size: var(--text-xl); color: var(--sodium); }
+/* The sign-in page: why on the left, the door on the right; one column on
+   a phone. The form sits on a frosted panel over the header's ground. */
+.signin-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
+  gap: var(--space-11);
+  align-items: start;
+  padding-block: var(--space-11) var(--space-12);
+}
+.signin-copy { margin: 0; }
+.signin-copy h1 { margin: 0; }
+.signin-copy .page-sub { margin-top: var(--space-4); max-width: 34em; font-size: var(--text-read); line-height: var(--leading-read); }
+.signin-points { margin: var(--space-8) 0 0; padding: 0; list-style: none; max-width: 34em; }
+.signin-points li {
+  padding-block: var(--space-4);
+  border-top: var(--border) solid var(--hairline);
+  color: var(--chalk-2);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+}
+.signin-points li:last-child { border-bottom: var(--border) solid var(--hairline); }
+.signin-points b { display: block; color: var(--chalk); font-weight: var(--weight-bold); }
+.signin-side .panel.signin {
+  padding: var(--space-8);
+  background: color-mix(in srgb, var(--stand) 80%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.75);
+}
+.signin-side .form-error { margin: 0 0 var(--space-4); }
+.signin-fine { margin: var(--space-5) 0 0; color: var(--chalk-3); font-size: var(--text-sm); line-height: var(--leading-normal); }
+.signin-fine a { color: var(--chalk-2); text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 900px) {
+  .signin-page { grid-template-columns: minmax(0, 1fr); gap: var(--space-8); padding-block: var(--space-9) var(--space-11); }
+  .signin-points { display: none; }
+}
+@media (max-width: 560px) {
+  .signin-side .panel.signin { padding: var(--space-6); }
+}
 /*
  * Google's own button sits in this slot and draws itself at up to 400px.
  * Until it does, a stand-in of the same size and colour holds the place.
@@ -6511,6 +6562,7 @@ html.dd-locked, html.dd-locked body { overflow: hidden; }
 .starball {
   position: absolute;
   aspect-ratio: 1;
+  will-change: transform;
   animation: starball-in 1600ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .starball-still, .starball-live { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -6593,6 +6645,8 @@ body[data-comp="ucl"]::after {
     radial-gradient(1.5px 1.5px at 60px 40px, var(--ucl-star), transparent 100%) 0 0 / 263px 239px,
     radial-gradient(2px 2px at 30px 150px, var(--ucl-star), transparent 100%) 0 0 / 401px 353px;
   animation: ucl-twinkle 5.5s ease-in-out infinite alternate;
+  /* Its own layer, so the twinkle never repaints the page under it. */
+  will-change: opacity;
 }
 @keyframes ucl-twinkle { from { opacity: 0.15; } to { opacity: 0.85; } }
 body[data-comp="ucl"] { background: var(--pitch); }
@@ -6615,6 +6669,46 @@ body[data-comp="ucl"] .top { background: color-mix(in srgb, var(--pitch) 72%, tr
 @media (max-width: 760px) {
   .ph-theme .comp-art-ucl .starball { top: -24vw; right: -46vw; width: 120vw; margin-top: 0; }
 }
+
+/* The competition's next night, under its title (nightHTML in app.js): the
+   countdown in the figures face, then the ties that open it as a line-up
+   card on night glass. */
+.comp-night {
+  margin: var(--space-2) 0 var(--space-8);
+  padding: var(--space-6);
+  border: var(--border) solid rgba(168, 190, 255, 0.24);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--ucl-night-deep) 70%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: 0 30px 80px -24px rgba(0, 0, 0, 0.7);
+}
+.comp-night-when { margin: 0; color: var(--chalk-2); font-size: var(--text-lg); }
+.comp-night-when b { color: var(--ucl-star); font-family: var(--display-figures); font-size: var(--text-2xl); font-weight: 700; }
+.comp-night-when span { display: block; margin-top: var(--space-2); color: var(--chalk-3); font-size: var(--text-sm); }
+.comp-night-ties {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0 var(--space-8);
+  margin: var(--space-5) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.comp-night-ties a {
+  display: grid;
+  grid-template-columns: 3.4em minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: var(--space-4);
+  row-gap: var(--space-1);
+  padding-block: var(--space-4);
+  border-top: var(--border) solid rgba(168, 190, 255, 0.16);
+  color: var(--chalk);
+}
+.comp-night-ties a:hover b { text-decoration: underline; text-underline-offset: 3px; }
+.cn-time { grid-row: span 2; color: var(--chalk-3); font-family: var(--display-figures); font-size: var(--text-lg); line-height: 1.6; }
+.cn-side { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.cn-side b { font-weight: var(--weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 560px) { .comp-night { padding: var(--space-5); } }
 
 /* The title on its night: set in the starlight, a touch wider. */
 body[data-comp="ucl"] .league-title h1,

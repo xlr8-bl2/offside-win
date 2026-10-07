@@ -341,27 +341,40 @@ export function startBall(canvas, { still = false, speed = 0.12, t: t0 = 0, frag
   const SCALE = 0.93; // room for the glow around the ball
 
   /*
-   * Drawn at the screen's own density, so the edges stay crisp on a phone.
-   * It was capped at 1.25 to spare the GPU, and on a 3x iPhone every pixel of
-   * the ball was stretched over two and a half of the screen's: stepped
-   * edges. Pinch-zoom counts too (visualViewport.scale), or zooming in on the
-   * ball showed the same steps. The cost is kept in hand by `quality`, which
-   * steps down while frames come too slowly and back up when there is room.
+   * How sharp it is drawn, and how often.
+   *
+   * It used to be drawn at the screen's full density (up to 3x) and thirty
+   * times a second, stepping its sharpness down when frames came slowly and
+   * back up when they came quickly. On a phone the owner called it choppy
+   * (October 2026): a canvas wider than the screen at 2x to 3x is well over
+   * a million pixels marched through the glass each frame, frames were
+   * missed, and the sharpness flipping up and down showed as a jump.
+   *
+   * Now: at most 1.5x on a touch screen and 2x elsewhere (it is behind the
+   * words and partly off the edge; the outlines are measured on screen, so
+   * they stay thin either way), the box measured only when it changes
+   * rather than every frame, time taken from the clock rather than added up
+   * frame by frame, sixty frames a second where there is room and thirty on
+   * a phone, and sharpness only ever stepped down, never back up, so it
+   * settles once and stays.
    */
-  // On a 3x screen the first frames are drawn at 2x and grow to full
-  // density once frames are coming quickly (below): the first frame is the
-  // one a reader waits for, and it was the slowest at full density.
-  let quality = (devicePixelRatio || 1) > 2 ? 2 / devicePixelRatio : 1;
+  const touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  const CAP = touch ? 1.5 : 2;
+  const INTERVAL = touch ? 1000 / 30 : 1000 / 60;
+  let quality = 1;
+  let boxW = Math.max(canvas.getBoundingClientRect().width, 1);
+  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(([e]) => { boxW = Math.max(e.contentRect.width, 1); }) : null;
+  ro?.observe(canvas);
   const size = () => {
-    const box = canvas.getBoundingClientRect();
+    if (!ro) boxW = Math.max(canvas.getBoundingClientRect().width, 1);
     const zoom = Math.max(1, (typeof visualViewport !== 'undefined' && visualViewport?.scale) || 1);
-    const density = Math.min(3, (devicePixelRatio || 1) * zoom) * quality;
-    const side = Math.min(2048, Math.max(64, Math.round(Math.max(box.width, 1) * density)));
+    const density = Math.min(CAP, (devicePixelRatio || 1) * zoom) * quality;
+    const side = Math.min(2048, Math.max(64, Math.round(boxW * density)));
     if (canvas.width !== side) { canvas.width = side; canvas.height = side; }
     gl.viewport(0, 0, side, side);
     gl.uniform1f(uScale, SCALE);
     gl.uniform1f(uPx, 2 / (side * SCALE));
-    gl.uniform1f(uW, Math.max(1, side / (Math.max(box.width, 1) * 1.25)));
+    gl.uniform1f(uW, Math.max(1, side / (boxW * 1.25)));
   };
   let t = t0, last = 0, raf = 0, onScreen = true, stopped = false;
   const draw = () => {
@@ -371,21 +384,22 @@ export function startBall(canvas, { still = false, speed = 0.12, t: t0 = 0, frag
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   };
-  // Thirty frames a second is plenty for a slow sway, and halves the work
-  // of a shader that marches every pixel through the glass.
-  let slow = 0, quick = 0;
+  let slow = 0;
   const frame = (now) => {
     raf = 0;
     if (stopped) return;
-    if (last && now - last < 31) { raf = requestAnimationFrame(frame); return; }
+    // A little early is close enough: on a 60Hz screen a 33ms wait lands on
+    // every other refresh, steadily.
+    if (last && now - last < INTERVAL - 4) { raf = requestAnimationFrame(frame); return; }
     if (last) {
-      t += Math.min(0.1, (now - last) / 1000) * speed;
-      // Frames arriving well short of thirty a second mean the shader is too
-      // big for this device: draw it smaller. Steady quick ones let it grow
-      // back. Never below half the screen's density.
       const gap = now - last;
-      if (gap > 48) { quick = 0; if (++slow >= 6 && quality > 0.5) { quality = Math.max(0.5, quality - 0.15); slow = 0; } }
-      else if (gap < 38) { slow = 0; if (++quick >= 90 && quality < 1) { quality = Math.min(1, quality + 0.1); quick = 0; } }
+      // Smooth, not stepped: the sway follows the clock, and a long gap
+      // (the tab was hidden) moves it on by no more than a tenth of a second.
+      t += Math.min(0.1, gap / 1000) * speed;
+      // Frames coming well behind time mean the shader is too big for this
+      // device: draw it smaller, once, and stay there.
+      if (gap > INTERVAL * 1.7) { if (++slow >= 8 && quality > 0.6) { quality = Math.max(0.6, quality - 0.2); slow = 0; } }
+      else slow = Math.max(0, slow - 1);
     }
     last = now;
     draw();
@@ -398,7 +412,7 @@ export function startBall(canvas, { still = false, speed = 0.12, t: t0 = 0, frag
   if (typeof visualViewport !== 'undefined') visualViewport?.addEventListener('resize', rezoom);
   draw();
   canvas.classList.add('is-live');
-  if (still) return () => { stopped = true; visualViewport?.removeEventListener('resize', rezoom); };
+  if (still) return () => { stopped = true; ro?.disconnect(); visualViewport?.removeEventListener('resize', rezoom); };
   const io = typeof IntersectionObserver === 'function'
     ? new IntersectionObserver(([e]) => { onScreen = e.isIntersecting; wake(); }) : null;
   io?.observe(canvas);
@@ -408,6 +422,7 @@ export function startBall(canvas, { still = false, speed = 0.12, t: t0 = 0, frag
     stopped = true;
     if (raf) cancelAnimationFrame(raf);
     io?.disconnect();
+    ro?.disconnect();
     document.removeEventListener('visibilitychange', wake);
     if (typeof visualViewport !== 'undefined') visualViewport?.removeEventListener('resize', rezoom);
   };

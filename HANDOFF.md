@@ -103,6 +103,20 @@ the members' front page, the landing page) are left alone.
   slowly closer, a floodlight falls from the top right, the edges fall into the dark, and the
   lead card is frosted with a deep shade.
 
+### Heroes and the ball, second pass (7 October)
+
+- **Ball smoothness** (`starball.js`): at most 1.5x density on touch screens and 2x elsewhere,
+  the box measured on resize rather than every frame, 30fps on phones and 60 elsewhere, and
+  sharpness only ever stepped down (it used to flip up and down, which showed as a jump).
+- **Masthead** (front page and match pages, `.hero`): the kick-off is a line of type in the figures
+  face (no dark box), form is coloured letters (no filled squares), the match-centre labels are in
+  sentence case. Match pages now show the match centre (countdown, table, meetings) beside the
+  tie on desktop, before kick-off.
+- **Sign-in:** two columns on desktop (why, then the form on a frosted panel), no handwriting.
+- **Champions League page:** `nightHTML` under the title: the countdown to the next night and
+  its ties in kick-off order.
+- **Landing:** taller header with the content centred; the free call's countdown on its own line.
+
 ### What happened: Supabase blocked the project
 
 Since the night of 6 to 7 October 2026 (between 21:10 and 00:58 UTC), every request to the site's

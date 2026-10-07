@@ -2611,10 +2611,11 @@ async function viewLanding() {
     const soon = fx.kickoff > Date.now() / 1000;
     put('call', `
       <p class="ld-lead-tag">Today’s free call</p>
-      <p class="ld-lead-comp">${fx.league ? `${crest(fx.league, 'xs', fx.league_id, 'league')}<span>${esc(fx.league)}</span>` : ''}<span>${esc(kickoffLabel(fx.kickoff))}</span>${soon ? `<span>kick-off in <b data-countdown="${Number(fx.kickoff)}" data-done="now">—</b></span>` : ''}</p>
+      <p class="ld-lead-comp">${fx.league ? `${crest(fx.league, 'xs', fx.league_id, 'league')}<span>${esc(fx.league)}</span>` : ''}<span>${esc(kickoffLabel(fx.kickoff))}</span></p>
       <h2 class="ld-lead-teams"><a href="#/fixture/${encodeURIComponent(fx.id)}">
         <span>${crest(fx.home, 'md', fx.home_id)}${esc(fx.home)}</span>
         <span>${crest(fx.away, 'md', fx.away_id)}${esc(fx.away)}</span></a></h2>
+      ${soon ? `<p class="ld-lead-count">Kick-off in <b data-countdown="${Number(fx.kickoff)}" data-done="now">—</b></p>` : ''}
       <p class="ld-lead-why">${esc(why)}</p>
       <a class="ld-lead-go" href="#/fixture/${encodeURIComponent(fx.id)}">Read the whole call, free</a>`);
   }
@@ -4963,6 +4964,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
         ${highlightsOf(f) ? `<a class="btn btn-primary hl-btn" href="${esc(highlightsOf(f).url)}" target="_blank" rel="noopener noreferrer"><i class="hl-play" aria-hidden="true"></i>Watch the highlights</a>` : ''}
         <div class="fx-follow">${followButtonHTML('team', f.home_id, f.home, { named: true })}${followButtonHTML('team', f.away_id, f.away, { named: true })}</div>
       </div>
+      ${st.kind === 'upcoming' ? matchCentreHTML(f, f) : ''}
     </div>
   </section>
 
@@ -5939,6 +5941,34 @@ async function viewLeagues(params = new URLSearchParams()) {
  * fixture page can find out what it is without leaving. The tabs work as they
  * do on a fixture page: the open one is in the address.
  */
+/*
+ * A competition with a look of its own (the Champions League) opens on its
+ * next night: how long until it, and the ties that start it, in the order
+ * they kick off. The countdown is the same one the match pages run.
+ */
+function nightHTML(games) {
+  const now = Date.now() / 1000;
+  const soon = games.filter((g) => Number(g.kickoff) > now - 2 * 3600).sort((a, b) => a.kickoff - b.kickoff);
+  if (!soon.length) return '';
+  const first = Number(soon[0].kickoff);
+  // That night: every tie on the same day as the first.
+  // In the reader's own time, as every other kick-off on the site is.
+  const day = (t) => new Date(t * 1000).toDateString();
+  const night = soon.filter((g) => day(Number(g.kickoff)) === day(first)).slice(0, 6);
+  const live = first <= now;
+  return `
+    <section class="comp-night" aria-label="The next night">
+      <p class="comp-night-when">${live ? 'On tonight.' : `The next night is <b data-countdown="${first}" data-done="now">—</b> away.`}
+        <span>${esc(dayLabel(first))}, ${night.length === 1 ? 'one tie' : `${night.length} ties`}.</span></p>
+      <ul class="comp-night-ties">${night.map((g) => `
+        <li><a href="#/fixture/${encodeURIComponent(g.id)}">
+          <span class="cn-time">${esc(new Date(Number(g.kickoff) * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }))}</span>
+          <span class="cn-side">${crest(g.home, 'sm', g.home_id)}<b>${esc(g.home)}</b></span>
+          <span class="cn-side">${crest(g.away, 'sm', g.away_id)}<b>${esc(g.away)}</b></span>
+        </a></li>`).join('')}</ul>
+    </section>`;
+}
+
 async function viewLeague(id, params = new URLSearchParams()) {
   // Which navigation this page belongs to: a newer one makes it stand down (see route).
   const nav = navTicket;
@@ -6120,6 +6150,7 @@ async function viewLeague(id, params = new URLSearchParams()) {
       </div>
       ${followButtonHTML('league', lg.id, lg.name)}
     </div>
+    ${themeOf(lg.id) ? nightHTML([...ahead, ...nextList]) : ''}
     ${TABS.length ? `
     <div class="tabs" role="tablist">
       ${TABS.map(([k, label]) => `<button class="tab${k === open ? ' on' : ''}" data-tab="${k}" role="tab" aria-selected="${k === open}">${esc(label)}</button>`).join('')}
@@ -6131,6 +6162,7 @@ async function viewLeague(id, params = new URLSearchParams()) {
   </div>`;
 
   wireFollowButtons();
+  tickCountdowns();
 
   // Arrived from a name in the analysis: that player, highlighted, in view.
   const wanted = params.get('p');
@@ -7126,14 +7158,17 @@ async function viewSignin() {
 
   if (nav !== navTicket) return;
   app.innerHTML = `
-  <div class="wrap section narrow">
-    <div class="turnstile">
-      <div class="page-head">
-        <p class="hand turnstile-aside">in you come</p>
-        <h1 class="display xl">Sign in</h1>
-        <p class="page-sub">${esc(because)}</p>
-      </div>
-
+  <div class="wrap section signin-page">
+    <div class="page-head signin-copy">
+      <h1 class="display xl">Sign in</h1>
+      <p class="page-sub">${esc(because)}</p>
+      <ul class="signin-points">
+        <li><b>Your calls, on every device.</b> Start on your phone, carry on at the laptop.</li>
+        <li><b>Your teams first.</b> Follow a club or a league and it leads the page.</li>
+        <li><b>Nothing to remember.</b> No password: a link by email, or Google.</li>
+      </ul>
+    </div>
+    <div class="signin-side">
       ${problem ? `<p class="form-error">${esc(problem)}</p>` : ''}
 
       <div class="panel signin" id="signin-panel">
@@ -7155,9 +7190,8 @@ async function viewSignin() {
         <p class="signin-note" id="note"></p>
       </div>
 
-      <p class="prose pricing-small">No password, ever. The link in the email signs you in on the device
-        you open it on. By signing in you agree to our <a href="/terms">terms</a> and
-        <a href="/privacy">privacy policy</a>.</p>
+      <p class="signin-fine">The link in the email signs you in on the device you open it on.
+        By signing in you agree to our <a href="/terms">terms</a> and <a href="/privacy">privacy policy</a>. 18+.</p>
     </div>
   </div>`;
 
