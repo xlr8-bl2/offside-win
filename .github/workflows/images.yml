@@ -68,8 +68,10 @@ jobs:
 
       - name: Fetch and re-host the photography
         env:
-          DB_BACKEND: postgres
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          # D1 through the Worker's engine door (HANDOFF.md, "The move to D1").
+          DB_BACKEND: d1
+          ENGINE_DB_URL: https://offside.win/api/internal/db
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SPORTRADAR_GETTY_KEY: ${{ secrets.SPORTRADAR_GETTY_KEY }}

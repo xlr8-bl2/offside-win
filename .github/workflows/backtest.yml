@@ -26,8 +26,10 @@ jobs:
       - run: npm ci
       - env:
           BSD_API_KEY: ${{ secrets.BSD_API_KEY }}
-          DB_BACKEND: postgres
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          # D1 through the Worker's engine door (HANDOFF.md, "The move to D1").
+          DB_BACKEND: d1
+          ENGINE_DB_URL: https://offside.win/api/internal/db
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           BACKTEST_LABEL: ${{ inputs.label }}
         run: npm run backtest
       - uses: actions/upload-artifact@v4

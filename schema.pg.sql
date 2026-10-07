@@ -2688,6 +2688,203 @@ RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $f
 $fn$;
 REVOKE ALL ON FUNCTION admin_log_list(integer) FROM PUBLIC, anon, authenticated;
 
+-- ---------------------------------------------------------------- support
+--
+-- Mail to support@ and hello@ reaches the Worker (Cloudflare Email Routing,
+-- worker/src/support.ts), which keeps each conversation here as a ticket and
+-- forwards the original to the owner's inbox. The owner answers from the
+-- dashboard (#/admin/support), as support@offside.win.
+--
+-- A ticket is open while it waits on us, waiting while it waits on them, and
+-- closed when it is done; a reply from them opens it again. Messages are kept
+-- as plain text only: what a stranger sends is never rendered as HTML.
+--
+-- Private: the owner's dashboard reads it through admin_ functions, the
+-- Worker writes it through support_inbound with the service key.
+CREATE TABLE IF NOT EXISTS support_ticket (
+  id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  email       text NOT NULL,              -- who we are talking to, lower-cased
+  name        text,
+  subject     text NOT NULL,
+  mailbox     text NOT NULL DEFAULT 'support',   -- the address they wrote to
+  status      text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'waiting', 'closed')),
+  created_at  bigint NOT NULL,
+  updated_at  bigint NOT NULL,
+  last_in_at  bigint,
+  last_out_at bigint
+);
+CREATE INDEX IF NOT EXISTS support_ticket_status ON support_ticket (status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS support_ticket_email ON support_ticket (email);
+ALTER TABLE support_ticket ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON support_ticket FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS support_message (
+  id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ticket_id   bigint NOT NULL REFERENCES support_ticket (id) ON DELETE CASCADE,
+  direction   text NOT NULL CHECK (direction IN ('in', 'out')),
+  at          bigint NOT NULL,
+  from_email  text,
+  to_email    text,
+  subject     text,
+  body        text NOT NULL,             -- plain text, at most 20,000 characters
+  message_id  text,                      -- the Message-ID, without angle brackets, for threading
+  attachments integer NOT NULL DEFAULT 0,
+  actor       uuid                       -- who answered, on our side
+);
+CREATE INDEX IF NOT EXISTS support_message_ticket ON support_message (ticket_id, at);
+-- A delivery repeated by the mail system is one message, not two.
+CREATE UNIQUE INDEX IF NOT EXISTS support_message_mid ON support_message (message_id) WHERE message_id IS NOT NULL;
+ALTER TABLE support_message ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON support_message FROM anon, authenticated;
+
+-- One email in. The ticket it belongs to is, in order: the one whose number
+-- is in the subject ("[#12]") from the same address; the one holding a
+-- message this one answers (In-Reply-To or References); otherwise a new one.
+-- Runs as the caller, which is the Worker holding the service key.
+CREATE OR REPLACE FUNCTION support_inbound(
+  p_from text, p_name text, p_to text, p_subject text, p_body text,
+  p_message_id text, p_refs text, p_attachments integer
+) RETURNS json LANGUAGE plpgsql VOLATILE SET search_path = public AS $fn$
+DECLARE
+  t bigint := floor(extract(epoch FROM now()))::bigint;
+  v_from text := lower(trim(coalesce(p_from, '')));
+  v_mid text := nullif(lower(trim(both '<> ' FROM coalesce(p_message_id, ''))), '');
+  v_subject text := left(coalesce(nullif(trim(p_subject), ''), '(no subject)'), 200);
+  v_ticket bigint;
+  v_new boolean := false;
+  v_tag text;
+BEGIN
+  IF v_from !~ '^[^@\s]+@[^@\s]+$' THEN RETURN json_build_object('error', 'no sender'); END IF;
+  IF v_mid IS NOT NULL THEN
+    SELECT ticket_id INTO v_ticket FROM support_message WHERE message_id = v_mid;
+    IF FOUND THEN RETURN json_build_object('ticket', v_ticket, 'new', false, 'repeat', true); END IF;
+  END IF;
+
+  v_tag := substring(v_subject FROM '\[#(\d{1,12})\]');
+  IF v_tag IS NOT NULL THEN
+    SELECT id INTO v_ticket FROM support_ticket WHERE id = v_tag::bigint AND email = v_from;
+  END IF;
+  IF v_ticket IS NULL AND coalesce(p_refs, '') <> '' THEN
+    SELECT m.ticket_id INTO v_ticket
+    FROM support_message m JOIN support_ticket k ON k.id = m.ticket_id
+    WHERE k.email = v_from
+      AND m.message_id = ANY (SELECT lower(trim(both '<> ' FROM r)) FROM regexp_split_to_table(p_refs, '\s+') r WHERE r <> '')
+    ORDER BY m.at DESC LIMIT 1;
+  END IF;
+  IF v_ticket IS NULL THEN
+    INSERT INTO support_ticket (email, name, subject, mailbox, status, created_at, updated_at)
+    VALUES (v_from, left(nullif(trim(p_name), ''), 120), v_subject,
+            CASE WHEN lower(coalesce(p_to, '')) LIKE 'hello@%' THEN 'hello' ELSE 'support' END, 'open', t, t)
+    RETURNING id INTO v_ticket;
+    v_new := true;
+  END IF;
+
+  INSERT INTO support_message (ticket_id, direction, at, from_email, to_email, subject, body, message_id, attachments)
+  VALUES (v_ticket, 'in', t, v_from, lower(coalesce(p_to, '')), v_subject, left(coalesce(p_body, ''), 20000), v_mid, greatest(coalesce(p_attachments, 0), 0));
+  UPDATE support_ticket SET status = 'open', updated_at = t, last_in_at = t,
+         name = coalesce(name, left(nullif(trim(p_name), ''), 120))
+  WHERE id = v_ticket;
+  RETURN json_build_object('ticket', v_ticket, 'new', v_new);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION support_inbound(text, text, text, text, text, text, text, integer) FROM PUBLIC, anon, authenticated;
+
+-- The list: how many in each state, and the tickets in one of them.
+CREATE OR REPLACE FUNCTION admin_support_list(p_status text DEFAULT 'open', p_limit integer DEFAULT 100)
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  SELECT json_build_object(
+    'counts', (SELECT json_build_object(
+        'open', count(*) FILTER (WHERE status = 'open'),
+        'waiting', count(*) FILTER (WHERE status = 'waiting'),
+        'closed', count(*) FILTER (WHERE status = 'closed')) FROM support_ticket),
+    'tickets', (SELECT coalesce(json_agg(row_to_json(k) ORDER BY k.updated_at DESC), '[]'::json) FROM (
+       SELECT k.id, k.email, k.name, k.subject, k.mailbox, k.status, k.created_at, k.updated_at, k.last_in_at, k.last_out_at,
+              (SELECT count(*) FROM support_message m WHERE m.ticket_id = k.id) AS messages,
+              (SELECT left(regexp_replace(m.body, '\s+', ' ', 'g'), 160) FROM support_message m
+                WHERE m.ticket_id = k.id ORDER BY m.at DESC, m.id DESC LIMIT 1) AS preview,
+              (SELECT m.direction FROM support_message m WHERE m.ticket_id = k.id ORDER BY m.at DESC, m.id DESC LIMIT 1) AS last_direction,
+              (SELECT u.id FROM auth.users u WHERE lower(u.email) = k.email LIMIT 1) AS user_id
+       FROM support_ticket k
+       WHERE coalesce(p_status, 'open') = 'all' OR k.status = coalesce(p_status, 'open')
+       ORDER BY k.updated_at DESC
+       LIMIT least(greatest(coalesce(p_limit, 100), 1), 300)) k));
+$fn$;
+REVOKE ALL ON FUNCTION admin_support_list(text, integer) FROM PUBLIC, anon, authenticated;
+
+-- One ticket: every message, and the account behind the address if there is one.
+CREATE OR REPLACE FUNCTION admin_support_ticket(p_id bigint)
+RETURNS json LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  SELECT json_build_object(
+    'ticket', row_to_json(k),
+    'messages', (SELECT coalesce(json_agg(row_to_json(m) ORDER BY m.at, m.id), '[]'::json) FROM (
+       SELECT id, direction, at, from_email, to_email, subject, body, message_id, attachments FROM support_message WHERE ticket_id = k.id) m),
+    'account', (SELECT row_to_json(a) FROM (
+       SELECT u.id, u.created_at,
+              (SELECT json_build_object('plan_id', m.plan_id, 'expires_at', m.expires_at) FROM membership m WHERE m.user_id = u.id) AS membership,
+              (SELECT json_build_object('plan_id', e.plan_id, 'expires_at', e.expires_at, 'status', e.status)
+                 FROM entitlement e WHERE lower(e.email) = k.email ORDER BY e.expires_at DESC LIMIT 1) AS entitlement
+       FROM auth.users u WHERE lower(u.email) = k.email LIMIT 1) a))
+  FROM support_ticket k WHERE k.id = p_id;
+$fn$;
+REVOKE ALL ON FUNCTION admin_support_ticket(bigint) FROM PUBLIC, anon, authenticated;
+
+-- A new conversation started from the dashboard. The ticket comes first so its
+-- number can go in the subject; one whose email never went is removed again
+-- (admin_support_drop).
+CREATE OR REPLACE FUNCTION admin_support_new(p_actor uuid, p_email text, p_subject text)
+RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE t bigint := floor(extract(epoch FROM now()))::bigint; v_id bigint; v_email text := lower(trim(coalesce(p_email, '')));
+BEGIN
+  IF v_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' THEN RETURN json_build_object('error', 'That email address does not look right.'); END IF;
+  IF coalesce(trim(p_subject), '') = '' THEN RETURN json_build_object('error', 'Give it a subject.'); END IF;
+  INSERT INTO support_ticket (email, subject, mailbox, status, created_at, updated_at)
+  VALUES (v_email, left(trim(p_subject), 200), 'support', 'waiting', t, t) RETURNING id INTO v_id;
+  RETURN json_build_object('id', v_id);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION admin_support_new(uuid, text, text) FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION admin_support_drop(p_id bigint)
+RETURNS json LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+  DELETE FROM support_ticket k WHERE k.id = p_id AND NOT EXISTS (SELECT 1 FROM support_message m WHERE m.ticket_id = k.id);
+  SELECT json_build_object('ok', true);
+$fn$;
+REVOKE ALL ON FUNCTION admin_support_drop(bigint) FROM PUBLIC, anon, authenticated;
+
+-- A reply that has gone out: kept on the ticket, which then waits on them
+-- (or is closed, when the reply was the last word).
+CREATE OR REPLACE FUNCTION admin_support_reply(
+  p_actor uuid, p_id bigint, p_to text, p_subject text, p_body text, p_message_id text, p_close boolean DEFAULT false
+) RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE t bigint := floor(extract(epoch FROM now()))::bigint;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM support_ticket WHERE id = p_id) THEN RETURN json_build_object('error', 'No such ticket.'); END IF;
+  INSERT INTO support_message (ticket_id, direction, at, from_email, to_email, subject, body, message_id, actor)
+  VALUES (p_id, 'out', t, 'support@offside.win', lower(p_to), left(p_subject, 200), left(coalesce(p_body, ''), 20000),
+          nullif(lower(trim(both '<> ' FROM coalesce(p_message_id, ''))), ''), p_actor)
+  ON CONFLICT DO NOTHING;
+  UPDATE support_ticket SET status = CASE WHEN p_close THEN 'closed' ELSE 'waiting' END, updated_at = t, last_out_at = t WHERE id = p_id;
+  INSERT INTO admin_log (at, actor, action, target, detail_json)
+  VALUES (t, p_actor, 'support_reply', 'ticket:' || p_id, json_build_object('ticket', p_id, 'closed', p_close)::text);
+  RETURN json_build_object('ok', true);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION admin_support_reply(uuid, bigint, text, text, text, text, boolean) FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION admin_support_status(p_actor uuid, p_id bigint, p_status text)
+RETURNS json LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE t bigint := floor(extract(epoch FROM now()))::bigint;
+BEGIN
+  IF p_status NOT IN ('open', 'waiting', 'closed') THEN RETURN json_build_object('error', 'No such state.'); END IF;
+  UPDATE support_ticket SET status = p_status, updated_at = t WHERE id = p_id;
+  IF NOT FOUND THEN RETURN json_build_object('error', 'No such ticket.'); END IF;
+  INSERT INTO admin_log (at, actor, action, target, detail_json)
+  VALUES (t, p_actor, 'support_status', 'ticket:' || p_id, json_build_object('ticket', p_id, 'status', p_status)::text);
+  RETURN json_build_object('ok', true);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION admin_support_status(uuid, bigint, text) FROM PUBLIC, anon, authenticated;
+
 NOTIFY pgrst, 'reload schema';
 
 -- ------------------------------------------------------------- goodwill days

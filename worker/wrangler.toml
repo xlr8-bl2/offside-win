@@ -70,6 +70,14 @@ ADMIN_EMAIL_SHA256 = "5a2087bbcb792ea743dd4e445fcef43ccb4818f37f5199981e3ec93d9e
 # quiet day of an international break or close season (src/goodwill.ts).
 crons = ["*/10 * * * *", "20 6 * * *"]
 
+# The site's database since October 2026 (HANDOFF.md, "The move to D1"). The
+# public reads (src/d1read.ts) and the engine's door (src/enginedb.ts) use it.
+# The id is filled in by deploy.yml, which finds the database by name.
+[[d1_databases]]
+binding = "DB"
+database_name = "offside"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
 # Outbound email through Cloudflare Email Service (src/mail.ts). On since the
 # account moved to Workers Paid. Sending also needs offside.win onboarded under
 # Compute, Email Service, Email Sending; until it is, Cloudflare refuses each

@@ -3,6 +3,10 @@
  *
  *   npm run mail:route                    what is set up now
  *   npm run mail:route -- you@example.com forward support@ and hello@ there
+ *   npm run mail:route -- worker          hand them to the site's Worker instead,
+ *                                         which keeps each as a support ticket
+ *                                         and forwards a copy to that same inbox
+ *                                         (worker/src/support.ts)
  *
  * support@offside.win is the reply-to on every email the site sends, and the
  * contact in the privacy policy, the terms and the refunds page. Until this
@@ -19,10 +23,16 @@
  * public); only its domain is.
  */
 
+import { kvGetJSON, kvSetJSON } from './store.ts';
+
 const DOMAIN = 'offside.win';
 const CF = 'https://api.cloudflare.com/client/v4';
 /** The addresses the site gives out, and so the ones that must reach a person. */
 const ROUTED = ['support@offside.win', 'hello@offside.win'];
+/** The Worker that keeps tickets (worker/wrangler.toml, name). */
+const WORKER = 'offside-win';
+/** Where the Worker forwards its copies; read by worker/src/support.ts. */
+const FORWARD_KEY = 'support:forward';
 
 async function cf(token: string, path: string, init: RequestInit = {}) {
   const res = await fetch(`${CF}${path}`, {
@@ -42,10 +52,18 @@ const PERMISSIONS = 'The Cloudflare token (CF_API_TOKEN) needs three more permis
   + 'Zone > Zone Settings > Edit, and Account > Email Routing Addresses > Edit. In the Cloudflare app: My Profile > API Tokens > '
   + 'edit the token, add those three, save, then run this again.';
 
-export async function mailRoute(to?: string): Promise<void> {
+export async function mailRoute(arg?: string): Promise<void> {
   const token = process.env['CF_API_TOKEN'] ?? '';
   if (!token) throw new Error('CF_API_TOKEN is not set in Actions secrets.');
+  const toWorker = arg === 'worker';
+  let to = toWorker ? undefined : arg;
   if (to && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error('That is not an email address.');
+  if (toWorker) {
+    // The inbox the copies go to: the one support@ forwards to now, or the
+    // one already saved for the Worker.
+    to = await currentForward(token) ?? (await kvGetJSON<{ to?: string }>(FORWARD_KEY))?.to ?? undefined;
+    if (!to) { console.log('No inbox to copy to yet. Run this with your email address first, then with "worker".'); return; }
+  }
 
   const z = await cf(token, `/zones?name=${DOMAIN}`);
   const zone = z.ok ? z.body?.result?.[0] : null;
@@ -62,7 +80,12 @@ export async function mailRoute(to?: string): Promise<void> {
     // Adds Cloudflare's MX and SPF records, and switches routing on.
     let on = await cf(token, `/zones/${zone.id}/email/routing/dns`, { method: 'POST', body: '{}' });
     if (!on.ok) on = await cf(token, `/zones/${zone.id}/email/routing/enable`, { method: 'POST', body: '{}' });
-    if (!on.ok) { console.log('could not switch routing on:', why(on)); console.log(PERMISSIONS); return; }
+    if (!on.ok) {
+      console.log('could not switch routing on:', why(on));
+      await diagnose(token, zone.id, account);
+      console.log(PERMISSIONS);
+      return;
+    }
     st = await cf(token, `/zones/${zone.id}/email/routing`);
     console.log('email routing: switched on', `(${st.body?.result?.status ?? 'unknown'})`);
   }
@@ -90,6 +113,12 @@ export async function mailRoute(to?: string): Promise<void> {
     console.log(`  ${shape(to)}: ${d?.verified ? 'confirmed' : 'NOT confirmed yet. Tap the link in the email from Cloudflare (check junk too). Forwarding starts the moment it is tapped.'}`);
   }
 
+  // The Worker forwards its copies here; saved before any mail is routed to it.
+  if (toWorker && to) {
+    await kvSetJSON(FORWARD_KEY, { to });
+    console.log(`support tickets will copy each email to ${shape(to)}`);
+  }
+
   // 3. One rule per address the site gives out.
   const rules = await cf(token, `/zones/${zone.id}/email/routing/rules?per_page=50`);
   if (!rules.ok) { console.log('rules: cannot read', why(rules)); console.log(PERMISSIONS); return; }
@@ -98,19 +127,63 @@ export async function mailRoute(to?: string): Promise<void> {
     const rule = have.find((r) => (r.matchers ?? []).some((m: any) => m.type === 'literal' && m.field === 'to' && String(m.value).toLowerCase() === addr));
     const target = rule?.actions?.find((a: any) => a.type === 'forward')?.value?.[0] as string | undefined;
     if (!to) {
-      console.log(`${addr}: ${rule ? `forwards to ${target ? shape(target) : 'nowhere'}${rule.enabled ? '' : ' (switched off)'}` : 'no rule: mail to it bounces'}`);
+      const w = rule?.actions?.find((a: any) => a.type === 'worker');
+      console.log(`${addr}: ${rule ? `${w ? 'goes to the support tickets' : `forwards to ${target ? shape(target) : 'nowhere'}`}${rule.enabled ? '' : ' (switched off)'}` : 'no rule: mail to it bounces'}`);
       continue;
     }
     const body = JSON.stringify({
-      name: `${addr} to the owner`, enabled: true,
+      name: toWorker ? `${addr} to support tickets` : `${addr} to the owner`, enabled: true,
       matchers: [{ type: 'literal', field: 'to', value: addr }],
-      actions: [{ type: 'forward', value: [to] }],
+      actions: [toWorker ? { type: 'worker', value: [WORKER] } : { type: 'forward', value: [to] }],
     });
-    if (rule && target?.toLowerCase() === to.toLowerCase() && rule.enabled) { console.log(`${addr}: already forwards there`); continue; }
+    const worker = rule?.actions?.find((a: any) => a.type === 'worker')?.value?.[0] as string | undefined;
+    if (toWorker && worker === WORKER && rule.enabled) { console.log(`${addr}: already goes to the support tickets`); continue; }
+    if (!toWorker && rule && target?.toLowerCase() === to.toLowerCase() && rule.enabled) { console.log(`${addr}: already forwards there`); continue; }
     const r = rule
       ? await cf(token, `/zones/${zone.id}/email/routing/rules/${rule.id ?? rule.tag}`, { method: 'PUT', body })
       : await cf(token, `/zones/${zone.id}/email/routing/rules`, { method: 'POST', body });
-    console.log(`${addr}: ${r.ok ? `now forwards to ${shape(to)}` : `could not set (${why(r)})`}`);
-    if (!r.ok) console.log(PERMISSIONS);
+    const unconfirmed = !r.ok && /not verified/i.test(JSON.stringify(r.body?.errors ?? ''));
+    console.log(`${addr}: ${r.ok ? (toWorker ? `now goes to the support tickets, with a copy to ${shape(to)}` : `now forwards to ${shape(to)}`) : unconfirmed
+      ? 'waiting: Cloudflare will not forward to the address until its confirmation link is tapped. Tap it, then run this again.'
+      : `could not set (${why(r)})`}`);
+    if (!r.ok && !unconfirmed) console.log(PERMISSIONS);
   }
+}
+
+/**
+ * What this token can and cannot do, one call per permission, so a refusal
+ * says which permission is missing rather than only that one is. Prints
+ * yes/no and status codes only.
+ */
+async function diagnose(token: string, zone: string, account?: string): Promise<void> {
+  const v = await cf(token, '/user/tokens/verify');
+  console.log(`  token: ${v.ok ? `valid (${v.body?.result?.status ?? '?'})` : `cannot verify (${v.status})`}`);
+  const checks: Array<[string, string]> = [
+    ['Zone Settings (read)', `/zones/${zone}/settings/ssl`],
+    ['DNS (read)', `/zones/${zone}/dns_records?per_page=1`],
+    ['Email Routing Rules (read)', `/zones/${zone}/email/routing/rules?per_page=1`],
+    ['Email Routing settings (read)', `/zones/${zone}/email/routing`],
+    ...(account ? [['Email Routing Addresses (read)', `/accounts/${account}/email/routing/addresses?per_page=1`] as [string, string]] : []),
+  ];
+  for (const [label, path] of checks) {
+    const r = await cf(token, path);
+    console.log(`  ${label}: ${r.ok ? 'yes' : `no (${r.status})`}`);
+  }
+  // A write that changes nothing: the same value back, to test Zone Settings > Edit.
+  const cur = await cf(token, `/zones/${zone}/settings/always_use_https`);
+  if (cur.ok) {
+    const w = await cf(token, `/zones/${zone}/settings/always_use_https`, { method: 'PATCH', body: JSON.stringify({ value: cur.body?.result?.value }) });
+    console.log(`  Zone Settings (edit): ${w.ok ? 'yes' : `no (${w.status})`}`);
+  }
+}
+
+/** Where support@ forwards to now, if it forwards anywhere. */
+async function currentForward(token: string): Promise<string | null> {
+  const z = await cf(token, `/zones?name=${DOMAIN}`);
+  const zone = z.ok ? z.body?.result?.[0]?.id : null;
+  if (!zone) return null;
+  const rules = await cf(token, `/zones/${zone}/email/routing/rules?per_page=50`);
+  const rule = (rules.body?.result ?? []).find((r: any) => (r.matchers ?? []).some((m: any) => m.field === 'to' && String(m.value).toLowerCase() === ROUTED[0]));
+  const target = rule?.actions?.find((a: any) => a.type === 'forward')?.value?.[0];
+  return typeof target === 'string' ? target : null;
 }

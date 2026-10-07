@@ -12,7 +12,7 @@ name: deploy
 on:
   push:
     branches: [main]
-    paths: ['worker/**', 'public/**', 'schema.pg.sql', 'engine/src/sql-split.ts', '.github/workflows/deploy.yml']
+    paths: ['worker/**', 'public/**', 'schema.sql', 'schema.pg.sql', 'engine/src/sql-split.ts', '.github/workflows/deploy.yml']
   schedule:
     - cron: '15 3 * * *'
   workflow_dispatch:
@@ -30,14 +30,21 @@ jobs:
         with: { node-version: '22', cache: 'npm' }
       - run: npm ci
 
-      # The schema is applied before the Worker is deployed, never after: the
-      # new Worker reads through serving functions that a stale schema does not
-      # have, and deploying first would serve 502s for as long as the migration
-      # took.
-      - name: Apply the Postgres schema (idempotent)
+      # The schema is applied before the Worker is deployed, never after: a
+      # new Worker reading a table a stale schema does not have would serve
+      # errors for as long as the migration took. Since October the site's
+      # database is D1 (HANDOFF.md, "The move to D1"); d1:create finds it by
+      # name and hands its id to the steps below through $GITHUB_ENV.
+      - name: Find the D1 database
         env:
-          DB_BACKEND: postgres
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: npm run d1:create
+      - name: Apply the D1 schema (idempotent)
+        env:
+          DB_BACKEND: d1
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: npm run migrate
 
       # Substituted rather than committed: the repo is public. See the comment
@@ -50,6 +57,7 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           set -euo pipefail
+          test -n "$CF_D1_DATABASE_ID"
           if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
             echo "SUPABASE_URL and SUPABASE_ANON_KEY must both be set as repository secrets."
             echo "Supabase dashboard -> Project Settings -> API: 'Project URL' and the 'anon public' key."
@@ -61,7 +69,8 @@ jobs:
             const url = process.env.SUPABASE_URL.replace(/\/+$/, "");
             let s = fs.readFileSync(path, "utf8");
             s = s.replace("REPLACE_WITH_SUPABASE_URL", () => url)
-                 .replace("REPLACE_WITH_SUPABASE_ANON_KEY", () => process.env.SUPABASE_ANON_KEY);
+                 .replace("REPLACE_WITH_SUPABASE_ANON_KEY", () => process.env.SUPABASE_ANON_KEY)
+                 .replace("REPLACE_WITH_D1_DATABASE_ID", () => process.env.CF_D1_DATABASE_ID);
             if (s.includes("REPLACE_WITH")) throw new Error("a placeholder was left unsubstituted");
             fs.writeFileSync(path, s);
             console.log("wrangler.toml points at " + url);
@@ -92,7 +101,12 @@ jobs:
           BSD_API_KEY: ${{ secrets.BSD_API_KEY }}
         run: |
           set -uo pipefail
-          for name in SUPABASE_SERVICE_KEY COINFLOW_API_KEY COINFLOW_WEBHOOK_SECRET WHOP_WEBHOOK_SECRET WHOP_API_KEY BREVO_API_KEY BSD_API_KEY; do
+          # The engine's key to the Worker's D1 door (worker/src/enginedb.ts):
+          # an HMAC of the Cloudflare token, which the engine derives the same
+          # way (engine/src/store.d1.ts), so no new secret has to be made.
+          ENGINE_DB_KEY=$(printf %s 'offside-engine-db-v1' | openssl dgst -sha256 -hmac "$CLOUDFLARE_API_TOKEN" | sed 's/^.*= //')
+          export ENGINE_DB_KEY
+          for name in ENGINE_DB_KEY SUPABASE_SERVICE_KEY COINFLOW_API_KEY COINFLOW_WEBHOOK_SECRET WHOP_WEBHOOK_SECRET WHOP_API_KEY BREVO_API_KEY BSD_API_KEY; do
             value="${!name:-}"
             if [ -z "$value" ]; then
               echo "$name is not set - skipping (payments stay switched off)"

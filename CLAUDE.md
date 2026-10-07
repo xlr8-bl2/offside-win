@@ -1,5 +1,9 @@
 # offside.win — notes for Claude
 
+**Read `HANDOFF.md` first, and keep it current.** It holds the live state of the project (right now:
+the move off Supabase to Cloudflare D1), the migration checklist and the context a new agent needs.
+Update it with every meaningful step, in the same commit.
+
 ## Before launch: remove all the dev tooling
 
 The owner asked for this to be remembered. Everything below exists only so the
@@ -36,7 +40,11 @@ is setup too and stays: it switches Supabase's sign-in emails to the Worker's de
 (`worker/src/authhook.ts`) or back. So does the admin dashboard's "send me every email" test.
 The admin dashboard (`#/admin`, `public/js/admin.js`, `worker/src/admin.ts`, the
 `admin_*` functions and `promo` table in `schema.pg.sql`) is the owner's tool and
-stays at launch. Its "give free time" replaces the `grant` command for everyday
+stays at launch. So does support (`#/admin/support`, `worker/src/support.ts`, the
+Worker's `email` handler, `support_ticket` / `support_message` and `support_inbound`):
+mail to support@ and hello@ becomes tickets the owner answers as support@. `mail:route`
+(`engine/src/mailroute.ts`) is setup and stays: `worker` routes those addresses to the
+tickets, an email address routes them straight to that inbox instead. Its "give free time" replaces the `grant` command for everyday
 use. Only the account whose email hashes to `ADMIN_EMAIL_SHA256`
 (`worker/wrangler.toml`) can use it.
 

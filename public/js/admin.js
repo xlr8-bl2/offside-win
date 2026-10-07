@@ -6,8 +6,9 @@
  * checks who is asking on every call (worker/src/admin.ts). A reader who
  * opens #/admin gets this page's frame and a refusal from the server.
  *
- * Six tabs, one address each so a phone's back button works:
+ * Seven tabs, one address each so a phone's back button works:
  *   #/admin            the day at a glance
+ *   #/admin/support    mail to support@ and hello@ as tickets; answer as support@
  *   #/admin/users      search accounts; one account, free time given or ended
  *   #/admin/calls      open calls and the last month
  *   #/admin/offers     deals, free trials and notices, with a live preview
@@ -20,6 +21,7 @@ import { authHeaders } from './lib/auth.js';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const TABS = [
   ['', 'Overview'],
+  ['support', 'Support'],
   ['users', 'Users'],
   ['calls', 'Calls'],
   ['offers', 'Offers'],
@@ -120,6 +122,7 @@ export async function viewAdmin(app, parts, params, helpers = {}) {
   const main = app.querySelector('#adm-main');
   try {
     if (tab === '') await overview(main);
+    else if (tab === 'support') await (parts[2] === 'new' ? supportNew(main) : parts[2] ? ticket(main, parts[2]) : support(main, params));
     else if (tab === 'users') await (parts[2] ? oneUser(main, parts[2]) : users(main, params));
     else if (tab === 'calls') await calls(main);
     else if (tab === 'offers') await offers(main, parts[2]);
@@ -199,12 +202,22 @@ async function overview(main) {
         </form>
       </section>
       <section class="adm-card">
+        <h2>Support</h2>
+        <p class="adm-big" id="adm-support-open"><b>…</b> waiting on you</p>
+        <p class="adm-quiet">Mail to support@ and hello@offside.win. Each one lands here and in your inbox.</p>
+        <a class="adm-link" href="#/admin/support">Open support</a>
+      </section>
+      <section class="adm-card">
         <h2>Emails</h2>
         <p class="adm-quiet">Every email the site sends, to your own address, so you can see them as members do.</p>
         <p><button class="btn btn-ghost btn-sm" type="button" id="adm-mail">Send me every email</button></p>
         <p class="adm-quiet" id="adm-mail-out" role="status"></p>
       </section>
     </div>`;
+  api('support?status=open').then((r) => {
+    const el = main.querySelector('#adm-support-open');
+    if (el) el.innerHTML = `<b>${count(r.counts?.open)}</b> waiting on you`;
+  }).catch(() => {});
   const social = main.querySelector('#adm-social');
   const socialMsg = main.querySelector('#adm-social-msg');
   api('social').then((r) => { for (const [k] of SOCIALS) social.elements[k].value = r.socials?.[k] ?? ''; }).catch(() => {});
@@ -234,6 +247,139 @@ async function overview(main) {
     } catch (err) {
       out.textContent = err.message;
     } finally {
+      btn.disabled = false;
+    }
+  };
+}
+
+/* -------------------------------------------------------------- support */
+
+// Open waits on us, waiting waits on them, closed is done. A reply from them
+// opens a ticket again (support_inbound in schema.pg.sql).
+const TICKET_STATES = [['open', 'Open'], ['waiting', 'Waiting on them'], ['closed', 'Closed']];
+const STATE_WORD = { open: 'Open', waiting: 'Waiting on them', closed: 'Closed' };
+
+/** The part of a message that is new: everything above "On … wrote:" or the first quoted line. */
+function newPart(body) {
+  const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const cut = lines.findIndex((l, i) => /^>/.test(l) || /^On .+wrote:\s*$/.test(l) || /^-{2,}\s*Original Message/i.test(l)
+    || (/^On .+$/.test(l) && /wrote:\s*$/.test(lines[i + 1] ?? '')));
+  return { fresh: (cut > 0 ? lines.slice(0, cut) : lines).join('\n').trim(), rest: cut > 0 ? lines.slice(cut).join('\n').trim() : '' };
+}
+
+async function support(main, params) {
+  const status = params.get?.('status') ?? 'open';
+  const d = await api(`support?status=${encodeURIComponent(status)}`);
+  const c = d.counts ?? {};
+  const filters = [['open', 'Open', c.open], ['waiting', 'Waiting on them', c.waiting], ['closed', 'Closed', c.closed], ['all', 'All', null]];
+  const rows = d.tickets ?? [];
+  main.innerHTML = `
+    <header class="adm-head adm-head-row">
+      <div><h1>Support</h1><p>Mail to support@ and hello@offside.win, one ticket per conversation. Answer here and it goes out from support@offside.win.</p></div>
+      <a class="btn btn-primary btn-sm" href="#/admin/support/new">New email</a>
+    </header>
+    <nav class="adm-chips adm-filter" aria-label="Tickets by state">
+      ${filters.map(([k, label, n]) => `<a class="adm-chip" href="#/admin/support?status=${k}"${k === status ? ' aria-current="page"' : ''}>${esc(label)}${n != null ? ` <b>${count(n)}</b>` : ''}</a>`).join('')}
+    </nav>
+    ${rows.length ? `<ul class="adm-tickets">${rows.map((t) => `
+      <li><a href="#/admin/support/${esc(t.id)}">
+        <span class="adm-state ${esc(t.status)}">${esc(STATE_WORD[t.status] ?? t.status)}</span>
+        <span class="adm-ticket-main">
+          <b>${esc(t.subject)}</b>
+          <small>${esc(t.name ? `${t.name}, ${t.email}` : t.email)}${t.user_id ? ', has an account' : ''}</small>
+          ${t.preview ? `<span class="adm-ticket-preview">${t.last_direction === 'out' ? 'You: ' : ''}${esc(t.preview)}</span>` : ''}
+        </span>
+        <small class="adm-ticket-when">${esc(ago(t.updated_at))}</small>
+      </a></li>`).join('')}</ul>`
+      : `<p class="adm-quiet">${status === 'open' ? 'Nothing waiting on you. When someone writes to support@ or hello@offside.win, it lands here and in your inbox.' : 'No tickets here.'}</p>`}`;
+}
+
+async function ticket(main, id) {
+  const d = await api(`support/ticket?id=${encodeURIComponent(id)}`);
+  if (!d?.ticket) { main.innerHTML = '<a class="adm-back" href="#/admin/support">All tickets</a><p class="adm-error">No such ticket.</p>'; return; }
+  const t = d.ticket, a = d.account;
+  const now = Date.now() / 1000;
+  const m = a?.membership && a.membership.expires_at > now ? a.membership
+    : a?.entitlement && a.entitlement.status === 'active' && a.entitlement.expires_at > now ? a.entitlement : null;
+  main.innerHTML = `
+    <a class="adm-back" href="#/admin/support">All tickets</a>
+    <header class="adm-head">
+      <h1>${esc(t.subject)}</h1>
+      <p>${esc(t.name ? `${t.name}, ` : '')}${esc(t.email)}. Ticket ${esc(t.id)}, to ${esc(t.mailbox)}@, started ${esc(when(t.created_at))}.
+        ${a ? `<a href="#/admin/users/${esc(a.id)}">Their account</a>${m ? `: ${esc(planName(m.plan_id))} to ${esc(day(m.expires_at))}` : ', no membership running'}.` : 'No account with this address.'}</p>
+    </header>
+    <fieldset class="adm-seg" id="adm-tstate" aria-label="State of this ticket">
+      ${TICKET_STATES.map(([k, label]) => `<label><input type="radio" name="state" value="${k}"${t.status === k ? ' checked' : ''}><span>${esc(label)}</span></label>`).join('')}
+    </fieldset>
+    <p class="adm-msg" id="adm-tstate-msg" role="status"></p>
+    <ol class="adm-thread">
+      ${(d.messages ?? []).map((x) => {
+        const { fresh, rest } = newPart(x.body);
+        return `<li class="${x.direction === 'out' ? 'out' : 'in'}">
+          <p class="adm-thread-who"><b>${x.direction === 'out' ? 'You' : esc(t.name || x.from_email)}</b><small>${esc(when(x.at))}${x.attachments ? `, ${x.attachments} attachment${x.attachments === 1 ? '' : 's'} (in your inbox)` : ''}</small></p>
+          <div class="adm-thread-body">${esc(fresh || x.body)}</div>
+          ${rest ? `<details class="adm-thread-quote"><summary>Earlier messages quoted in this one</summary><div class="adm-thread-body">${esc(rest)}</div></details>` : ''}
+        </li>`;
+      }).join('')}
+    </ol>
+    <form class="adm-form adm-reply" id="adm-reply">
+      <label class="adm-f"><span>Reply to ${esc(t.email)}</span><textarea name="body" rows="7" maxlength="10000" required placeholder="Write your reply. Their last message is quoted under it, and it is signed Offside.win."></textarea></label>
+      <div class="adm-actions">
+        <button class="btn btn-primary btn-sm" type="submit" name="close" value="0">Send reply</button>
+        <button class="btn btn-ghost btn-sm" type="submit" name="close" value="1">Send and close</button>
+      </div>
+      <p class="adm-msg" id="adm-reply-msg" role="status"></p>
+    </form>`;
+  const stateMsg = main.querySelector('#adm-tstate-msg');
+  main.querySelector('#adm-tstate').addEventListener('change', async (e) => {
+    stateMsg.textContent = 'Saving';
+    try { await api('support/status', { id: Number(t.id), status: e.target.value }); stateMsg.textContent = `Marked ${STATE_WORD[e.target.value].toLowerCase()}.`; }
+    catch (err) { stateMsg.textContent = err.message; }
+  });
+  const form = main.querySelector('#adm-reply');
+  const msg = main.querySelector('#adm-reply-msg');
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const close = e.submitter?.value === '1';
+    const text = String(new FormData(form).get('body') ?? '').trim();
+    if (!text) { msg.textContent = 'Write something first.'; return; }
+    for (const b of form.querySelectorAll('button')) b.disabled = true;
+    msg.textContent = 'Sending';
+    try {
+      await api('support/reply', { id: Number(t.id), body: text, close });
+      msg.textContent = close ? 'Sent, and the ticket is closed.' : 'Sent.';
+      setTimeout(() => ticket(main, id), 700);
+    } catch (err) {
+      msg.textContent = err.message;
+      for (const b of form.querySelectorAll('button')) b.disabled = false;
+    }
+  };
+}
+
+async function supportNew(main) {
+  main.innerHTML = `
+    <a class="adm-back" href="#/admin/support">All tickets</a>
+    <header class="adm-head"><h1>New email</h1><p>Sent from support@offside.win and kept as a ticket, so their answer comes back here.</p></header>
+    <form class="adm-form" id="adm-new">
+      <label class="adm-f"><span>To</span><input name="to" type="email" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="name@example.com"></label>
+      <label class="adm-f"><span>Subject</span><input name="subject" required maxlength="180"></label>
+      <label class="adm-f"><span>Message</span><textarea name="body" rows="8" maxlength="10000" required></textarea></label>
+      <div class="adm-actions"><button class="btn btn-primary btn-sm" type="submit">Send email</button></div>
+      <p class="adm-msg" id="adm-new-msg" role="status"></p>
+    </form>`;
+  const form = main.querySelector('#adm-new');
+  const msg = main.querySelector('#adm-new-msg');
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    const btn = form.querySelector('button');
+    btn.disabled = true;
+    msg.textContent = 'Sending';
+    try {
+      const r = await api('support/new', { to: String(fd.get('to')), subject: String(fd.get('subject')), body: String(fd.get('body')) });
+      location.hash = `#/admin/support/${r.id}`;
+    } catch (err) {
+      msg.textContent = err.message;
       btn.disabled = false;
     }
   };
@@ -565,6 +711,8 @@ function logWords(l) {
   if (l.action === 'end') return 'Ended the free time';
   if (l.action === 'plan') return `Changed the ${planName(l.target)} plan${d.amount_minor ? `, price ${money(d.amount_minor)}` : ''}`;
   if (l.action === 'promo') return `Saved the offer “${d.title ?? l.target}”`;
+  if (l.action === 'support_reply') return `Answered ticket ${d.ticket}${d.closed ? ' and closed it' : ''}`;
+  if (l.action === 'support_status') return `Marked ticket ${d.ticket} ${String(STATE_WORD[d.status] ?? d.status).toLowerCase()}`;
   return l.action;
 }
 

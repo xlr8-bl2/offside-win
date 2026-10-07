@@ -437,6 +437,27 @@ const commands: Record<string, () => Promise<unknown>> = {
     return mailSetup(process.argv[3] ?? (process.env['GRANT_EMAIL'] || undefined));
   },
 
+  // Every row, gzipped JSON lines per table, for the move off Supabase (dbexport.ts).
+  async 'db:export'() {
+    const { dbExport } = await import('./dbexport.ts');
+    return dbExport();
+  },
+
+  // The move to D1: find or make the database, load the export, and check
+  // the Worker's reads against the Postgres functions (HANDOFF.md).
+  async 'd1:create'() {
+    const { d1Create } = await import('./d1setup.ts');
+    return d1Create();
+  },
+  async 'db:import'() {
+    const { d1Import } = await import('./d1import.ts');
+    return d1Import();
+  },
+  async 'db:verify'() {
+    const { d1Verify } = await import('./d1verify.ts');
+    return d1Verify();
+  },
+
   // Mail to support@ and hello@, forwarded to the owner's inbox (Cloudflare Email Routing).
   async 'mail:route'() {
     const { mailRoute } = await import('./mailroute.ts');

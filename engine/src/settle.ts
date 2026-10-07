@@ -253,7 +253,8 @@ export async function regradeSettled(limit = 5000): Promise<number> {
   // week later. The match table is the finished-only record the nightly
   // history job writes, so it wins where both have one, and the fixture's
   // copy is brought into line with it.
-  if (config.dbBackend === 'postgres') await exec(
+  // Postgres and SQLite (3.33+, which D1 is) both take UPDATE ... FROM.
+  await exec(
     `UPDATE fixture SET home_goals = m.home_goals, away_goals = m.away_goals
        FROM match m
       WHERE m.id = fixture.id AND m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL
