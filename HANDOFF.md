@@ -340,6 +340,10 @@ Stage 2, accounts:
 ## Recent work, newest first
 
 - **6 to 7 October:**
+  - Match event markup (`worker/src/seo.ts`): each team carries its page and crest (`url`, `logo`),
+    the competition its badge, so Google has pictures to draw in event results. Search Console's
+    Events errors (missing location / startDate) were the old nested competition event, gone since
+    #149; the owner was told to press "Validate fix". `offers` stays out: we sell no tickets.
   - #154 (open): support tickets.
   - `mail:route`, so support@ and hello@ forward to the owner.
   - #153: the analysis leads with the insight reads, with a fallback paragraph built from them.
