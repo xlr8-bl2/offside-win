@@ -339,7 +339,25 @@ Stage 2, accounts:
 
 ## Recent work, newest first
 
+- **8 October:**
+  - "Yesterday's results haven't updated": settle was fine. Every call for 7 October was pulled
+    before kick-off, so the record had nothing new. 29 of the 30 calls pulled 3–7 October would
+    have landed. The cause: a standing call was re-run through the price tests every pass, so
+    when the market came round to our view (price shortened) it read as "too short" or "shorter
+    than it deserves" and came down; a market missing from the feed for one pass pulled it too.
+    Now (`standingGate` in `select.ts`) a published call comes down only if it falls below the
+    floor or the money goes against it (both with the hold slack), or the side it backs is
+    rotated. A call whose market is unpriced for a pass stays up as stored. Each pull logs its
+    reason in the slate log (match and reason only, never the call).
+  - D1 takes at most 100 values per statement: the slate's ground lookup (`context/venue.ts`)
+    failed every pass ("too many SQL variables"), so new grounds were not saved and those match
+    pages lost their place and their Google event. Chunked by 90, as are `report.ts` and
+    `context/players.ts`.
 - **6 to 7 October:**
+  - Match event markup (`worker/src/seo.ts`): each team carries its page and crest (`url`, `logo`),
+    the competition its badge, so Google has pictures to draw in event results. Search Console's
+    Events errors (missing location / startDate) were the old nested competition event, gone since
+    #149; the owner was told to press "Validate fix". `offers` stays out: we sell no tickets.
   - #154 (open): support tickets.
   - `mail:route`, so support@ and hello@ forward to the owner.
   - #153: the analysis leads with the insight reads, with a fallback paragraph built from them.

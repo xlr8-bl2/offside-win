@@ -17,7 +17,7 @@ const SHELL = `<!doctype html><html><head><title>offside.win: x</title>
 
 const now = Math.floor(Date.now() / 1000);
 const FIX: Record<string, any> = {
-  id: 212602, home: 'Iceland', away: 'Estonia', league: 'UEFA Nations League', league_id: 64,
+  id: 212602, home: 'Iceland', away: 'Estonia', league: 'UEFA Nations League', league_id: 64, home_id: 1090, away_id: 1101,
   kickoff: now + 7200, status: 'notstarted', venue: { name: 'Laugardalsvöllur', city: 'Reykjavík' },
   round_label: 'League C · Matchday 1', locked: true, locked_calls: 1, published: [],
   verdicts: [{ drivers: [] }],
@@ -225,6 +225,12 @@ test('the match event carries everything Google requires, and nests no other eve
   assert.equal(ld.performer.length, 2);
   assert.ok(ld.organizer.url.startsWith('https://offside.win/'));
   assert.ok(Array.isArray(ld.image) && ld.image.length === 1);
+  // Each side links to its page and carries its crest; the competition its badge.
+  for (const t of ld.performer) {
+    assert.match(t.url, /^https:\/\/offside\.win\/team\/\d+\//);
+    assert.match(t.logo, /^https:\/\/.+\/img\/team\/\d+\/$/);
+  }
+  assert.match(ld.organizer.logo, /\/img\/league\/\d+\/$/);
   // Any other Event in the tree is one Google would read on its own, without a date or a place.
   const events: any[] = [];
   const walk = (x: any) => { if (x && typeof x === 'object') { if (/Event$/.test(String(x['@type'] ?? ''))) events.push(x); Object.values(x).forEach(walk); } };

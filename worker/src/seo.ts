@@ -187,6 +187,8 @@ export interface Page {
 }
 
 const SITE = SITE_NAME;
+/** The provider's image service, where the pages' crests and badges come from. */
+const CREST_BASE = 'https://sports.bzzoiro.com/img';
 export const MOVES = 'Calls are looked at again every fifteen minutes until kick-off, so one can change or come down, and each closes when the match starts. The bet slip stays exactly as posted.';
 
 export function crumbs(items: Array<[string, string]>, site: string): { html: string; ld: unknown } {
@@ -310,7 +312,13 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
    * is required. The end is kick-off plus two hours, which covers a match
    * and its half-time; extra time is the exception.
    */
-  const teams = [{ '@type': 'SportsTeam', name: home }, { '@type': 'SportsTeam', name: away }];
+  // Each side with its page here and its crest, and the competition with its
+  // badge: what Google draws next to the names when it shows the match as an
+  // event. The crests come from the same image service the pages show them from.
+  const side = (name: string, id: unknown) => Number(id) > 0
+    ? { '@type': 'SportsTeam', name, url: `${site}${teamPath(id, name)}`, logo: `${CREST_BASE}/team/${Number(id)}/` }
+    : { '@type': 'SportsTeam', name };
+  const teams = [side(home, f.home_id), side(away, f.away_id)];
   const event: Rec | null = venue && Number.isFinite(Number(f.kickoff)) ? {
     '@context': 'https://schema.org', '@type': 'SportsEvent',
     name: `${home} v ${away}`, sport: 'Football', url: canonical, description,
@@ -322,7 +330,7 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
       address: { '@type': 'PostalAddress', addressLocality: String(f.venue.city ?? f.venue.name) },
     },
     organizer: league && f.league_id
-      ? { '@type': 'SportsOrganization', name: league, url: `${site}${leaguePath(f.league_id, league)}` }
+      ? { '@type': 'SportsOrganization', name: league, url: `${site}${leaguePath(f.league_id, league)}`, logo: `${CREST_BASE}/league/${Number(f.league_id)}/` }
       : { '@type': 'Organization', name: SITE, url: `${site}/` },
   } : null;
 

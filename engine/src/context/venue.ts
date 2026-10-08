@@ -31,11 +31,15 @@ export function parseVenue(raw: unknown): Venue | null {
 export async function fillVenues(ids: Iterable<number>, { limit = 60 } = {}): Promise<number> {
   const wanted = [...new Set([...ids].filter((id) => Number.isFinite(id) && id > 0))];
   if (!wanted.length) return 0;
-  const known = new Set(
-    (await select<{ id: number | string }>(
-      `SELECT id FROM venue WHERE id IN (${wanted.map(() => '?').join(',')})`, wanted,
-    )).map((r) => Number(r.id)),
-  );
+  // In pieces: D1 takes at most a hundred values in one statement, and a
+  // full board names more grounds than that.
+  const known = new Set<number>();
+  for (let i = 0; i < wanted.length; i += 90) {
+    const part = wanted.slice(i, i + 90);
+    for (const r of await select<{ id: number | string }>(
+      `SELECT id FROM venue WHERE id IN (${part.map(() => '?').join(',')})`, part,
+    )) known.add(Number(r.id));
+  }
   const now = Math.floor(Date.now() / 1000);
   let done = 0;
   for (const id of wanted.filter((v) => !known.has(v)).slice(0, limit)) {

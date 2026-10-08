@@ -23,7 +23,7 @@ import { budgeted, keyId, spent, todays, type BudgetState } from './narrate/budg
 import { write, type Writer } from './narrate/write.ts';
 import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
-import { bucketOf, buildCandidates, confidentEligible, confidentHolds, DayMix, whyNoCall, type NoCallReason, driversFor, floorForRank, isLean, marketLabel, rankConfident, select, setAsideFor, type CalibrationMap } from './select.ts';
+import { bucketOf, buildCandidates, confidentEligible, DayMix, standingGate, whyNoCall, type NoCallReason, driversFor, floorForRank, isLean, marketLabel, rankConfident, select, setAsideFor, type CalibrationMap } from './select.ts';
 import { consensusMarkets } from './consensus.ts';
 import { readOf } from './read.ts';
 import { snapshotOf } from './odds.ts';
@@ -39,6 +39,26 @@ import { MARKET_FAMILY, type Candidate, type Factor, type MarketFamily } from '.
  * Worker reads those rows and serves them, which is why it stays inside the free
  * tier's 10 ms of CPU — there is nothing left for it to compute.
  */
+
+/** A published call as the pick table stores it. */
+interface StoredCall {
+  market: string; outcome: string; line: number | null; odds: number; bookmaker: string | null;
+  model_prob: number; book_prob: number; edge: number; shrunk_edge: number; kelly: number | null; confidence: number;
+}
+
+/** A stored call as a candidate, for one held while its market is out of the feed. */
+function storedCandidate(row: StoredCall): Candidate {
+  return {
+    market: row.market as Candidate['market'], outcome: row.outcome as Candidate['outcome'],
+    line: row.line === null ? null : Number(row.line),
+    push: row.line !== null && row.market === 'asian_handicap' ? pushRuleFor(Number(row.line)) : null,
+    model_prob: Number(row.model_prob), book_prob: Number(row.book_prob), edge: Number(row.edge),
+    shrunk_edge: Number(row.shrunk_edge), odds: Number(row.odds), bookmaker: row.bookmaker ?? '',
+    prices: row.bookmaker ? [{ slug: '', book: row.bookmaker, odds: Number(row.odds) }] : [],
+    kelly: Number(row.kelly ?? 0), confidence: Number(row.confidence),
+    family: MARKET_FAMILY[row.market as keyof typeof MARKET_FAMILY],
+  };
+}
 
 export async function loadCalibration(): Promise<CalibrationMap> {
   const rows = await dbSelect<{
@@ -430,11 +450,19 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
   // The calls standing on fixtures still to kick off, and the day's market
   // mix they make, so this run keeps what still holds and varies the rest.
   const incumbents = new Map<number, { market: string; outcome: string; line: number | null }>();
-  for (const r of await dbSelect<{ fixture_id: number; market: string; outcome: string; line: number | null }>(
-    `SELECT fixture_id, market, outcome, line FROM pick
-      WHERE kind = 'CONFIDENT' AND settled_at IS NULL AND kickoff > ?`,
+  // And each one's stored row, so a call whose market drops out of the feed
+  // for a pass stays up as it was rather than coming down (see `standingCall`).
+  const incumbentRows = new Map<number, StoredCall>();
+  for (const r of await dbSelect<StoredCall & { fixture_id: number }>(
+    `SELECT fixture_id, market, outcome, line, odds, bookmaker, model_prob, book_prob, edge, shrunk_edge, kelly, confidence
+       FROM pick WHERE kind = 'CONFIDENT' AND settled_at IS NULL AND kickoff > ?`,
     [now],
-  )) incumbents.set(Number(r.fixture_id), { market: r.market, outcome: r.outcome, line: r.line === null ? null : Number(r.line) });
+  )) {
+    incumbents.set(Number(r.fixture_id), { market: r.market, outcome: r.outcome, line: r.line === null ? null : Number(r.line) });
+    incumbentRows.set(Number(r.fixture_id), r);
+  }
+  // Why a standing call came down this pass, for the log.
+  const pullWhy = new Map<number, string>();
   const fixturesByDay = new Map<string, number>();
   for (const e of candidates) {
     const k = toEpoch(e['event_date']);
@@ -584,16 +612,7 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
          * and the free call dropped off the front page.
          */
         const row = slipLeg && !pin && !slipLegDropped ? legRows.get(analysis.fixture_id) : undefined;
-        const held: Candidate | undefined = row ? {
-          market: row.market as Candidate['market'], outcome: row.outcome as Candidate['outcome'],
-          line: row.line === null ? null : Number(row.line),
-          push: row.line !== null && row.market === 'asian_handicap' ? pushRuleFor(Number(row.line)) : null,
-          model_prob: Number(row.model_prob), book_prob: Number(row.book_prob), edge: Number(row.edge),
-          shrunk_edge: Number(row.shrunk_edge), odds: Number(row.odds), bookmaker: row.bookmaker ?? '',
-          prices: row.bookmaker ? [{ slug: '', book: row.bookmaker, odds: Number(row.odds) }] : [],
-          kelly: Number(row.kelly ?? 0), confidence: Number(row.confidence),
-          family: MARKET_FAMILY[row.market as keyof typeof MARKET_FAMILY],
-        } : undefined;
+        const held: Candidate | undefined = row ? storedCandidate(row) : undefined;
         const chosen = pin
           ? theirCands.filter(matchesPin(pin)).slice(0, 1)
           : held ? [held] : (() => {
@@ -608,7 +627,20 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
             const standingCall = fresh ? undefined : incumbents.get(analysis.fixture_id);
             if (standingCall && !ranked.some(matchesPin(standingCall))) {
               const still = unrotated.find(matchesPin(standingCall));
-              if (still && confidentHolds(still, floor, calibration)) ranked.unshift(still);
+              const stored = incumbentRows.get(analysis.fixture_id);
+              if (still) {
+                const gate = standingGate(still, floor, calibration);
+                if (gate === null) ranked.unshift(still);
+                else pullWhy.set(analysis.fixture_id, gate === 'floor' ? 'fell below the floor' : 'the money went against it');
+              } else if (theirCands.some(matchesPin(standingCall))) {
+                pullWhy.set(analysis.fixture_id, 'the side it backs was rotated');
+              } else if (stored && !backsRotatedSide(storedCandidate(stored), ctx.lineups.changes)) {
+                // Its market is not priced this pass: a gap in the feed, not
+                // news. It stays up as it was stored.
+                ranked.unshift(storedCandidate(stored));
+              } else {
+                pullWhy.set(analysis.fixture_id, 'its market is no longer priced and the side was rotated');
+              }
             }
             noCall = ranked.length ? 'mix'
               : rankConfident(theirCands, floor, calibration).length ? 'rotated'
@@ -1340,6 +1372,9 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
         );
       }
       await dbExec('DELETE FROM pick WHERE id = ?', [r.id]);
+      // The call itself is members' and the log is public: the match and the reason only.
+      console.log(`  pulled the call on ${pc ? `${pc.home} v ${pc.away}` : `fixture ${fixtureId}`}: ${
+        keep.length ? 'replaced by a better one' : pullWhy.get(fixtureId) ?? 'not chosen this pass'}`);
       withdrawn++;
     }
   }

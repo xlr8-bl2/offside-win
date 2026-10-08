@@ -92,11 +92,16 @@ export async function writeMissingReports(opts: { ids?: number[]; sinceDays?: nu
   let rows: Array<{ id: number }>;
   if (opts.ids) {
     if (!opts.ids.length) return 0;
-    rows = await select<{ id: number }>(
-      `SELECT id FROM fixture WHERE report_json IS NULL AND home_goals IS NOT NULL
-         AND id IN (${opts.ids.map(() => '?').join(',')}) LIMIT ?`,
-      [...opts.ids, limit],
-    );
+    // In pieces: D1 takes at most a hundred values in one statement.
+    rows = [];
+    for (let i = 0; i < opts.ids.length && rows.length < limit; i += 90) {
+      const part = opts.ids.slice(i, i + 90);
+      rows.push(...await select<{ id: number }>(
+        `SELECT id FROM fixture WHERE report_json IS NULL AND home_goals IS NOT NULL
+           AND id IN (${part.map(() => '?').join(',')}) LIMIT ?`,
+        [...part, limit - rows.length],
+      ));
+    }
   } else {
     rows = await select<{ id: number }>(
       `SELECT id FROM fixture WHERE report_json IS NULL AND home_goals IS NOT NULL
