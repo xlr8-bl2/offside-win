@@ -181,6 +181,12 @@ export interface MatchMeta { id: number; kickoff: number; home_team_id: number; 
 
 async function matchMeta(ids: number[]): Promise<Map<number, MatchMeta>> {
   if (!ids.length) return new Map();
+  // D1 takes at most a hundred values in one statement.
+  if (ids.length > 90) {
+    const out = new Map<number, MatchMeta>();
+    for (let i = 0; i < ids.length; i += 90) for (const [k, v] of await matchMeta(ids.slice(i, i + 90))) out.set(k, v);
+    return out;
+  }
   const rows = await select<MatchMeta>(
     `SELECT m.id, m.kickoff, m.home_team_id, m.away_team_id, m.home_goals, m.away_goals,
             th.name AS home, ta.name AS away, l.name AS league

@@ -339,6 +339,14 @@ Stage 2, accounts:
 
 ## Recent work, newest first
 
+- **8 October:**
+  - "Yesterday's results haven't updated": settle was fine. Every call for 7 October was pulled
+    before kick-off (they show under pulled calls, graded), so the record had nothing new. Calls
+    per day fell to 0–1 over the international break; worth watching once the leagues resume.
+  - D1 takes at most 100 values per statement: the slate's ground lookup (`context/venue.ts`)
+    failed every pass ("too many SQL variables"), so new grounds were not saved and those match
+    pages lost their place and their Google event. Chunked by 90, as are `report.ts` and
+    `context/players.ts`.
 - **6 to 7 October:**
   - Match event markup (`worker/src/seo.ts`): each team carries its page and crest (`url`, `logo`),
     the competition its badge, so Google has pictures to draw in event results. Search Console's
