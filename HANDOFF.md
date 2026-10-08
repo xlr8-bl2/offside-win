@@ -341,8 +341,14 @@ Stage 2, accounts:
 
 - **8 October:**
   - "Yesterday's results haven't updated": settle was fine. Every call for 7 October was pulled
-    before kick-off (they show under pulled calls, graded), so the record had nothing new. Calls
-    per day fell to 0–1 over the international break; worth watching once the leagues resume.
+    before kick-off, so the record had nothing new. 29 of the 30 calls pulled 3–7 October would
+    have landed. The cause: a standing call was re-run through the price tests every pass, so
+    when the market came round to our view (price shortened) it read as "too short" or "shorter
+    than it deserves" and came down; a market missing from the feed for one pass pulled it too.
+    Now (`standingGate` in `select.ts`) a published call comes down only if it falls below the
+    floor or the money goes against it (both with the hold slack), or the side it backs is
+    rotated. A call whose market is unpriced for a pass stays up as stored. Each pull logs its
+    reason in the slate log (match and reason only, never the call).
   - D1 takes at most 100 values per statement: the slate's ground lookup (`context/venue.ts`)
     failed every pass ("too many SQL variables"), so new grounds were not saved and those match
     pages lost their place and their Google event. Chunked by 90, as are `report.ts` and

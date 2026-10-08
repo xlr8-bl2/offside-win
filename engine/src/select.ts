@@ -414,11 +414,29 @@ export function confidentGate(
 }
 
 /**
- * Whether a call already published still stands: the same tests, with the
- * slack in config.confident.hold on the ones that move with every price.
+ * Why a call already published would come down, or null when it stands.
+ *
+ * Only the tests that say the call itself is worse: it has fallen below the
+ * floor, or the money has gone against it, each with the slack in
+ * config.confident.hold. The price tests (short, long, value) and the
+ * ceiling are for choosing a new call, and are not asked again. Every one of
+ * those fails when the market comes round to our view after we publish: the
+ * price shortens, and the call that was right to make reads as "too short"
+ * or "shorter than it deserves". 29 of the 30 calls pulled from 3 to 7
+ * October 2026 went on to land, nearly all of them pulled that way, and lab
+ * deep had the calls the close would drop on price alone landing 80%.
  */
+export function standingGate(c: Candidate, floor = config.confident.floor, calibration: CalibrationMap = new Map()): ConfidentGate | null {
+  const slack = config.confident.hold;
+  if (c.model_prob < floor + overclaim(MARKET_FAMILY[c.market], calibration) - slack.floor) return 'floor';
+  if (config.confident.maxDrift !== null && c.open_prob != null
+    && (c.sharp_prob ?? c.book_prob) - c.open_prob < -(config.confident.maxDrift + slack.drift)) return 'drift';
+  return null;
+}
+
+/** Whether a call already published still stands (standingGate). */
 export function confidentHolds(c: Candidate, floor = config.confident.floor, calibration: CalibrationMap = new Map()): boolean {
-  return confidentGate(c, floor, calibration, config.confident.hold) === null;
+  return standingGate(c, floor, calibration) === null;
 }
 
 /** Whether a call clears the published bar on its own terms. */

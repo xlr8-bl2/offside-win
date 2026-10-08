@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { consensusMarkets, targetsFromBook } from '../src/consensus.ts';
 import { buildBookMarkets } from '../src/odds.ts';
-import { bucketOf, confidentGate, confidentHolds, confidentScore, DayMix, rankConfident, whyNoCall } from '../src/select.ts';
+import { bucketOf, confidentGate, confidentHolds, standingGate, confidentScore, DayMix, rankConfident, whyNoCall } from '../src/select.ts';
 import type { Candidate, Quote } from '../src/types.ts';
 
 /**
@@ -132,7 +132,11 @@ test('a call already up holds through a twitch, and comes down on a real fall', 
   assert.ok(confidentHolds(at(0.8, 1.3, 0.8, 0.82), 0.78));
   // A real fall is not held.
   assert.ok(!confidentHolds(at(0.75, 1.36), 0.78), 'three points under');
-  assert.ok(!confidentHolds(at(0.8, 1.2), 0.78), 'four per cent under fair');
   assert.ok(!confidentHolds(at(0.8, 1.3, 0.8, 0.85), 0.78), 'five points against it');
-  assert.ok(!confidentHolds(at(0.8, 1.1), 0.78), 'too short is too short');
+  // The price coming in after we publish is the market agreeing, not news:
+  // too short or under fair for a new call, and still a standing one.
+  assert.equal(confidentGate(at(0.8, 1.1), 0.78), 'short');
+  assert.ok(confidentHolds(at(0.8, 1.1), 0.78), 'shortened below the minimum');
+  assert.ok(confidentHolds(at(0.8, 1.2), 0.78), 'four per cent under fair');
+  assert.equal(standingGate(at(0.75, 1.1), 0.78), 'floor', 'a real fall still counts when the price is short too');
 });
