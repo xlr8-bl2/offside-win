@@ -630,6 +630,27 @@ CREATE TABLE IF NOT EXISTS auth_session (
 
 CREATE INDEX IF NOT EXISTS auth_session_account ON auth_session (account_id);
 
+-- A signed-in browser, from October 2026 (auth_session above is the first
+-- version, moved over a row at a time as each is next used; worker/src/auth.ts).
+-- The hash is of the token joined to the kind of browser it was issued to, so
+-- a token copied into another browser matches nothing. An account is signed
+-- in on at most two at once; signing in on a third ends the one least
+-- recently used, kept here with why until it would have expired, so that
+-- browser can say what happened.
+CREATE TABLE IF NOT EXISTS account_session (
+  token_sha256 TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL,
+  device TEXT,
+  country TEXT,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  seen_at INTEGER NOT NULL,
+  ended_at INTEGER,
+  ended_reason TEXT
+);
+
+CREATE INDEX IF NOT EXISTS account_session_account ON account_session (account_id, ended_at);
+
 -- A sign-in link sent by email: one use, one hour. Hashed like the sessions.
 CREATE TABLE IF NOT EXISTS auth_link (
   token_sha256 TEXT PRIMARY KEY,

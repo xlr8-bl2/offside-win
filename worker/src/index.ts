@@ -38,7 +38,7 @@ import { admin, type AdminEnv } from './admin.ts';
 import { inbound, type InboundMessage } from './support.ts';
 import { engineDb, type EngineDbEnv } from './enginedb.ts';
 import { recordView, serve, type D1Read } from './d1read.ts';
-import { auth, authCleanup, viewerFor, type AuthDb } from './auth.ts';
+import { auth, authCleanup, boundToken, viewerFor, type AuthDb } from './auth.ts';
 import { accountWrite } from './profile.ts';
 import { socials, type SocialEnv } from './social.ts';
 import { fixtureChanges, liveList, liveMatch, type LiveEnv } from './live.ts';
@@ -203,7 +203,8 @@ const worker = {
     // The engine's way into D1 (enginedb.ts). Keyed; a 404 without the key.
     if (path === '/api/internal/db') return await engineDb(request, env as unknown as EngineDbEnv);
 
-    const jwt = bearer(request);
+    // On D1 a session is tied to the kind of browser it was issued to (auth.ts).
+    const jwt = env.DB ? boundToken(bearer(request), request) : bearer(request);
 
     // A signed-out read of something every visitor sees the same: from the
     // edge's copy (edge.ts). The inner call carries a marker so it goes to the

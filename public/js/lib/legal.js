@@ -10,7 +10,7 @@
  * page. One source, so the two can never disagree.
  */
 
-export const UPDATED = '6 October 2026';
+export const UPDATED = '9 October 2026';
 
 /*
  * The address on the contact page. It is referenced from the privacy policy and
@@ -359,7 +359,7 @@ export const LEGAL = {
   },
   terms: {
     title: 'Terms of Use',
-    version: '2.0',
+    version: '2.1',
     standfirst: `These Terms of Use set out the terms on which Offside.win makes the Site and the
       Services available to you, including the terms on which Memberships are sold. Please read them
       carefully before using the Site or purchasing a Membership. Nothing in these Terms affects your
@@ -493,6 +493,9 @@ export const LEGAL = {
          or transferred. You are responsible for maintaining the security of the email address
          associated with your Account, since a sign-in link sent to that address grants access to the
          Account.</p>
+      <p>An Account may be signed in on no more than two devices at a time; signing in on another
+         device signs out the one used least recently. We may limit how often an Account signs in, and
+         may suspend an Account we reasonably believe is being shared.</p>
       <p>You are responsible for all activity on your Account save where it results from access without
          your authorisation and you have taken reasonable care to prevent it. You must notify us without
          delay if you believe your Account has been accessed without your authorisation.</p>

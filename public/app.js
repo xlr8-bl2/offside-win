@@ -23,7 +23,7 @@ import { sweat } from './js/lib/sweat.js';
 import * as attention from './js/lib/attention.js';
 import { anchorClock, clockText, diffEvents, eachFixture, eventKey, fixtureIdOf, ingest, inPlayWindow, overlay, signature } from './js/lib/live.js';
 import { TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle, ukDay } from './js/lib/titles.js';
-import { accountRpc, authHeaders, completeSignIn, currentUser, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, prepareGoogleRedirect, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, siteConfig, viewingAsFree, hasStoredSession } from './js/lib/auth.js';
+import { accountRpc, authHeaders, completeSignIn, currentUser, endedReason, signedInDevices, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, prepareGoogleRedirect, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, siteConfig, viewingAsFree, hasStoredSession } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
 
@@ -1301,8 +1301,10 @@ const markLabel = () => (state.account?.profile?.username ? `@${state.account.pr
 function paintMemberMark() {
   const root = document.documentElement;
   if (!isMember() || !state.user) { root.style.removeProperty('--member-mark'); return; }
-  const label = `for ${markLabel()}`.replace(/[<&>"']/g, '');
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='240' height='120'><text x='12' y='70' transform='rotate(-16 120 60)' font-family='sans-serif' font-size='12' fill='white' fill-opacity='0.07'>${label}</text></svg>`;
+  // The name and the code both, so a screenshot names the account even when
+  // the username has been changed since.
+  const label = `for ${markLabel()}${state.account?.profile?.username ? ` (${memberCode()})` : ''}`.replace(/[<&>"']/g, '');
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='220' height='96'><text x='10' y='58' transform='rotate(-16 110 48)' font-family='sans-serif' font-size='12' fill='white' fill-opacity='0.12'>${label}</text></svg>`;
   root.style.setProperty('--member-mark', `url("data:image/svg+xml,${encodeURIComponent(svg)}")`);
 }
 document.addEventListener('copy', (e) => {
@@ -7140,7 +7142,10 @@ async function viewSignin() {
   const nav = navTicket;
   if (await currentUser()) { goInstead('#/account'); return; }
 
-  const problem = state.authError;
+  const ended = endedReason();
+  const problem = state.authError ?? (ended === 'device_limit'
+    ? 'You were signed out here because your account signed in on another device. An account stays signed in on two devices at a time.'
+    : ended === 'signed_out' ? 'You were signed out here from another device.' : null);
   state.authError = null;
 
   // Read without consuming: the intent is spent when the sign-in completes,
@@ -7156,43 +7161,58 @@ async function viewSignin() {
       ? 'Your account is behind this.'
       : 'Your calls follow you, your slip is yours, and there is nothing to remember.';
 
+  // The match the front page leads with, for the picture and a reason to be
+  // here. Cached, and the page draws without it.
+  const hero = await getJSON('/api/hero', { quiet: true }).catch(() => null);
   if (nav !== navTicket) return;
+  const heroWhen = hero?.kickoff ? kickoffLabel(Number(hero.kickoff)).replace(/^(Today|Tomorrow)/, (m) => m.toLowerCase()) : null;
+  const lead = hero?.home && hero?.away && heroWhen && Number(hero.kickoff) * 1000 > Date.now()
+    ? `<p class="auth-next"><span>Next up</span> ${esc(hero.home)} v ${esc(hero.away)}, ${esc(heroWhen)}</p>` : '';
+
   app.innerHTML = `
-  <div class="wrap section signin-page">
-    <div class="page-head signin-copy">
-      <h1 class="display xl">Sign in</h1>
-      <p class="page-sub">${esc(because)}</p>
-      <ul class="signin-points">
-        <li><b>Your calls, on every device.</b> Start on your phone, carry on at the laptop.</li>
-        <li><b>Your teams first.</b> Follow a club or a league and it leads the page.</li>
-        <li><b>Nothing to remember.</b> No password: a link by email, or Google.</li>
-      </ul>
-    </div>
-    <div class="signin-side">
-      ${problem ? `<p class="form-error">${esc(problem)}</p>` : ''}
-
-      <div class="panel signin" id="signin-panel">
-        <!-- Our own button, drawn with the page. With the redirect switched on
-             (GOOGLE_REDIRECT) it is the whole thing; until then Google's own
-             button is drawn over it by renderGoogleButton once it has loaded,
-             and this one is what shows while it does. -->
-        <div class="gsi-slot" id="google-wrap">
-          <button class="btn-gsi" id="google" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.8 3-4.3 3-7.4z" fill="#4285F4"/><path d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853"/><path d="M6.4 14a6 6 0 0 1 0-3.9V7.5H3.1a10 10 0 0 0 0 9z" fill="#FBBC05"/><path d="M12 6c1.5 0 2.8.5 3.8 1.5l2.8-2.8A10 10 0 0 0 3.1 7.5l3.3 2.6C7.2 7.8 9.4 6 12 6z" fill="#EA4335"/></svg><span>Continue with Google</span></button>
-          <div id="google-slot"></div>
-        </div>
-        <div class="or"><span>or by email</span></div>
-        <form id="magic" novalidate>
-          <label for="email">Email address</label>
-          <input id="email" name="email" type="email" autocomplete="email"
-                 inputmode="email" required placeholder="you@example.com">
-          <button class="btn btn-ghost btn-lg" type="submit">Email me a sign-in link</button>
-        </form>
-        <p class="signin-note" id="note"></p>
+  <div class="auth">
+    <aside class="auth-stage" aria-hidden="true">
+      ${hero?.shot_venue_id ? venueShot([hero.shot_venue_id], 'auth-shot', true) : ''}
+      <span class="auth-line"></span>
+      <div class="auth-stage-in">
+        <p class="auth-title display">The call, and the reason for it.</p>
+        ${lead}
       </div>
+    </aside>
 
-      <p class="signin-fine">The link in the email signs you in on the device you open it on.
-        By signing in you agree to our <a href="/terms">terms</a> and <a href="/privacy">privacy policy</a>. 18+.</p>
-    </div>
+    <section class="auth-door" aria-labelledby="auth-h">
+      <div class="auth-card">
+        <h1 class="auth-h" id="auth-h">Sign in</h1>
+        <p class="auth-because">${esc(because)}</p>
+        ${problem ? `<p class="auth-problem" role="alert">${esc(problem)}</p>` : ''}
+
+        <div class="signin" id="signin-panel">
+          <!-- Our own button, drawn with the page. With the redirect switched on
+               (GOOGLE_REDIRECT) it is the whole thing; until then Google's own
+               button is drawn over it by renderGoogleButton once it has loaded,
+               and this one is what shows while it does. -->
+          <div class="gsi-slot" id="google-wrap">
+            <button class="btn-gsi" id="google" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.8 3-4.3 3-7.4z" fill="#4285F4"/><path d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853"/><path d="M6.4 14a6 6 0 0 1 0-3.9V7.5H3.1a10 10 0 0 0 0 9z" fill="#FBBC05"/><path d="M12 6c1.5 0 2.8.5 3.8 1.5l2.8-2.8A10 10 0 0 0 3.1 7.5l3.3 2.6C7.2 7.8 9.4 6 12 6z" fill="#EA4335"/></svg><span>Continue with Google</span></button>
+            <div id="google-slot"></div>
+          </div>
+          <div class="or"><span>or with your email</span></div>
+          <form id="magic" novalidate>
+            <label for="email">Email address</label>
+            <input id="email" name="email" type="email" autocomplete="email"
+                   inputmode="email" required placeholder="you@example.com">
+            <button class="btn btn-primary btn-lg" type="submit">Email me a sign-in link</button>
+          </form>
+          <p class="signin-note" id="note" role="status"></p>
+        </div>
+
+        <ul class="auth-facts">
+          <li>No password. A link by email, or your Google account.</li>
+          <li>One account is one person's. It stays signed in on two devices at a time.</li>
+        </ul>
+        <p class="signin-fine">The link in the email signs you in on the device you open it on.
+          By signing in you agree to our <a href="/terms">terms</a> and <a href="/privacy">privacy policy</a>. 18+.</p>
+      </div>
+    </section>
   </div>`;
 
   const note = document.getElementById('note');
@@ -7268,9 +7288,10 @@ async function viewSignin() {
        * limit; what a reader needs now is the address they typed, where to
        * look, and one way to try again once the first link has had time.
        */
+      document.getElementById('auth-h').textContent = 'Check your inbox';
+      for (const el of document.querySelectorAll('.auth-because, .auth-problem')) el.remove();
       document.getElementById('signin-panel').innerHTML = `
         <div class="sent">
-          <p class="sent-head">Check your inbox</p>
           <p>We sent a sign-in link to <b>${esc(email)}</b>. Tap it on this device and you are in.</p>
           <p class="muted small">Not there in a minute? Look in spam, or
             <button type="button" class="linklike" id="again" disabled>send another (<span id="wait">60</span>)</button>.</p>
@@ -7568,7 +7589,9 @@ async function viewAccount() {
     </fieldset>
 
     <h2 class="acct-sub">Signing in</h2>
-    <p class="acct-hint">Signing out does not touch your membership. Sign back in with the same email and it is still yours.</p>
+    <p class="acct-hint">An account is one person's. It stays signed in on two devices at a time; signing in on a third signs out the one you used least recently.
+      Signing out does not touch your membership. Sign back in with the same email and it is still yours.</p>
+    <ul class="acct-devices" id="devices" hidden></ul>
     <div class="acct-actions">
       <button class="btn btn-ghost" id="out">Sign out</button>
       <button class="btn btn-quiet" id="out-all">Sign out on every device</button>
@@ -7795,6 +7818,18 @@ async function viewAccount() {
   // Sign out, here or everywhere.
   document.getElementById('out').onclick = () => leaveAccount(false);
   document.getElementById('out-all').onclick = () => leaveAccount(true);
+  // Where the account is signed in, from the Worker (auth.ts, me).
+  signedInDevices().then((list) => {
+    const ul = document.getElementById('devices');
+    if (!ul || !list?.length) return;
+    const when = (t) => {
+      const mins = Math.round((Date.now() / 1000 - Number(t)) / 60);
+      return mins < 60 ? 'in the last hour' : mins < 1440 ? 'today' : mins < 2880 ? 'yesterday' : `${Math.round(mins / 1440)} days ago`;
+    };
+    ul.innerHTML = list.map((d) => `<li><b>${esc(d.device ?? 'A browser')}</b>
+      <span>${d.current ? 'This device' : `Last used ${when(d.seen_at)}`}</span></li>`).join('');
+    ul.hidden = false;
+  }).catch(() => { /* the list is a courtesy */ });
 
   // Take your data: one JSON file, built from what the account page already holds.
   document.getElementById('export').onclick = () => {
@@ -8965,6 +9000,21 @@ async function render(name, parts, params) {
  * time at the moment you are refused something is the worst way to meet it, and
  * it is the complaint this answers.
  */
+/*
+ * The Worker ended this browser's session (auth.js checkLater): another
+ * device signed in past the two an account may use, or it was signed out from
+ * elsewhere. Drop what the page held as a member and say why on the sign-in
+ * page, rather than leave a member's page up that the next read would empty.
+ */
+addEventListener('ow:signedout', async () => {
+  cacheClear();
+  state.member = null;
+  state.board = null;
+  state.account = null;
+  location.hash = '#/signin';
+  headerAuth();
+});
+
 /** Sign out, here or on every device, and land on the front page. */
 async function leaveAccount(everywhere = false) {
   await signOut({ everywhere });
