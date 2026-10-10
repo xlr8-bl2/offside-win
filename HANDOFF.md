@@ -277,7 +277,13 @@ Stage 2, accounts:
   Cloudflare Email Routing (set 6 October with `mail:route`). This works and does not depend on
   Supabase.
 - **Gemini:** the free daily quota for the analysis writer resets at 08:00 UK time. When it is
-  spent, `narrate/rescue.ts` writes a paragraph from the insight reads.
+  spent, `narrate/rescue.ts` writes a paragraph from the insight reads. Real capacity is about
+  140 a day (7 models x 20), and Google refuses some models earlier. Until 10 October the 60
+  held back for calls were counted from 200, so previews spent everything by midday and later
+  calls got the fallback; `left()` in `narrate/budget.ts` now counts the real remainder.
+- **D1 request size (10 October):** a request to the engine door must stay under D1's 32 MiB per
+  call. `insertMany` now caps each request at 8 MB as well as 40 statements; a full board write
+  reached 33.6 MB and every slate pass failed from 03:06 to 05:44 UTC.
 - **Bet slip:** since 6 October it is built surest call first, then the longest prices. Lab study
   `deep slip study`: it came in 67% against 50%.
 
