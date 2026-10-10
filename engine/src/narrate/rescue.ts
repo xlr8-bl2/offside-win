@@ -122,6 +122,16 @@ export function fromReads(home: string, away: string, facts: PubFact[]): string 
     return `${lead} ${text.trim().replace(/[.\s]*$/, '.')}`;
   });
 
+  // The deciding line is both general reads in one. When the pool was too
+  // thin to leave those out, the body has said them already, and ending on
+  // the decider made the paragraph say everything twice (Inter v Parma,
+  // 10 October), so it closes on the plain line instead.
+  if (decides && close === sentence(decides.text) && chosen.some((r) => general.test(r.text))) {
+    close = pick([
+      `If that carries on, ${B} should have the better of it.`,
+      `That is the pattern to trust here, and it favours ${B}.`,
+    ], seed);
+  }
   const text = [take, ...body, close].join(' ');
   if (text.split(/\s+/).length < MIN_WORDS) return null;
   // Every read is already said in the pub's words; this only makes sure.

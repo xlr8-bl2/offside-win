@@ -19,7 +19,7 @@ import { gatherExtras, type Extras } from './context/extras.ts';
 import { refreshLeagueInfo } from './leagueinfo.ts';
 import { geminiWriter } from './narrate/gemini.ts';
 import { fromReads } from './narrate/rescue.ts';
-import { budgeted, keyId, spent, todays, type BudgetState } from './narrate/budget.ts';
+import { budgeted, keyId, left, spent, todays, type BudgetState } from './narrate/budget.ts';
 import { write, type Writer } from './narrate/write.ts';
 import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
@@ -832,7 +832,10 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
           preview = cached.text;
           previewsReused++;
         } else if (writer && !writerGaveUp && previewAttempts < previewsPerRun
-          && budget.used < perDay - PREVIEW_RESERVE && !spent(budget, perDay, models, perModel)) {
+          // Held back against what can really still be asked: seven models
+          // at twenty a day is 140, not the 200 the daily limit says, and
+          // counting the reserve from 200 let previews take all of it.
+          && left(budget, perDay, models, perModel) > PREVIEW_RESERVE) {
           previewAttempts++;
           const result = await write({
             home: analysis.home_team,

@@ -94,3 +94,15 @@ test('one read is not an argument: the grammar keeps it', async () => {
   assert.equal(fromReads('A', 'B', [{ text: 'A have been out-created in all of their last eight games', side: 'home', weight: 96, lean: -1 }]), null);
   assert.equal(fromReads('A', 'B', [{ text: 'A have won four of their last six', side: 'home', weight: 85 }]), null);
 });
+
+test('fromReads never says the deciding line after the reads it is made of', async () => {
+  const { fromReads } = await import('../src/narrate/rescue.ts');
+  const facts = [
+    { text: 'Inter have created the better chances in seven of their last nine games', side: 'home', lean: 1, weight: 10 },
+    { text: 'Parma have been out-created in five of their last seven games', side: 'away', lean: -1, weight: 9 },
+    { text: 'Inter have kept four clean sheets in a row', side: 'home', lean: 1, weight: 5 },
+    { text: 'This is where it is decided: Inter make the better chances almost every week, and Parma have been out-created in most of their recent games', side: 'match', lean: 1, weight: 99, decides: 'home' },
+  ] as any;
+  const t = fromReads('Inter', 'Parma', facts);
+  if (t) assert.doesNotMatch(t, /This is where it is decided/);
+});

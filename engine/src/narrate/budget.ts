@@ -81,6 +81,21 @@ function modelOpen(state: BudgetState, model: string, perModel: number, now: num
 }
 
 /**
+ * Requests still askable today: what the daily limit leaves, and no more than
+ * the models still answering can take between them. A model Google has
+ * refused or paused counts as nothing, so a reserve held against this is a
+ * reserve that can actually be spent.
+ */
+export function left(state: BudgetState, limit: number, models: string[] = [], perModel = Infinity): number {
+  const byDay = Math.max(0, limit - state.used);
+  if (!models.length) return byDay;
+  const now = Date.now();
+  let open = 0;
+  for (const m of models) if (modelOpen(state, m, perModel, now)) open += perModel - (state.models?.[m]?.used ?? 0);
+  return Math.min(byDay, open);
+}
+
+/**
  * Is there anything left to ask today? With a list of models, the answer is
  * whether any of them still has allowance; without one, the old single pause.
  */

@@ -76,3 +76,14 @@ test('a new key starts the day fresh, even after the old one was spent', async (
   // A refusal recorded with no pause (before pauses existed) stops nothing.
   assert.ok(!spent(todays({ day: '2026-09-26', key: b, used: 1, exhausted: true }, '2026-09-26', b), 200));
 });
+
+test('left: the reserve is counted against what the models can still take, not the daily limit', async () => {
+  const { left } = await import('../src/narrate/budget.ts');
+  const models = ['a', 'b', 'c'];
+  const state = { day: 'd', used: 30, models: { a: { used: 20 }, b: { used: 10 } } } as any;
+  // 200 a day says 170 left; three models at twenty with thirty used say 30.
+  assert.equal(left(state, 200, models, 20), 30);
+  state.models.b.pausedUntil = Date.now() + 60_000;
+  assert.equal(left(state, 200, models, 20), 20, 'a paused model counts as nothing');
+  assert.equal(left({ day: 'd', used: 190 } as any, 200, [], Infinity), 10);
+});
