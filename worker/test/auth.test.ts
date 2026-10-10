@@ -53,9 +53,9 @@ test('an email link signs in once, makes the account, and only its hash is store
   const { session, user } = await signInByLink('Reader@Example.com');
   assert.equal(user.email, 'reader@example.com');
   assert.equal(sent[0]!.to, 'reader@example.com');
-  const stored = sqlite.prepare('SELECT token_sha256 FROM auth_session').all() as any[];
+  const stored = sqlite.prepare('SELECT token_sha256, device FROM account_session').all() as any[];
   assert.equal(stored.length, 1);
-  assert.equal(stored[0].token_sha256, await sha256Hex(session));
+  assert.equal(stored[0].token_sha256, await sha256Hex(`${session}|${stored[0].device}`));
   // The same link a second time is refused.
   const token = /signin=([A-Za-z0-9_-]+)/.exec(sent[0]!.raw)![1];
   assert.equal((await post('/api/auth/verify', { token })).status, 401);
@@ -198,4 +198,90 @@ test('Google sign-in through the router links the Google account to an existing 
   const row = sqlite.prepare('SELECT google_sub FROM account WHERE id = ?').get(first.user.id) as any;
   assert.equal(row.google_sub, 'g-9');
   assert.equal((await post('/api/auth/google', { id_token, nonce: 'wrong' })).status, 401);
+});
+
+/* ------------------------------------------------------- one person's account */
+
+const PHONE = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/129.0 Mobile Safari/537.36';
+const LAPTOP = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15';
+const TABLET = 'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1';
+
+const as = (ua: string) => (path: string, init: RequestInit & { token?: string } = {}) =>
+  call(path, { ...init, headers: { ...(init.headers as Record<string, string> ?? {}), 'user-agent': ua } });
+
+async function signInOn(ua: string, email: string): Promise<{ session: string; user: any }> {
+  const c = as(ua);
+  assert.equal((await c('/api/auth/link', { method: 'POST', body: JSON.stringify({ email }) })).status, 200);
+  const token = /signin=([A-Za-z0-9_-]+)/.exec(sent.at(-1)!.raw)![1];
+  const v = await c('/api/auth/verify', { method: 'POST', body: JSON.stringify({ token }) });
+  assert.equal(v.status, 200, await v.clone().text());
+  return v.json() as Promise<any>;
+}
+
+test('the kind of browser is read without versions', async () => {
+  const { deviceOf } = await import('../src/auth.ts');
+  assert.equal(deviceOf(PHONE), 'Chrome on Android');
+  assert.equal(deviceOf(LAPTOP), 'Safari on Mac');
+  assert.equal(deviceOf(TABLET), 'Safari on iPad');
+  assert.equal(deviceOf(PHONE.replace('129.0', '130.0')), 'Chrome on Android');
+  assert.equal(deviceOf(null), 'a browser on a device');
+});
+
+test('a session copied into another browser is no use', async () => {
+  const { session } = await signInOn(PHONE, 'copy@example.com');
+  assert.equal((await as(PHONE)('/api/auth/me', { token: session })).status, 200);
+  assert.equal((await as(LAPTOP)('/api/auth/me', { token: session })).status, 401);
+});
+
+test('a third browser signs out the one least recently used, and that one is told why', async () => {
+  const phone = await signInOn(PHONE, 'three@example.com');
+  const laptop = await signInOn(LAPTOP, 'three@example.com');
+  // The phone was used last.
+  sqlite.prepare('UPDATE account_session SET seen_at = seen_at - 7200 WHERE device = ?').run('Safari on Mac');
+  const tablet = await signInOn(TABLET, 'three@example.com');
+  assert.equal((await as(PHONE)('/api/auth/me', { token: phone.session })).status, 200);
+  assert.equal((await as(TABLET)('/api/auth/me', { token: tablet.session })).status, 200);
+  const gone = await as(LAPTOP)('/api/auth/me', { token: laptop.session });
+  assert.equal(gone.status, 401);
+  assert.equal(((await gone.json()) as any).reason, 'device_limit');
+  // Members' reads on the ended one read as signed out.
+  assert.equal(((await (await as(LAPTOP)('/api/board', { token: laptop.session })).json()) as any).member, false);
+  const me = await (await as(PHONE)('/api/auth/me', { token: phone.session })).json() as any;
+  assert.equal(me.devices.length, 2);
+  assert.equal(me.devices.filter((d: any) => d.current).length, 1);
+});
+
+test('an account signs in at most six times a day', async () => {
+  for (let i = 0; i < 6; i++) {
+    await signInOn(i % 2 ? PHONE : LAPTOP, 'turns@example.com');
+    // A fresh hour of links each time; the link cap is a different rule.
+    sqlite.prepare('UPDATE auth_link SET created_at = created_at - 7200').run();
+  }
+  const c = as(PHONE);
+  await c('/api/auth/link', { method: 'POST', body: JSON.stringify({ email: 'turns@example.com' }) });
+  const token = /signin=([A-Za-z0-9_-]+)/.exec(sent.at(-1)!.raw)![1];
+  const refused = await c('/api/auth/verify', { method: 'POST', body: JSON.stringify({ token }) });
+  assert.equal(refused.status, 429);
+  assert.match(((await refused.json()) as any).error, /too many times today/);
+});
+
+test('a session from before browsers were checked keeps working, and is tied to that browser from then on', async () => {
+  const id = '22222222-2222-2222-2222-222222222222';
+  const t = Math.floor(Date.now() / 1000);
+  const raw = 'r'.repeat(43);
+  sqlite.prepare('INSERT INTO account (id, email, provider, created_at) VALUES (?, ?, ?, ?)').run(id, 'old@example.com', 'email', t);
+  sqlite.prepare('INSERT INTO auth_session (token_sha256, account_id, created_at, expires_at, seen_at) VALUES (?, ?, ?, ?, ?)')
+    .run(await sha256Hex(raw), id, t, t + 86400, t);
+  assert.equal((await as(PHONE)('/api/auth/me', { token: raw })).status, 200);
+  assert.equal((sqlite.prepare('SELECT count(*) AS n FROM auth_session').get() as any).n, 0);
+  assert.equal((await as(PHONE)('/api/auth/me', { token: raw })).status, 200);
+  assert.equal((await as(LAPTOP)('/api/auth/me', { token: raw })).status, 401);
+});
+
+test('signing out the others keeps this browser', async () => {
+  const phone = await signInOn(PHONE, 'others@example.com');
+  const laptop = await signInOn(LAPTOP, 'others@example.com');
+  await as(PHONE)('/api/auth/signout', { method: 'POST', body: JSON.stringify({ others: true }), token: phone.session });
+  assert.equal((await as(PHONE)('/api/auth/me', { token: phone.session })).status, 200);
+  assert.equal((await as(LAPTOP)('/api/auth/me', { token: laptop.session })).status, 401);
 });

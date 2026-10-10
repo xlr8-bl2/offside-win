@@ -20,6 +20,13 @@
  * SHA-256 is stored (`auth_session`), so a copy of the database signs nobody
  * in. Sessions last 60 days and are extended while they are used.
  *
+ * One account is one person's. A session is tied to the kind of browser it
+ * was issued to (`deviceOf`), so a token copied into another browser is no
+ * use; an account is signed in on at most `MAX_DEVICES` browsers at once, a
+ * new sign-in ending the one least recently used; and an account signs in at
+ * most `SIGNINS_PER_DAY` times a day, so one membership cannot be passed
+ * round a group by taking turns.
+ *
  * Accounts are keyed by email. The six from Supabase keep their ids
  * (`db:accounts`, engine/src/d1accounts.ts), so their memberships, profiles
  * and follows are still theirs.
@@ -53,6 +60,10 @@ const LINK_SECONDS = 3600;
 /** Links one address may be sent in an hour, and the whole site. */
 const LINKS_PER_EMAIL = 5;
 const LINKS_PER_HOUR = 300;
+/** Browsers an account is signed in on at once. */
+export const MAX_DEVICES = 2;
+/** New sign-ins an account may make in a day. */
+export const SIGNINS_PER_DAY = 6;
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -92,12 +103,77 @@ export const userOf = (a: Account) => ({
 
 const ACCOUNT_COLS = 'a.id, a.email, a.name, a.avatar_url, a.provider, a.created_at';
 
-/** The account behind a session token, or null for an unknown or expired one. */
-export async function sessionAccount(db: AuthDb, token: string | null): Promise<(Account & { expires_at: number }) | null> {
-  if (!token || token.length < 20 || token.length > 100) return null;
-  return db.prepare(`SELECT ${ACCOUNT_COLS}, s.expires_at FROM auth_session s JOIN account a ON a.id = s.account_id
-      WHERE s.token_sha256 = ? AND s.expires_at > ?`)
-    .bind(await sha256Hex(token), now()).first<Account & { expires_at: number }>();
+/**
+ * The kind of browser a request comes from: its make and its system, never a
+ * version, so an update does not sign anyone out. "Chrome on Android".
+ */
+export function deviceOf(userAgent: string | null): string {
+  const ua = userAgent ?? '';
+  const browser = /Edg(A|iOS)?\//.test(ua) ? 'Edge'
+    : /OPR\/|Opera/.test(ua) ? 'Opera'
+    : /SamsungBrowser\//.test(ua) ? 'Samsung Internet'
+    : /Firefox\/|FxiOS\//.test(ua) ? 'Firefox'
+    : /Chrome\/|CriOS\//.test(ua) ? 'Chrome'
+    : /Safari\//.test(ua) ? 'Safari'
+    : 'a browser';
+  const system = /Android/.test(ua) ? 'Android'
+    : /iPhone|iPod/.test(ua) ? 'iPhone'
+    : /iPad/.test(ua) ? 'iPad'
+    : /CrOS/.test(ua) ? 'Chromebook'
+    : /Macintosh|Mac OS X/.test(ua) ? 'Mac'
+    : /Windows/.test(ua) ? 'Windows'
+    : /Linux/.test(ua) ? 'Linux'
+    : 'a device';
+  return `${browser} on ${system}`;
+}
+
+/**
+ * The bearer token as the sessions are keyed: the token and the kind of
+ * browser sending it. The Worker reads every token through this when D1 is
+ * bound (index.ts), so the same token from another browser finds nothing.
+ */
+export function boundToken(raw: string | null, request: Request): string | null {
+  return raw ? `${raw}|${deviceOf(request.headers.get('user-agent'))}` : null;
+}
+
+const splitToken = (token: string): [string, string | null] => {
+  const i = token.indexOf('|');
+  return i < 0 ? [token, null] : [token.slice(0, i), token.slice(i + 1)];
+};
+
+type Session = Account & { expires_at: number; seen_at: number; token_sha256: string };
+
+/** The account behind a session token, or null for an unknown, expired or ended one. */
+export async function sessionAccount(db: AuthDb, token: string | null): Promise<Session | null> {
+  if (!token || token.length < 20 || token.length > 200) return null;
+  const hash = await sha256Hex(token);
+  const t = now();
+  const found = await db.prepare(`SELECT ${ACCOUNT_COLS}, s.expires_at, s.seen_at, s.token_sha256
+      FROM account_session s JOIN account a ON a.id = s.account_id
+      WHERE s.token_sha256 = ? AND s.expires_at > ? AND s.ended_at IS NULL`)
+    .bind(hash, t).first<Session>();
+  if (found) return found;
+  // A session from before browsers were checked: moved over, tied to the
+  // browser using it now, so nobody already signed in is signed out.
+  const [raw, device] = splitToken(token);
+  const old = await db.prepare('SELECT account_id, created_at, expires_at, seen_at FROM auth_session WHERE token_sha256 = ? AND expires_at > ?')
+    .bind(await sha256Hex(raw), t).first<{ account_id: string; created_at: number; expires_at: number; seen_at: number }>();
+  if (!old) return null;
+  await db.batch([
+    db.prepare(`INSERT INTO account_session (token_sha256, account_id, device, created_at, expires_at, seen_at)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (token_sha256) DO NOTHING`)
+      .bind(hash, old.account_id, device, old.created_at, old.expires_at, old.seen_at),
+    db.prepare('DELETE FROM auth_session WHERE token_sha256 = ?').bind(await sha256Hex(raw)),
+  ]);
+  return sessionAccount(db, token);
+}
+
+/** Why a session that no longer works stopped, when it was ended rather than run out. */
+async function endedWhy(db: AuthDb, token: string | null): Promise<string | null> {
+  if (!token || token.length < 20 || token.length > 200) return null;
+  const r = await db.prepare('SELECT ended_reason FROM account_session WHERE token_sha256 = ? AND ended_at IS NOT NULL')
+    .bind(await sha256Hex(token)).first<{ ended_reason: string | null }>();
+  return r?.ended_reason ?? null;
 }
 
 /** Who is reading, for the walled reads: null when signed out. */
@@ -107,13 +183,34 @@ export async function viewerFor(db: AuthDb, token: string | null): Promise<Viewe
   return { id: a.id, email: a.email, member: await hasMembership(db as unknown as D1Read, a.id, a.email) };
 }
 
-async function startSession(db: AuthDb, accountId: string): Promise<{ token: string; expires_at: number }> {
-  const token = randomToken();
+class SignInRefused extends Error {}
+
+/**
+ * A new session for this browser. Refused past the day's sign-ins; past
+ * MAX_DEVICES, the browser least recently used is signed out.
+ */
+async function startSession(db: AuthDb, accountId: string, request: Request): Promise<{ token: string; expires_at: number }> {
   const t = now();
+  const today = await db.prepare('SELECT count(*) AS n FROM account_session WHERE account_id = ? AND created_at > ?')
+    .bind(accountId, t - DAY).first<{ n: number }>();
+  if (Number(today?.n ?? 0) >= SIGNINS_PER_DAY) {
+    throw new SignInRefused('This account has signed in too many times today. Try again tomorrow, or write to support@offside.win.');
+  }
+  const token = randomToken();
+  const device = deviceOf(request.headers.get('user-agent'));
+  const country = (request as { cf?: { country?: string } }).cf?.country ?? null;
   const expires = t + SESSION_DAYS * DAY;
   await db.batch([
-    db.prepare('INSERT INTO auth_session (token_sha256, account_id, created_at, expires_at, seen_at) VALUES (?, ?, ?, ?, ?)')
-      .bind(await sha256Hex(token), accountId, t, expires, t),
+    db.prepare(`INSERT INTO account_session (token_sha256, account_id, device, country, created_at, expires_at, seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .bind(await sha256Hex(`${token}|${device}`), accountId, device, country, t, expires, t),
+    db.prepare(`UPDATE account_session SET ended_at = ?, ended_reason = 'device_limit'
+      WHERE account_id = ? AND ended_at IS NULL AND token_sha256 NOT IN (
+        SELECT token_sha256 FROM account_session WHERE account_id = ? AND ended_at IS NULL AND expires_at > ?
+         ORDER BY seen_at DESC, created_at DESC LIMIT ${MAX_DEVICES})`).bind(t, accountId, accountId, t),
+    // Sessions from before browsers were checked count towards the limit by
+    // simply ending: the next sign-in on those browsers is a fresh one.
+    db.prepare('DELETE FROM auth_session WHERE account_id = ?').bind(accountId),
     db.prepare('UPDATE account SET last_sign_in_at = ? WHERE id = ?').bind(t, accountId),
   ]);
   return { token, expires_at: expires };
@@ -189,6 +286,17 @@ async function sendLink(request: Request, env: AuthEnv, db: AuthDb): Promise<Res
   return answer({ sent: true });
 }
 
+/** A session answer for the page, or the reason there is none. */
+async function signedIn(db: AuthDb, account: Account, request: Request): Promise<Response> {
+  try {
+    const s = await startSession(db, account.id, request);
+    return answer({ session: s.token, expires_at: s.expires_at, user: userOf(account) });
+  } catch (err) {
+    if (err instanceof SignInRefused) return refuse(429, err.message);
+    throw err;
+  }
+}
+
 async function verifyLink(request: Request, db: AuthDb): Promise<Response> {
   const token = String((await body(request)).token ?? '');
   if (token.length < 20 || token.length > 100) return refuse(400, 'That sign-in link is not complete.');
@@ -200,9 +308,7 @@ async function verifyLink(request: Request, db: AuthDb): Promise<Response> {
   if (!used.meta?.changes) return refuse(401, 'That sign-in link has been used or has run out. Ask for a new one.');
   const link = await db.prepare('SELECT email FROM auth_link WHERE token_sha256 = ?').bind(hash).first<{ email: string }>();
   if (!link) return refuse(401, 'That sign-in link has been used or has run out. Ask for a new one.');
-  const account = await accountFor(db, link.email);
-  const s = await startSession(db, account.id);
-  return answer({ session: s.token, expires_at: s.expires_at, user: userOf(account) });
+  return signedIn(db, await accountFor(db, link.email), request);
 }
 
 /* ---------------------------------------------------------------- Google */
@@ -259,31 +365,46 @@ async function google(request: Request, env: AuthEnv, db: AuthDb): Promise<Respo
   const account = await accountFor(db, linked?.email ?? claims.email, {
     name: claims.name, avatar: claims.picture, provider: 'google', googleSub: claims.sub,
   });
-  const s = await startSession(db, account.id);
-  return answer({ session: s.token, expires_at: s.expires_at, user: userOf(account) });
+  return signedIn(db, account, request);
 }
 
 /* ------------------------------------------------------------- the rest */
 
 async function me(db: AuthDb, token: string | null): Promise<Response> {
   const a = await sessionAccount(db, token);
-  if (!a) return refuse(401, 'signed out');
+  if (!a) return answer({ error: 'signed out', reason: await endedWhy(db, token) }, 401);
   const t = now();
   let expires = a.expires_at;
-  if (expires - t < EXTEND_WITHIN) {
-    expires = t + SESSION_DAYS * DAY;
-    await db.prepare('UPDATE auth_session SET expires_at = ?, seen_at = ? WHERE token_sha256 = ?')
-      .bind(expires, t, await sha256Hex(token ?? '')).run();
+  // Marked as used at most once an hour; that is what decides which browser
+  // a new sign-in signs out.
+  if (expires - t < EXTEND_WITHIN || t - a.seen_at > 3600) {
+    if (expires - t < EXTEND_WITHIN) expires = t + SESSION_DAYS * DAY;
+    await db.prepare('UPDATE account_session SET expires_at = ?, seen_at = ? WHERE token_sha256 = ?')
+      .bind(expires, t, a.token_sha256).run();
   }
-  return answer({ user: userOf(a), expires_at: expires });
+  const devices = (await db.prepare(`SELECT device, seen_at, token_sha256 FROM account_session
+      WHERE account_id = ? AND ended_at IS NULL AND expires_at > ? ORDER BY seen_at DESC`)
+    .bind(a.id, t).all<{ device: string | null; seen_at: number; token_sha256: string }>()).results ?? [];
+  return answer({
+    user: userOf(a), expires_at: expires, max_devices: MAX_DEVICES,
+    devices: devices.map((d) => ({ device: d.device, seen_at: d.seen_at, current: d.token_sha256 === a.token_sha256 })),
+  });
 }
 
 async function signOut(request: Request, db: AuthDb, token: string | null): Promise<Response> {
   const a = await sessionAccount(db, token);
   if (a) {
-    const everywhere = (await body(request)).everywhere === true;
-    if (everywhere) await db.prepare('DELETE FROM auth_session WHERE account_id = ?').bind(a.id).run();
-    else await db.prepare('DELETE FROM auth_session WHERE token_sha256 = ?').bind(await sha256Hex(token ?? '')).run();
+    const b = await body(request);
+    const t = now();
+    // Ended rather than deleted, so they still count towards the day's sign-ins.
+    if (b.everywhere === true || b.others === true) {
+      await db.prepare(`UPDATE account_session SET ended_at = ?, ended_reason = 'signed_out'
+          WHERE account_id = ? AND ended_at IS NULL${b.others === true ? ' AND token_sha256 <> ?' : ''}`)
+        .bind(...(b.others === true ? [t, a.id, a.token_sha256] : [t, a.id])).run();
+    } else {
+      await db.prepare(`UPDATE account_session SET ended_at = ?, ended_reason = 'signed_out' WHERE token_sha256 = ?`)
+        .bind(t, a.token_sha256).run();
+    }
   }
   return answer({ signed_out: true });
 }
@@ -307,6 +428,7 @@ export async function authCleanup(db: AuthDb | undefined): Promise<void> {
   const t = now();
   await db.batch([
     db.prepare('DELETE FROM auth_session WHERE expires_at < ?').bind(t),
+    db.prepare('DELETE FROM account_session WHERE expires_at < ?').bind(t),
     db.prepare('DELETE FROM auth_link WHERE created_at < ?').bind(t - 2 * DAY),
   ]);
 }
