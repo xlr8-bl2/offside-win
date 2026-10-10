@@ -1554,7 +1554,7 @@ function promoHTML(user) {
         <li><b>The bet slip's legs</b> before the first one kicks off</li>
         <li><b>Why we're making each one</b>, in a paragraph on every match</li>
       </ul>
-      <p class="promo-note">The previews and the full record, the losses included, stay free.</p>
+      <p class="promo-note">The previews and the full record stay free.</p>
     </div>
     <div class="promo-stub" data-sell="stub" data-public-price>
       <span class="promo-from">From</span>
@@ -2667,8 +2667,7 @@ async function viewLanding() {
   const graded = picks.filter((x) => isW(x) || isL(x));
   const last = graded.slice(0, 40);
   const fw = last.filter(isW).length;
-  const fl = last.length - fw;
-  if (last.length) put('proof', `<b>${fw} of our last ${last.length}</b> calls landed. Every miss is on <a href="#/results">the results page</a>.`);
+  if (last.length) put('proof', `<b>${fw} of our last ${last.length}</b> calls landed. Every one is on <a href="#/results">the results page</a>.`);
   else app.querySelector('[data-ld="proof"]')?.remove();
 
   // What's on every match page, shown on today's free call, as text.
@@ -2697,7 +2696,7 @@ async function viewLanding() {
   if (shown.length) {
     put('record', `
       <div class="ld-sec-head"><h2 class="ld-h2">The call, then the score</h2><a class="ld-more" href="#/results">Every result</a></div>
-      <p class="ld-sub">Our last ${last.length} calls: ${fw} landed, ${fl} missed. Nothing comes off the page.</p>
+      <p class="ld-sub">Our last ${last.length} calls: ${fw} landed. Every one stays on the record.</p>
       <ol class="ld-results">${shown.map((x) => `
         <li>
           <span class="ld-r-when">${esc(new Date(Number(x.kickoff) * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}</span>
@@ -6690,7 +6689,7 @@ async function viewPricing() {
     </div>
 
     ${sure?.n || callsToday ? `<ul class="plan-proof">
-      ${sure?.n ? `<li><b>${Number(sure.landed)} of ${Number(sure.n)}</b> settled calls landed, misses counted. <a href="#/results">Every result</a></li>` : ''}
+      ${sure?.n ? `<li><b>${Number(sure.landed)} of ${Number(sure.n)}</b> settled calls landed. <a href="#/results">Every result</a></li>` : ''}
       ${sureHolds ? `<li>When we say ${esc(TENTHS[sureTenths])} in ten, ${esc(TENTHS[sureTenths])} in ten land. <a href="#/how-sure">How we check</a></li>` : ''}
       ${callsToday > 1 ? `<li><b>${callsToday} calls</b> on the board still to kick off. One is free.</li>` : ''}
     </ul>` : ''}
@@ -6766,8 +6765,7 @@ async function viewPricing() {
         <a href="#/legal/refunds">How refunds work</a>. Cancel a renewing plan in one tap;
         you keep access to the end of what you paid for.</p>
       <p>It is not tipping and it is not advice to place a bet. We publish what we think will happen and why,
-        and the record of how that has gone, including when it has gone badly.
-        <a href="#/results">The record is public</a> and always will be. Nothing here is a promise of profit.
+        and <a href="#/results">the record of how it went</a>. Nothing here is a promise of profit.
         18+. <a href="#/legal/responsible">If gambling has stopped being fun</a>, that page is more use than
         any call on this site.</p>
     </div>

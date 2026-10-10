@@ -232,7 +232,7 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
       ? `${vs} in the ${league}. Our call, ${callName(settledCall, home, away)}, ${RESULT_WORD[settledCall.result] ?? 'was settled'}. Scorers, the stats and how it went.`
       : `${vs} in the ${league}: the result, the scorers and the stats.${hasCall ? '' : ' We did not have a call on this one.'}`;
     callHTML = settledCall
-      ? `<p>Our call was <b>${esc(callName(settledCall, home, away))}</b>, at odds of ${esc(Number(settledCall.odds).toFixed(2))}${settledCall.bookmaker ? ` with ${esc(settledCall.bookmaker)}` : ''}. It ${esc(RESULT_WORD[settledCall.result] ?? 'was settled')}. Every settled call is on <a href="/results">the record</a>, the misses included.</p>`
+      ? `<p>Our call was <b>${esc(callName(settledCall, home, away))}</b>, at odds of ${esc(Number(settledCall.odds).toFixed(2))}${settledCall.bookmaker ? ` with ${esc(settledCall.bookmaker)}` : ''}. It ${esc(RESULT_WORD[settledCall.result] ?? 'was settled')}. Every settled call is on <a href="/results">the record</a>.</p>`
       : `<p>We did not have a call on this match.</p>`;
   } else if (state === 'live') {
     title = matchTitle({ home, away, state, live });
@@ -453,21 +453,18 @@ export async function resultsPage(env: SeoEnv, site: string): Promise<Page> {
   const picks: Rec[] = Array.isArray(d?.picks) ? d!.picks : [];
   const graded = picks.filter((p) => p.result && p.result !== 'VOID');
   const won = graded.filter((p) => p.result === 'WON' || p.result === 'HALF_WON').length;
-  // In money, never units, and the sign as it is.
-  const pnl = picks.reduce((s, p) => s + (Number.isFinite(Number(p.pnl)) && p.pnl !== null ? Number(p.pnl)
-    : p.result === 'WON' ? Number(p.odds) - 1 : p.result === 'LOST' ? -1 : 0), 0) * 10;
-  const money = `£${Math.abs(pnl).toFixed(2)} ${pnl < 0 ? 'down' : 'up'}`;
+  // A count, not a staking sum (see record() in landing.ts).
   const c = crumbs([[SITE, '/'], ['Results', '/results']], site);
   return {
     title: TITLES.results,
-    description: `Of the last ${graded.length} calls, ${won} landed. £10 on every one would have left you ${money}. Every settled call, the misses included.`,
+    description: `${won} of our last ${graded.length} calls landed. Every settled call, with the score that decided it.`,
     canonical: `${site}/results`,
     json: `${site}/api/picks?settled=true&limit=60`,
     body: `
   <article class="wrap section narrow seo">
     ${c.html}
     <h1 class="display">The record</h1>
-    <p>${esc(`Of the last ${graded.length} calls, ${won} landed. £10 on every one would have left you ${money}.`)} The record is public and stays that way, including when it has gone badly. Nothing here is a promise of profit.</p>
+    <p>${esc(`${won} of our last ${graded.length} calls landed.`)} Every one is below with the score that settled it, and the record stays public.</p>
     <ul class="seo-list">${picks.map((p) => {
       const home = String(p.home_team ?? p.home ?? '');
       const away = String(p.away_team ?? p.away ?? '');
@@ -549,7 +546,7 @@ export async function homePage(env: SeoEnv, site: string): Promise<Page> {
   <article class="wrap section narrow seo">
     <h1 class="display">Football predictions for today's biggest games</h1>
     <p>${esc(LANDING_LEDE)}</p>
-    <p>${esc(fixtures.length ? `${fixtures.length} matches in the next two days across ${comps} competitions, with ${calls} calls.` : 'The next matches go up as soon as they are analysed.')} <a href="/results">Every result stays on the record</a>, the misses included. One call a day is free.</p>
+    <p>${esc(fixtures.length ? `${fixtures.length} matches in the next two days across ${comps} competitions, with ${calls} calls.` : 'The next matches go up as soon as they are analysed.')} <a href="/results">Every result stays on the record</a>. One call a day is free.</p>
     ${free ? `<p>Today's free call is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
     <h2>How it works</h2>
     <ol>${LANDING_STEPS.map(([h, p]) => `<li><b>${esc(h)}</b> ${esc(p)}</li>`).join('')}</ol>

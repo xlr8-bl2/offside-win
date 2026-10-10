@@ -103,7 +103,7 @@ The settled record is negative — £10 a pick across 171 settled picks is £69.
 down. Publishing only the high-probability calls is roughly break-even on 60
 picks, which is a small sample and proof of nothing.
 
-So: sell coverage, explanation and transparency. Never returns. This is not
+So: sell coverage, explanation, the strike rate and transparency. Never returns. This is not
 only honest, it is what makes the advertising reviewable at all — Google and
 Meta both reject gambling-adjacent ads carrying profit claims, and UK ASA rules
 bite. The results page stays public and unfiltered, forever, including the
@@ -114,6 +114,21 @@ a "£10 on every pick would have left you £X down" banner removed: it invents a
 staking plan nobody follows and presents it as the product's headline. Every
 settled pick, won and lost, stays published in full — that is the honesty, and
 nothing on the page may imply a profit either.
+
+**Sell, don't apologise (owner, 10 October 2026).** The site had swung so far
+into disclaimers that it talked readers out of paying: "£X down" in every
+search snippet, "the misses included" on every page, and a FAQ telling readers
+to "close the tab". The line now:
+
+- Lead with what is true and good: how many landed ("377 of 474 landed"), the
+  free call, the analysis, the team news, the live tracker.
+- No staking sums anywhere, in either direction, and no profit claim or hint.
+- The full record, losses and all, stays public and one tap away. Say so once
+  where it helps ("every one is on the results page"), not as a confession.
+- The responsible-gambling and "not a promise of profit" lines live in the
+  footer and on pricing, once each, not in every paragraph.
+- Never hide, filter or reword a result, and never show only the winners as
+  if they were the record. That is the legal edge (CMA, ASA/CAP) and it holds.
 
 ## Why the gate is not cosmetic
 
