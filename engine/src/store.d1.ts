@@ -22,6 +22,9 @@ interface D1Response<T> {
   result: Array<{ results?: T[]; success: boolean; meta?: Record<string, unknown> }>;
 }
 
+/** Bytes of statements a request to the Worker may carry; D1's own ceiling is 32 MiB. */
+const MAX_BATCH_BYTES = 8_000_000;
+
 export const dbStats = { queries: 0, rowsWritten: 0, rowsRead: 0 };
 
 /**
@@ -214,7 +217,22 @@ export async function insertMany(
   }
   // Through the Worker, many chunks to a request; over REST, one at a time.
   if (config.d1.gateway) {
-    for (let i = 0; i < statements.length; i += config.d1.batchSize) await viaWorker(statements.slice(i, i + config.d1.batchSize));
+    // By count and by size: D1 refuses a call whose arguments pass 32 MiB, and
+    // forty chunks of fixture rows (each row a full bundle) reached 33.6 MB on
+    // 10 October and failed every slate pass until this cap.
+    let group: typeof statements = [];
+    let bytes = 0;
+    for (const st of statements) {
+      const size = st.sql.length + JSON.stringify(st.params).length;
+      if (group.length && (group.length >= config.d1.batchSize || bytes + size > MAX_BATCH_BYTES)) {
+        await viaWorker(group);
+        group = [];
+        bytes = 0;
+      }
+      group.push(st);
+      bytes += size;
+    }
+    if (group.length) await viaWorker(group);
   } else {
     for (const st of statements) await request(st.sql, st.params);
   }
