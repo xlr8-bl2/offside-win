@@ -94,13 +94,15 @@ export const KINDS: Array<{ slug: string; name: string; match: (p: Rec) => boole
 /** Settled calls of a kind are worth a page once there are a few to show. */
 const ENOUGH = 3;
 
-/** In money, never units, and the sign as it is. */
-function record(picks: Rec[]): { n: number; won: number; money: string } {
+/**
+ * How many landed, as a count. No staking sum: "£10 on every one" invents a
+ * plan nobody follows and put a loss in every search snippet (owner, 10
+ * October). The full record, every call and its score, is on /results.
+ */
+function record(picks: Rec[]): { n: number; won: number } {
   const graded = picks.filter((p) => p.result && p.result !== 'VOID' && p.result !== 'PUSH');
   const won = graded.filter((p) => p.result === 'WON' || p.result === 'HALF_WON').length;
-  const pnl = picks.reduce((s, p) => s + (Number.isFinite(Number(p.pnl)) && p.pnl !== null ? Number(p.pnl)
-    : p.result === 'WON' ? Number(p.odds) - 1 : p.result === 'LOST' ? -1 : 0), 0) * 10;
-  return { n: graded.length, won, money: `£${Math.abs(pnl).toFixed(2)} ${pnl < 0 ? 'down' : 'up'}` };
+  return { n: graded.length, won };
 }
 
 /* --------------------------------------------------- the links between */
@@ -236,7 +238,7 @@ export async function freePage(env: SeoEnv, site: string): Promise<Page> {
     <h2><a href="${esc(matchPath(f))}">${esc(`${home} v ${away}`)}</a>: ${esc(name)}</h2>
     <p>${Number.isFinite(odds) ? `At odds of ${esc(odds.toFixed(2))}${pub.bookmaker ? ` with ${esc(pub.bookmaker)}` : ''}.` : ''}${esc(result)} ${esc(MOVES)}</p>
     ${why ? `<h2>Why</h2><p>${esc(why)}</p>` : ''}
-    <p>This one is free every day: the call we are surest of. <a href="/pricing">Members</a> get every call the moment it goes up. <a href="/results">Every result is on the record</a>, the misses included.</p>
+    <p>This one is free every day: the call we are surest of. <a href="/pricing">Members</a> get every call the moment it goes up. <a href="/results">Every result is on the record</a>.</p>
     ${moreHTML(liveKinds(picks))}
   </article>`,
     jsonLd: [c.ld],
@@ -256,7 +258,7 @@ export async function predictionsHub(env: SeoEnv, site: string): Promise<Page> {
   <article class="wrap section narrow seo">
     ${c.html}
     <h1 class="display">Football predictions by type</h1>
-    <p>Every call we make is one of these. Each page says what has to happen for it to land, and how our calls of that kind have gone, the misses included.</p>
+    <p>Every call we make is one of these. Each page says what has to happen for it to land, and how our calls of that kind have gone.</p>
     <ul class="seo-list">${kinds.map((k) => {
       const r = record(picks.filter(k.match));
       return `<li><a href="/predictions/${k.slug}">${esc(k.name)} predictions</a>: ${esc(k.what)} Of our last ${esc(word(r.n))}, ${esc(word(r.won))} landed.</li>`;
@@ -279,7 +281,7 @@ export async function kindPage(env: SeoEnv, slugName: string, site: string): Pro
   if (mine.length < ENOUGH) return null;
   const r = record(mine);
   const c = crumbs([[SITE, '/'], ['Predictions', '/predictions'], [kind.name, `/predictions/${kind.slug}`]], site);
-  const line = `Of our last ${r.n} ${kind.name.toLowerCase()} calls, ${r.won} landed. £10 on every one would have left you ${r.money}.`;
+  const line = `${r.won} of our last ${r.n} ${kind.name.toLowerCase()} calls landed.`;
   return {
     title: `${kind.name} predictions today, and how ours have gone`,
     description: clip(`${kind.name} predictions: ${kind.what} ${line}`),
@@ -289,7 +291,7 @@ export async function kindPage(env: SeoEnv, slugName: string, site: string): Pro
     ${c.html}
     <h1 class="display">${esc(kind.name)} predictions</h1>
     <p>${esc(kind.what)}</p>
-    <p>${esc(line)} The record stays public, including when it has gone badly. Nothing here is a promise of profit.</p>
+    <p>${esc(line)} Every one of them is on <a href="/results">the results page</a> with the score that settled it.</p>
     <p>Today's ${esc(kind.name.toLowerCase())} calls are on <a href="/today">today's board</a>: one call a day is free, and <a href="/pricing">members</a> get the rest the moment they go up. ${esc(MOVES)}</p>
     <h2>The latest ${esc(kind.name.toLowerCase())} calls, settled</h2>
     <ul class="seo-list">${mine.slice(0, 30).map((p) => {

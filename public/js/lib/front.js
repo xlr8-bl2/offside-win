@@ -10,7 +10,7 @@
 
 export const LANDING_HEADLINE = ['Football predictions,', 'argued properly.'];
 
-export const LANDING_LEDE = 'Team news, form and what’s riding on it, for every big game. We make a call when we’d back it ourselves, say why when we wouldn’t, and keep every result on the record. The misses too.';
+export const LANDING_LEDE = 'Team news, form and what’s riding on it, for every big game. We make a call when we’d back it ourselves, say why when we wouldn’t, and keep every result on the record.';
 
 /** What every match page gives you: the landing page's three, in order. */
 export const LANDING_GETS = [
@@ -29,7 +29,7 @@ export const LANDING_FAQ = [
   ['Is this a tipping service?',
     'It’s analysis with a call on the end. We read the game, say what we think happens and why, and leave the rest to you. Nobody here will ever tell you to place a bet.'],
   ['Do your calls always come in?',
-    'No, and nobody’s do. Every call we’ve made is on the results page with how it went, the misses included. If someone promises you winners, close the tab.'],
+    'Most of them do, and you don’t have to take our word for it: every call we’ve made is on the results page with the score that settled it.'],
   ['What’s free?',
     'Every match preview, the full record, and one call a day: the one we’re surest of. Members get every call the moment it goes up, the bet slip, and the reasons behind all of them.'],
   ['Which games do you cover?',

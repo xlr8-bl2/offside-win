@@ -571,7 +571,7 @@ export function accessEndedMail({ reason }: { reason: 'refund' | 'chargeback' | 
     look: { hero: 'hero-ended' },
     parts: [
       { p: why },
-      { p: 'Your account stays, and so does everything free: the day’s free call, every match page and the full results record, losses included.' },
+      { p: 'Your account stays, and so does everything free: the day’s free call, every match page and the full results record.' },
       { p: 'Think this is a mistake? Reply to this email and it gets looked at by a person.', small: true },
       { button: 'Open the site', href: `${SITE}/#/home` },
     ],
