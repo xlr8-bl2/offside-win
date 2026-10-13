@@ -103,7 +103,16 @@ function checkLater() {
     if (!s) return;
     try {
       const res = await fetch('/api/auth/me', { headers: { authorization: `Bearer ${s.token}` }, cache: 'no-store' });
-      if (res.status === 401) { save(null); return; }
+      if (res.status === 401) {
+        const why = (await res.json().catch(() => ({})))?.reason;
+        save(null);
+        // Signed out from elsewhere: the sign-in page says why (endedReason).
+        if (why) {
+          try { sessionStorage.setItem(ENDED_KEY, String(why)); } catch { /* private mode */ }
+          dispatchEvent(new CustomEvent('ow:signedout', { detail: { reason: why } }));
+        }
+        return;
+      }
       if (!res.ok) return;
       const me = await res.json();
       save({ token: s.token, expires_at: me.expires_at ?? s.expires_at, user: me.user ?? s.user });
@@ -111,6 +120,21 @@ function checkLater() {
   };
   if ('requestIdleCallback' in window) requestIdleCallback(go, { timeout: 4000 });
   else setTimeout(go, 1500);
+}
+
+/*
+ * Why this browser was signed out, when the Worker ended the session rather
+ * than it running out: `device_limit` (the account signed in on another
+ * device, past the two it may use at once) or `signed_out` (signed out from
+ * another device). Read once.
+ */
+const ENDED_KEY = 'ow.ended';
+export function endedReason() {
+  try {
+    const r = sessionStorage.getItem(ENDED_KEY);
+    sessionStorage.removeItem(ENDED_KEY);
+    return r;
+  } catch { return null; }
 }
 
 /** The current session, or null. */
@@ -366,6 +390,15 @@ export async function signOut({ everywhere = false } = {}) {
   save(null);
   if (!s) return;
   try { await post('/api/auth/signout', { everywhere }, s.token); } catch { /* already gone */ }
+}
+
+/** The browsers this account is signed in on: `[{ device, seen_at, current }]`. */
+export async function signedInDevices() {
+  const s = stored() ?? memory;
+  if (!s) return [];
+  const res = await fetch('/api/auth/me', { headers: { authorization: `Bearer ${s.token}` }, cache: 'no-store' });
+  if (!res.ok) return [];
+  return (await res.json())?.devices ?? [];
 }
 
 /** One of the account's own settings, written with the reader's session (worker/src/profile.ts). */

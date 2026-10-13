@@ -38,7 +38,7 @@ import { admin, type AdminEnv } from './admin.ts';
 import { inbound, type InboundMessage } from './support.ts';
 import { engineDb, type EngineDbEnv } from './enginedb.ts';
 import { recordView, serve, type D1Read } from './d1read.ts';
-import { auth, authCleanup, viewerFor, type AuthDb } from './auth.ts';
+import { auth, authCleanup, boundToken, viewerFor, type AuthDb } from './auth.ts';
 import { accountWrite } from './profile.ts';
 import { socials, type SocialEnv } from './social.ts';
 import { fixtureChanges, liveList, liveMatch, type LiveEnv } from './live.ts';
@@ -179,6 +179,17 @@ const worker = {
       if (path === '/sitemap.xml') return await sitemap(env, url.origin);
       const card = path.match(/^\/og\/(\d{1,12})\.jpg$/);
       if (card) return await cardImage(env, Number(card[1]), url.origin);
+      // A crest, a competition's badge or a ground's photograph from the
+      // provider, served from our own address so a page can draw it on a canvas
+      // and save the result (the studio, public/js/studio.js). The provider
+      // answers a missing picture with a 1x1 and a 200; that is a 404 here.
+      const badge = path.match(/^\/media\/(team|league|venue)\/(\d{1,9})$/);
+      if (badge) {
+        const up = await fetch(`https://sports.bzzoiro.com/img/${badge[1]}/${badge[2]}/`, { cf: { cacheTtl: 604800, cacheEverything: true } } as RequestInit);
+        const bytes = up.ok ? await up.arrayBuffer() : null;
+        if (!bytes || bytes.byteLength <= 200) return new Response('Not found', { status: 404, headers: { 'cache-control': 'public, max-age=3600' } });
+        return new Response(bytes, { headers: { 'content-type': up.headers.get('content-type') ?? 'image/png', 'cache-control': 'public, max-age=604800' } });
+      }
       // Pictures the engine keeps in D1 (team photographs and the like).
       if (path.startsWith('/img/')) {
         const img = await storedImage(env, path.slice('/img/'.length), 86400);
@@ -203,7 +214,8 @@ const worker = {
     // The engine's way into D1 (enginedb.ts). Keyed; a 404 without the key.
     if (path === '/api/internal/db') return await engineDb(request, env as unknown as EngineDbEnv);
 
-    const jwt = bearer(request);
+    // On D1 a session is tied to the kind of browser it was issued to (auth.ts).
+    const jwt = env.DB ? boundToken(bearer(request), request) : bearer(request);
 
     // A signed-out read of something every visitor sees the same: from the
     // edge's copy (edge.ts). The inner call carries a marker so it goes to the

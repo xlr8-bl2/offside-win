@@ -345,6 +345,30 @@ Stage 2, accounts:
 
 ## Recent work, newest first
 
+- **13 October:** the Champions League star ball is a picture now (`comptheme.js`, starball.webp with
+  the 480 for phones); the live shader stuttered on phones however it was tuned, and moved to
+  `scripts/hero/starball.js`, where it only renders stills. The full-screen twinkle is still too.
+- **13 October:** the studio (`#/admin/studio`, `public/js/studio.js`): a day's results as a carousel
+  to post, drawn on canvas at 1080x1350 (post) or 1080x1920 (story). Cover gives the day's true
+  count ("12 of 13 landed"); one slide per landed call (crests, score, scorers, the call, its odds
+  and book); a closing slide with 18+ and BeGambleAware. Any slide takes a photo from the owner's
+  phone. "Save all" uses the share sheet on a phone. Captions for X (fitted to 280), Instagram and
+  TikTok, and Telegram. Crests come through the Worker's `/media/team/<id>` so the canvas can
+  be saved. The owner is bringing a Pinterest design to restyle the slides to.
+- **9 October:**
+  - Account sharing made harder (`worker/src/auth.ts`, new table `account_session`): a session is
+    keyed by the token joined to the kind of browser (`deviceOf`, make and system, no versions),
+    so a copied token is no use elsewhere; an account is signed in on at most two browsers
+    (a third signs out the least recently used, which is told why: `me` answers `reason:
+    device_limit` and the sign-in page says so); at most six sign-ins a day. Old `auth_session`
+    rows are moved over on first use, so nobody was signed out by the change. The account page
+    lists where it is signed in. Terms 2.1 say it.
+  - Members' calls cannot be selected (`.is-members`), the "for @name" mark is stronger and carries
+    the code too; `trace` works on D1 again and prints sign-ins, browsers and countries in the last
+    30 days.
+  - Sign-in page rebuilt: a stage (the lead match's ground, the offside line through it) and one
+    card; Google first, a violet email button, a proper "check your inbox" state. The long footer
+    is cut to its base on that page.
 - **8 October:**
   - "Yesterday's results haven't updated": settle was fine. Every call for 7 October was pulled
     before kick-off, so the record had nothing new. 29 of the 30 calls pulled 3–7 October would

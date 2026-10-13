@@ -239,6 +239,7 @@ export async function deleteAccountData(db: AuthDb, userId: string, email: strin
     db.prepare('DELETE FROM membership WHERE user_id = ?').bind(userId),
     db.prepare(`UPDATE payment SET raw_json = '{"redacted": true}' WHERE user_id = ?`).bind(userId),
     db.prepare('DELETE FROM auth_session WHERE account_id = ?').bind(userId),
+    db.prepare('DELETE FROM account_session WHERE account_id = ?').bind(userId),
     db.prepare('DELETE FROM account WHERE id = ?').bind(userId),
   ];
   if (e) {

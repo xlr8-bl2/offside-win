@@ -6,13 +6,14 @@
  * checks who is asking on every call (worker/src/admin.ts). A reader who
  * opens #/admin gets this page's frame and a refusal from the server.
  *
- * Seven tabs, one address each so a phone's back button works:
+ * Eight tabs, one address each so a phone's back button works:
  *   #/admin            the day at a glance
  *   #/admin/support    mail to support@ and hello@ as tickets; answer as support@
  *   #/admin/users      search accounts; one account, free time given or ended
  *   #/admin/calls      open calls and the last month
  *   #/admin/offers     deals, free trials and notices, with a live preview
  *   #/admin/plans      names and prices; the price here is the price charged
+ *   #/admin/studio     a day's results as a carousel and captions, to post (studio.js)
  *   #/admin/log        what was changed here, newest first
  */
 
@@ -26,6 +27,7 @@ const TABS = [
   ['calls', 'Calls'],
   ['offers', 'Offers'],
   ['plans', 'Plans'],
+  ['studio', 'Studio'],
   ['log', 'Log'],
 ];
 const SOCIALS = [
@@ -128,6 +130,12 @@ export async function viewAdmin(app, parts, params, helpers = {}) {
     else if (tab === 'offers') await offers(main, parts[2]);
     else if (tab === 'plans') await plans(main);
     else if (tab === 'log') await log(main);
+    else if (tab === 'studio') {
+      // Only the owner: the studio reads public results, but it is a tool, not a page.
+      const me = await api('me');
+      if (!me?.admin) throw Object.assign(new Error('This account cannot open the dashboard.'), { status: 403 });
+      await (await import('./studio.js')).studio(main);
+    }
   } catch (err) {
     app.innerHTML = err.status === 401 || err.status === 403 ? refusal(err) : frame(tab, `<p class="adm-error">${esc(err.message)}</p>`);
   }

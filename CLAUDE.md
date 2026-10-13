@@ -44,7 +44,8 @@ stays at launch. So does support (`#/admin/support`, `worker/src/support.ts`, th
 Worker's `email` handler, `support_ticket` / `support_message` and `support_inbound`):
 mail to support@ and hello@ becomes tickets the owner answers as support@. `mail:route`
 (`engine/src/mailroute.ts`) is setup and stays: `worker` routes those addresses to the
-tickets, an email address routes them straight to that inbox instead. Its "give free time" replaces the `grant` command for everyday
+tickets, an email address routes them straight to that inbox instead. The studio (`#/admin/studio`, `public/js/studio.js`, the Worker's `/media/` route) is the owner's
+content tool and stays too. Its "give free time" replaces the `grant` command for everyday
 use. Only the account whose email hashes to `ADMIN_EMAIL_SHA256`
 (`worker/wrangler.toml`) can use it.
 
