@@ -339,6 +339,13 @@ Stage 2, accounts:
 
 ## Recent work, newest first
 
+- **13 October:** the studio (`#/admin/studio`, `public/js/studio.js`): a day's results as a carousel
+  to post, drawn on canvas at 1080x1350 (post) or 1080x1920 (story). Cover gives the day's true
+  count ("12 of 13 landed"); one slide per landed call (crests, score, scorers, the call, its odds
+  and book); a closing slide with 18+ and BeGambleAware. Any slide takes a photo from the owner's
+  phone. "Save all" uses the share sheet on a phone. Captions for X (fitted to 280), Instagram and
+  TikTok, and Telegram. Crests come through the Worker's `/crest/team/<id>.png` so the canvas can
+  be saved. The owner is bringing a Pinterest design to restyle the slides to.
 - **9 October:**
   - Account sharing made harder (`worker/src/auth.ts`, new table `account_session`): a session is
     keyed by the token joined to the kind of browser (`deviceOf`, make and system, no versions),

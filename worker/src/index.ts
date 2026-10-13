@@ -179,6 +179,17 @@ const worker = {
       if (path === '/sitemap.xml') return await sitemap(env, url.origin);
       const card = path.match(/^\/og\/(\d{1,12})\.jpg$/);
       if (card) return await cardImage(env, Number(card[1]), url.origin);
+      // A crest or a competition's badge from the provider, served from our own
+      // address so a page can draw it on a canvas and save the result (the
+      // studio, public/js/studio.js). The provider answers a missing badge with
+      // a 1x1 picture and a 200; that is a 404 here.
+      const badge = path.match(/^\/crest\/(team|league)\/(\d{1,9})\.png$/);
+      if (badge) {
+        const up = await fetch(`https://sports.bzzoiro.com/img/${badge[1]}/${badge[2]}/`, { cf: { cacheTtl: 604800, cacheEverything: true } } as RequestInit);
+        const bytes = up.ok ? await up.arrayBuffer() : null;
+        if (!bytes || bytes.byteLength <= 200) return new Response('Not found', { status: 404, headers: { 'cache-control': 'public, max-age=3600' } });
+        return new Response(bytes, { headers: { 'content-type': up.headers.get('content-type') ?? 'image/png', 'cache-control': 'public, max-age=604800' } });
+      }
       // Pictures the engine keeps in D1 (team photographs and the like).
       if (path.startsWith('/img/')) {
         const img = await storedImage(env, path.slice('/img/'.length), 86400);
