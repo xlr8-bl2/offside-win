@@ -179,11 +179,11 @@ const worker = {
       if (path === '/sitemap.xml') return await sitemap(env, url.origin);
       const card = path.match(/^\/og\/(\d{1,12})\.jpg$/);
       if (card) return await cardImage(env, Number(card[1]), url.origin);
-      // A crest or a competition's badge from the provider, served from our own
-      // address so a page can draw it on a canvas and save the result (the
-      // studio, public/js/studio.js). The provider answers a missing badge with
-      // a 1x1 picture and a 200; that is a 404 here.
-      const badge = path.match(/^\/crest\/(team|league)\/(\d{1,9})\.png$/);
+      // A crest, a competition's badge or a ground's photograph from the
+      // provider, served from our own address so a page can draw it on a canvas
+      // and save the result (the studio, public/js/studio.js). The provider
+      // answers a missing picture with a 1x1 and a 200; that is a 404 here.
+      const badge = path.match(/^\/media\/(team|league|venue)\/(\d{1,9})$/);
       if (badge) {
         const up = await fetch(`https://sports.bzzoiro.com/img/${badge[1]}/${badge[2]}/`, { cf: { cacheTtl: 604800, cacheEverything: true } } as RequestInit);
         const bytes = up.ok ? await up.arrayBuffer() : null;

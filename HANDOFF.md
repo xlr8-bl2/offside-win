@@ -344,7 +344,7 @@ Stage 2, accounts:
   count ("12 of 13 landed"); one slide per landed call (crests, score, scorers, the call, its odds
   and book); a closing slide with 18+ and BeGambleAware. Any slide takes a photo from the owner's
   phone. "Save all" uses the share sheet on a phone. Captions for X (fitted to 280), Instagram and
-  TikTok, and Telegram. Crests come through the Worker's `/crest/team/<id>.png` so the canvas can
+  TikTok, and Telegram. Crests come through the Worker's `/media/team/<id>` so the canvas can
   be saved. The owner is bringing a Pinterest design to restyle the slides to.
 - **9 October:**
   - Account sharing made harder (`worker/src/auth.ts`, new table `account_session`): a session is
