@@ -12,9 +12,8 @@
  * night without reproducing anyone's artwork. The competition's own logo,
  * where it appears, is the provider's, used to say which competition it is.
  *
- * The star ball itself is public/js/lib/starball.js (a shader), with a still
- * of it at public/brand/starball.webp for the first paint and for browsers
- * without WebGL.
+ * The star ball is a still, public/brand/starball.webp (and a small one,
+ * starball-480.webp, for phones).
  *
  * Adding a competition is a line in THEMES, its art here, and a block of
  * CSS keyed on .theme-<name> in components.css.
@@ -28,60 +27,22 @@ export const THEMES = new Map([
 export const themeOf = (leagueId) => THEMES.get(Number(leagueId)) ?? null;
 
 /**
- * The art for a theme, as markup to sit behind the masthead's words. The
- * star ball paints a still frame at once and comes alive when its canvas
- * starts (wakeArt).
+ * The art for a theme, as markup to sit behind the masthead's words.
+ *
+ * The star ball is a picture. It was a live shader (now scripts/hero/starball.js, kept to render stills) that turned
+ * slowly, and on phones it stuttered however it was tuned (October 2026, the
+ * owner: "lagging"); a still costs nothing to show and looks the same at a
+ * glance. The small one is enough for a phone; the big one for a wide screen.
  */
 export function themeArt(theme) {
   if (theme === 'ucl') {
-    // The first paint is a small still (about 50KB, against 205KB for the
-    // full one): the live ball replaces it within a second, so its detail is
-    // never studied. The full still is fetched only where the live ball
-    // cannot run (start below).
     return `<div class="comp-art comp-art-ucl" aria-hidden="true"><div class="starball">
-      <img class="starball-still" src="/brand/starball-480.webp" alt="" decoding="async" fetchpriority="high" width="480" height="480">
-      <canvas class="starball-live"></canvas></div></div>`;
+      <img class="starball-still" src="/brand/starball.webp" srcset="/brand/starball-480.webp 480w, /brand/starball.webp 900w"
+        sizes="(max-width: 760px) 150vw, 64vw" alt="" decoding="async" fetchpriority="high" width="900" height="900">
+      </div></div>`;
   }
   return '';
 }
 
-/*
- * Every star ball on the page is started as it arrives and stopped as it
- * leaves, wherever it was put (a masthead, the landing hero, a card), so no
- * view has to remember to do it. A reader who asked for less motion gets
- * one frame, the same as the still.
- */
-const running = new Map();
-const pending = new WeakSet();
-function start(canvas) {
-  if (running.has(canvas) || pending.has(canvas)) return;
-  pending.add(canvas);
-  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  // The shader's module is fetched at once, but compiled and first drawn
-  // only once the page has painted and the browser is idle: compiling it
-  // on the first frame held up the words and the still it sits behind.
-  const mod = import('./starball.js');
-  const go = () => mod.then(({ startBall }) => {
-    pending.delete(canvas);
-    if (!canvas.isConnected || running.has(canvas)) return;
-    const stop = startBall(canvas, { still });
-    if (!stop) {
-      // No live ball here (no WebGL): the full still in place of the small one.
-      const img = canvas.parentElement?.querySelector('.starball-still');
-      if (img) img.src = '/brand/starball.webp';
-    }
-    running.set(canvas, stop ?? (() => {}));
-  }).catch(() => { pending.delete(canvas); });
-  if ('requestIdleCallback' in window) requestIdleCallback(go, { timeout: 900 });
-  else setTimeout(go, 300);
-}
-function sweep() {
-  for (const c of document.querySelectorAll('canvas.starball-live')) start(c);
-  for (const [c, stop] of running) if (!c.isConnected) { stop(); running.delete(c); }
-}
-export function wakeArt() {
-  if (typeof document === 'undefined' || wakeArt.on) return;
-  wakeArt.on = true;
-  new MutationObserver(sweep).observe(document.body, { childList: true, subtree: true });
-  sweep();
-}
+/** Kept for the router, which calls it once: there is nothing to start now. */
+export function wakeArt() {}
