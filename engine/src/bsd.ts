@@ -46,43 +46,91 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export const stats = { requests: 0, retries: 0, errors: 0, notEntitled: 0, cacheHits: 0 };
 
 /**
- * Per-run response cache.
+ * The provider's daily allowance, from its own headers (`RateLimit: ...;r=`).
  *
- * Every read here is a GET of immutable-enough data, and a slate asks for the
- * same things repeatedly: one standings table serves every fixture in its
- * league, one squad serves both of a team's fixtures. Caching the *outcome*
- * rather than the payload means a 403 or 404 is remembered too — the provider
- * is asked once whether we are entitled to a route, not once per fixture.
- *
- * Transient errors are deliberately not cached: retrying those is the whole
- * point of the retry loop, and freezing one would turn a blip into a run-long
- * absence. The cache lives for the process, which is one job, so staleness
- * cannot outlive the run that created it.
+ * The free plan is 7,500 requests a day, reset at midnight UTC, across every
+ * job and the Worker's live scores. A job stops asking once fewer than
+ * `config.bsd.reserve` remain, leaving the rest for the others, and nothing
+ * asks again once the provider says the day is spent (`taster_exhausted`):
+ * retrying that was how a slate sat for hours waiting on midnight.
  */
-const cache = new Map<string, FetchOutcome<unknown>>();
-/** Identical concurrent requests share one flight rather than racing. */
-const pending = new Map<string, Promise<FetchOutcome<unknown>>>();
+export const quota = { remaining: null as number | null, exhausted: false };
 
 /**
- * Bounded, because a backfill walks thousands of per-match stats payloads it
- * will never ask for twice — caching those is pure memory cost. Oldest out
- * first: the repeat-heavy reads (standings, squads, entitlement) are asked for
- * often enough to keep re-entering, while a one-shot payload falls out.
+ * Response cache, with a lifetime per kind of read.
+ *
+ * Caching the outcome rather than the payload means a 403 or 404 is
+ * remembered too. Transient errors are not cached. Entries live for as long
+ * as the data cannot usefully change (`ttlFor`), across the passes of a
+ * slate job, and across jobs when the workflow keeps the file (saveCache /
+ * loadCache, BSD_CACHE_FILE): a squad or a table does not need asking for
+ * every half hour, and on the free plan it cannot be.
  */
-const CACHE_MAX = 2000;
+interface Entry { at: number; out: FetchOutcome<unknown> }
+const cache = new Map<string, Entry>();
+/** Identical concurrent requests share one flight rather than racing. */
+const pending = new Map<string, Promise<FetchOutcome<unknown>>>();
+const CACHE_MAX = 20000;
+
+/**
+ * Matches near kick-off (from a few hours before to the end): their prices,
+ * line-ups and news are read fresh; everyone else's a few hours old. Set by
+ * the slate from its window (setNearFixtures).
+ */
+let near = new Set<number>();
+export function setNearFixtures(ids: Iterable<number>): void { near = new Set(ids); }
+
+const MIN = 60;
+const HOUR = 3600;
+/** How long one answer stays good, in seconds. */
+export function ttlFor(url: URL): number {
+  const p = url.pathname;
+  const eventParam = Number(url.searchParams.get('event_id'));
+  const ev = /\/events\/(\d+)\//.exec(p);
+  const id = ev ? Number(ev[1]) : eventParam;
+  const isNear = Number.isFinite(id) && near.has(id);
+  // Prices and team news move before kick-off; elsewhere twice a day is plenty.
+  if (p === '/api/v2/odds/' || /\/events\/\d+\/(odds|lineups|availability)\//.test(p)) return isNear ? 45 * MIN : 6 * HOUR;
+  if (/\/events\/\d+\/(prediction|polymarket|h2h|incidents|stats|player-stats)\//.test(p)) return 6 * HOUR;
+  if (/^\/api\/v2\/events\/\d+\/$/.test(p)) return isNear ? 15 * MIN : 6 * HOUR;
+  if (p === '/api/v2/events/' || p.startsWith('/api/v2/live')) return 30 * MIN;
+  // Squads, managers, players, tables, grounds, referees: once a day.
+  if (/^\/api\/v2\/(teams|managers|players|leagues|venues|referees)\//.test(p)) return 24 * HOUR;
+  return HOUR;
+}
 
 function remember(key: string, out: FetchOutcome<unknown>): void {
   if (cache.size >= CACHE_MAX) {
     const oldest = cache.keys().next().value;
     if (oldest !== undefined) cache.delete(oldest);
   }
-  cache.set(key, out);
+  cache.delete(key);
+  cache.set(key, { at: Date.now(), out });
 }
 
 export function clearCache(): void {
   cache.clear();
   pending.clear();
 }
+
+/** The cache to a file, live entries only, for the next job (BSD_CACHE_FILE). */
+export async function saveCache(file: string): Promise<void> {
+  const { writeFile } = await import('node:fs/promises');
+  const now = Date.now();
+  const live = [...cache].filter(([k, e]) => now - e.at < ttlFor(new URL(k)) * 1000);
+  await writeFile(file, JSON.stringify(live));
+}
+
+export async function loadCache(file: string): Promise<number> {
+  const { readFile } = await import('node:fs/promises');
+  try {
+    const rows = JSON.parse(await readFile(file, 'utf8')) as Array<[string, Entry]>;
+    for (const [k, e] of rows) cache.set(k, e);
+    return rows.length;
+  } catch { return 0; }
+}
+
+const spent = (): FetchOutcome<never> => ({ ok: false, reason: 'error', status: 429, message: 'daily allowance spent' });
 
 export async function bsdRaw<T = unknown>(
   path: string,
@@ -95,14 +143,21 @@ export async function bsdRaw<T = unknown>(
   const key = url.toString();
 
   const hit = cache.get(key);
-  if (hit) {
+  if (hit && Date.now() - hit.at < ttlFor(url) * 1000) {
     stats.cacheHits++;
-    return hit as FetchOutcome<T>;
+    return hit.out as FetchOutcome<T>;
   }
   const inFlightSame = pending.get(key);
   if (inFlightSame) {
     stats.cacheHits++;
     return inFlightSame as Promise<FetchOutcome<T>>;
+  }
+  // Out of allowance, or down to what is kept for the other jobs: an old
+  // answer is better than none, and nothing is asked.
+  if (quota.exhausted || (quota.remaining !== null && quota.remaining <= config.bsd.reserve)) {
+    quota.exhausted = true;
+    if (hit) { stats.cacheHits++; return hit.out as FetchOutcome<T>; }
+    return spent();
   }
 
   const flight = fetchOnce<T>(url) as Promise<FetchOutcome<unknown>>;
@@ -113,6 +168,8 @@ export async function bsdRaw<T = unknown>(
     // An 'error' is not: it may well succeed next time.
     if (out.ok || out.reason === 'not_entitled' || out.reason === 'not_found') {
       remember(key, out as FetchOutcome<unknown>);
+    } else if (hit) {
+      return hit.out as FetchOutcome<T>;
     }
     return out;
   } finally {
@@ -153,6 +210,10 @@ async function fetchOnce<T = unknown>(url: URL): Promise<FetchOutcome<T>> {
         signal: controller.signal,
       });
       lastStatus = res.status;
+      // Where the day's allowance stands ("football";r=7213;t=52800). Absent
+      // on a paid plan, which has none.
+      const rl = /;r=(\d+)/.exec(res.headers.get('ratelimit') ?? '');
+      if (rl) quota.remaining = Number(rl[1]);
 
       if (res.status === 403) {
         const body = await res.text();
@@ -164,11 +225,20 @@ async function fetchOnce<T = unknown>(url: URL): Promise<FetchOutcome<T>> {
       }
       // 429 and 5xx are worth another go; other 4xx are our bug, not theirs.
       if (res.status === 429 || res.status >= 500) {
+        const text = await res.text();
+        // The day's allowance is gone: it comes back at midnight UTC, so
+        // asking again before then only wastes the run.
+        if (res.status === 429 && /taster_exhausted/.test(text)) {
+          quota.exhausted = true;
+          quota.remaining = 0;
+          stats.errors++;
+          return spent();
+        }
         const after = Number(res.headers.get('retry-after'));
         // Honour the provider's own number when it gives one, capped so a wild
         // value cannot park the run for the rest of the job.
         if (Number.isFinite(after) && after > 0) retryAfterMs = Math.min(after * 1000, 60_000);
-        lastMessage = `${res.status} ${(await res.text()).slice(0, 200)}`;
+        lastMessage = `${res.status} ${text.slice(0, 200)}`;
         continue;
       }
       if (!res.ok) {

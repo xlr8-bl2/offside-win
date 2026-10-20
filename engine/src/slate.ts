@@ -1,6 +1,6 @@
 import { backsRotatedSide } from './context/xi.ts';
 import { chanceInWords, openSlipLegs, refreshSlip } from './slip.ts';
-import { bsdList, bsdOrNull, num, str, stats as bsdStats, toEpoch } from './bsd.ts';
+import { bsdList, bsdOrNull, num, quota as bsdQuota, setNearFixtures, str, stats as bsdStats, toEpoch } from './bsd.ts';
 import { config } from './config.ts';
 import { analyseFixture } from './context/index.ts';
 import { checkComparisonEntitlement, gatherFixture, parseScorers } from './context/gather.ts';
@@ -371,6 +371,12 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
   console.log(
     `${events.length} fixtures in window, ${candidates.length} in leagues with fitted ratings`,
   );
+  // Soonest first, so a day's provider allowance goes on the matches about
+  // to be played; and those near kick-off are read fresh (bsd.ts, ttlFor).
+  const kickOf = (e: Record<string, unknown>) => toEpoch(e['event_date']) ?? Infinity;
+  candidates.sort((a, b) => kickOf(a) - kickOf(b));
+  const nowS = Math.floor(Date.now() / 1000);
+  setNearFixtures(candidates.filter((e) => kickOf(e) > nowS - 4 * 3600 && kickOf(e) < nowS + 3 * 3600).map((e) => num(e['id'])!).filter(Boolean));
 
   if (candidates.length === 0) {
     return { fixtures: events.length, analysed: 0, picks: 0, confident: 0, passes: 0, skipped: events.length, requests: bsdStats.requests, d1Queries: dbStats.queries };
@@ -493,6 +499,13 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
     if (venueId) venueIds.add(venueId);
     try {
       const ctx = await gatherAt(index);
+      // The day's allowance ran out: a fixture gathered now may be missing its
+      // prices or its news, and writing it would replace a good page with a
+      // thin one. What is up stays up until tomorrow's allowance.
+      if (bsdQuota.exhausted) {
+        report.skipped++;
+        continue;
+      }
       if (!ctx) {
         report.skipped++;
         continue;

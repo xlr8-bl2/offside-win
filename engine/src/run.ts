@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { runBacktest } from './backtest.ts';
-import { clearCache, stats as bsdStats } from './bsd.ts';
+import { loadCache, quota as bsdQuota, saveCache, stats as bsdStats } from './bsd.ts';
 import { config, requireEnv } from './config.ts';
 import { backfillHistory, repairCards } from './history.ts';
 import { probe, probeExtras, probePlayers, probeProfiles, probeReds, probeReport } from './probe.ts';
@@ -211,10 +211,17 @@ const commands: Record<string, () => Promise<unknown>> = {
     const lastStart = end - 25 * 60_000;
     let pass = 0;
     let failures = 0;
+    // The provider's answers, kept from the last job: each read lasts as long
+    // as it can (bsd.ts, ttlFor), so a pass asks only for what is stale.
+    const cacheFile = process.env['BSD_CACHE_FILE'];
+    let quotaDay = '';
+    if (cacheFile) console.log(`slate:loop: ${await loadCache(cacheFile)} provider answers carried over`);
     for (;;) {
       const t0 = Date.now();
       pass++;
-      clearCache();
+      // A new day (midnight UTC) is a new allowance.
+      const today = new Date().toISOString().slice(0, 10);
+      if (today !== quotaDay) { quotaDay = today; bsdQuota.exhausted = false; bsdQuota.remaining = null; }
       try {
         await commands.slate!();
         failures = 0;
@@ -236,7 +243,9 @@ const commands: Record<string, () => Promise<unknown>> = {
       } catch (err) {
         console.error('slate:loop: settle failed:', err instanceof Error ? err.message : err);
       }
-      console.log(`slate:loop: pass ${pass} took ${((Date.now() - t0) / 60_000).toFixed(1)} min`);
+      if (cacheFile) await saveCache(cacheFile).catch(() => {});
+      console.log(`slate:loop: pass ${pass} took ${((Date.now() - t0) / 60_000).toFixed(1)} min`
+        + `${bsdQuota.remaining !== null ? `, ${bsdQuota.remaining} provider requests left today` : ''}`);
       const next = t0 + every;
       if (next > lastStart) break;
       if (next > Date.now()) await new Promise((r) => setTimeout(r, next - Date.now()));

@@ -27,6 +27,12 @@ export const config = {
     concurrency: num('BSD_CONCURRENCY', 12),
     retries: num('BSD_RETRIES', 4),
     timeoutMs: num('BSD_TIMEOUT_MS', 30_000),
+    /**
+     * Requests of the day's free allowance (7,500) this job leaves for the
+     * others: below it, it asks for nothing and works from what it has
+     * (bsd.ts, quota). Each workflow sets its own.
+     */
+    reserve: num('BSD_RESERVE', 500),
   },
 
   /**
