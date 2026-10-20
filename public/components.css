@@ -6871,3 +6871,12 @@ body[data-page="landing"] .foot-top { display: none; }
 }
 .locked-when { margin: var(--space-2) 0 0; font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--warn); }
 .locked-when span { font-variant-numeric: tabular-nums; }
+
+/* The home masthead's type, in one scale: the clubs lead, each beside its
+   crest even when the name runs to two lines; the call sits a step below
+   them, not level with them. */
+.hero .fx-stack { gap: var(--space-3); }
+.hero .fx-line { flex-wrap: nowrap; }
+.hero .fx-line .crest { flex: none; }
+.hero .fx-line .name { flex: 1 1 auto; min-width: 0; font-size: clamp(2.25rem, 4.4vw, 4.25rem); line-height: 0.98; text-wrap: balance; }
+.hero-call .freecall-sel { font-size: var(--text-2xl); }
