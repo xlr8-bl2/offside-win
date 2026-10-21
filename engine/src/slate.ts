@@ -371,8 +371,8 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
   console.log(
     `${events.length} fixtures in window, ${candidates.length} in leagues with fitted ratings`,
   );
-  // Soonest first, so a day's provider allowance goes on the matches about
-  // to be played; and those near kick-off are read fresh (bsd.ts, ttlFor).
+  // Those near kick-off are read fresh (bsd.ts, ttlFor); the order and the
+  // share of the day's allowance each match gets are set below (priorityOf).
   const kickOf = (e: Record<string, unknown>) => toEpoch(e['event_date']) ?? Infinity;
   candidates.sort((a, b) => kickOf(a) - kickOf(b));
   const nowS = Math.floor(Date.now() / 1000);
@@ -493,7 +493,34 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
   // fetched while this one is being analysed; everything after the fetch
   // stays in order, because the day mix, the writer's budget and the
   // repetition ledger all depend on it.
-  const gatherAt = ahead(candidates, (e) => gatherFixture(e), config.slate.gatherAhead);
+  /*
+   * Which matches the day's provider allowance is spent on.
+   *
+   * On the free plan (7,500 requests a day) there is not enough for every
+   * match every hour. The ones that matter go first and are always read:
+   * a match we have a call on, the Champions League and the big leagues
+   * (league rank up to the marquee line), and anything kicking off in the
+   * next three hours. Everything else is read with what is left, at most an
+   * even share of the remaining allowance per pass until midnight UTC, so a
+   * morning of small leagues cannot spend what an evening of big games needs.
+   * A match not read this pass keeps its page as it was.
+   */
+  const priorityOf = (e: Record<string, unknown>): number => {
+    const id = num(e['id']);
+    const k = kickOf(e);
+    if ((id !== undefined && incumbents.has(id)) || k - nowS < 3 * 3600) return 0;
+    return leagueRank(num(e['league_id']) ?? -1) <= config.confident.marqueeRank ? 0 : 1;
+  };
+  candidates.sort((a, b) => priorityOf(a) - priorityOf(b) || kickOf(a) - kickOf(b));
+  const passesLeft = Math.max(1, Math.ceil((86400 - (nowS % 86400)) / (config.slate.loopEveryMinutes * 60)));
+  const spentAtStart = bsdStats.requests;
+  const shareOf = () => bsdQuota.remaining === null ? Infinity
+    : Math.max(0, bsdQuota.remaining + (bsdStats.requests - spentAtStart) - config.bsd.reserve) / passesLeft;
+  let deferred = 0;
+  const gatherAt = ahead(candidates, (e) => {
+    if (priorityOf(e) > 0 && bsdStats.requests - spentAtStart >= shareOf()) { deferred++; return Promise.resolve(null); }
+    return gatherFixture(e);
+  }, config.slate.gatherAhead);
   for (const [index, event] of candidates.entries()) {
     const venueId = num(event['venue_id']);
     if (venueId) venueIds.add(venueId);
@@ -1526,7 +1553,7 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
 
   console.log(
     `Analysed ${report.analysed}, published ${report.picks} picks, ${report.passes} passes, ` +
-      `skipped ${report.skipped}. ${report.requests} provider requests, ${report.d1Queries} D1 queries.`,
+      `skipped ${report.skipped} (${deferred} smaller matches left for a later pass). ${report.requests} provider requests, ${report.d1Queries} D1 queries.`,
   );
   return report;
 }

@@ -355,6 +355,11 @@ Stage 2, accounts:
   fixtures once the allowance is gone. The Worker's live scores: list every 2 min, changes every 15,
   a match every minute, and nothing asked while no board match could be in play. A call with no named
   bookmaker is stored with an empty one and shown without "at ...".
+  Priority (`priorityOf` in slate.ts): a match with a standing call, a marquee league (rank up to
+  `marqueeRank`) or a kick-off within 3 h is always read; the rest get at most an even share of the
+  remaining allowance per pass until midnight UTC, and are left for a later pass when it is spent.
+  The Worker's `get_hero` falls back to the board's biggest match still to come when the stored hero
+  kicked off more than 3 h ago (the slate had stalled for a day and a half on the old code).
 - **13 October:** the Champions League star ball is a picture now (`comptheme.js`, starball.webp with
   the 480 for phones); the live shader stuttered on phones however it was tuned, and moved to
   `scripts/hero/starball.js`, where it only renders stills. The full-screen twinkle is still too.
