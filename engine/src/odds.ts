@@ -95,8 +95,10 @@ export async function fetchQuotes(eventId: number, since?: string): Promise<Quot
       outcome,
       line: num(r['line']) ?? null,
       push: pushRaw === 'none' || pushRaw === 'full' || pushRaw === 'half' ? (pushRaw as PushRule) : null,
-      bookmaker_slug: str(r['bookmaker_slug']) ?? 'unknown',
-      bookmaker_name: str(r['bookmaker_name']) ?? str(r['bookmaker_slug']) ?? 'unknown',
+      // Without the paid plan the feed carries one price per outcome, the
+      // average across bookmakers, and names none.
+      bookmaker_slug: str(r['bookmaker_slug']) ?? 'consensus',
+      bookmaker_name: str(r['bookmaker_name']) ?? str(r['bookmaker_slug']) ?? 'consensus',
       decimal_odds: odds,
       opening_decimal_odds: num(r['opening_decimal_odds']) ?? null,
       opening_at: toEpoch(r['opening_at']) ?? null,

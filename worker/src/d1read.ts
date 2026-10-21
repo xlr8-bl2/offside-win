@@ -382,7 +382,22 @@ export async function getHero(db: D1Read): Promise<Rec> {
   const t = now();
   const over = await kv(db, 'hero:override');
   const live = over.found && (over.expires_at === null || over.expires_at === undefined || over.expires_at > t);
-  const hero = live ? over.value : (await kv(db, 'hero:today')).value;
+  let hero = live ? over.value : (await kv(db, 'hero:today')).value;
+  // The slate picks the hero each pass; when it has not run (the provider's
+  // daily allowance spent, a job stuck) the stored one goes stale and the
+  // front page led with a match finished the day before. Then the biggest
+  // match still to come, or in play, from the board takes its place.
+  if (!live && (!isObj(hero) || !digits(hero.kickoff) || Number(text(hero.kickoff)) < t - 3 * 3600)) {
+    const f = await one(db, `SELECT f.id, f.kickoff, f.league_id, f.home_team, f.away_team, f.home_team_id, f.away_team_id, l.name AS league
+        FROM fixture f LEFT JOIN league l ON l.id = f.league_id
+       WHERE f.kickoff > ? AND f.home_goals IS NULL
+       ORDER BY f.rank ASC, f.kickoff ASC LIMIT 1`, t - 2 * 3600);
+    if (f) {
+      hero = { fixture_id: f.id, kicker: f.league, headline: `${f.home_team} v ${f.away_team}`, kickoff: f.kickoff,
+        league: f.league, league_id: f.league_id, home: f.home_team, away: f.away_team,
+        home_id: f.home_team_id, away_id: f.away_team_id, reason: 'next big match' };
+    }
+  }
   const out: Rec = isObj(hero) ? { ...hero } : {};
   out.free_fixture_id = await freeFixtureId(db);
   const trap = (await kv(db, 'trap:today')).value;

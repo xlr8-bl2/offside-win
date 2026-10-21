@@ -40,8 +40,23 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22', cache: 'npm' }
       - run: npm ci
+      # The provider's answers from the last job (engine/src/bsd.ts, ttlFor):
+      # on the free plan's 7,500 requests a day, a squad or a table is asked
+      # for once a day, not once a pass.
+      - uses: actions/cache/restore@v4
+        with:
+          path: bsd-cache.json
+          key: bsd-cache-${{ github.run_id }}
+          restore-keys: bsd-cache-
       - env:
           BSD_API_KEY: ${{ secrets.BSD_API_KEY }}
+          BSD_CACHE_FILE: ${{ github.workspace }}/bsd-cache.json
+          # Of the day's 7,500, what this job leaves for the ratings, the
+          # results and the Worker's live scores.
+          BSD_RESERVE: '1800'
+          # The next day and a half, not three: on the free plan the third day
+          # cost as much as the first two and nobody reads it yet.
+          SLATE_HORIZON_HOURS: '36'
           # D1 through the Worker's engine door (HANDOFF.md, "The move to D1").
           DB_BACKEND: d1
           ENGINE_DB_URL: https://offside.win/api/internal/db
@@ -52,7 +67,7 @@ jobs:
           # Every thirty minutes on D1: each query is a request to the Worker,
           # and fifteen-minute passes alone would use the plan's monthly
           # allowance of ten million requests.
-          SLATE_LOOP_EVERY: '30'
+          SLATE_LOOP_EVERY: '60'
           # Optional. Without it the template grammar writes the narratives, in
           # the old voice, and the run says so -- which is the fallback working
           # rather than a failure. Google has cut this free tier sharply and
@@ -67,3 +82,8 @@ jobs:
           GEMINI_RPM: ${{ vars.GEMINI_RPM }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
         run: npm run slate:loop
+      - uses: actions/cache/save@v4
+        if: always() && hashFiles('bsd-cache.json') != ''
+        with:
+          path: bsd-cache.json
+          key: bsd-cache-${{ github.run_id }}

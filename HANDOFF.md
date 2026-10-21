@@ -345,6 +345,21 @@ Stage 2, accounts:
 
 ## Recent work, newest first
 
+- **20 October: the provider's free plan.** The owner dropped Football Unlimited ($5): 7,500 requests a
+  day for everything, reset midnight UTC, and odds as one average price with no bookmaker named.
+  `engine/src/bsd.ts`: a cache with a lifetime per kind of read (`ttlFor`: prices, line-ups and news
+  45 min near kick-off and 6 h otherwise, squads/managers/players/tables 24 h), kept across passes and
+  across jobs (`BSD_CACHE_FILE`, actions/cache in slate.yml); the `RateLimit` header is read and a job
+  stops asking below `BSD_RESERVE` (slate 1800, others 500); `taster_exhausted` is never retried. The
+  slate looks 36 h ahead (was 72) every 60 min (was 30), soonest matches first, and skips writing
+  fixtures once the allowance is gone. The Worker's live scores: list every 2 min, changes every 15,
+  a match every minute, and nothing asked while no board match could be in play. A call with no named
+  bookmaker is stored with an empty one and shown without "at ...".
+  Priority (`priorityOf` in slate.ts): a match with a standing call, a marquee league (rank up to
+  `marqueeRank`) or a kick-off within 3 h is always read; the rest get at most an even share of the
+  remaining allowance per pass until midnight UTC, and are left for a later pass when it is spent.
+  The Worker's `get_hero` falls back to the board's biggest match still to come when the stored hero
+  kicked off more than 3 h ago (the slate had stalled for a day and a half on the old code).
 - **13 October:** the Champions League star ball is a picture now (`comptheme.js`, starball.webp with
   the 480 for phones); the live shader stuttered on phones however it was tuned, and moved to
   `scripts/hero/starball.js`, where it only renders stills. The full-screen twinkle is still too.

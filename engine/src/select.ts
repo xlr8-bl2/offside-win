@@ -104,7 +104,9 @@ export function buildCandidates(
         edge,
         shrunk_edge: edge * shrink,
         odds: bestQuote.odds,
-        bookmaker: bestQuote.bookmaker,
+        // On the provider's free plan the price is the average of every
+        // bookmaker's, with no name: the call is then shown without one.
+        bookmaker: /^(consensus|average|unknown)$/i.test(String(bestQuote.bookmaker ?? '').trim()) ? '' : bestQuote.bookmaker,
         prices: bm.quotes.get(outcome as Outcome) ?? [],
         kelly: kelly(modelProb, bestQuote.odds, config.selection.kellyFraction),
         confidence: mm.confidence,

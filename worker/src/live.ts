@@ -25,6 +25,28 @@ import { parseIncidents, parseTeamStats } from '../../engine/src/report-parse.ts
 export interface LiveEnv {
   BSD_API_KEY?: string;
   BSD_BASE_URL?: string;
+  DB?: { prepare(sql: string): { bind(...v: unknown[]): { first<T>(): Promise<T | null> } } };
+}
+
+/*
+ * The provider's free plan is 7,500 requests a day for everything, and this
+ * is asked from every data centre with a visitor in it. So the list is built
+ * at most every two minutes per data centre, the changes feed every fifteen,
+ * a match's own page every minute, and none of it is asked for at all while
+ * no match on the board could be in play (onNow).
+ */
+const LIST_TTL = 120;
+const CHANGES_TTL = 900;
+const MATCH_TTL = 60;
+
+/** Whether any match on the board kicked off in the last two and a half hours or is about to. */
+async function onNow(env: LiveEnv): Promise<boolean> {
+  if (!env.DB) return true;
+  const t = Math.floor(Date.now() / 1000);
+  try {
+    const r = await env.DB.prepare('SELECT 1 AS x FROM fixture WHERE kickoff BETWEEN ? AND ? LIMIT 1').bind(t - 9000, t + 300).first<{ x: number }>();
+    return Boolean(r);
+  } catch { return true; }
 }
 
 interface Ctx { waitUntil(p: Promise<unknown>): void }
@@ -210,7 +232,8 @@ function listOf(raw: unknown, key: string): unknown[] {
   return [];
 }
 
-const matchesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('list', 25, ctx, async () => {
+const matchesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('list', LIST_TTL, ctx, async () => {
+  if (!await onNow(env)) return { matches: [] as LiveMatch[], unread: undefined };
   const raw = await provider(env, '/api/v2/events/live/', { limit: 500 });
   const matches = listOf(raw, 'results').map(compactMatch).filter((m): m is LiveMatch => m !== null);
   const count = numOr(rec(raw)?.['count']);
@@ -221,7 +244,7 @@ const matchesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('list', 25, ctx, asy
   return { matches, unread };
 });
 
-const changesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('changes', 60, ctx, async () => {
+const changesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('changes', CHANGES_TTL, ctx, async () => {
   let since = new Date(Date.now() - 7 * 86400e3 + 60e3).toISOString();
   const all: unknown[] = [];
   // The feed pages by time: when a page is cut short, ask again from the
@@ -250,13 +273,13 @@ export async function liveList(env: LiveEnv, ctx?: Ctx): Promise<Response> {
     matchesNow(env, ctx),
     changesNow(env, ctx).catch(() => [] as FixtureChange[]),
   ]);
-  return json({ enabled: true, at: Math.floor(Date.now() / 1000), matches, changes, ...(unread ? { unread } : {}) }, 25);
+  return json({ enabled: true, at: Math.floor(Date.now() / 1000), matches, changes, ...(unread ? { unread } : {}) }, LIST_TTL);
 }
 
 /** GET /api/live/:id: one match in play, with its timeline and numbers. */
 export async function liveMatch(env: LiveEnv, id: number, ctx?: Ctx): Promise<Response> {
   if (!env.BSD_API_KEY) return off();
-  return json(await cachedValue(`match/${id}`, 25, ctx, async () => {
+  return json(await cachedValue(`match/${id}`, MATCH_TTL, ctx, async () => {
     const [event, incidents, stats] = await Promise.all([
       provider(env, `/api/v2/events/${id}/`).catch(() => null),
       provider(env, `/api/v2/events/${id}/incidents/`).catch(() => null),
@@ -274,7 +297,7 @@ export async function liveMatch(env: LiveEnv, id: number, ctx?: Ctx): Promise<Re
         stats: parseTeamStats(stats),
       },
     };
-  }), 25);
+  }), MATCH_TTL);
 }
 
 /** GET /api/changes: kick-offs moved and matches postponed, the last week. */
