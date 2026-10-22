@@ -369,6 +369,10 @@ Stage 2, accounts:
 - **13 October:** the Champions League star ball is a picture now (`comptheme.js`, starball.webp with
   the 480 for phones); the live shader stuttered on phones however it was tuned, and moved to
   `scripts/hero/starball.js`, where it only renders stills. The full-screen twinkle is still too.
+- **22 October:** studio slides redone as a broadcaster's results graphic (owner: the poster look was
+  "hot garbage"): club colours split on the diagonal with their crests or the owner's photo, score
+  bars in club colours, "Our call landed" with a tick, a violet brand bar (offside.win, LINK IN BIO) on
+  every slide. Stadium photos are no longer filled in.
 - **13 October:** the studio (`#/admin/studio`, `public/js/studio.js`): a day's results as a carousel
   to post, drawn on canvas at 1080x1350 (post) or 1080x1920 (story). Cover gives the day's true
   count ("12 of 13 landed"); one slide per landed call (crests, score, scorers, the call, its odds

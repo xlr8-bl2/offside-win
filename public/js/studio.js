@@ -13,10 +13,9 @@
  * Nothing claims a profit, and the last slide carries 18+ and
  * BeGambleAware.
  *
- * Crests and each ground's photograph come through the Worker's own address
- * (/media/<kind>/<id>) so the canvas can read them back to save. Every call's
- * slide shows its ground until the owner adds a photo of their own, which
- * never leaves the browser.
+ * Crests come through the Worker's own address (/media/team/<id>) so the
+ * canvas can read them back to save. A slide without a photo of the owner's
+ * shows the two clubs' colours; a photo never leaves the browser.
  */
 
 import { describe } from './lib/markets.js';
@@ -52,8 +51,6 @@ let size = 'feed';
 /** Photos the owner added, by slide key: { img, y } (y: 0 top to 1 bottom). */
 const photos = new Map();
 const mediaCache = new Map();
-/** A fixture's ground, looked up once. */
-const venueOf = new Map();
 
 /* -------------------------------------------------------------- loading */
 
@@ -119,22 +116,6 @@ const media = (kind, id) => {
 };
 const crest = (id) => media('team', id);
 
-/** The ground a call was played at, for its slide: the match's own page knows it. */
-async function groundOf(p) {
-  if (!venueOf.has(p.fixture_id)) {
-    venueOf.set(p.fixture_id, fetch(`/api/fixture/${Number(p.fixture_id)}`).then((r) => r.json())
-      .then((f) => Number(f?.venue_id) || null).catch(() => null));
-  }
-  return media('venue', await venueOf.get(p.fixture_id));
-}
-
-/** The photo a slide shows: the owner's if they added one, else the ground. */
-async function photoFor(key, p) {
-  if (photos.has(key)) return photos.get(key);
-  const img = p ? await groundOf(p) : null;
-  return img ? { img, y: 0.5 } : null;
-}
-
 /** A club's colour from its crest: the most common strong colour in it. */
 function crestColour(img) {
   if (!img) return null;
@@ -162,17 +143,14 @@ function crestColour(img) {
 /* -------------------------------------------------------------- drawing */
 
 /*
- * Two looks, from the owner's references.
- *
- * The cover and the last slide are the sportswear advert: a photograph to
- * the edges, a heavy two-line headline across the top, a big figure in the
- * bottom-left with a few small lines beside it, a barcode bottom-right.
- * Every call that landed is the film poster: cream paper with its folds, the
- * title in orange, laurels either side, the ground in a window, a line in
- * script, and the stacked billing block along the bottom. "Link in bio" and
- * the site's name are on every slide.
+ * The look: a broadcaster's results graphic. One picture (the owner's photo,
+ * or the two clubs' colours split on the diagonal with their crests), the
+ * score set big in condensed capitals on bars in each club's colour, our
+ * call underneath with a tick, and the brand bar across the foot of every
+ * slide: the site's name and "link in bio". Little text, all of it large.
  */
-const P = { cream: '#efe5cf', paper: '#e4d8bd', ink: '#1e1a15', orange: '#d8622a', teal: '#2a6b74', hype: '#ff5a36' };
+const V = { violet: '#7a5af8', violetDeep: '#4b2fd6', bar: 'rgba(12,11,9,0.86)', tick: '#3db468' };
+const CAPS = (s, w = 800) => `${w} ${s}px ${DISPLAY}`;
 
 function lines(x, text, maxW) {
   const out = [];
@@ -185,15 +163,11 @@ function lines(x, text, maxW) {
   return out;
 }
 
-/** The largest size up to `max` at which `text` fits `maxW` on at most `rows` lines. */
-function fit(x, text, { font, max, min = 30, maxW, rows = 1 }) {
-  for (let s = max; s >= min; s -= 2) {
-    x.font = font(s);
-    const ls = lines(x, text, maxW);
-    if (ls.length <= rows && ls.every((l) => x.measureText(l).width <= maxW)) return { size: s, lines: ls };
-  }
+/** The largest size up to `max` at which `text` fits `maxW` on one line. */
+function fitSize(x, text, font, max, min, maxW) {
+  for (let s = max; s > min; s -= 2) { x.font = font(s); if (x.measureText(text).width <= maxW) return s; }
   x.font = font(min);
-  return { size: min, lines: lines(x, text, maxW).slice(0, rows) };
+  return min;
 }
 
 function cover(x, img, X, Y, W, H, y = 0.5) {
@@ -202,351 +176,200 @@ function cover(x, img, X, Y, W, H, y = 0.5) {
   x.drawImage(img, X + (W - w) / 2, Y + (H - h) * y, w, h);
 }
 
-let grainTile = null;
-function grain(x, W, H, alpha) {
-  if (!grainTile) {
-    grainTile = document.createElement('canvas');
-    grainTile.width = grainTile.height = 256;
-    const g = grainTile.getContext('2d');
-    const d = g.createImageData(256, 256);
-    for (let i = 0; i < d.data.length; i += 4) {
-      const v = Math.random() * 255;
-      d.data[i] = d.data[i + 1] = d.data[i + 2] = v;
-      d.data[i + 3] = 255;
-    }
-    g.putImageData(d, 0, 0);
-  }
-  x.save();
-  x.globalAlpha = alpha;
-  x.globalCompositeOperation = 'overlay';
-  x.fillStyle = x.createPattern(grainTile, 'repeat');
-  x.fillRect(0, 0, W, H);
-  x.restore();
-}
+const margins = () => (size === 'story' ? { top: 220, bottom: 300 } : { top: 0, bottom: 0 });
 
-/** Old paper: cream, its folds, darker at the edges, grain. */
-function paper(x, W, H) {
-  x.fillStyle = P.cream;
-  x.fillRect(0, 0, W, H);
-  const v = x.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, H * 0.8);
-  v.addColorStop(0, 'rgba(0,0,0,0)');
-  v.addColorStop(1, 'rgba(90,70,40,0.28)');
-  x.fillStyle = v;
-  x.fillRect(0, 0, W, H);
-  // Folded in four, then once more across.
-  const fold = (x0, y0, x1, y1) => {
-    x.strokeStyle = 'rgba(255,255,255,0.35)'; x.lineWidth = 3;
-    x.beginPath(); x.moveTo(x0, y0); x.lineTo(x1, y1); x.stroke();
-    x.strokeStyle = 'rgba(80,60,30,0.16)'; x.lineWidth = 2;
-    x.beginPath(); x.moveTo(x0 + 3, y0 + 3); x.lineTo(x1 + 3, y1 + 3); x.stroke();
-  };
-  fold(W / 2, 0, W / 2, H);
-  fold(0, H / 3, W, H / 3);
-  fold(0, (H * 2) / 3, W, (H * 2) / 3);
-  grain(x, W, H, 0.16);
-}
-
-/** A photograph to the edges, darkened top and bottom for the type. */
-function photoGround(x, W, H, photo) {
-  x.fillStyle = C.pitch;
-  x.fillRect(0, 0, W, H);
-  if (photo) cover(x, photo.img, 0, 0, W, H, photo.y);
-  else {
-    const g = x.createRadialGradient(W * 0.7, H * 0.2, 0, W * 0.7, H * 0.2, H);
-    g.addColorStop(0, '#3a2a7a'); g.addColorStop(1, C.pitch);
-    x.fillStyle = g; x.fillRect(0, 0, W, H);
-  }
-  const g = x.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, 'rgba(10,9,8,0.72)');
-  g.addColorStop(0.3, 'rgba(10,9,8,0.05)');
-  g.addColorStop(0.62, 'rgba(10,9,8,0.1)');
-  g.addColorStop(1, 'rgba(10,9,8,0.92)');
-  x.fillStyle = g;
-  x.fillRect(0, 0, W, H);
-  grain(x, W, H, 0.1);
-}
-
-/** The mark: a ball, the line through it, the side past the line in violet. */
-function mark(x, cx, cy, r, ink = C.chalk) {
-  x.save();
-  x.lineWidth = r * 0.22;
-  x.strokeStyle = ink;
-  x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.stroke();
-  x.beginPath(); x.arc(cx, cy, r, -Math.PI / 2.6, Math.PI / 2.6); x.strokeStyle = C.violet; x.stroke();
-  x.fillStyle = C.violet;
-  x.fillRect(cx + r * 0.25, cy - r * 1.35, r * 0.16, r * 2.7);
-  x.restore();
-}
-
-function barcode(x, X, Y, w, h, label, ink) {
-  let seed = [...label].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
-  const rnd = () => { seed = (seed * 1103515245 + 12345) >>> 0; return seed / 2 ** 32; };
-  x.fillStyle = ink;
-  let at = X;
-  while (at < X + w) {
-    const bar = 2 + Math.floor(rnd() * 5);
-    if (rnd() > 0.4) x.fillRect(at, Y, Math.min(bar, X + w - at), h);
-    at += bar + 1 + Math.floor(rnd() * 3);
-  }
-  x.font = `600 22px ${BODY}`;
-  x.textAlign = 'center';
-  x.letterSpacing = '4px';
-  x.fillText(label, X + w / 2, Y + h + 28);
-  x.letterSpacing = '0px';
-}
-
-/** The heavy two-line headline of the advert. */
-function headline(x, W, top, one, two) {
-  x.textAlign = 'center';
-  x.textBaseline = 'alphabetic';
-  x.letterSpacing = '-4px';
-  const a = fit(x, one, { font: (s) => `800 ${s}px ${BODY}`, max: 150, min: 70, maxW: W - 140 });
-  x.font = `800 ${a.size}px ${BODY}`;
-  x.fillStyle = C.chalk;
-  x.shadowColor = 'rgba(0,0,0,0.45)'; x.shadowBlur = 30;
-  x.fillText(a.lines[0], W / 2, top + a.size);
-  const b = fit(x, two, { font: (s) => `800 ${s}px ${BODY}`, max: a.size * 1.08, min: 70, maxW: W - 140 });
-  x.font = `800 ${b.size}px ${BODY}`;
-  x.fillStyle = P.hype;
-  x.fillText(b.lines[0], W / 2, top + a.size + b.size * 0.98);
-  x.shadowBlur = 0;
-  x.letterSpacing = '0px';
-  return top + a.size + b.size;
-}
-
-const COVER_LINES = (c) => (c.landed === c.graded ? ['CLEAN', 'SWEEP.'] : c.landed / c.graded >= 0.75 ? ['WE ATE', 'THAT.'] : ['STILL', 'COOKING.']);
-
-function margins(H) { return size === 'story' ? { top: 230, bottom: 330 } : { top: 80, bottom: 70 }; }
-
-async function drawCover(x, W, H, d, counts, first) {
-  const { top, bottom } = margins(H);
-  photoGround(x, W, H, await photoFor('cover', first));
-  mark(x, W / 2, top + 40, 26);
-  const [one, two] = COVER_LINES(counts);
-  headline(x, W, top + 90, one, two);
-
-  const base = H - bottom;
+/** The brand bar along the foot: the name, and where to find us. */
+function brandBar(x, W, H, { tag = 'LINK IN BIO' } = {}) {
+  const { bottom } = margins();
+  const h = 120; const y = H - bottom - h;
+  x.fillStyle = V.violet;
+  x.fillRect(0, y, W, H - y); // to the edge; on a story the app's own buttons sit over the rest
+  x.textBaseline = 'middle';
   x.textAlign = 'left';
-  x.fillStyle = C.chalk2;
-  x.font = `700 28px ${BODY}`;
-  x.letterSpacing = '3px';
-  x.fillText(dayLong(d).toUpperCase(), 70, base - 300);
-  x.letterSpacing = '0px';
-  x.fillStyle = C.chalk;
-  x.font = `800 220px ${DISPLAY}`;
-  const fig = `${counts.landed}/${counts.graded}`;
-  x.fillText(fig, 62, base - 20);
-  const fw = x.measureText(fig).width;
-  x.font = `600 25px ${BODY}`;
-  const said = ['Every call came with the reason.', 'Every result is on the site.', 'Tomorrow\'s are already up.', 'Link in bio. Don\'t be late.'];
-  said.forEach((l, i) => x.fillText(l, 62 + fw + 28, base - 160 + i * 38));
-  barcode(x, W - 70 - 200, base - 110, 200, 64, 'LINK IN BIO', C.chalk);
-  x.fillStyle = C.chalk2;
-  x.font = `700 24px ${BODY}`;
+  x.font = `700 50px 'Offside Wordmark', ${BODY}`;
+  x.fillStyle = '#fff';
+  x.fillText('offside.win', 60, y + h / 2 + 2);
   x.textAlign = 'right';
-  x.fillText('OFFSIDE.WIN', W - 70, base - 130);
-}
-
-const SCRIPT = ['Cooked it.', 'Called it.', 'Light work.', 'Never in doubt.', 'Told you.', 'Bang on.'];
-
-/** Small words stacked in two before a big one, the way a film's credits are set. */
-function billing(x, X, Y, maxW, tokens, big = 64) {
-  let at = X; let y = Y;
-  const small = Math.round(big * 0.3);
-  for (const t of tokens) {
-    x.font = `800 ${big}px ${DISPLAY}`;
-    const bw = x.measureText(t.big).width;
-    x.font = `800 ${small}px ${DISPLAY}`;
-    const sw = t.small ? Math.max(...t.small.map((s) => x.measureText(s).width)) : 0;
-    const w = sw + (sw ? 6 : 0) + bw;
-    if (at > X && at + w > X + maxW) { at = X; y += big * 1.02; }
-    if (t.small) {
-      x.textAlign = 'right';
-      x.fillText(t.small[0], at + sw, y - big * 0.42);
-      if (t.small[1]) x.fillText(t.small[1], at + sw, y - big * 0.1);
-      at += sw + 6;
-    }
-    x.textAlign = 'left';
-    x.font = `800 ${big}px ${DISPLAY}`;
-    x.fillText(t.big, at, y);
-    at += bw + big * 0.22;
-  }
+  x.font = CAPS(54);
+  x.fillText(tag, W - 60, y + h / 2 + 3);
+  x.textBaseline = 'alphabetic';
   return y;
 }
 
-function laurel(x, cx, cy, lines3, ink) {
+/** Two clubs' colours split on the diagonal, each crest large and soft behind its side. */
+function clubGround(x, X, Y, W, H, hc, ac) {
+  const a = crestColour(hc) ?? '#2a2a33';
+  const b = crestColour(ac) ?? '#1c1c22';
   x.save();
-  x.strokeStyle = ink; x.fillStyle = ink;
-  for (const side of [-1, 1]) {
-    for (let i = 0; i < 7; i++) {
-      const a = Math.PI / 2 + side * (0.42 + i * 0.27);
-      const r = 92;
-      const lx = cx + Math.cos(a) * r; const ly = cy + Math.sin(a) * r * 0.9 - 6;
-      x.save();
-      x.translate(lx, ly);
-      x.rotate(a + side * Math.PI / 2.4);
-      x.beginPath(); x.ellipse(0, 0, 13, 5.5, 0, 0, Math.PI * 2); x.fill();
-      x.restore();
-    }
-  }
-  x.textAlign = 'center';
-  x.font = `800 26px ${BODY}`;
-  x.fillText(lines3[0], cx, cy - 8);
-  lines3.slice(1).forEach((l, i) => {
-    let s = 17;
-    x.font = `700 ${s}px ${BODY}`;
-    while (s > 11 && x.measureText(l).width > 140) { s--; x.font = `700 ${s}px ${BODY}`; }
-    x.fillText(l, cx, cy + 18 + i * 21);
-  });
+  x.beginPath(); x.rect(X, Y, W, H); x.clip();
+  x.fillStyle = a; x.fillRect(X, Y, W, H);
+  x.beginPath(); x.moveTo(X + W * 0.62, Y); x.lineTo(X + W, Y); x.lineTo(X + W, Y + H); x.lineTo(X + W * 0.38, Y + H); x.closePath();
+  x.fillStyle = b; x.fill();
+  x.globalAlpha = 0.22;
+  x.filter = 'blur(3px)';
+  const big = H * 0.95;
+  if (hc) x.drawImage(hc, X + W * 0.25 - big / 2, Y + H * 0.5 - big / 2, big, big);
+  if (ac) x.drawImage(ac, X + W * 0.75 - big / 2, Y + H * 0.5 - big / 2, big, big);
+  x.filter = 'none';
+  x.globalAlpha = 1;
+  const g = x.createLinearGradient(0, Y, 0, Y + H);
+  g.addColorStop(0, 'rgba(0,0,0,0.15)'); g.addColorStop(1, 'rgba(0,0,0,0.55)');
+  x.fillStyle = g; x.fillRect(X, Y, W, H);
   x.restore();
 }
 
-/** The window the ground shows through: square at two corners, round at two. */
-function windowPath(x, X, Y, W, H) {
-  const r = Math.min(W, H) * 0.42;
-  x.beginPath();
-  x.moveTo(X + r, Y);
-  x.lineTo(X + W, Y);
-  x.lineTo(X + W, Y + H - r);
-  x.quadraticCurveTo(X + W, Y + H, X + W - r, Y + H);
-  x.lineTo(X, Y + H);
-  x.lineTo(X, Y + r);
-  x.quadraticCurveTo(X, Y, X + r, Y);
-  x.closePath();
+function photoGround(x, X, Y, W, H, photo) {
+  cover(x, photo.img, X, Y, W, H, photo.y);
+  const g = x.createLinearGradient(0, Y, 0, Y + H);
+  g.addColorStop(0, 'rgba(0,0,0,0.35)'); g.addColorStop(0.45, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.75)');
+  x.fillStyle = g; x.fillRect(X, Y, W, H);
+}
+
+function pill(x, X, Y, text, { bg = '#fff', fg = '#000', size = 30, align = 'left' } = {}) {
+  x.font = `800 ${size}px ${BODY}`;
+  const w = x.measureText(text).width + size * 1.1;
+  const h = size * 1.6;
+  const left = align === 'right' ? X - w : X;
+  x.fillStyle = bg; x.fillRect(left, Y, w, h);
+  x.fillStyle = fg; x.textAlign = 'left'; x.textBaseline = 'middle';
+  x.fillText(text, left + size * 0.55, Y + h / 2 + 1);
+  x.textBaseline = 'alphabetic';
+  return w;
+}
+
+/** One side's score row: its colour down the edge, crest, name, goals. */
+function scoreRow(x, X, Y, W, h, { name, goals, crest: img, colour, won }) {
+  x.fillStyle = V.bar; x.fillRect(X, Y, W, h);
+  x.fillStyle = colour ?? '#888'; x.fillRect(X, Y, 14, h);
+  const cs = h * 0.66;
+  if (img) x.drawImage(img, X + 40, Y + (h - cs) / 2, cs, cs);
+  const nameX = X + 40 + cs + 30;
+  const boxW = h * 1.05;
+  const fs = fitSize(x, name.toUpperCase(), (s) => CAPS(s), h * 0.62, h * 0.36, W - (nameX - X) - boxW - 30);
+  x.font = CAPS(fs);
+  x.fillStyle = '#fff'; x.textAlign = 'left'; x.textBaseline = 'middle';
+  x.fillText(name.toUpperCase(), nameX, Y + h / 2 + 3);
+  x.fillStyle = won ? '#fff' : 'rgba(255,255,255,0.12)';
+  x.fillRect(X + W - boxW, Y, boxW, h);
+  x.fillStyle = won ? '#000' : '#fff';
+  x.textAlign = 'center';
+  x.font = `800 ${h * 0.72}px 'Offside Figures', ${DISPLAY}`;
+  x.fillText(String(goals), X + W - boxW / 2, Y + h / 2 + 4);
+  x.textBaseline = 'alphabetic';
+}
+
+const COVER_WORDS = (c) => (c.landed === c.graded ? 'CLEAN SWEEP' : c.landed / c.graded >= 0.75 ? 'CALLS LANDED' : 'CALLS LANDED');
+
+async function drawCover(x, W, H, d, counts, landed) {
+  const { top } = margins();
+  x.fillStyle = C.pitch; x.fillRect(0, 0, W, H);
+  const photo = photos.get('cover');
+  const heroH = H * 0.5;
+  if (photo) photoGround(x, 0, 0, W, heroH + 120, photo);
+  else {
+    const g = x.createLinearGradient(0, 0, W, heroH);
+    g.addColorStop(0, V.violetDeep); g.addColorStop(1, C.pitch);
+    x.fillStyle = g; x.fillRect(0, 0, W, heroH + 120);
+  }
+  const fade = x.createLinearGradient(0, heroH - 200, 0, heroH + 120);
+  fade.addColorStop(0, 'rgba(12,11,9,0)'); fade.addColorStop(1, C.pitch);
+  x.fillStyle = fade; x.fillRect(0, heroH - 200, W, 320);
+
+  pill(x, 60, top + 60, `${dayName(d).toUpperCase()}'S RESULTS`, { bg: V.violet, fg: '#fff', size: 30 });
+  x.textAlign = 'left';
+  x.fillStyle = '#fff';
+  x.font = CAPS(330);
+  x.fillText(`${counts.landed}/${counts.graded}`, 50, heroH + 10);
+  x.fillStyle = V.tick;
+  x.font = CAPS(96);
+  x.fillText(COVER_WORDS(counts), 60, heroH + 150);
+
+  // The calls that landed, as a results list.
+  const barTop = brandBar(x, W, H);
+  const rowH = 74;
+  const room = Math.floor((barTop - (heroH + 190)) / rowH);
+  const list = landed.slice(0, Math.max(1, room - (landed.length > room ? 1 : 0)));
+  list.forEach((p, i) => {
+    const y = heroH + 190 + i * rowH;
+    x.fillStyle = V.tick;
+    x.beginPath(); x.arc(84, y + 30, 18, 0, Math.PI * 2); x.fill();
+    x.strokeStyle = '#000'; x.lineWidth = 5; x.beginPath(); x.moveTo(75, y + 31); x.lineTo(82, y + 38); x.lineTo(94, y + 23); x.stroke();
+    const t = `${p.home_team} ${p.home_goals}–${p.away_goals} ${p.away_team}`.toUpperCase();
+    const fs = fitSize(x, t, (s) => CAPS(s), 50, 30, W - 180);
+    x.font = CAPS(fs); x.fillStyle = '#fff'; x.textAlign = 'left';
+    x.fillText(t, 124, y + 48);
+  });
+  if (landed.length > list.length) {
+    x.font = `700 30px ${BODY}`; x.fillStyle = C.chalk3;
+    x.fillText(`+${landed.length - list.length} more, swipe`, 124, heroH + 190 + list.length * rowH + 40);
+  }
 }
 
 async function drawCall(x, W, H, p, i, n) {
-  const { top, bottom } = margins(H);
-  const [hc, ac, photo] = await Promise.all([crest(p.home_team_id), crest(p.away_team_id), photoFor(`p${p.id}`, p)]);
-  paper(x, W, H);
+  const { top } = margins();
+  const [hc, ac] = await Promise.all([crest(p.home_team_id), crest(p.away_team_id)]);
+  x.fillStyle = C.pitch; x.fillRect(0, 0, W, H);
+  const barTop = brandBar(x, W, H);
+  const picH = Math.round((barTop - top) * 0.52);
+  const photo = photos.get(`p${p.id}`);
+  // To the top edge; the words keep inside the story's safe area.
+  if (photo) photoGround(x, 0, 0, W, top + picH, photo); else clubGround(x, 0, 0, W, top + picH, hc, ac);
+
+  const lg = (leagues.get(Number(p.league_id)) ?? '').toUpperCase();
+  if (lg) pill(x, 60, top + 50, lg, { bg: '#fff', fg: '#000', size: 28 });
+  pill(x, W - 60, top + 50, `${i} OF ${n}`, { bg: 'rgba(0,0,0,0.6)', fg: '#fff', size: 28, align: 'right' });
+
+  // The score, over the foot of the picture.
+  const rowH = 128;
+  const y0 = top + picH - rowH - 30;
+  pill(x, 60, y0 - 62, 'FULL TIME', { bg: '#fff', fg: '#000', size: 26 });
+  const hw = p.home_goals > p.away_goals; const aw = p.away_goals > p.home_goals;
+  scoreRow(x, 60, y0, W - 120, rowH, { name: p.home_team, goals: p.home_goals, crest: hc, colour: crestColour(hc), won: hw });
+  scoreRow(x, 60, y0 + rowH + 8, W - 120, rowH, { name: p.away_team, goals: p.away_goals, crest: ac, colour: crestColour(ac), won: aw });
+
+  // Our call.
+  const cy = y0 + rowH * 2 + 8 + 90;
+  x.fillStyle = V.tick;
+  x.beginPath(); x.arc(84, cy - 12, 24, 0, Math.PI * 2); x.fill();
+  x.strokeStyle = '#000'; x.lineWidth = 6; x.beginPath(); x.moveTo(72, cy - 11); x.lineTo(81, cy - 2); x.lineTo(97, cy - 22); x.stroke();
+  x.textAlign = 'left'; x.fillStyle = V.tick; x.font = CAPS(44);
+  x.fillText('OUR CALL LANDED', 128, cy);
   const call = callOf(p);
-  const lg = leagues.get(Number(p.league_id)) ?? '';
-
-  // Title.
-  x.textAlign = 'center';
-  x.fillStyle = P.orange;
-  x.letterSpacing = '-1px';
-  // On one line when it fits big; else the home side and the score, then the away side.
-  const title = `${p.home_team} ${p.home_goals}–${p.away_goals} ${p.away_team}`.toUpperCase();
-  let t = fit(x, title, { font: (s) => `800 ${s}px ${BODY}`, max: 78, min: 64, maxW: W - 120, rows: 1 });
-  x.font = `800 ${t.size}px ${BODY}`;
-  if (x.measureText(title).width > W - 120) {
-    const pair = [`${p.home_team} ${p.home_goals}–${p.away_goals}`.toUpperCase(), String(p.away_team).toUpperCase()];
-    let sz = 78;
-    x.font = `800 ${sz}px ${BODY}`;
-    while (sz > 44 && Math.max(...pair.map((l) => x.measureText(l).width)) > W - 120) { sz -= 2; x.font = `800 ${sz}px ${BODY}`; }
-    t = { size: sz, lines: pair };
+  const fs = fitSize(x, call.name.toUpperCase(), (s) => CAPS(s), 104, 56, W - 120);
+  x.font = CAPS(fs); x.fillStyle = '#fff';
+  x.fillText(call.name.toUpperCase(), 60, cy + fs + 10);
+  x.font = `600 34px ${BODY}`; x.fillStyle = C.chalk2;
+  x.fillText(`${call.market ? `${call.market}, ` : ''}odds of ${odds(p.odds)}${p.bookmaker ? ` at ${p.bookmaker.charAt(0).toUpperCase()}${p.bookmaker.slice(1)}` : ''}`, 60, cy + fs + 64);
+  const sc = scorers(p);
+  const who = [...sc.home, ...sc.away].join(', ');
+  if (who && cy + fs + 120 < barTop - 20) {
+    x.font = `500 28px ${BODY}`; x.fillStyle = C.chalk3;
+    x.fillText(lines(x, who, W - 120)[0], 60, cy + fs + 112);
   }
-  x.font = `800 ${t.size}px ${BODY}`;
-  t.lines.forEach((l, k) => x.fillText(l, W / 2, top + t.size + k * t.size * 1.02));
-  x.letterSpacing = '0px';
-  const below = top + t.size * (t.lines.length + 0.2);
-
-  // Laurels.
-  const ly = below + 95;
-  laurel(x, 200, ly, ['LANDED', lg.length > 22 ? `${lg.slice(0, 21)}…` : lg, dayLong(ukDay(p.kickoff)).split(' ').slice(1).join(' ')], P.teal);
-  laurel(x, W - 200, ly, ['ODDS OF', odds(p.odds), p.bookmaker ? `at ${p.bookmaker}` : ''], P.teal);
-
-  // The ground, in its window.
-  const wy = ly + 120;
-  const wh = H - bottom - 330 - wy;
-  const wx = 90; const ww = W - 180;
-  x.save();
-  windowPath(x, wx, wy, ww, wh);
-  x.clip();
-  if (photo) {
-    x.filter = 'sepia(0.25) saturate(1.15) contrast(1.06)';
-    cover(x, photo.img, wx, wy, ww, wh, photo.y);
-    x.filter = 'none';
-  } else {
-    // No photograph of the ground: the two clubs, big, on their colours.
-    const g = x.createLinearGradient(wx, wy, wx + ww, wy + wh);
-    g.addColorStop(0, crestColour(hc) ?? P.teal);
-    g.addColorStop(1, crestColour(ac) ?? P.ink);
-    x.fillStyle = g; x.fillRect(wx, wy, ww, wh);
-    const big = Math.min(ww * 0.36, wh * 0.55);
-    x.globalAlpha = 0.95;
-    if (hc) x.drawImage(hc, wx + ww * 0.25 - big / 2, wy + wh * 0.42 - big / 2, big, big);
-    if (ac) x.drawImage(ac, wx + ww * 0.75 - big / 2, wy + wh * 0.42 - big / 2, big, big);
-    x.globalAlpha = 1;
-  }
-  grain(x, W, H, 0.12);
-  x.restore();
-  // Crests as stickers on the window's foot.
-  const cs = 128;
-  for (const [img, cx] of [[hc, wx + ww - cs * 2 - 50], [ac, wx + ww - cs - 30]]) {
-    if (!img) continue;
-    x.save();
-    x.shadowColor = 'rgba(0,0,0,0.35)'; x.shadowBlur = 18;
-    x.drawImage(img, cx, wy + wh - cs * 0.7, cs, cs);
-    x.restore();
-  }
-  // The line in script, over the window's corner.
-  x.save();
-  x.textAlign = 'left';
-  x.font = `700 132px 'Caveat', cursive`;
-  x.lineWidth = 16; x.strokeStyle = P.cream; x.lineJoin = 'round';
-  const sc = SCRIPT[(i - 1) % SCRIPT.length];
-  const sx = 70; const sy = wy + wh - 40;
-  x.rotate(-0.05);
-  x.strokeText(sc, sx, sy + 40);
-  x.fillStyle = P.ink;
-  x.fillText(sc, sx, sy + 40);
-  x.restore();
-  x.textAlign = 'left';
-  x.fillStyle = P.ink;
-  x.font = `800 26px ${BODY}`;
-  x.fillText('...and the next one\'s already up', 78, wy + wh + 46);
-
-  // Billing.
-  x.fillStyle = P.teal;
-  const sco = scorers(p);
-  const goals = [...sco.home, ...sco.away].slice(0, 3).map((g) => g.split(' ')[0].toUpperCase());
-  const by = billing(x, 70, wy + wh + 140, W - 140, [
-    { small: ['OUR', 'CALL'], big: call.name.toUpperCase() },
-    { small: ['AT ODDS', 'OF'], big: odds(p.odds) },
-    { small: ['FULL', 'TIME'], big: `${p.home_goals}–${p.away_goals}` },
-    ...(goals.length ? [{ small: ['GOALS', 'FROM'], big: goals.join(', ') }] : []),
-  ], 62);
-
-  // The badge row.
-  const ry = Math.max(by + 60, H - bottom - 30);
-  x.strokeStyle = P.ink; x.fillStyle = P.ink; x.lineWidth = 2.5;
-  x.textAlign = 'left';
-  x.font = `800 21px ${BODY}`;
-  x.fillText('OFFSIDE.WIN PRESENTS', 70, ry);
-  const box = (label, bx, w) => {
-    x.strokeRect(bx, ry - 30, w, 42);
-    x.textAlign = 'center';
-    x.font = `800 21px ${BODY}`;
-    x.fillText(label, bx + w / 2, ry);
-  };
-  box('LINK IN BIO', 380, 200);
-  box(`${i} OF ${n} LANDED`, 600, 210);
-  box('18+', W - 70 - 80, 80);
 }
 
-async function drawEnd(x, W, H, last) {
-  const { top, bottom } = margins(H);
-  photoGround(x, W, H, await photoFor('end', last));
-  mark(x, W / 2, top + 40, 26);
-  headline(x, W, top + 90, 'YOU\'RE', 'LATE.');
-  const base = H - bottom;
-  x.textAlign = 'left';
-  x.fillStyle = C.chalk2;
-  x.font = `700 28px ${BODY}`;
-  x.letterSpacing = '3px';
-  x.fillText('TOMORROW\'S CALLS ARE ALREADY UP', 70, base - 250);
-  x.letterSpacing = '0px';
-  x.fillStyle = C.chalk;
-  x.font = `800 150px ${DISPLAY}`;
-  x.fillText('LINK IN BIO', 62, base - 70);
-  x.font = `600 27px ${BODY}`;
-  x.fillText('offside.win: every call, with the reason.', 66, base - 22);
-  barcode(x, W - 70 - 200, base - 180, 200, 64, 'OFFSIDE.WIN', C.chalk);
-  x.fillStyle = C.chalk3;
-  x.font = `500 21px ${BODY}`;
-  x.fillText('18+. Gamble responsibly. BeGambleAware.org', 66, base + 16);
+async function drawEnd(x, W, H) {
+  const { top, bottom } = margins();
+  const photo = photos.get('end');
+  x.fillStyle = V.violet; x.fillRect(0, 0, W, H);
+  if (photo) {
+    photoGround(x, 0, 0, W, H, photo);
+    x.fillStyle = 'rgba(75,47,214,0.55)'; x.fillRect(0, 0, W, H);
+  }
+  x.textAlign = 'left'; x.fillStyle = '#fff';
+  const lines4 = ["TOMORROW'S", 'CALLS ARE', 'ALREADY UP.'];
+  lines4.forEach((l, k) => { x.font = CAPS(170); x.fillText(l, 56, top + 300 + k * 165); });
+  const by = top + 300 + lines4.length * 165 + 30;
+  x.font = CAPS(96);
+  const lw = x.measureText('LINK IN BIO').width + 60;
+  x.fillStyle = '#fff'; x.fillRect(60, by, lw, 130);
+  x.fillStyle = V.violetDeep; x.textBaseline = 'middle';
+  x.fillText('LINK IN BIO', 90, by + 68);
+  x.textBaseline = 'alphabetic';
+  x.fillStyle = '#fff'; x.font = `700 64px 'Offside Wordmark', ${BODY}`;
+  x.fillText('offside.win', 60, by + 240);
+  x.font = `500 26px ${BODY}`; x.fillStyle = 'rgba(255,255,255,0.75)';
+  x.fillText('18+. Gamble responsibly. BeGambleAware.org', 60, H - bottom - 60);
 }
 
 /* ------------------------------------------------------------- captions */
@@ -584,13 +407,13 @@ async function slidesFor(d) {
     await draw(c.getContext('2d'));
     out.push({ key, label, canvas: c });
   };
-  await make('cover', 'Cover', (x) => drawCover(x, W, H, d, counts, landed[0]));
+  await make('cover', 'Cover', (x) => drawCover(x, W, H, d, counts, landed));
   let i = 0;
   for (const p of landed) {
     i++;
     await make(`p${p.id}`, `${p.home_team} v ${p.away_team}`, (x) => drawCall(x, W, H, p, i, landed.length));
   }
-  await make('end', 'Last slide', (x) => drawEnd(x, W, H, landed[landed.length - 1]));
+  await make('end', 'Last slide', (x) => drawEnd(x, W, H));
   return { slides: out, counts, landed };
 }
 
