@@ -214,14 +214,14 @@ const commands: Record<string, () => Promise<unknown>> = {
     // The provider's answers, kept from the last job: each read lasts as long
     // as it can (bsd.ts, ttlFor), so a pass asks only for what is stale.
     const cacheFile = process.env['BSD_CACHE_FILE'];
-    let quotaDay = '';
     if (cacheFile) console.log(`slate:loop: ${await loadCache(cacheFile)} provider answers carried over`);
     for (;;) {
       const t0 = Date.now();
       pass++;
-      // A new day (midnight UTC) is a new allowance.
-      const today = new Date().toISOString().slice(0, 10);
-      if (today !== quotaDay) { quotaDay = today; bsdQuota.exhausted = false; bsdQuota.remaining = null; }
+      // The allowance rolls over 24 hours, so what was spent a day ago is
+      // back: each pass asks afresh, and the first answer says where it stands.
+      bsdQuota.exhausted = false;
+      bsdQuota.remaining = null;
       try {
         await commands.slate!();
         failures = 0;

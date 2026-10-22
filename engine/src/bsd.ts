@@ -44,12 +44,16 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Requests counted for the run log — useful when diagnosing a slow slate. */
 export const stats = { requests: 0, retries: 0, errors: 0, notEntitled: 0, cacheHits: 0 };
+/** Requests by kind of read ("/api/v2/events/:id/lineups/"), for the run log. */
+export const byKind = new Map<string, number>();
+export const kindOf = (url: URL) => url.pathname.replace(/\/\d+(?=\/)/g, '/:id');
 
 /**
  * The provider's daily allowance, from its own headers (`RateLimit: ...;r=`).
  *
- * The free plan is 7,500 requests a day, reset at midnight UTC, across every
- * job and the Worker's live scores. A job stops asking once fewer than
+ * The free plan is 7,500 requests in any 24 hours (the window rolls: what
+ * was spent a day ago comes back), across every job and the Worker's live
+ * scores. A job stops asking once fewer than
  * `config.bsd.reserve` remain, leaving the rest for the others, and nothing
  * asks again once the provider says the day is spent (`taster_exhausted`):
  * retrying that was how a slate sat for hours waiting on midnight.
@@ -201,6 +205,7 @@ async function fetchOnce<T = unknown>(url: URL): Promise<FetchOutcome<T>> {
     const timer = setTimeout(() => controller.abort(), config.bsd.timeoutMs);
     try {
       stats.requests++;
+      byKind.set(kindOf(url), (byKind.get(kindOf(url)) ?? 0) + 1);
       const res = await fetch(url, {
         headers: {
           Authorization: `Token ${config.bsd.key}`,

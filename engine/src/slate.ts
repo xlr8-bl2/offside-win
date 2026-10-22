@@ -1,6 +1,6 @@
 import { backsRotatedSide } from './context/xi.ts';
 import { chanceInWords, openSlipLegs, refreshSlip } from './slip.ts';
-import { bsdList, bsdOrNull, num, quota as bsdQuota, setNearFixtures, str, stats as bsdStats, toEpoch } from './bsd.ts';
+import { bsdList, bsdOrNull, byKind as bsdByKind, num, quota as bsdQuota, setNearFixtures, str, stats as bsdStats, toEpoch } from './bsd.ts';
 import { config } from './config.ts';
 import { analyseFixture } from './context/index.ts';
 import { checkComparisonEntitlement, gatherFixture, parseScorers } from './context/gather.ts';
@@ -512,13 +512,19 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
     return leagueRank(num(e['league_id']) ?? -1) <= config.confident.marqueeRank ? 0 : 1;
   };
   candidates.sort((a, b) => priorityOf(a) - priorityOf(b) || kickOf(a) - kickOf(b));
-  const passesLeft = Math.max(1, Math.ceil((86400 - (nowS % 86400)) / (config.slate.loopEveryMinutes * 60)));
+  /*
+   * The allowance is 7,500 in any 24 hours, rolling, so what matters is the
+   * rate: a pass spends at most `passBudget` (a day of hourly passes at that
+   * rate leaves the reserve for the other jobs), the matches that matter up
+   * to twice that, and nothing below the reserve.
+   */
   const spentAtStart = bsdStats.requests;
-  const shareOf = () => bsdQuota.remaining === null ? Infinity
-    : Math.max(0, bsdQuota.remaining + (bsdStats.requests - spentAtStart) - config.bsd.reserve) / passesLeft;
+  const headroom = () => bsdQuota.remaining === null ? Infinity
+    : Math.max(0, bsdQuota.remaining + (bsdStats.requests - spentAtStart) - config.bsd.reserve);
+  const capFor = (p: number) => Math.min(headroom(), config.slate.passBudget * (p === 0 ? 2 : 1));
   let deferred = 0;
   const gatherAt = ahead(candidates, (e) => {
-    if (priorityOf(e) > 0 && bsdStats.requests - spentAtStart >= shareOf()) { deferred++; return Promise.resolve(null); }
+    if (bsdStats.requests - spentAtStart >= capFor(priorityOf(e))) { deferred++; return Promise.resolve(null); }
     return gatherFixture(e);
   }, config.slate.gatherAhead);
   for (const [index, event] of candidates.entries()) {
@@ -1553,8 +1559,10 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
 
   console.log(
     `Analysed ${report.analysed}, published ${report.picks} picks, ${report.passes} passes, ` +
-      `skipped ${report.skipped} (${deferred} smaller matches left for a later pass). ${report.requests} provider requests, ${report.d1Queries} D1 queries.`,
+      `skipped ${report.skipped} (${deferred} left for a later pass). ${report.requests} provider requests, ${report.d1Queries} D1 queries.`,
   );
+  console.log(`  provider requests by kind: ${[...bsdByKind].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, n]) => `${k} ${n}`).join(', ')}`);
+  bsdByKind.clear();
   return report;
 }
 
