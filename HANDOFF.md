@@ -358,6 +358,12 @@ Stage 2, accounts:
   Priority (`priorityOf` in slate.ts): a match with a standing call, a marquee league (rank up to
   `marqueeRank`) or a kick-off within 3 h is always read; the rest get at most an even share of the
   remaining allowance per pass until midnight UTC, and are left for a later pass when it is spent.
+  22 Oct: the allowance is 7,500 in any 24 hours, rolling (the `RateLimit` remaining rose during the
+  day as the previous day's requests aged out). The first warm-up day spent ~7,500 (slate ~5,000
+  refilling its cache, history catching up 2,369) and ran out at 09:31. Now: each pass spends at most
+  `SLATE_PASS_BUDGET` (200; marquee/called/near matches up to 400) and never below the reserve; the
+  history step keeps 3,000; the slate re-checks the allowance every pass; the log prints requests by
+  kind of read.
   The Worker's `get_hero` falls back to the board's biggest match still to come when the stored hero
   kicked off more than 3 h ago (the slate had stalled for a day and a half on the old code).
 - **13 October:** the Champions League star ball is a picture now (`comptheme.js`, starball.webp with

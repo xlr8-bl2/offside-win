@@ -32,6 +32,10 @@ jobs:
       - name: Backfill match history
         env:
           BSD_API_KEY: ${{ secrets.BSD_API_KEY }}
+          # The provider's free plan is 7,500 in any 24 hours, shared with the
+          # slate: a catch-up after missed days stops with this many left, and
+          # the next run carries on.
+          BSD_RESERVE: '3000'
           # D1 through the Worker's engine door (HANDOFF.md, "The move to D1").
           DB_BACKEND: d1
           ENGINE_DB_URL: https://offside.win/api/internal/db

@@ -590,6 +590,12 @@ export const config = {
     loopForMinutes: num('SLATE_LOOP_FOR', 330),
     /** How far ahead to price. */
     horizonHours: num('SLATE_HORIZON_HOURS', 72),
+    /**
+     * Provider requests one pass may spend (the matches that matter, twice
+     * this). On the free plan, 7,500 in any 24 hours: 200 an hour is 4,800 a
+     * day, leaving the rest for the results, the ratings and live scores.
+     */
+    passBudget: num('SLATE_PASS_BUDGET', 200),
     /** Keep finished fixtures on the board briefly so results are visible. */
     lookbackHours: num('SLATE_LOOKBACK_HOURS', 6),
   },
