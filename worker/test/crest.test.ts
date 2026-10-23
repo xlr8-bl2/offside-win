@@ -26,3 +26,18 @@ test('a crest is passed through with a long cache, a blank one is a 404, and not
   await worker.fetch(new Request('https://offside.win/media/team/..%2F1'), ENV);
   assert.equal(asked.length, 2);
 });
+
+test('a freely licensed photo passes through from Flickr or Wikimedia only', async () => {
+  const asked: string[] = [];
+  globalThis.fetch = (async (url: string | URL | Request) => {
+    asked.push(String(url));
+    return new Response(new Uint8Array(900), { headers: { 'content-type': 'image/jpeg' } });
+  }) as typeof fetch;
+  const ok = await worker.fetch(new Request('https://offside.win/media/cc?u=' + encodeURIComponent('https://live.staticflickr.com/1/2_b.jpg')), ENV);
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get('content-type'), 'image/jpeg');
+  for (const bad of ['https://example.com/x.jpg', 'http://live.staticflickr.com/1.jpg', 'https://live.staticflickr.com.evil.com/1.jpg', 'nonsense']) {
+    assert.equal((await worker.fetch(new Request('https://offside.win/media/cc?u=' + encodeURIComponent(bad)), ENV)).status, 404);
+  }
+  assert.equal(asked.length, 1);
+});

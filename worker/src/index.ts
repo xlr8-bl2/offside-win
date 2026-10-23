@@ -190,6 +190,20 @@ const worker = {
         if (!bytes || bytes.byteLength <= 200) return new Response('Not found', { status: 404, headers: { 'cache-control': 'public, max-age=3600' } });
         return new Response(bytes, { headers: { 'content-type': up.headers.get('content-type') ?? 'image/png', 'cache-control': 'public, max-age=604800' } });
       }
+      // A freely licensed photograph (Flickr or Wikimedia, found through
+      // Openverse by the studio), passed through our own address so the
+      // slide it is drawn on can be saved. Those two hosts only.
+      if (path === '/media/cc') {
+        let src: URL | null = null;
+        try { src = new URL(url.searchParams.get('u') ?? ''); } catch { src = null; }
+        if (!src || src.protocol !== 'https:' || !/^(live\.staticflickr\.com|upload\.wikimedia\.org)$/.test(src.hostname)) {
+          return new Response('Not found', { status: 404 });
+        }
+        const up = await fetch(src.toString(), { cf: { cacheTtl: 604800, cacheEverything: true } } as RequestInit);
+        const type = up.headers.get('content-type') ?? '';
+        if (!up.ok || !type.startsWith('image/')) return new Response('Not found', { status: 404 });
+        return new Response(up.body, { headers: { 'content-type': type, 'cache-control': 'public, max-age=604800' } });
+      }
       // Pictures the engine keeps in D1 (team photographs and the like).
       if (path.startsWith('/img/')) {
         const img = await storedImage(env, path.slice('/img/'.length), 86400);
