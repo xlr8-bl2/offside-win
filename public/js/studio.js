@@ -178,198 +178,193 @@ function cover(x, img, X, Y, W, H, y = 0.5) {
 
 const margins = () => (size === 'story' ? { top: 220, bottom: 300 } : { top: 0, bottom: 0 });
 
-/** The brand bar along the foot: the name, and where to find us. */
-function brandBar(x, W, H, { tag = 'LINK IN BIO' } = {}) {
-  const { bottom } = margins();
-  const h = 120; const y = H - bottom - h;
-  x.fillStyle = V.violet;
-  x.fillRect(0, y, W, H - y); // to the edge; on a story the app's own buttons sit over the rest
-  x.textBaseline = 'middle';
-  x.textAlign = 'left';
-  x.font = `700 50px 'Offside Wordmark', ${BODY}`;
-  x.fillStyle = '#fff';
-  x.fillText('offside.win', 60, y + h / 2 + 2);
-  x.textAlign = 'right';
-  x.font = CAPS(54);
-  x.fillText(tag, W - 60, y + h / 2 + 3);
-  x.textBaseline = 'alphabetic';
-  return y;
+/** A pitch drawn from above, for a slide with no photo: mown stripes, the lines, a goal. */
+function pitchGround(x, W, H) {
+  const stripe = H / 9;
+  for (let i = 0; i < 10; i++) {
+    x.fillStyle = i % 2 ? '#3f8a2f' : '#47963a';
+    x.save(); x.translate(W / 2, H / 2); x.rotate(-0.38);
+    x.fillRect(-W * 1.5, -H + i * stripe * 2 - H * 0.2, W * 3, stripe);
+    x.restore();
+  }
+  x.save();
+  x.strokeStyle = 'rgba(255,255,255,0.85)'; x.lineWidth = 10;
+  x.translate(W / 2, H / 2); x.rotate(-0.38); x.translate(-W / 2, -H / 2);
+  x.beginPath(); x.moveTo(-W, H * 0.08); x.lineTo(W * 2, H * 0.08); x.stroke();
+  x.strokeRect(W * 0.2, H * 0.08, W * 0.6, H * 0.2);
+  x.strokeRect(W * 0.36, H * 0.08, W * 0.28, H * 0.08);
+  x.beginPath(); x.arc(W / 2, H * 0.28, W * 0.12, 0.25, Math.PI - 0.25); x.stroke();
+  x.restore();
+  const v = x.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.35)');
+  x.fillStyle = v; x.fillRect(0, 0, W, H);
 }
 
-/** Two clubs' colours split on the diagonal, each crest large and soft behind its side. */
-function clubGround(x, X, Y, W, H, hc, ac) {
-  const a = crestColour(hc) ?? '#2a2a33';
-  const b = crestColour(ac) ?? '#1c1c22';
+/** The background: the owner's photo to the edges, else the pitch. */
+function background(x, W, H, photo) {
+  if (photo) cover(x, photo.img, 0, 0, W, H, photo.y); else pitchGround(x, W, H);
+}
+
+/** Frosted glass: what is under the box, blurred and tinted. */
+function frost(x, X, Y, w, h, tint) {
+  const snap = document.createElement('canvas');
+  snap.width = x.canvas.width; snap.height = x.canvas.height;
+  snap.getContext('2d').drawImage(x.canvas, 0, 0);
   x.save();
-  x.beginPath(); x.rect(X, Y, W, H); x.clip();
-  x.fillStyle = a; x.fillRect(X, Y, W, H);
-  x.beginPath(); x.moveTo(X + W * 0.62, Y); x.lineTo(X + W, Y); x.lineTo(X + W, Y + H); x.lineTo(X + W * 0.38, Y + H); x.closePath();
-  x.fillStyle = b; x.fill();
-  x.globalAlpha = 0.22;
-  x.filter = 'blur(3px)';
-  const big = H * 0.95;
-  if (hc) x.drawImage(hc, X + W * 0.25 - big / 2, Y + H * 0.5 - big / 2, big, big);
-  if (ac) x.drawImage(ac, X + W * 0.75 - big / 2, Y + H * 0.5 - big / 2, big, big);
+  x.beginPath(); x.rect(X, Y, w, h); x.clip();
+  x.filter = 'blur(18px)';
+  x.drawImage(snap, 0, 0);
   x.filter = 'none';
-  x.globalAlpha = 1;
-  const g = x.createLinearGradient(0, Y, 0, Y + H);
-  g.addColorStop(0, 'rgba(0,0,0,0.15)'); g.addColorStop(1, 'rgba(0,0,0,0.55)');
-  x.fillStyle = g; x.fillRect(X, Y, W, H);
+  x.fillStyle = tint; x.fillRect(X, Y, w, h);
   x.restore();
 }
 
-function photoGround(x, X, Y, W, H, photo) {
-  cover(x, photo.img, X, Y, W, H, photo.y);
-  const g = x.createLinearGradient(0, Y, 0, Y + H);
-  g.addColorStop(0, 'rgba(0,0,0,0.35)'); g.addColorStop(0.45, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.75)');
-  x.fillStyle = g; x.fillRect(X, Y, W, H);
+const LINE = 'rgba(255,255,255,0.92)';
+function cell(x, X, Y, w, h) { x.strokeStyle = LINE; x.lineWidth = 3; x.strokeRect(X, Y, w, h); }
+
+/** The site's name and where to find us, small, at the foot of every slide. */
+function footer(x, W, H) {
+  const { bottom } = margins();
+  const y = H - bottom - 50;
+  x.fillStyle = '#fff'; x.textBaseline = 'alphabetic';
+  x.shadowColor = 'rgba(0,0,0,0.6)'; x.shadowBlur = 12;
+  x.font = `800 26px ${BODY}`; x.textAlign = 'left';
+  x.fillText('OFFSIDE.WIN', 56, y);
+  x.textAlign = 'right';
+  x.fillText('LINK IN BIO', W - 56, y);
+  x.shadowBlur = 0;
 }
 
-function pill(x, X, Y, text, { bg = '#fff', fg = '#000', size = 30, align = 'left' } = {}) {
-  x.font = `800 ${size}px ${BODY}`;
-  const w = x.measureText(text).width + size * 1.1;
-  const h = size * 1.6;
-  const left = align === 'right' ? X - w : X;
-  x.fillStyle = bg; x.fillRect(left, Y, w, h);
-  x.fillStyle = fg; x.textAlign = 'left'; x.textBaseline = 'middle';
-  x.fillText(text, left + size * 0.55, Y + h / 2 + 1);
-  x.textBaseline = 'alphabetic';
-  return w;
-}
-
-/** One side's score row: its colour down the edge, crest, name, goals. */
-function scoreRow(x, X, Y, W, h, { name, goals, crest: img, colour, won }) {
-  x.fillStyle = V.bar; x.fillRect(X, Y, W, h);
-  x.fillStyle = colour ?? '#888'; x.fillRect(X, Y, 14, h);
-  const cs = h * 0.66;
-  if (img) x.drawImage(img, X + 40, Y + (h - cs) / 2, cs, cs);
-  const nameX = X + 40 + cs + 30;
-  const boxW = h * 1.05;
-  const fs = fitSize(x, name.toUpperCase(), (s) => CAPS(s), h * 0.62, h * 0.36, W - (nameX - X) - boxW - 30);
-  x.font = CAPS(fs);
-  x.fillStyle = '#fff'; x.textAlign = 'left'; x.textBaseline = 'middle';
-  x.fillText(name.toUpperCase(), nameX, Y + h / 2 + 3);
-  x.fillStyle = won ? '#fff' : 'rgba(255,255,255,0.12)';
-  x.fillRect(X + W - boxW, Y, boxW, h);
-  x.fillStyle = won ? '#000' : '#fff';
-  x.textAlign = 'center';
-  x.font = `800 ${h * 0.72}px 'Offside Figures', ${DISPLAY}`;
-  x.fillText(String(goals), X + W - boxW / 2, Y + h / 2 + 4);
-  x.textBaseline = 'alphabetic';
-}
-
-const COVER_WORDS = (c) => (c.landed === c.graded ? 'CLEAN SWEEP' : c.landed / c.graded >= 0.75 ? 'CALLS LANDED' : 'CALLS LANDED');
-
-async function drawCover(x, W, H, d, counts, landed) {
-  const { top } = margins();
-  x.fillStyle = C.pitch; x.fillRect(0, 0, W, H);
-  const photo = photos.get('cover');
-  const heroH = H * 0.5;
-  if (photo) photoGround(x, 0, 0, W, heroH + 120, photo);
-  else {
-    const g = x.createLinearGradient(0, 0, W, heroH);
-    g.addColorStop(0, V.violetDeep); g.addColorStop(1, C.pitch);
-    x.fillStyle = g; x.fillRect(0, 0, W, heroH + 120);
-  }
-  const fade = x.createLinearGradient(0, heroH - 200, 0, heroH + 120);
-  fade.addColorStop(0, 'rgba(12,11,9,0)'); fade.addColorStop(1, C.pitch);
-  x.fillStyle = fade; x.fillRect(0, heroH - 200, W, 320);
-
-  pill(x, 60, top + 60, `${dayName(d).toUpperCase()}'S RESULTS`, { bg: V.violet, fg: '#fff', size: 30 });
-  x.textAlign = 'left';
-  x.fillStyle = '#fff';
-  x.font = CAPS(330);
-  x.fillText(`${counts.landed}/${counts.graded}`, 50, heroH + 10);
-  x.fillStyle = V.tick;
-  x.font = CAPS(96);
-  x.fillText(COVER_WORDS(counts), 60, heroH + 150);
-
-  // The calls that landed, as a results list.
-  const barTop = brandBar(x, W, H);
-  const rowH = 74;
-  const room = Math.floor((barTop - (heroH + 190)) / rowH);
-  const list = landed.slice(0, Math.max(1, room - (landed.length > room ? 1 : 0)));
-  list.forEach((p, i) => {
-    const y = heroH + 190 + i * rowH;
-    x.fillStyle = V.tick;
-    x.beginPath(); x.arc(84, y + 30, 18, 0, Math.PI * 2); x.fill();
-    x.strokeStyle = '#000'; x.lineWidth = 5; x.beginPath(); x.moveTo(75, y + 31); x.lineTo(82, y + 38); x.lineTo(94, y + 23); x.stroke();
-    const t = `${p.home_team} ${p.home_goals}–${p.away_goals} ${p.away_team}`.toUpperCase();
-    const fs = fitSize(x, t, (s) => CAPS(s), 50, 30, W - 180);
-    x.font = CAPS(fs); x.fillStyle = '#fff'; x.textAlign = 'left';
-    x.fillText(t, 124, y + 48);
-  });
-  if (landed.length > list.length) {
-    x.font = `700 30px ${BODY}`; x.fillStyle = C.chalk3;
-    x.fillText(`+${landed.length - list.length} more, swipe`, 124, heroH + 190 + list.length * rowH + 40);
-  }
-}
+/** The card's frame: left edge, width, and where it starts so it sits centred. */
+const WIDE = (s, w = 800) => `${w} ${s}px ${BODY}`;
 
 async function drawCall(x, W, H, p, i, n) {
-  const { top } = margins();
-  const [hc, ac] = await Promise.all([crest(p.home_team_id), crest(p.away_team_id)]);
-  x.fillStyle = C.pitch; x.fillRect(0, 0, W, H);
-  const barTop = brandBar(x, W, H);
-  const picH = Math.round((barTop - top) * 0.52);
-  const photo = photos.get(`p${p.id}`);
-  // To the top edge; the words keep inside the story's safe area.
-  if (photo) photoGround(x, 0, 0, W, top + picH, photo); else clubGround(x, 0, 0, W, top + picH, hc, ac);
+  const [hc, ac, lgImg] = await Promise.all([crest(p.home_team_id), crest(p.away_team_id), media('league', p.league_id)]);
+  background(x, W, H, photos.get(`p${p.id}`));
+  const cw = Math.round(W * 0.56); const X = Math.round((W - cw) / 2);
+  const headH = 230; const nameH = 70; const bandH = 250; const winH = size === 'story' ? 520 : 330; const footH = 120; const callH = 92;
+  const total = headH + bandH + winH + footH + callH;
+  const Y = Math.round((H - total) / 2);
+  const logoW = headH;
 
-  const lg = (leagues.get(Number(p.league_id)) ?? '').toUpperCase();
-  if (lg) pill(x, 60, top + 50, lg, { bg: '#fff', fg: '#000', size: 28 });
-  pill(x, W - 60, top + 50, `${i} OF ${n}`, { bg: 'rgba(0,0,0,0.6)', fg: '#fff', size: 28, align: 'right' });
+  // Head: the competition's badge, its name, the two crests.
+  frost(x, X, Y, cw, headH, 'rgba(255,255,255,0.86)');
+  if (lgImg) { const s = logoW * 0.62; x.drawImage(lgImg, X + (logoW - s) / 2, Y + (headH - s) / 2, s, s); }
+  const lg = leagues.get(Number(p.league_id)) ?? 'Full time';
+  x.fillStyle = '#111'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.font = `600 ${fitSize(x, lg, (s) => `600 ${s}px ${BODY}`, 36, 20, cw - logoW - 30)}px ${BODY}`;
+  x.fillText(lg, X + logoW + (cw - logoW) / 2, Y + nameH / 2 + 2);
+  const cs = 104; const midX = X + logoW + (cw - logoW) / 2; const cy = Y + nameH + (headH - nameH) / 2;
+  if (hc) x.drawImage(hc, midX - cs - 50, cy - cs / 2, cs, cs);
+  if (ac) x.drawImage(ac, midX + 50, cy - cs / 2, cs, cs);
+  x.fillStyle = '#333'; x.font = `500 30px ${BODY}`;
+  x.fillText('vs', midX, cy + 2);
+  cell(x, X, Y, logoW, headH); cell(x, X + logoW, Y, cw - logoW, nameH); cell(x, X + logoW, Y + nameH, cw - logoW, headH - nameH);
 
-  // The score, over the foot of the picture.
-  const rowH = 128;
-  const y0 = top + picH - rowH - 30;
-  pill(x, 60, y0 - 62, 'FULL TIME', { bg: '#fff', fg: '#000', size: 26 });
-  const hw = p.home_goals > p.away_goals; const aw = p.away_goals > p.home_goals;
-  scoreRow(x, 60, y0, W - 120, rowH, { name: p.home_team, goals: p.home_goals, crest: hc, colour: crestColour(hc), won: hw });
-  scoreRow(x, 60, y0 + rowH + 8, W - 120, rowH, { name: p.away_team, goals: p.away_goals, crest: ac, colour: crestColour(ac), won: aw });
+  // The score, on a band of the pitch's own green.
+  const by = Y + headH;
+  frost(x, X, by, cw, bandH, 'rgba(70,120,40,0.55)');
+  cell(x, X, by, cw, bandH);
+  const l1 = String(p.home_team).toUpperCase();
+  const l2 = `${p.home_goals}-${p.away_goals} ${String(p.away_team).toUpperCase()}`;
+  const fs = Math.min(fitSize(x, l1, (s) => WIDE(s, 500), 92, 40, cw - 60), fitSize(x, l2, (s) => WIDE(s, 500), 92, 40, cw - 60));
+  x.textAlign = 'left'; x.fillStyle = '#fff'; x.textBaseline = 'alphabetic';
+  x.font = WIDE(fs, 500);
+  x.fillText(l1, X + 30, by + bandH / 2 - 8);
+  const score = `${p.home_goals}-${p.away_goals} `;
+  x.font = WIDE(fs, 800); x.fillText(score, X + 30, by + bandH / 2 + fs - 4);
+  const sw = x.measureText(score).width;
+  x.font = WIDE(fs, 500); x.fillText(String(p.away_team).toUpperCase(), X + 30 + sw, by + bandH / 2 + fs - 4);
 
-  // Our call.
-  const cy = y0 + rowH * 2 + 8 + 90;
-  x.fillStyle = V.tick;
-  x.beginPath(); x.arc(84, cy - 12, 24, 0, Math.PI * 2); x.fill();
-  x.strokeStyle = '#000'; x.lineWidth = 6; x.beginPath(); x.moveTo(72, cy - 11); x.lineTo(81, cy - 2); x.lineTo(97, cy - 22); x.stroke();
-  x.textAlign = 'left'; x.fillStyle = V.tick; x.font = CAPS(44);
-  x.fillText('OUR CALL LANDED', 128, cy);
-  const call = callOf(p);
-  const fs = fitSize(x, call.name.toUpperCase(), (s) => CAPS(s), 104, 56, W - 120);
-  x.font = CAPS(fs); x.fillStyle = '#fff';
-  x.fillText(call.name.toUpperCase(), 60, cy + fs + 10);
-  x.font = `600 34px ${BODY}`; x.fillStyle = C.chalk2;
-  x.fillText(`${call.market ? `${call.market}, ` : ''}odds of ${odds(p.odds)}${p.bookmaker ? ` at ${p.bookmaker.charAt(0).toUpperCase()}${p.bookmaker.slice(1)}` : ''}`, 60, cy + fs + 64);
+  // The photo shows through; then the scorers and the competition stage.
+  const wy = by + bandH;
+  cell(x, X, wy, cw, winH);
+  const fy = wy + winH;
+  frost(x, X, fy, cw, footH, 'rgba(255,255,255,0.9)');
+  cell(x, X, fy, cw, footH);
   const sc = scorers(p);
-  const who = [...sc.home, ...sc.away].join(', ');
-  if (who && cy + fs + 120 < barTop - 20) {
-    x.font = `500 28px ${BODY}`; x.fillStyle = C.chalk3;
-    x.fillText(lines(x, who, W - 120)[0], 60, cy + fs + 112);
+  x.fillStyle = '#111'; x.font = `500 26px ${BODY}`; x.textBaseline = 'top';
+  x.textAlign = 'left'; sc.home.slice(0, 3).forEach((g, k) => x.fillText(g, X + 22, fy + 16 + k * 32));
+  x.textAlign = 'right'; sc.away.slice(0, 3).forEach((g, k) => x.fillText(g, X + cw - 22, fy + 16 + k * 32));
+  x.font = `600 24px ${BODY}`;
+  const tag = `${i} of ${n}`;
+  const tw = x.measureText(tag).width + 40;
+  x.fillStyle = '#9a9a9a'; x.beginPath(); x.roundRect(X + cw / 2 - tw / 2, fy + footH / 2 - 22, tw, 44, 22); x.fill();
+  x.fillStyle = '#fff'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(tag, X + cw / 2, fy + footH / 2 + 1);
+
+  // Our call, landed.
+  const ky = fy + footH;
+  frost(x, X, ky, cw, callH, 'rgba(17,17,17,0.88)');
+  cell(x, X, ky, cw, callH);
+  x.fillStyle = V.tick; x.beginPath(); x.arc(X + 44, ky + callH / 2, 20, 0, Math.PI * 2); x.fill();
+  x.strokeStyle = '#000'; x.lineWidth = 5; x.beginPath();
+  x.moveTo(X + 35, ky + callH / 2 + 1); x.lineTo(X + 42, ky + callH / 2 + 8); x.lineTo(X + 54, ky + callH / 2 - 8); x.stroke();
+  const call = callOf(p);
+  x.textAlign = 'left'; x.textBaseline = 'middle'; x.fillStyle = '#fff';
+  const oddsTxt = `odds of ${odds(p.odds)}`;
+  x.font = `700 26px ${BODY}`;
+  const ow = x.measureText(oddsTxt).width;
+  x.font = `800 ${fitSize(x, call.name, (s) => `800 ${s}px ${BODY}`, 32, 18, cw - 100 - ow - 30)}px ${BODY}`;
+  x.fillText(call.name, X + 80, ky + callH / 2 + 1);
+  x.textAlign = 'right'; x.font = `700 26px ${BODY}`; x.fillStyle = V.tick;
+  x.fillText(oddsTxt, X + cw - 22, ky + callH / 2 + 1);
+  x.textBaseline = 'alphabetic';
+
+  footer(x, W, H);
+}
+
+async function drawCover(x, W, H, d, counts, landed) {
+  background(x, W, H, photos.get('cover'));
+  const cw = Math.round(W * 0.62); const X = Math.round((W - cw) / 2);
+  const rows = landed.slice(0, 6);
+  const headH = 90; const bigH = 300; const rowH = 66; const listH = rows.length * rowH + (landed.length > rows.length ? 50 : 0) + 30;
+  const Y = Math.round((H - headH - bigH - listH) / 2);
+  frost(x, X, Y, cw, headH, 'rgba(255,255,255,0.88)'); cell(x, X, Y, cw, headH);
+  x.fillStyle = '#111'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = `700 34px ${BODY}`;
+  x.fillText(`${dayLong(d)}`, X + cw / 2, Y + headH / 2 + 2);
+  const by = Y + headH;
+  frost(x, X, by, cw, bigH, 'rgba(70,120,40,0.55)'); cell(x, X, by, cw, bigH);
+  x.fillStyle = '#fff'; x.textAlign = 'left'; x.textBaseline = 'alphabetic';
+  x.font = WIDE(150, 800); x.fillText(`${counts.landed}/${counts.graded}`, X + 34, by + 170);
+  x.font = WIDE(56, 500); x.fillText('CALLS LANDED', X + 34, by + 250);
+  const ly = by + bigH;
+  frost(x, X, ly, cw, listH, 'rgba(17,17,17,0.86)'); cell(x, X, ly, cw, listH);
+  rows.forEach((p, k) => {
+    const y = ly + 20 + k * rowH + rowH / 2;
+    x.fillStyle = V.tick; x.beginPath(); x.arc(X + 40, y, 15, 0, Math.PI * 2); x.fill();
+    x.strokeStyle = '#000'; x.lineWidth = 4; x.beginPath(); x.moveTo(X + 33, y); x.lineTo(X + 38, y + 6); x.lineTo(X + 48, y - 6); x.stroke();
+    const t = `${p.home_team} ${p.home_goals}-${p.away_goals} ${p.away_team}`;
+    x.fillStyle = '#fff'; x.textBaseline = 'middle';
+    x.font = `700 ${fitSize(x, t, (s) => `700 ${s}px ${BODY}`, 30, 18, cw - 100)}px ${BODY}`;
+    x.fillText(t, X + 72, y + 1);
+  });
+  if (landed.length > rows.length) {
+    x.fillStyle = C.chalk3; x.font = `600 24px ${BODY}`;
+    x.fillText(`+${landed.length - rows.length} more, swipe`, X + 72, ly + 20 + rows.length * rowH + 20);
   }
+  x.textBaseline = 'alphabetic';
+  footer(x, W, H);
 }
 
 async function drawEnd(x, W, H) {
-  const { top, bottom } = margins();
-  const photo = photos.get('end');
-  x.fillStyle = V.violet; x.fillRect(0, 0, W, H);
-  if (photo) {
-    photoGround(x, 0, 0, W, H, photo);
-    x.fillStyle = 'rgba(75,47,214,0.55)'; x.fillRect(0, 0, W, H);
-  }
-  x.textAlign = 'left'; x.fillStyle = '#fff';
-  const lines4 = ["TOMORROW'S", 'CALLS ARE', 'ALREADY UP.'];
-  lines4.forEach((l, k) => { x.font = CAPS(170); x.fillText(l, 56, top + 300 + k * 165); });
-  const by = top + 300 + lines4.length * 165 + 30;
-  x.font = CAPS(96);
-  const lw = x.measureText('LINK IN BIO').width + 60;
-  x.fillStyle = '#fff'; x.fillRect(60, by, lw, 130);
-  x.fillStyle = V.violetDeep; x.textBaseline = 'middle';
-  x.fillText('LINK IN BIO', 90, by + 68);
+  background(x, W, H, photos.get('end'));
+  const cw = Math.round(W * 0.62); const X = Math.round((W - cw) / 2);
+  const Y = Math.round(H / 2 - 260);
+  frost(x, X, Y, cw, 330, 'rgba(70,120,40,0.55)'); cell(x, X, Y, cw, 330);
+  x.fillStyle = '#fff'; x.textAlign = 'left';
+  x.font = WIDE(64, 500); x.fillText("TOMORROW'S", X + 34, Y + 110);
+  x.font = WIDE(64, 800); x.fillText('CALLS ARE UP', X + 34, Y + 190);
+  x.font = `500 28px ${BODY}`; x.fillText('Every one with the reason.', X + 34, Y + 270);
+  frost(x, X, Y + 330, cw, 120, 'rgba(255,255,255,0.92)'); cell(x, X, Y + 330, cw, 120);
+  x.fillStyle = '#111'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.font = WIDE(52, 800); x.fillText('LINK IN BIO', X + cw / 2, Y + 392);
   x.textBaseline = 'alphabetic';
-  x.fillStyle = '#fff'; x.font = `700 64px 'Offside Wordmark', ${BODY}`;
-  x.fillText('offside.win', 60, by + 240);
-  x.font = `500 26px ${BODY}`; x.fillStyle = 'rgba(255,255,255,0.75)';
-  x.fillText('18+. Gamble responsibly. BeGambleAware.org', 60, H - bottom - 60);
+  x.fillStyle = '#fff'; x.font = `500 22px ${BODY}`; x.textAlign = 'center';
+  x.shadowColor = 'rgba(0,0,0,0.6)'; x.shadowBlur = 10;
+  x.fillText('18+. Gamble responsibly. BeGambleAware.org', W / 2, Y + 500);
+  x.shadowBlur = 0;
+  footer(x, W, H);
 }
 
 /* ------------------------------------------------------------- captions */
