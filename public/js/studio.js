@@ -19,6 +19,7 @@
  */
 
 import { describe } from './lib/markets.js';
+import { findBanned } from './lib/vocabulary.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -241,227 +242,216 @@ function cover(x, img, X, Y, W, H, y = 0.5) {
 
 const margins = () => (size === 'story' ? { top: 220, bottom: 300 } : { top: 0, bottom: 0 });
 
-/** A pitch drawn from above, for a slide with no photo: mown stripes, the lines, a goal. */
-function pitchGround(x, W, H) {
-  const stripe = H / 9;
-  for (let i = 0; i < 10; i++) {
-    x.fillStyle = i % 2 ? '#2f6b26' : '#33722a';
-    x.save(); x.translate(W / 2, H / 2); x.rotate(-0.38);
-    x.fillRect(-W * 1.5, -H + i * stripe * 2 - H * 0.2, W * 3, stripe);
-    x.restore();
-  }
-  x.save();
-  x.strokeStyle = 'rgba(255,255,255,0.55)'; x.lineWidth = 8;
-  x.translate(W / 2, H / 2); x.rotate(-0.38); x.translate(-W / 2, -H / 2);
-  x.beginPath(); x.moveTo(-W, H * 0.08); x.lineTo(W * 2, H * 0.08); x.stroke();
-  x.strokeRect(W * 0.2, H * 0.08, W * 0.6, H * 0.2);
-  x.restore();
-}
-
-function background(x, W, H, photo) {
-  if (photo) cover(x, photo.img, 0, 0, W, H, photo.y); else pitchGround(x, W, H);
-}
-
 /*
- * The card, measured off the owner's reference (a 736 x 920 post, scaled):
- * half the width, centred, a quarter of the way down. Rows, top to bottom:
- * the competition's badge in a square cell beside its name on a white strip
- * and the two crests on a light one; the score on a band tinted with the
- * photo's own colour; an open window the photo shows through; a white foot
- * with the scorers either side and a grey pill between. Thin white lines
- * round every cell, a faint glass streak across it all, and the name of the
- * site, small, bottom-left. One face for the score and names (Michroma, the
- * free cut of that squared, extended look), a plain one for the rest.
+ * The look: football social with some noise in it. A photo darkened under
+ * grain; one heavy hook line on the cover, skewed, its second half on a
+ * green slab; on each call, WHAT WE SAID (the call, its odds, a line from the
+ * reasoning the site published before kick-off) against WHAT HAPPENED (the
+ * score on tilted bars, the scorers) with a LANDED stamp slapped across the
+ * corner. Big Shoulders for shouting, Michroma for labels and figures.
  */
-const FACE = "'Michroma', 'Archivo', sans-serif";
-const PLAIN = "'Archivo', system-ui, sans-serif";
-const K = 1080 / 736; // the reference's pixels to ours
-const LINE = 'rgba(255,255,255,0.95)';
+const HOT = { violet: '#7a5af8', green: '#3ddc84', black: '#0a0a0a' };
+const SHOUT = (s) => `800 ${s}px ${DISPLAY}`;
+const LABEL = (s) => `400 ${s}px 'Michroma', ${BODY}`;
 
-function cardGeom(W, H) {
-  const cw = Math.round(W * 0.5); const X = Math.round((W - cw) / 2);
-  const rows = { title: 36 * K, crests: 75 * K, band: 127 * K, win: 192 * K, foot: 45 * K };
-  const total = rows.title + rows.crests + rows.band + rows.win + rows.foot;
-  const Y = Math.round(size === 'story' ? (H - total) / 2 - 40 : H * 0.241);
-  return { X, Y, cw, logoW: Math.round(cw * 0.266), rows, total };
-}
-
-/** The photo's own colour under a box, darkened, for the band's tint. */
-function tintUnder(x, X, Y, w, h) {
-  try {
-    const d = x.getImageData(X, Y, w, h).data;
-    let r = 0; let g = 0; let b = 0; let n = 0;
-    for (let i = 0; i < d.length; i += 64) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
-    return `rgba(${Math.round(r / n * 0.7)}, ${Math.round(g / n * 0.78)}, ${Math.round(b / n * 0.6)}, 0.78)`;
-  } catch { return 'rgba(60,110,40,0.62)'; }
-}
-
-function stroke(x, X, Y, w, h) { x.strokeStyle = LINE; x.lineWidth = 2; x.strokeRect(X + 1, Y + 1, w - 2, h - 2); }
-
-/** The glass streak: a soft band of light across the card on the diagonal. */
-function gloss(x, X, Y, w, h) {
-  x.save();
-  x.beginPath(); x.rect(X, Y, w, h); x.clip();
-  const g = x.createLinearGradient(X, Y + h * 0.55, X + w, Y + h * 0.15);
-  g.addColorStop(0.35, 'rgba(255,255,255,0)'); g.addColorStop(0.5, 'rgba(255,255,255,0.16)'); g.addColorStop(0.65, 'rgba(255,255,255,0)');
-  x.fillStyle = g; x.fillRect(X, Y, w, h);
+function pitchGround(x, W, H) {
+  const g = x.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#16351a'); g.addColorStop(1, '#0a0f0a');
+  x.fillStyle = g; x.fillRect(0, 0, W, H);
+  x.save(); x.globalAlpha = 0.08; x.strokeStyle = '#fff'; x.lineWidth = 6;
+  x.beginPath(); x.arc(W / 2, H * 0.55, W * 0.3, 0, Math.PI * 2); x.stroke();
+  x.beginPath(); x.moveTo(0, H * 0.55); x.lineTo(W, H * 0.55); x.stroke();
   x.restore();
 }
 
-/** Score-face text, its weight thickened by a stroke of its own colour (Michroma has one weight). */
-function faceText(x, text, X, Y, size, bold = false) {
-  x.font = `400 ${size}px ${FACE}`;
-  x.fillText(text, X, Y);
-  if (bold) { x.lineWidth = size * 0.05; x.strokeStyle = x.fillStyle; x.strokeText(text, X, Y); }
+let grainTile = null;
+function grain(x, W, H, alpha = 0.12) {
+  if (!grainTile) {
+    grainTile = document.createElement('canvas'); grainTile.width = grainTile.height = 256;
+    const t = grainTile.getContext('2d'); const d = t.createImageData(256, 256);
+    for (let i = 0; i < d.data.length; i += 4) { const v = Math.random() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; }
+    t.putImageData(d, 0, 0);
+  }
+  x.save(); x.globalAlpha = alpha; x.globalCompositeOperation = 'overlay';
+  x.fillStyle = x.createPattern(grainTile, 'repeat'); x.fillRect(0, 0, W, H); x.restore();
 }
-function faceWidth(x, text, size) { x.font = `400 ${size}px ${FACE}`; return x.measureText(text).width; }
 
-function brand(x, W, H) {
+/** The photo to the edges, pushed dark so the type can shout over it. */
+function background(x, W, H, photo, dark = 0.55) {
+  if (photo) cover(x, photo.img, 0, 0, W, H, photo.y); else pitchGround(x, W, H);
+  const g = x.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, `rgba(10,10,10,${dark})`); g.addColorStop(0.5, `rgba(10,10,10,${dark * 0.7})`); g.addColorStop(1, 'rgba(10,10,10,0.92)');
+  x.fillStyle = g; x.fillRect(0, 0, W, H);
+  grain(x, W, H);
+}
+
+/** Text in the shouting face, skewed forward. */
+function shout(x, text, X, Y, size, { fill = '#fff', skew = -0.14 } = {}) {
+  x.save(); x.translate(X, Y); x.transform(1, 0, skew, 1, 0, 0);
+  x.font = SHOUT(size); x.fillStyle = fill; x.fillText(text, 0, 0);
+  x.restore();
+}
+
+/** The site's name as a sticker: violet, tilted, slapped on. */
+function sticker(x, X, Y, angle = -0.08) {
+  x.save(); x.translate(X, Y); x.rotate(angle);
+  x.font = `700 34px 'Offside Wordmark', ${BODY}`;
+  const w = x.measureText('offside.win').width + 40;
+  x.fillStyle = HOT.violet; x.fillRect(-w / 2, -32, w, 64);
+  x.fillStyle = '#fff'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText('offside.win', 0, 2);
+  x.restore(); x.textAlign = 'left'; x.textBaseline = 'alphabetic';
+}
+
+/** The LANDED stamp: a thick green frame, tilted, the word and a tick. */
+function stamp(x, cx, cy, text = 'LANDED', size = 110, angle = -0.2) {
+  x.save(); x.translate(cx, cy); x.rotate(angle);
+  x.font = SHOUT(size);
+  const tw = x.measureText(text).width; const w = tw + size * 1.4; const h = size * 1.15;
+  x.fillStyle = 'rgba(10,10,10,0.55)'; x.fillRect(-w / 2, -h / 2, w, h);
+  x.strokeStyle = HOT.green; x.lineWidth = 10; x.strokeRect(-w / 2, -h / 2, w, h);
+  x.fillStyle = HOT.green; x.textBaseline = 'middle'; x.textAlign = 'left';
+  x.fillText(text, -w / 2 + size * 0.3, 4);
+  const tx = w / 2 - size * 0.62; const r = size * 0.3;
+  x.beginPath(); x.arc(tx, 0, r, 0, Math.PI * 2); x.fill();
+  x.strokeStyle = HOT.black; x.lineWidth = size * 0.08; x.beginPath();
+  x.moveTo(tx - r * 0.45, 0); x.lineTo(tx - r * 0.1, r * 0.38); x.lineTo(tx + r * 0.5, -r * 0.4); x.stroke();
+  x.restore(); x.textAlign = 'left'; x.textBaseline = 'alphabetic';
+}
+
+function tiny(x, W, H) {
   const { bottom } = margins();
-  x.font = `600 ${Math.round(11 * K)}px ${PLAIN}`; x.fillStyle = '#fff'; x.textAlign = 'left'; x.textBaseline = 'alphabetic';
-  x.shadowColor = 'rgba(0,0,0,0.45)'; x.shadowBlur = 6;
-  x.fillText('OFFSIDE.WIN', Math.round(36 * K), H - bottom - Math.round(30 * K));
-  x.shadowBlur = 0;
+  x.font = LABEL(20); x.fillStyle = 'rgba(255,255,255,0.85)'; x.textBaseline = 'alphabetic';
+  x.textAlign = 'left'; x.fillText('OFFSIDE.WIN', 60, H - bottom - 50);
+  x.textAlign = 'right'; x.fillText('LINK IN BIO', W - 60, H - bottom - 50);
+  x.textAlign = 'left';
 }
-
 function credit(x, W, H, photo) {
   if (!photo?.credit) return;
   const { bottom } = margins();
-  x.font = `400 ${Math.round(8 * K)}px ${PLAIN}`; x.textAlign = 'right'; x.fillStyle = 'rgba(255,255,255,0.7)';
-  x.fillText(photo.credit, W - Math.round(36 * K), H - bottom - Math.round(30 * K));
+  x.font = `400 15px ${BODY}`; x.textAlign = 'right'; x.fillStyle = 'rgba(255,255,255,0.55)';
+  x.fillText(photo.credit, W - 60, H - bottom - 22); x.textAlign = 'left';
 }
 
-/** The card's shared top: badge cell, title strip, the middle row (crests or anything). */
-function cardTop(x, g, { badge, title, middle }) {
-  const { X, Y, cw, logoW, rows } = g;
-  const topH = rows.title + rows.crests;
-  x.fillStyle = 'rgba(255,255,255,0.96)'; x.fillRect(X, Y, logoW, topH);
-  if (badge) { const s = Math.min(logoW, topH) * 0.66; x.drawImage(badge, X + (logoW - s) / 2, Y + (topH - s) / 2, s, s); }
-  x.fillStyle = 'rgba(255,255,255,0.96)'; x.fillRect(X + logoW, Y, cw - logoW, rows.title);
-  x.fillStyle = '#1b1b1b'; x.textAlign = 'left'; x.textBaseline = 'middle';
-  let fs = Math.round(16 * K);
-  x.font = `500 ${fs}px ${PLAIN}`;
-  while (fs > 12 && x.measureText(title).width > cw - logoW - 36) { fs--; x.font = `500 ${fs}px ${PLAIN}`; }
-  x.fillText(title, X + logoW + Math.round(13 * K), Y + rows.title / 2 + 1);
-  x.fillStyle = 'rgba(255,255,255,0.72)'; x.fillRect(X + logoW, Y + rows.title, cw - logoW, rows.crests);
-  middle?.(X + logoW, Y + rows.title, cw - logoW, rows.crests);
-  x.textBaseline = 'alphabetic';
-  stroke(x, X, Y, logoW, topH); stroke(x, X + logoW, Y, cw - logoW, rows.title); stroke(x, X + logoW, Y + rows.title, cw - logoW, rows.crests);
-  return Y + topH;
+/** The sharpest line of what we wrote before kick-off: short, plain, safe to show. */
+function quoteOf(p) {
+  const all = `${p.narrative ?? ''} ${p.why ?? ''}`.split(/(?<=[.!?])\s+/).map((t) => t.trim());
+  const ok = all.filter((t) => {
+    const n = t.split(/\s+/).length;
+    return n >= 6 && n <= 20 && !/odds|call to fail|at \d/i.test(t) && !findBanned(t) && !/\d+\.\d/.test(t);
+  });
+  ok.sort((a, b) => a.length - b.length);
+  return ok.find((t) => t.includes(p.home_team) || t.includes(p.away_team)) ?? ok[0] ?? null;
 }
 
-/** The score band: two lines in the score face, left-aligned, on the photo's own colour. */
-function band(x, g, y, line1, line2Bold, line2Rest) {
-  const { X, cw, rows } = g;
-  const tint = tintUnder(x, X, y, cw, rows.band);
-  x.fillStyle = tint; x.fillRect(X, y, cw, rows.band);
-  const pad = Math.round(14 * K);
-  let fs = Math.round(36 * K);
-  const widest = () => Math.max(faceWidth(x, line1, fs), faceWidth(x, `${line2Bold} ${line2Rest}`, fs));
-  while (fs > 16 && widest() > cw - pad * 2) fs--;
-  x.fillStyle = '#fff'; x.textAlign = 'left'; x.textBaseline = 'alphabetic';
-  const mid = y + rows.band / 2;
-  faceText(x, line1, X + pad, mid - fs * 0.18, fs);
-  faceText(x, line2Bold, X + pad, mid + fs * 1.02, fs, true);
-  const bw = faceWidth(x, `${line2Bold} `, fs);
-  faceText(x, line2Rest, X + pad + bw, mid + fs * 1.02, fs);
-  stroke(x, X, y, cw, rows.band);
-  return y + rows.band;
-}
+const HOOK = (c, landed) => {
+  if (landed.some((p) => Number(p.odds) >= 2)) return ['NOBODY SAW IT.', 'WE DID.'];
+  if (c.landed === c.graded) return ["WE DON'T", 'MISS.'];
+  if (c.landed / c.graded >= 0.7) return ['TOLD', 'YOU.'];
+  return ['STILL', 'COOKING.'];
+};
 
-function pillAt(x, cx, cy, text, { bg = 'rgba(150,150,150,0.85)', fg = '#fff' } = {}) {
-  x.font = `500 ${Math.round(12 * K)}px ${PLAIN}`;
-  const w = x.measureText(text).width + 28 * K; const h = 22 * K;
-  x.fillStyle = bg; x.beginPath(); x.roundRect(cx - w / 2, cy - h / 2, w, h, h / 2); x.fill();
-  x.fillStyle = fg; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(text, cx, cy + 1);
+async function drawCover(x, W, H, d, counts, landed) {
+  const { top, bottom } = margins();
+  const photo = await dayPhoto('cover', landed, 0);
+  background(x, W, H, photo, 0.45);
+  sticker(x, W - 190, top + 90);
+  x.font = LABEL(24); x.fillStyle = 'rgba(255,255,255,0.8)';
+  x.fillText(dayLong(d).toUpperCase(), 64, top + 100);
+  const [one, two] = HOOK(counts, landed);
+  const base = H * 0.52;
+  let s1 = 230; x.font = SHOUT(s1); while (x.measureText(one).width > W - 140 && s1 > 120) { s1 -= 6; x.font = SHOUT(s1); }
+  shout(x, one, 64, base, s1);
+  let s2 = s1; x.font = SHOUT(s2); while (x.measureText(two).width > W - 200 && s2 > 120) { s2 -= 6; x.font = SHOUT(s2); }
+  const w2 = x.measureText(two).width;
+  x.save(); x.translate(56, base + 30); x.transform(1, 0, -0.14, 1, 0, 0);
+  x.fillStyle = HOT.green; x.fillRect(0, 0, w2 + 50, s2 * 0.95); x.restore();
+  shout(x, two, 80, base + 30 + s2 * 0.82, s2, { fill: HOT.black });
+  stamp(x, W * 0.68, H - bottom - 260, `${counts.landed}/${counts.graded} LANDED`, 74, -0.1);
+  x.font = LABEL(26); x.fillStyle = '#fff'; x.textAlign = 'right';
+  x.fillText('SWIPE →', W - 64, H - bottom - 110); x.textAlign = 'left';
+  tiny(x, W, H); credit(x, W, H, photo);
 }
 
 async function drawCall(x, W, H, p, i, n) {
-  const [hc, ac, lgImg] = await Promise.all([crest(p.home_team_id), crest(p.away_team_id), media('league', p.league_id)]);
+  const { top, bottom } = margins();
+  const [hc, ac] = await Promise.all([crest(p.home_team_id), crest(p.away_team_id)]);
   const photo = await photoOf(`p${p.id}`, p);
-  background(x, W, H, photo);
-  const g = cardGeom(W, H);
-  const lg = leagues.get(Number(p.league_id)) ?? 'Full time';
-  let y = cardTop(x, g, {
-    badge: lgImg, title: lg,
-    middle: (mx, my, mw, mh) => {
-      const s = mh * 0.62; const cx = mx + mw / 2; const cy = my + mh / 2;
-      if (hc) x.drawImage(hc, cx - s - 38 * K, cy - s / 2, s, s);
-      if (ac) x.drawImage(ac, cx + 38 * K, cy - s / 2, s, s);
-      x.fillStyle = '#444'; x.font = `400 ${Math.round(14 * K)}px ${PLAIN}`; x.textAlign = 'center'; x.textBaseline = 'middle';
-      x.fillText('VS', cx, cy + 1);
-    },
-  });
-  y = band(x, g, y, String(p.home_team).toUpperCase(), `${p.home_goals}-${p.away_goals}`, String(p.away_team).toUpperCase());
-  stroke(x, g.X, y, g.cw, g.rows.win);
-  y += g.rows.win;
-  // The foot: who scored, each side; our call between.
-  x.fillStyle = 'rgba(255,255,255,0.96)'; x.fillRect(g.X, y, g.cw, g.rows.foot);
-  const sc = scorers(p);
-  x.fillStyle = '#1b1b1b'; x.font = `400 ${Math.round(12 * K)}px ${PLAIN}`; x.textBaseline = 'top';
-  const lh = 14 * K;
-  x.textAlign = 'left'; sc.home.slice(0, 2).forEach((t, k) => x.fillText(t, g.X + 10 * K, y + 6 * K + k * lh));
-  x.textAlign = 'right'; sc.away.slice(0, 2).forEach((t, k) => x.fillText(t, g.X + g.cw - 10 * K, y + 6 * K + k * lh));
-  pillAt(x, g.X + g.cw / 2, y + g.rows.foot / 2, 'Called it', { bg: 'rgba(61,180,104,0.9)' });
-  stroke(x, g.X, y, g.cw, g.rows.foot);
-  gloss(x, g.X, g.Y, g.cw, g.total);
-  x.textBaseline = 'alphabetic';
-  brand(x, W, H);
-  credit(x, W, H, photo);
-}
+  background(x, W, H, photo, 0.62);
+  const lg = (leagues.get(Number(p.league_id)) ?? '').toUpperCase();
+  x.font = LABEL(20); x.fillStyle = 'rgba(255,255,255,0.75)';
+  x.fillText(`${lg}${lg ? '   ' : ''}${i}/${n}`, 64, top + 80);
+  sticker(x, W - 170, top + 70, -0.06);
 
-async function drawCover(x, W, H, d, counts, landed) {
-  const photo = await dayPhoto('cover', landed, 0);
-  background(x, W, H, photo);
-  const g = cardGeom(W, H);
-  let y = cardTop(x, g, {
-    badge: null, title: 'offside.win results',
-    middle: (mx, my, mw, mh) => {
-      x.fillStyle = '#1b1b1b'; x.font = `500 ${Math.round(15 * K)}px ${PLAIN}`; x.textAlign = 'center'; x.textBaseline = 'middle';
-      x.fillText(dayLong(d), mx + mw / 2, my + mh / 2);
-    },
-  });
-  // The offside mark in the badge cell: a ball, the line through it.
-  const cx = g.X + g.logoW / 2; const cy = g.Y + (g.rows.title + g.rows.crests) / 2; const r = g.logoW * 0.24;
-  x.lineWidth = r * 0.22; x.strokeStyle = '#1b1b1b'; x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.stroke();
-  x.fillStyle = C.violet; x.fillRect(cx + r * 0.25, cy - r * 1.35, r * 0.16, r * 2.7);
-  y = band(x, g, y, 'CALLS LANDED', `${counts.landed}/${counts.graded}`, '');
-  stroke(x, g.X, y, g.cw, g.rows.win);
-  y += g.rows.win;
-  x.fillStyle = 'rgba(255,255,255,0.96)'; x.fillRect(g.X, y, g.cw, g.rows.foot);
-  pillAt(x, g.X + g.cw / 2, y + g.rows.foot / 2, `${landed.length} on the next slides`);
-  stroke(x, g.X, y, g.cw, g.rows.foot);
-  gloss(x, g.X, g.Y, g.cw, g.total);
-  brand(x, W, H);
-  credit(x, W, H, photo);
+  // WHAT WE SAID.
+  let y = top + 200;
+  x.font = LABEL(26); x.fillStyle = HOT.violet; x.fillText('WHAT WE SAID', 64, y);
+  const call = callOf(p).name.toUpperCase();
+  let cs = 132; x.font = SHOUT(cs); while (x.measureText(call).width > W - 150 && cs > 70) { cs -= 4; x.font = SHOUT(cs); }
+  y += cs + 6; shout(x, call, 64, y, cs);
+  y += 74; x.font = LABEL(48); x.fillStyle = HOT.green; x.fillText(`ODDS OF ${odds(p.odds)}`, 64, y);
+  const q = quoteOf(p);
+  if (q) {
+    x.font = `600 italic 34px ${BODY}`;
+    const ls = lines(x, `“${q}”`, W - 170).slice(0, 3);
+    y += 40;
+    x.fillStyle = HOT.violet; x.fillRect(64, y, 8, ls.length * 46 + 6);
+    x.fillStyle = 'rgba(255,255,255,0.92)';
+    ls.forEach((l, k) => x.fillText(l, 92, y + 36 + k * 46));
+    y += ls.length * 46 + 6;
+  }
+
+  // The hinge: WE SAID. THEY DID.
+  y += 40;
+  x.save(); x.translate(0, y); x.rotate(-0.035);
+  x.fillStyle = HOT.violet; x.fillRect(-20, 0, W + 40, 70);
+  x.fillStyle = '#fff'; x.font = LABEL(30); x.textBaseline = 'middle';
+  x.fillText('WE SAID IT.  THEY DID IT.  WE SAID IT.  THEY DID IT.', 40, 37);
+  x.restore(); x.textBaseline = 'alphabetic';
+
+  // WHAT HAPPENED.
+  y += 140;
+  x.font = LABEL(26); x.fillStyle = HOT.green; x.fillText('WHAT HAPPENED', 64, y);
+  y += 26;
+  const rowH = 104;
+  const row = (team, goals, img, yy, won) => {
+    x.save(); x.translate(64, yy); x.transform(1, 0, -0.06, 1, 0, 0);
+    x.fillStyle = 'rgba(10,10,10,0.82)'; x.fillRect(0, 0, W - 128, rowH);
+    x.fillStyle = won ? HOT.green : 'rgba(255,255,255,0.14)'; x.fillRect(W - 128 - rowH, 0, rowH, rowH);
+    x.restore();
+    if (img) x.drawImage(img, 86, yy + 17, 70, 70);
+    let ns = 72; x.font = SHOUT(ns); const nm = String(team).toUpperCase();
+    while (x.measureText(nm).width > W - 128 - rowH - 150 && ns > 40) { ns -= 2; x.font = SHOUT(ns); }
+    x.fillStyle = '#fff'; x.textBaseline = 'middle'; x.fillText(nm, 176, yy + rowH / 2 + 4);
+    x.font = SHOUT(84); x.textAlign = 'center'; x.fillStyle = won ? HOT.black : '#fff';
+    x.fillText(String(goals), 64 + W - 128 - rowH / 2 - 4, yy + rowH / 2 + 5);
+    x.textAlign = 'left'; x.textBaseline = 'alphabetic';
+  };
+  row(p.home_team, p.home_goals, hc, y, p.home_goals > p.away_goals);
+  row(p.away_team, p.away_goals, ac, y + rowH + 8, p.away_goals > p.home_goals);
+  y += rowH * 2 + 8;
+  const sc = scorers(p); const who = [...sc.home, ...sc.away].join(', ');
+  if (who) { x.font = `500 28px ${BODY}`; x.fillStyle = 'rgba(255,255,255,0.75)'; x.fillText(lines(x, who, W - 128)[0], 64, y + 44); }
+  stamp(x, W - 290, Math.min(y + 170, H - margins().bottom - 170), 'LANDED', 104, -0.16);
+  tiny(x, W, H); credit(x, W, H, photo);
 }
 
 async function drawEnd(x, W, H, landed) {
+  const { top, bottom } = margins();
   const photo = await dayPhoto('end', landed, 1);
-  background(x, W, H, photo);
-  const g = cardGeom(W, H);
-  let y = cardTop(x, g, {
-    badge: null, title: 'offside.win',
-    middle: (mx, my, mw, mh) => {
-      x.fillStyle = '#1b1b1b'; x.font = `500 ${Math.round(15 * K)}px ${PLAIN}`; x.textAlign = 'center'; x.textBaseline = 'middle';
-      x.fillText('Every call, with the reason', mx + mw / 2, my + mh / 2);
-    },
-  });
-  const cx = g.X + g.logoW / 2; const cy = g.Y + (g.rows.title + g.rows.crests) / 2; const r = g.logoW * 0.24;
-  x.lineWidth = r * 0.22; x.strokeStyle = '#1b1b1b'; x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.stroke();
-  x.fillStyle = C.violet; x.fillRect(cx + r * 0.25, cy - r * 1.35, r * 0.16, r * 2.7);
-  y = band(x, g, y, "TOMORROW'S", 'CALLS', 'ARE UP');
-  stroke(x, g.X, y, g.cw, g.rows.win);
-  y += g.rows.win;
-  x.fillStyle = 'rgba(255,255,255,0.96)'; x.fillRect(g.X, y, g.cw, g.rows.foot);
-  pillAt(x, g.X + g.cw / 2, y + g.rows.foot / 2, 'Link in bio', { bg: 'rgba(122,90,248,0.95)' });
-  x.fillStyle = '#555'; x.font = `400 ${Math.round(9 * K)}px ${PLAIN}`; x.textAlign = 'left'; x.textBaseline = 'middle';
-  x.fillText('18+ BeGambleAware.org', g.X + 10 * K, y + g.rows.foot / 2);
-  stroke(x, g.X, y, g.cw, g.rows.foot);
-  gloss(x, g.X, g.Y, g.cw, g.total);
-  x.textBaseline = 'alphabetic';
-  brand(x, W, H);
-  credit(x, W, H, photo);
+  background(x, W, H, photo, 0.6);
+  sticker(x, W - 190, top + 90);
+  const base = H * 0.36;
+  ['TOMORROW\'S', 'CALLS ARE', 'ALREADY UP.'].forEach((l, k) => shout(x, l, 64, base + k * 175, 180, { fill: k === 2 ? HOT.green : '#fff' }));
+  const by = base + 2 * 175 + 90;
+  x.save(); x.translate(64, by); x.rotate(-0.03);
+  x.font = SHOUT(96); const lw = x.measureText('LINK IN BIO').width + 80;
+  x.fillStyle = '#fff'; x.fillRect(0, 0, lw, 130);
+  x.fillStyle = HOT.black; x.textBaseline = 'middle'; x.fillText('LINK IN BIO', 40, 70);
+  x.restore(); x.textBaseline = 'alphabetic';
+  x.font = `500 24px ${BODY}`; x.fillStyle = 'rgba(255,255,255,0.7)';
+  x.fillText('18+. Gamble responsibly. BeGambleAware.org', 64, H - bottom - 110);
+  tiny(x, W, H); credit(x, W, H, photo);
 }
 
 /* ------------------------------------------------------------- captions */
