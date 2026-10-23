@@ -116,6 +116,79 @@ const media = (kind, id) => {
 };
 const crest = (id) => media('team', id);
 
+/*
+ * Photographs found for the owner: Openverse searches Flickr and Wikimedia
+ * for pictures whose licence allows commercial use (CC0, CC BY, CC BY-SA),
+ * best match first ("Home Away", then each club). The licence asks for the
+ * photographer's credit, which goes on the slide in small print. They come
+ * through the Worker (/media/cc) so the slide can be saved. "Next photo"
+ * steps through the rest; a photo of the owner's own always wins.
+ */
+const found = new Map(); // slide key -> { list, i }
+// Openverse can take seconds a search: each is asked once, all at the same time.
+const searches = new Map();
+const search = (q) => {
+  if (!searches.has(q)) {
+    searches.set(q, fetch(`https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&license_type=commercial&page_size=12`)
+      .then((r) => r.json()).catch(() => null));
+  }
+  return searches.get(q);
+};
+async function searchPhotos(queries) {
+  const seen = new Set(); const out = [];
+  const pages = await Promise.all(queries.map(search));
+  for (const d of pages) {
+    try {
+      for (const it of d?.results ?? []) {
+        if (seen.has(it.id) || !it.url || Number(it.width) < 700) continue;
+        if (!/^https:\/\/(live\.staticflickr\.com|upload\.wikimedia\.org)\//.test(it.url)) continue;
+        seen.add(it.id);
+        const lic = `CC ${String(it.license ?? '').toUpperCase()} ${it.license_version ?? ''}`.trim();
+        out.push({ src: `/media/cc?u=${encodeURIComponent(it.url)}`, credit: `Photo: ${String(it.creator ?? 'unknown').slice(0, 40)}, ${lic}` });
+      }
+    } catch { /* no photos is fine */ }
+  }
+  return out.slice(0, 10);
+}
+async function foundPhoto(key, queries) {
+  if (!found.has(key)) found.set(key, { list: await searchPhotos(queries), i: 0 });
+  const f = found.get(key);
+  for (let tries = 0; tries < f.list.length; tries++) {
+    const pick = f.list[f.i % f.list.length];
+    const img = await image(pick.src);
+    if (img) return { img, y: 0.4, credit: pick.credit };
+    f.i++;
+  }
+  return null;
+}
+const queriesFor = (p) => [`${p.home_team} ${p.away_team}`, `${p.home_team} football`, `${p.away_team} football`];
+/** For the cover and the last slide: the first of the day's matches with a photo found. */
+async function dayPhoto(key, landed, from = 0) {
+  if (photos.has(key)) return photos.get(key);
+  for (let k = 0; k < landed.length; k++) {
+    const p = landed[(from + k) % landed.length];
+    const ph = await foundPhoto(`${key}:${p.id}`, queriesFor(p));
+    if (ph) return ph;
+  }
+  return null;
+}
+
+/** The photo a slide shows: the owner's, else one found for it. */
+async function photoOf(key, p) {
+  if (photos.has(key)) return photos.get(key);
+  return p ? foundPhoto(key, queriesFor(p)) : null;
+}
+
+/** The photographer's credit, small, where a found photo is used. */
+function credit(x, W, H, photo) {
+  if (!photo?.credit) return;
+  const { bottom } = margins();
+  x.font = `500 18px ${BODY}`; x.textAlign = 'right'; x.fillStyle = 'rgba(255,255,255,0.8)';
+  x.shadowColor = 'rgba(0,0,0,0.7)'; x.shadowBlur = 8;
+  x.fillText(photo.credit, W - 56, H - bottom - 20);
+  x.shadowBlur = 0;
+}
+
 /** A club's colour from its crest: the most common strong colour in it. */
 function crestColour(img) {
   if (!img) return null;
@@ -182,13 +255,13 @@ const margins = () => (size === 'story' ? { top: 220, bottom: 300 } : { top: 0, 
 function pitchGround(x, W, H) {
   const stripe = H / 9;
   for (let i = 0; i < 10; i++) {
-    x.fillStyle = i % 2 ? '#3f8a2f' : '#47963a';
+    x.fillStyle = i % 2 ? '#2f6b26' : '#33722a';
     x.save(); x.translate(W / 2, H / 2); x.rotate(-0.38);
     x.fillRect(-W * 1.5, -H + i * stripe * 2 - H * 0.2, W * 3, stripe);
     x.restore();
   }
   x.save();
-  x.strokeStyle = 'rgba(255,255,255,0.85)'; x.lineWidth = 10;
+  x.strokeStyle = 'rgba(255,255,255,0.55)'; x.lineWidth = 8;
   x.translate(W / 2, H / 2); x.rotate(-0.38); x.translate(-W / 2, -H / 2);
   x.beginPath(); x.moveTo(-W, H * 0.08); x.lineTo(W * 2, H * 0.08); x.stroke();
   x.strokeRect(W * 0.2, H * 0.08, W * 0.6, H * 0.2);
@@ -196,7 +269,7 @@ function pitchGround(x, W, H) {
   x.beginPath(); x.arc(W / 2, H * 0.28, W * 0.12, 0.25, Math.PI - 0.25); x.stroke();
   x.restore();
   const v = x.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
-  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.35)');
+  v.addColorStop(0, 'rgba(0,0,0,0.1)'); v.addColorStop(1, 'rgba(0,0,0,0.55)');
   x.fillStyle = v; x.fillRect(0, 0, W, H);
 }
 
@@ -240,7 +313,8 @@ const WIDE = (s, w = 800) => `${w} ${s}px ${BODY}`;
 
 async function drawCall(x, W, H, p, i, n) {
   const [hc, ac, lgImg] = await Promise.all([crest(p.home_team_id), crest(p.away_team_id), media('league', p.league_id)]);
-  background(x, W, H, photos.get(`p${p.id}`));
+  const photo = await photoOf(`p${p.id}`, p);
+  background(x, W, H, photo);
   const cw = Math.round(W * 0.56); const X = Math.round((W - cw) / 2);
   const headH = 230; const nameH = 70; const bandH = 250; const winH = size === 'story' ? 520 : 330; const footH = 120; const callH = 92;
   const total = headH + bandH + winH + footH + callH;
@@ -311,11 +385,13 @@ async function drawCall(x, W, H, p, i, n) {
   x.fillText(oddsTxt, X + cw - 22, ky + callH / 2 + 1);
   x.textBaseline = 'alphabetic';
 
+  credit(x, W, H, photo);
   footer(x, W, H);
 }
 
 async function drawCover(x, W, H, d, counts, landed) {
-  background(x, W, H, photos.get('cover'));
+  const photo = await dayPhoto('cover', landed, 0);
+  background(x, W, H, photo);
   const cw = Math.round(W * 0.62); const X = Math.round((W - cw) / 2);
   const rows = landed.slice(0, 6);
   const headH = 90; const bigH = 300; const rowH = 66; const listH = rows.length * rowH + (landed.length > rows.length ? 50 : 0) + 30;
@@ -344,11 +420,13 @@ async function drawCover(x, W, H, d, counts, landed) {
     x.fillText(`+${landed.length - rows.length} more, swipe`, X + 72, ly + 20 + rows.length * rowH + 20);
   }
   x.textBaseline = 'alphabetic';
+  credit(x, W, H, photo);
   footer(x, W, H);
 }
 
-async function drawEnd(x, W, H) {
-  background(x, W, H, photos.get('end'));
+async function drawEnd(x, W, H, landed) {
+  const photo = await dayPhoto('end', landed, 1);
+  background(x, W, H, photo);
   const cw = Math.round(W * 0.62); const X = Math.round((W - cw) / 2);
   const Y = Math.round(H / 2 - 260);
   frost(x, X, Y, cw, 330, 'rgba(70,120,40,0.55)'); cell(x, X, Y, cw, 330);
@@ -364,6 +442,7 @@ async function drawEnd(x, W, H) {
   x.shadowColor = 'rgba(0,0,0,0.6)'; x.shadowBlur = 10;
   x.fillText('18+. Gamble responsibly. BeGambleAware.org', W / 2, Y + 500);
   x.shadowBlur = 0;
+  credit(x, W, H, photo);
   footer(x, W, H);
 }
 
@@ -402,13 +481,15 @@ async function slidesFor(d) {
     await draw(c.getContext('2d'));
     out.push({ key, label, canvas: c });
   };
+  // Every match's photo search at once, before anything is drawn.
+  await Promise.all(landed.flatMap((p) => queriesFor(p).map(search)));
   await make('cover', 'Cover', (x) => drawCover(x, W, H, d, counts, landed));
   let i = 0;
   for (const p of landed) {
     i++;
     await make(`p${p.id}`, `${p.home_team} v ${p.away_team}`, (x) => drawCall(x, W, H, p, i, landed.length));
   }
-  await make('end', 'Last slide', (x) => drawEnd(x, W, H));
+  await make('end', 'Last slide', (x) => drawEnd(x, W, H, landed));
   return { slides: out, counts, landed };
 }
 
@@ -448,6 +529,7 @@ async function render(main) {
         <label class="btn btn-quiet btn-sm">${photos.has(s.key) ? 'Change photo' : 'Add photo'}<input type="file" accept="image/*" hidden data-photo="${s.key}"></label>
         ${photos.has(s.key) ? `<input type="range" min="0" max="100" value="${Math.round(photos.get(s.key).y * 100)}" aria-label="Move the photo" data-y="${s.key}">
           <button type="button" class="btn btn-quiet btn-sm" data-clear="${s.key}">Remove</button>` : ''}
+        ${!photos.has(s.key) && found.get(s.key)?.list.length > 1 ? `<button type="button" class="btn btn-quiet btn-sm" data-next="${s.key}">Next photo</button>` : ''}
         <button type="button" class="btn btn-quiet btn-sm" data-one="${i}">Save</button>
       </figcaption>
     </figure>`).join('');
@@ -463,6 +545,7 @@ async function render(main) {
     };
   }
   for (const r of box.querySelectorAll('[data-y]')) r.onchange = () => { photos.get(r.dataset.y).y = Number(r.value) / 100; render(main); };
+  for (const b of box.querySelectorAll('[data-next]')) b.onclick = () => { found.get(b.dataset.next).i++; render(main); };
   for (const b of box.querySelectorAll('[data-clear]')) b.onclick = () => { photos.delete(b.dataset.clear); render(main); };
   for (const b of box.querySelectorAll('[data-one]')) {
     b.onclick = async () => {

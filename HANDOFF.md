@@ -372,7 +372,12 @@ Stage 2, accounts:
 - **22 October:** studio slides redone as a broadcaster's results graphic (owner: the poster look was
   "hot garbage"): club colours split on the diagonal with their crests or the owner's photo, score
   bars in club colours, "Our call landed" with a tick, a violet brand bar (offside.win, LINK IN BIO) on
-  every slide. Stadium photos are no longer filled in.
+  every slide. Then redone again on the owner's reference (a frosted card over a match photo:
+  competition badge, crests "vs", the score, scorers, our call with odds, OFFSIDE.WIN / LINK IN BIO).
+  Photos are found automatically through Openverse (Flickr and Wikimedia, licences allowing
+  commercial use only), passed through the Worker's `/media/cc` (those two hosts only), with the
+  photographer's credit on the slide; "Next photo" steps through the rest. The owner asked for
+  agency photos scraped from anywhere, and for their social cookies to post with; both declined.
 - **13 October:** the studio (`#/admin/studio`, `public/js/studio.js`): a day's results as a carousel
   to post, drawn on canvas at 1080x1350 (post) or 1080x1920 (story). Cover gives the day's true
   count ("12 of 13 landed"); one slide per landed call (crests, score, scorers, the call, its odds
