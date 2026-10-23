@@ -41,3 +41,10 @@ weight axis kept) and renamed, as the OFL asks of a modified font. About
 ten kilobytes, preloaded from index.html so the name in the header never
 swaps. To rebuild it, subset Geist's Latin woff2 from Google Fonts with
 `fontTools.subset` to that text and set name IDs 1, 3, 4, 6, 16 and 21.
+
+## Michroma (the studio's slides only)
+
+`michroma-latin.woff2`, Google Fonts' Latin cut of Michroma (OFL), unchanged.
+The squared, extended face of the results graphics the owner chose as the
+reference; loaded by `public/js/studio.js` with the FontFace API, never by a
+page. One weight: the bold score is the same face drawn with a stroke.
