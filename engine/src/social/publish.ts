@@ -73,10 +73,18 @@ async function owner(token: string): Promise<number> {
 }
 
 /** Send a post to the owner with Post / Skip under it. The button data carries what publishing needs. */
+/** Telegram's HTML caption as the plain words X takes. */
+function plainText(html: string): string {
+  return html.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
 async function sendDraft(token: string, chat: number, post: Post, tag: string): Promise<void> {
   const rows: unknown[][] = [];
   if (post.button) rows.push([{ text: post.button.text, url: post.button.url }]);
-  rows.push([{ text: '✅ Post to Telegram and X', callback_data: `post:${tag}:${post.reaction ?? '-'}` }, { text: 'Skip', callback_data: `skip:${tag}` }]);
+  rows.push([{ text: xKeys() ? '✅ Post to Telegram and X' : '✅ Post to Telegram', callback_data: `post:${tag}:${post.reaction ?? '-'}` }, { text: 'Skip', callback_data: `skip:${tag}` }]);
+  // The free way onto X: opens the X app with the words filled in; the owner
+  // saves the picture from this message and adds it. No API, no charge.
+  rows.push([{ text: '𝕏 Post it on X yourself (free)', url: `https://x.com/intent/post?text=${encodeURIComponent(xText(plainText(post.text)))}` }]);
   await tg(token, 'sendPhoto', upload(
     { chat_id: String(chat), caption: post.text, parse_mode: 'HTML', reply_markup: { inline_keyboard: rows } },
     { field: 'photo', name: 'post.jpg', bytes: post.photo!, type: 'image/jpeg' },
@@ -99,7 +107,7 @@ async function publishTaps(token: string, chat: number, channel: string): Promis
     if (await kvGet(doneKey)) continue;
     await kvSet(doneKey, '1', 7 * DAY);
     await tg(token, 'answerCallbackQuery', { callback_query_id: q.id }).catch(() => null);
-    const link = q.message.reply_markup?.inline_keyboard.flat().find((b) => b.url);
+    const link = q.message.reply_markup?.inline_keyboard.flat().find((b) => b.url && !b.url.startsWith('https://x.com/'));
     const linkRow = link ? [[{ text: link.text, url: link.url }]] : [];
     if (q.data.startsWith('skip:')) {
       await tg(token, 'editMessageReplyMarkup', { chat_id: chat, message_id: q.message.message_id, reply_markup: { inline_keyboard: [...linkRow, [{ text: 'Skipped', callback_data: 'noop' }]] } }).catch(() => null);
