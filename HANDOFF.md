@@ -277,8 +277,11 @@ Stage 2, accounts:
   `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHANNEL` as Actions secrets. `telegram:check` (pg.yml,
   `engine/src/telegramcheck.ts`) checks the token, that the bot can post in the channel, and that
   the owner pressed Start with it, then sends them a private test. It never posts to the channel.
-  This is setup, not dev tooling, and it stays at launch. Next: the posts go privately to the owner
-  to approve first, then to the channel; X and Instagram come after.
+  This is setup, not dev tooling, and it stays at launch. `telegram:preview` (`engine/src/telegrampost.ts`)
+  builds the two daily posts from the public API (morning free call on its share card; night
+  results with every graded call, misses included) and sends them to the owner's private chat
+  only. Next: owner's style feedback, then a schedule that sends each post to the owner with a
+  Post button before the channel; X and Instagram come after.
 
 - **PR #154, support tickets:** open and not merged. It needs Supabase (see stage 2).
 - **Support mail:** support@ and hello@offside.win forward to the owner's iCloud through
