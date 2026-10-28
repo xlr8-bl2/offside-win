@@ -70,3 +70,47 @@ export async function xCheck(): Promise<void> {
   }
   console.log('all good: the keys can post (nothing was posted)');
 }
+
+/** Upload one picture; its media id, or null when X refuses (the post then goes out with the link alone). */
+export async function uploadImage(k: Keys, bytes: Buffer): Promise<string | null> {
+  const url = 'https://api.x.com/2/media/upload';
+  const fd = new FormData();
+  fd.append('media', new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' }), 'post.jpg');
+  fd.append('media_category', 'tweet_image');
+  const res = await fetch(url, { method: 'POST', headers: { authorization: authHeader(k, 'POST', url) }, body: fd });
+  const j = await res.json().catch(() => null) as any;
+  const id = j?.data?.id ?? j?.media_id_string ?? null;
+  if (!id) console.log(`x media upload: ${res.status} ${String(j?.detail ?? j?.title ?? j?.errors?.[0]?.message ?? '').slice(0, 200)}`);
+  return id;
+}
+
+/** Post one tweet as the site's account; its id. */
+export async function tweet(k: Keys, text: string, mediaId?: string | null): Promise<string> {
+  const r = await x(k, 'POST', 'https://api.x.com/2/tweets', { text, ...(mediaId ? { media: { media_ids: [mediaId] } } : {}) });
+  if (r.status !== 201 && r.status !== 200) {
+    throw new Error(`X refused the post: ${r.status} ${String(r.body?.detail ?? r.body?.title ?? r.body?.errors?.[0]?.message ?? '').slice(0, 200)}`);
+  }
+  return String(r.body?.data?.id ?? '');
+}
+
+/** X counts every link as 23 characters, and most emoji as two. */
+export function xLength(s: string): number {
+  return [...s.replace(/https?:\/\/\S+|\b[\w-]+\.(?:org|win|com)\b/g, 'x'.repeat(23))].reduce((n, ch) => n + (ch.codePointAt(0)! > 0x2fff ? 2 : 1), 0);
+}
+
+/**
+ * The X version of a Telegram post: its opening lines, as many as fit, then
+ * the link and the 18+ line. Lines that only make sense in Telegram (the
+ * notifications nudge, "below") are dropped.
+ */
+export function xText(caption: string, link: string): string {
+  const tail = `\n\n${link}\n18+ BeGambleAware.org`;
+  const lines = caption.split('\n').filter((l) => !/18\+|BeGambleAware|notifications|👇/.test(l));
+  while (lines.length && !lines[lines.length - 1]!.trim()) lines.pop();
+  const kept: string[] = [];
+  for (const l of lines) {
+    if (xLength([...kept, l].join('\n').trim() + tail) > 280) break;
+    kept.push(l);
+  }
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim() + tail;
+}

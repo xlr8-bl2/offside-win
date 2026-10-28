@@ -39,6 +39,7 @@
     "telegram:check": "npm -w engine run telegram:check",
     "telegram:preview": "npm -w engine run telegram:preview",
     "x:check": "npm -w engine run x:check",
+    "social:tick": "npm -w engine run social:tick",
     "mail:route": "npm -w engine run mail:route",
     "db:export": "npm -w engine run db:export",
     "d1:create": "npm -w engine run d1:create",

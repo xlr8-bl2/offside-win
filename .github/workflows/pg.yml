@@ -13,7 +13,7 @@ on:
       command:
         description: 'Engine command to run against Postgres'
         type: choice
-        options: [migrate, history, 'history:cards', ratings, slate, 'slate:fresh', settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players', 'probe:profile', 'probe:reds', 'probe:extras', grant, plans, 'whop:check', 'gemini:check', 'telegram:check', 'telegram:preview', 'x:check', trace, 'mail:setup', 'mail:route', 'db:export', 'db:verify', 'd1:create', 'db:import', 'db:accounts', 'mail:auth', 'record:reset', lab, 'lab:tune', 'lab:leans', 'lab:model', 'lab:losses', 'lab:slices', 'lab:live', 'lab:record', 'lab:calib', 'lab:odds', 'lab:backfill', 'leagues:refresh']
+        options: [migrate, history, 'history:cards', ratings, slate, 'slate:fresh', settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players', 'probe:profile', 'probe:reds', 'probe:extras', grant, plans, 'whop:check', 'gemini:check', 'telegram:check', 'telegram:preview', 'x:check', 'social:tick', trace, 'mail:setup', 'mail:route', 'db:export', 'db:verify', 'd1:create', 'db:import', 'db:accounts', 'mail:auth', 'record:reset', lab, 'lab:tune', 'lab:leans', 'lab:model', 'lab:losses', 'lab:slices', 'lab:live', 'lab:record', 'lab:calib', 'lab:odds', 'lab:backfill', 'leagues:refresh']
         default: migrate
       arg:
         # Free text for the commands that take one. `grant` reads an email and
@@ -77,7 +77,7 @@ jobs:
 
       # telegram:preview draws its pictures in Chromium; the runner has none.
       - name: Install Chromium
-        if: inputs.command == 'telegram:preview'
+        if: inputs.command == 'telegram:preview' || inputs.command == 'social:tick'
         run: npx playwright install --with-deps chromium
 
       # db:verify and db:import load the encrypted export from a db:export run

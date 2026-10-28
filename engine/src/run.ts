@@ -10,6 +10,7 @@ import { geminiCheck } from './geminicheck.ts';
 import { telegramCheck } from './telegramcheck.ts';
 import { telegramPreview } from './telegrampost.ts';
 import { xCheck } from './xpost.ts';
+import { socialTick } from './social/publish.ts';
 import { mailSetup } from './mailsetup.ts';
 import { authMail } from './authmail.ts';
 import { syncCards } from './cards/sync.ts';
@@ -297,6 +298,12 @@ const commands: Record<string, () => Promise<unknown>> = {
 
   async 'x:check'() {
     return xCheck();
+  },
+
+  // The channel's daily posts: draft what is due to the owner, publish what they approved.
+  async 'social:tick'() {
+    requireEnv({ provider: false });
+    return socialTick();
   },
 
   // The market lab: which probability is most accurate and which selection

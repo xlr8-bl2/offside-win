@@ -29,6 +29,7 @@
     "telegram:check": "tsx src/run.ts telegram:check",
     "telegram:preview": "tsx src/run.ts telegram:preview",
     "x:check": "tsx src/run.ts x:check",
+    "social:tick": "tsx src/run.ts social:tick",
     "reactions": "tsx scripts/reactions.mts",
     "mail:route": "tsx src/run.ts mail:route",
     "db:export": "tsx src/run.ts db:export",

@@ -145,14 +145,15 @@ export async function resultsPost(browser: Browserish, day?: string): Promise<Po
   };
 }
 
-async function tg(token: string, method: string, body: Record<string, unknown> | FormData) {
+export async function tg<T = any>(token: string, method: string, body: Record<string, unknown> | FormData): Promise<T> {
   const form = body instanceof FormData;
   const res = await fetch(`${API}/bot${token}/${method}`, { method: 'POST', ...(form ? {} : { headers: { 'content-type': 'application/json' } }), body: form ? body : JSON.stringify(body) });
-  const j = await res.json().catch(() => ({})) as { ok?: boolean; description?: string };
+  const j = await res.json().catch(() => ({})) as { ok?: boolean; description?: string; result?: T };
   if (!j.ok) throw new Error(`${method}: ${j.description ?? `HTTP ${res.status}`}`);
+  return j.result as T;
 }
 
-function upload(fields: Record<string, unknown>, file: { name: string; field: string; bytes: Buffer; type: string }): FormData {
+export function upload(fields: Record<string, unknown>, file: { name: string; field: string; bytes: Buffer; type: string }): FormData {
   const fd = new FormData();
   for (const [k, v] of Object.entries(fields)) if (v !== undefined) fd.append(k, typeof v === 'string' ? v : JSON.stringify(v));
   fd.append(file.field, new Blob([new Uint8Array(file.bytes)], { type: file.type }), file.name);

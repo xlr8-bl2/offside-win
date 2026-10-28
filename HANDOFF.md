@@ -280,8 +280,15 @@ Stage 2, accounts:
   This is setup, not dev tooling, and it stays at launch. `telegram:preview` (`engine/src/telegrampost.ts`)
   builds the two daily posts from the public API (morning free call on its share card; night
   results with every graded call, misses included) and sends them to the owner's private chat
-  only. Next: owner's style feedback, then a schedule that sends each post to the owner with a
-  Post button before the channel; X and Instagram come after.
+  only. Pictures: `engine/src/social/graphics.ts` (1080x1350, Chromium); words: `social/copy.ts`
+  (Gemini headline from the analysis, checked for promises and money talk, with a fallback);
+  win/loss reactions are our own MP4s in `engine/assets` (`npm run reactions -w engine`). The owner
+  chose these over borrowed GIFs of a footballer and a creator (CAP 16.3.12, copyright).
+  X: keys in `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_SECRET`; `x:check` passed.
+  `social.yml` (every 10 min) runs `social:tick` (`social/publish.ts`): drafts the free call from
+  08:30 UK and a day's results once all its calls settle to the owner's private chat with Post /
+  Skip; a Post tap copies the message to the channel and tweets the picture with a cut caption.
+  kv keys `social:*` stop doubles. Instagram comes next.
 
 - **PR #154, support tickets:** open and not merged. It needs Supabase (see stage 2).
 - **Support mail:** support@ and hello@offside.win forward to the owner's iCloud through

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { authHeader } from '../src/xpost.ts';
+import { authHeader, xLength, xText } from '../src/xpost.ts';
 import { clean, fallbackHook } from '../src/social/copy.ts';
 
 test('the OAuth 1.0a signature matches the worked example in X\'s own documentation', () => {
@@ -32,4 +32,15 @@ test('every fallback headline passes the same checks', () => {
     const h = fallbackHook({ ...base, ...c });
     assert.ok(clean(h.replace(/\*/g, '')), h);
   }
+});
+
+test('the X version of a post fits in 280, keeps the link and the 18+ line, and drops Telegram-only lines', () => {
+  const caption = ['🚨 FREE CALL · Numancia v Real Oviedo', '', 'Write Numancia off? Not a chance.', '', '🎯 Numancia +2.5 (Asian Handicap), odds of 1.16 at Bet365',
+    'Only loses if Numancia lose by 3 or more.', '⏰ 19:00 UK · Copa del Rey', '', 'A long paragraph of analysis that will not fit. '.repeat(6), '', 'Members get every call 👇', '', '18+ · BeGambleAware.org'].join('\n');
+  const t = xText(caption, 'https://offside.win/match/606008/numancia-v-real-oviedo');
+  assert.ok(xLength(t) <= 280, String(xLength(t)));
+  assert.match(t, /odds of 1\.16/);
+  assert.match(t, /offside\.win\/match\/606008/);
+  assert.match(t, /18\+ BeGambleAware\.org$/);
+  assert.doesNotMatch(t, /👇|analysis that will not fit/);
 });
