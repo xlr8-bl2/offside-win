@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { runBacktest } from './backtest.ts';
 import { loadCache, quota as bsdQuota, saveCache, stats as bsdStats } from './bsd.ts';
 import { config, requireEnv } from './config.ts';
@@ -19,6 +20,30 @@ import { coinflowCharger, renewDue } from './membership/renew.ts';
 import { runSettle } from './settle.ts';
 import { pruneBoard, runSlate } from './slate.ts';
 import { closeDb, dbStats, migrate, schemaFile, select } from './store.ts';
+
+/**
+ * CPU a pass spends, as against the time it waits on the network: what a
+ * Cloudflare Worker would bill and cap. `block` is the longest the event loop
+ * was held at once, the most any one piece of the pass would need on its own;
+ * `heap` the most memory it held.
+ */
+function cpuMeter(): () => string {
+  const cpu0 = process.cpuUsage();
+  const t0 = Date.now();
+  const loop = monitorEventLoopDelay({ resolution: 10 });
+  loop.enable();
+  let heap = 0;
+  const sample = setInterval(() => { heap = Math.max(heap, process.memoryUsage().heapUsed); }, 250);
+  return () => {
+    clearInterval(sample);
+    loop.disable();
+    heap = Math.max(heap, process.memoryUsage().heapUsed);
+    const { user, system } = process.cpuUsage(cpu0);
+    return `cpu ${((user + system) / 1e6).toFixed(1)}s (user ${(user / 1e6).toFixed(1)}s, system ${(system / 1e6).toFixed(1)}s)`
+      + ` in ${((Date.now() - t0) / 1000).toFixed(0)}s, longest block ${(loop.max / 1e6).toFixed(0)}ms,`
+      + ` heap up to ${(heap / 2 ** 20).toFixed(0)} MB`;
+  };
+}
 
 /**
  * Entry points for the scheduled workflows.
@@ -187,8 +212,10 @@ const commands: Record<string, () => Promise<unknown>> = {
       console.log('\nCold start complete. Tonight\'s ratings run will deepen the history.\n');
     }
 
+    const meter = cpuMeter();
     const report = await runSlate();
     await pruneBoard();
+    console.log(`slate: ${meter()}`);
     return report;
   },
 
@@ -217,6 +244,7 @@ const commands: Record<string, () => Promise<unknown>> = {
     if (cacheFile) console.log(`slate:loop: ${await loadCache(cacheFile)} provider answers carried over`);
     for (;;) {
       const t0 = Date.now();
+      const meter = cpuMeter();
       pass++;
       // The allowance rolls over 24 hours, so what was spent a day ago is
       // back: each pass asks afresh, and the first answer says where it stands.
@@ -245,7 +273,7 @@ const commands: Record<string, () => Promise<unknown>> = {
       }
       if (cacheFile) await saveCache(cacheFile).catch(() => {});
       console.log(`slate:loop: pass ${pass} took ${((Date.now() - t0) / 60_000).toFixed(1)} min`
-        + `${bsdQuota.remaining !== null ? `, ${bsdQuota.remaining} provider requests left today` : ''}`);
+        + `${bsdQuota.remaining !== null ? `, ${bsdQuota.remaining} provider requests left today` : ''}; ${meter()}`);
       const next = t0 + every;
       if (next > lastStart) break;
       if (next > Date.now()) await new Promise((r) => setTimeout(r, next - Date.now()));
