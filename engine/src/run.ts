@@ -9,6 +9,7 @@ import { whopCheck } from './whopcheck.ts';
 import { geminiCheck } from './geminicheck.ts';
 import { telegramCheck } from './telegramcheck.ts';
 import { telegramPreview } from './telegrampost.ts';
+import { xCheck } from './xpost.ts';
 import { mailSetup } from './mailsetup.ts';
 import { authMail } from './authmail.ts';
 import { syncCards } from './cards/sync.ts';
@@ -292,6 +293,10 @@ const commands: Record<string, () => Promise<unknown>> = {
   // (YYYY-MM-DD) for the results post, or blank for the latest finished one.
   async 'telegram:preview'() {
     return telegramPreview(process.env['ARG'] ?? '');
+  },
+
+  async 'x:check'() {
+    return xCheck();
   },
 
   // The market lab: which probability is most accurate and which selection
