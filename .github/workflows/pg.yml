@@ -75,6 +75,11 @@ jobs:
         with: { node-version: '22', cache: 'npm' }
       - run: npm ci
 
+      # telegram:preview draws its pictures in Chromium; the runner has none.
+      - name: Install Chromium
+        if: inputs.command == 'telegram:preview'
+        run: npx playwright install --with-deps chromium
+
       # db:verify and db:import load the encrypted export from a db:export run
       # (HANDOFF.md, "The move to D1"). Decrypted on the runner only, into
       # engine/export, and removed at the end of the job.

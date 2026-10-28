@@ -28,6 +28,7 @@
     "gemini:check": "tsx src/run.ts gemini:check",
     "telegram:check": "tsx src/run.ts telegram:check",
     "telegram:preview": "tsx src/run.ts telegram:preview",
+    "reactions": "tsx scripts/reactions.mts",
     "mail:route": "tsx src/run.ts mail:route",
     "db:export": "tsx src/run.ts db:export",
     "d1:create": "tsx src/run.ts d1:create",
