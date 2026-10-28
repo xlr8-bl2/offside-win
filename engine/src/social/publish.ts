@@ -73,6 +73,9 @@ async function owner(token: string): Promise<number> {
 }
 
 /** Send a post to the owner with Post / Skip under it. The button data carries what publishing needs. */
+/** X by the API only when X_AUTO=1: the owner posts to X by hand (the free button), and each API post costs. */
+const xAuto = () => process.env['X_AUTO'] === '1' && !!xKeys();
+
 /** Telegram's HTML caption as the plain words X takes. */
 function plainText(html: string): string {
   return html.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
@@ -81,7 +84,7 @@ function plainText(html: string): string {
 async function sendDraft(token: string, chat: number, post: Post, tag: string): Promise<void> {
   const rows: unknown[][] = [];
   if (post.button) rows.push([{ text: post.button.text, url: post.button.url }]);
-  rows.push([{ text: xKeys() ? '✅ Post to Telegram and X' : '✅ Post to Telegram', callback_data: `post:${tag}:${post.reaction ?? '-'}` }, { text: 'Skip', callback_data: `skip:${tag}` }]);
+  rows.push([{ text: xAuto() ? '✅ Post to Telegram and X' : '✅ Post to Telegram', callback_data: `post:${tag}:${post.reaction ?? '-'}` }, { text: 'Skip', callback_data: `skip:${tag}` }]);
   // The free way onto X: opens the X app with the words filled in; the owner
   // saves the picture from this message and adds it. No API, no charge.
   rows.push([{ text: '𝕏 Post it on X yourself (free)', url: `https://x.com/intent/post?text=${encodeURIComponent(xText(plainText(post.text)))}` }]);
@@ -129,7 +132,7 @@ async function publishTaps(token: string, chat: number, channel: string): Promis
       console.log(`telegram channel: ${(e as Error).message}`);
     }
     // X: the same picture, the caption cut to fit.
-    const k = xKeys();
+    const k = xAuto() ? xKeys() : null;
     if (k) {
       try {
         const photo = [...(q.message.photo ?? [])].sort((a, b) => b.width - a.width)[0];
