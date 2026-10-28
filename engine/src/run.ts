@@ -8,6 +8,7 @@ import { grant, plans } from './grant.ts';
 import { whopCheck } from './whopcheck.ts';
 import { geminiCheck } from './geminicheck.ts';
 import { telegramCheck } from './telegramcheck.ts';
+import { telegramPreview } from './telegrampost.ts';
 import { mailSetup } from './mailsetup.ts';
 import { authMail } from './authmail.ts';
 import { syncCards } from './cards/sync.ts';
@@ -285,6 +286,12 @@ const commands: Record<string, () => Promise<unknown>> = {
 
   async 'telegram:check'() {
     return telegramCheck();
+  },
+
+  // The two daily posts, sent to the owner's private chat only. ARG: a day
+  // (YYYY-MM-DD) for the results post, or blank for the latest finished one.
+  async 'telegram:preview'() {
+    return telegramPreview(process.env['ARG'] ?? '');
   },
 
   // The market lab: which probability is most accurate and which selection
