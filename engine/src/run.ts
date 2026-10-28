@@ -7,6 +7,10 @@ import { probe, probeExtras, probePlayers, probeProfiles, probeReds, probeReport
 import { grant, plans } from './grant.ts';
 import { whopCheck } from './whopcheck.ts';
 import { geminiCheck } from './geminicheck.ts';
+import { telegramCheck } from './telegramcheck.ts';
+import { telegramPreview } from './telegrampost.ts';
+import { xCheck } from './xpost.ts';
+import { socialTick } from './social/publish.ts';
 import { mailSetup } from './mailsetup.ts';
 import { authMail } from './authmail.ts';
 import { syncCards } from './cards/sync.ts';
@@ -280,6 +284,26 @@ const commands: Record<string, () => Promise<unknown>> = {
 
   async 'gemini:check'() {
     return geminiCheck();
+  },
+
+  async 'telegram:check'() {
+    return telegramCheck();
+  },
+
+  // The two daily posts, sent to the owner's private chat only. ARG: a day
+  // (YYYY-MM-DD) for the results post, or blank for the latest finished one.
+  async 'telegram:preview'() {
+    return telegramPreview(process.env['ARG'] ?? '');
+  },
+
+  async 'x:check'() {
+    return xCheck();
+  },
+
+  // The channel's daily posts: draft what is due to the owner, publish what they approved.
+  async 'social:tick'() {
+    requireEnv({ provider: false });
+    return socialTick();
   },
 
   // The market lab: which probability is most accurate and which selection

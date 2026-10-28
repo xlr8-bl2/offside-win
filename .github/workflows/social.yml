@@ -1,0 +1,47 @@
+name: social
+
+# The channel's daily posts (engine/src/social/publish.ts). Every ten minutes:
+# publish whatever the owner approved in Telegram, and draft whatever is due
+# (the free call from 08:30 UK, a day's results once every call has settled)
+# to the owner's private chat with a Post button. Nothing reaches the channel
+# or X without that tap.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: social
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DB_BACKEND: d1
+      ENGINE_DB_URL: https://offside.win/api/internal/db
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
+      X_API_KEY: ${{ secrets.X_API_KEY }}
+      X_API_SECRET: ${{ secrets.X_API_SECRET }}
+      X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+      X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+      # Most ticks have nothing to draw, so the browser is only installed when
+      # the first pass says a draft is due.
+      - id: first
+        run: npm run social:tick
+      - name: Install Chromium
+        if: steps.first.outputs.draw == '1'
+        run: npx playwright install --with-deps chromium
+      - name: Draw the drafts
+        if: steps.first.outputs.draw == '1'
+        run: npm run social:tick

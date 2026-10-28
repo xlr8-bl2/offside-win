@@ -272,6 +272,24 @@ Stage 2, accounts:
 
 ### Other things in flight
 
+- **Marketing and automatic posting (28 October):** the plan is a Claude Doc ("offside.win
+  marketing content plan"). Posting starts with Telegram: the owner made a bot and saved
+  `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHANNEL` as Actions secrets. `telegram:check` (pg.yml,
+  `engine/src/telegramcheck.ts`) checks the token, that the bot can post in the channel, and that
+  the owner pressed Start with it, then sends them a private test. It never posts to the channel.
+  This is setup, not dev tooling, and it stays at launch. `telegram:preview` (`engine/src/telegrampost.ts`)
+  builds the two daily posts from the public API (morning free call on its share card; night
+  results with every graded call, misses included) and sends them to the owner's private chat
+  only. Pictures: `engine/src/social/graphics.ts` (1080x1350, Chromium); words: `social/copy.ts`
+  (Gemini headline from the analysis, checked for promises and money talk, with a fallback);
+  win/loss reactions are our own MP4s in `engine/assets` (`npm run reactions -w engine`). The owner
+  chose these over borrowed GIFs of a footballer and a creator (CAP 16.3.12, copyright).
+  X: keys in `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_SECRET`; `x:check` passed.
+  `social.yml` (every 10 min) runs `social:tick` (`social/publish.ts`): drafts the free call from
+  08:30 UK and a day's results once all its calls settle to the owner's private chat with Post /
+  Skip; a Post tap copies the message to the channel and tweets the picture with a cut caption.
+  kv keys `social:*` stop doubles. Instagram comes next.
+
 - **PR #154, support tickets:** open and not merged. It needs Supabase (see stage 2).
 - **Support mail:** support@ and hello@offside.win forward to the owner's iCloud through
   Cloudflare Email Routing (set 6 October with `mail:route`). This works and does not depend on
