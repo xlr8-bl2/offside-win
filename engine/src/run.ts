@@ -7,6 +7,7 @@ import { probe, probeExtras, probePlayers, probeProfiles, probeReds, probeReport
 import { grant, plans } from './grant.ts';
 import { whopCheck } from './whopcheck.ts';
 import { geminiCheck } from './geminicheck.ts';
+import { telegramCheck } from './telegramcheck.ts';
 import { mailSetup } from './mailsetup.ts';
 import { authMail } from './authmail.ts';
 import { syncCards } from './cards/sync.ts';
@@ -280,6 +281,10 @@ const commands: Record<string, () => Promise<unknown>> = {
 
   async 'gemini:check'() {
     return geminiCheck();
+  },
+
+  async 'telegram:check'() {
+    return telegramCheck();
   },
 
   // The market lab: which probability is most accurate and which selection

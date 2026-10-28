@@ -272,6 +272,14 @@ Stage 2, accounts:
 
 ### Other things in flight
 
+- **Marketing and automatic posting (28 October):** the plan is a Claude Doc ("offside.win
+  marketing content plan"). Posting starts with Telegram: the owner made a bot and saved
+  `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHANNEL` as Actions secrets. `telegram:check` (pg.yml,
+  `engine/src/telegramcheck.ts`) checks the token, that the bot can post in the channel, and that
+  the owner pressed Start with it, then sends them a private test. It never posts to the channel.
+  This is setup, not dev tooling, and it stays at launch. Next: the posts go privately to the owner
+  to approve first, then to the channel; X and Instagram come after.
+
 - **PR #154, support tickets:** open and not merged. It needs Supabase (see stage 2).
 - **Support mail:** support@ and hello@offside.win forward to the owner's iCloud through
   Cloudflare Email Routing (set 6 October with `mail:route`). This works and does not depend on
