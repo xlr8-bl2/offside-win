@@ -145,9 +145,16 @@ export async function resultsPost(browser: Browserish, day?: string): Promise<Po
   };
 }
 
+/** fetch, tried again twice on a network error (not on an HTTP answer): a runner's first call sometimes drops. */
+async function retry(url: string, init: RequestInit): Promise<Response> {
+  for (let i = 0; ; i++) {
+    try { return await fetch(url, init); } catch (e) { if (i >= 2) throw e; await new Promise((r) => setTimeout(r, 2000 * (i + 1))); }
+  }
+}
+
 export async function tg<T = any>(token: string, method: string, body: Record<string, unknown> | FormData): Promise<T> {
   const form = body instanceof FormData;
-  const res = await fetch(`${API}/bot${token}/${method}`, { method: 'POST', ...(form ? {} : { headers: { 'content-type': 'application/json' } }), body: form ? body : JSON.stringify(body) });
+  const res = await retry(`${API}/bot${token}/${method}`, { method: 'POST', ...(form ? {} : { headers: { 'content-type': 'application/json' } }), body: form ? body : JSON.stringify(body) });
   const j = await res.json().catch(() => ({})) as { ok?: boolean; description?: string; result?: T };
   if (!j.ok) throw new Error(`${method}: ${j.description ?? `HTTP ${res.status}`}`);
   return j.result as T;
@@ -180,7 +187,7 @@ export async function send(token: string, chat: string | number, post: Post): Pr
 
 /** The owner's private chat with the bot: the latest one that pressed Start. */
 export async function ownerChat(token: string): Promise<number | null> {
-  const res = await fetch(`${API}/bot${token}/getUpdates`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ allowed_updates: ['message'] }) });
+  const res = await retry(`${API}/bot${token}/getUpdates`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ allowed_updates: ['message'] }) });
   const j = await res.json().catch(() => ({})) as { result?: Array<{ message?: { chat?: { id: number; type: string } } }> };
   const ids = (j.result ?? []).map((u) => u.message?.chat).filter((c) => c?.type === 'private').map((c) => c!.id);
   return ids.length ? ids[ids.length - 1]! : null;
