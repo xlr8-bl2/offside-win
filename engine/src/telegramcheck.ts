@@ -45,7 +45,18 @@ export async function telegramCheck(): Promise<void> {
     const chat = channelOf(rawChannel);
     const info = await call<{ type: string }>(token, 'getChat', { chat_id: chat });
     if (!info.ok || !info.result) {
-      console.log(`channel: not found (${info.description ?? 'no answer'})`);
+      // Shapes only, never the value: what was saved, and any channel Telegram
+      // says the bot was added to (a private channel has no @username to save).
+      const shape = /^-?\d+$/.test(chat) ? 'a number' : `an @username of ${chat.length - 1} characters`;
+      console.log(`channel: not found (${info.description ?? 'no answer'}); the secret reads as ${shape}`);
+      const seen = await call<Array<{ my_chat_member?: { chat?: { type: string; username?: string }; new_chat_member?: { status: string } } }>>(token, 'getUpdates', { allowed_updates: ['my_chat_member'] });
+      const added = (seen.result ?? []).map((u) => u.my_chat_member).filter((m) => m?.chat?.type === 'channel');
+      if (added.length) {
+        const last = added[added.length - 1]!;
+        console.log(`  the bot was added to a channel: now ${last.new_chat_member?.status ?? 'unknown'}, ${last.chat?.username ? 'a public one with an @username' : 'a private one (no @username)'}`);
+      } else {
+        console.log('  Telegram has no record of the bot being added to a channel in the last 24 hours');
+      }
       problems++;
     } else {
       console.log(`channel: found, a ${info.result.type}`);
