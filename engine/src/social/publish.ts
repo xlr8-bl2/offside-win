@@ -131,7 +131,7 @@ async function publishTaps(token: string, chat: number, channel: string): Promis
           const res = await fetch(`https://api.telegram.org/file/bot${token}/${f.file_path}`);
           media = await uploadImage(k, Buffer.from(await res.arrayBuffer()));
         }
-        await tweet(k, xText(q.message.caption ?? '', link?.url ?? SITE), media);
+        await tweet(k, xText(q.message.caption ?? '', process.env['X_POST_LINKS'] === '1' ? link?.url ?? SITE : null), media);
         report.push(media ? 'X ✅' : 'X ✅ (link only, picture refused)');
       } catch (e) {
         report.push('X ❌');

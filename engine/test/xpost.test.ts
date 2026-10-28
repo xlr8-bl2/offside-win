@@ -38,6 +38,7 @@ test('the X version of a post fits in 280, keeps the link and the 18+ line, and 
   const caption = ['🚨 FREE CALL · Numancia v Real Oviedo', '', 'Write Numancia off? Not a chance.', '', '🎯 Numancia +2.5 (Asian Handicap), odds of 1.16 at Bet365',
     'Only loses if Numancia lose by 3 or more.', '⏰ 19:00 UK · Copa del Rey', '', 'A long paragraph of analysis that will not fit. '.repeat(6), '', 'Members get every call 👇', '', '18+ · BeGambleAware.org'].join('\n');
   const t = xText(caption, 'https://offside.win/match/606008/numancia-v-real-oviedo');
+  assert.doesNotMatch(xText(caption), /https?:/);
   assert.ok(xLength(t) <= 280, String(xLength(t)));
   assert.match(t, /odds of 1\.16/);
   assert.match(t, /offside\.win\/match\/606008/);

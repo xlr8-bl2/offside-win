@@ -103,8 +103,10 @@ export function xLength(s: string): number {
  * the link and the 18+ line. Lines that only make sense in Telegram (the
  * notifications nudge, "below") are dropped.
  */
-export function xText(caption: string, link: string): string {
-  const tail = `\n\n${link}\n18+ BeGambleAware.org`;
+export function xText(caption: string, link: string | null = null): string {
+  // X charges far more for a post with a link in it (2026 pay-per-use), so by
+  // default the link lives in the bio. X_POST_LINKS=1 puts it back.
+  const tail = link ? `\n\n${link}\n18+ BeGambleAware.org` : '\n\nFull case: link in bio\n18+ BeGambleAware.org';
   const lines = caption.split('\n').filter((l) => !/18\+|BeGambleAware|notifications|👇/.test(l));
   while (lines.length && !lines[lines.length - 1]!.trim()) lines.pop();
   const kept: string[] = [];
