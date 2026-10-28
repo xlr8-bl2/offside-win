@@ -5328,7 +5328,7 @@ async function viewResults() {
   <div class="wrap section">
     <div class="page-head">
       <h1 class="display xl">Results</h1>
-      <p class="page-sub">Every call we have published since 6 October 2026, when this engine went live,
+      <p class="page-sub">Every call we have published since 6 October 2026,
         marked against the real result. Nothing removed, nothing hidden.</p>
     </div>
 
@@ -5371,8 +5371,8 @@ async function viewResults() {
         : 'These are short prices, so winning most of them is not the same as being ahead.'}</p>
       <p class="record-sub"><a class="record-link" href="#/how-sure">When we’re confident, are we right? See how often our calls land against how sure we were.</a></p>
       ${n > 0 && n < 100
-        ? `<p class="record-note">That is ${n} results. It is not enough to tell a good run
-             from a good model, and we will say so until it is.</p>`
+        ? `<p class="record-note">That is ${n} results. It is not enough to tell a lucky run
+             from a real one, and we will say so until it is.</p>`
         : ''}`}
 
     <div class="with-side">

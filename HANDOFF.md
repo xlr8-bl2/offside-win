@@ -345,6 +345,12 @@ Stage 2, accounts:
 
 ## Recent work, newest first
 
+- **28 October: no engine talk on the public site.** The owner asked that the site stop saying an
+  engine or model does the analysis. A sweep of pages, meta tags, `llms.txt`, the Worker's prerendered
+  pages, emails and studio captions found two lines, both on `#/results` (`viewResults()`), now neutral.
+  Do not replace such wording with claims that people or tipsters make the calls: that would be untrue.
+  Left alone on purpose: the terms and privacy pages' AI-assistance disclosure (a legal disclosure, and
+  true), and admin-only text.
 - **20 October: the provider's free plan.** The owner dropped Football Unlimited ($5): 7,500 requests a
   day for everything, reset midnight UTC, and odds as one average price with no bookmaker named.
   `engine/src/bsd.ts`: a cache with a lifetime per kind of read (`ttlFor`: prices, line-ups and news
