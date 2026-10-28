@@ -477,6 +477,12 @@ const commands: Record<string, () => Promise<unknown>> = {
     return mailRoute(process.argv[3] ?? (process.env['GRANT_EMAIL'] || undefined));
   },
 
+  // Bots kept out at Cloudflare's edge: WAF and rate-limiting rules (shield.ts).
+  async 'edge:shield'() {
+    const { edgeShield } = await import('./shield.ts');
+    return edgeShield(process.argv[3] ?? (process.env['GRANT_EMAIL'] || undefined));
+  },
+
   // Sign-in emails: from the Worker in the site's design, or back to Supabase's.
   async 'mail:auth'() {
     return authMail(process.argv[3] ?? (process.env['GRANT_EMAIL'] || 'status'));

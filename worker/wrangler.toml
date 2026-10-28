@@ -62,6 +62,15 @@ WHOP_COMPANY_ID = "biz_u3qYuQLDjOpDZH"
 # Only the hash is here; the address is not.
 ADMIN_EMAIL_SHA256 = "5a2087bbcb792ea743dd4e445fcef43ccb4818f37f5199981e3ec93d9ea26916"
 
+# How fast one address may ask the Worker: 300 requests a minute, per
+# Cloudflare location (src/shield.ts, PER_MINUTE). Search engines and the
+# engine's door are not counted. namespace_id is any number unique to this
+# account; it names the counter, it is not a secret.
+[[ratelimits]]
+name = "RATE_LIMIT"
+namespace_id = "1001"
+simple = { limit = 300, period = 60 }
+
 # Every ten minutes the Worker asks Whop for paid memberships and switches on
 # any the webhook missed (sweepWhop in src/pay.ts). The webhook is fast; this
 # is what makes a payment certain to count even when a delivery never comes.

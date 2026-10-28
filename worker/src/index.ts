@@ -43,8 +43,9 @@ import { accountWrite } from './profile.ts';
 import { socials, type SocialEnv } from './social.ts';
 import { fixtureChanges, liveList, liveMatch, type LiveEnv } from './live.ts';
 import { EDGE_PATHS, edgeCached } from './edge.ts';
+import { shield, type ShieldEnv } from './shield.ts';
 
-interface Env extends PayEnv, LiveEnv, AdminEnv, HookEnv {
+interface Env extends PayEnv, LiveEnv, AdminEnv, HookEnv, ShieldEnv {
   /** Cloudflare D1. When bound, the public reads come from here (d1read.ts), not Supabase. */
   DB?: D1Read & AuthDb;
   SUPABASE_URL: string;
@@ -464,6 +465,10 @@ export function secured(res: Response): Response {
 export default {
   ...worker,
   async fetch(request: Request, env: Env, ctx?: { waitUntil(p: Promise<unknown>): void }): Promise<Response> {
+    // Bots the owner keeps out, and any one address asking too fast (shield.ts).
+    // Here rather than in worker.fetch, which calls itself to fill the edge's copy.
+    const refused = await shield(request, env);
+    if (refused) return secured(refused);
     return secured(await worker.fetch(request, env, ctx));
   },
   // Mail to support@ and hello@, routed here by Cloudflare Email Routing (support.ts).

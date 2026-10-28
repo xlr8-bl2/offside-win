@@ -27,6 +27,7 @@
     "whop:check": "tsx src/run.ts whop:check",
     "gemini:check": "tsx src/run.ts gemini:check",
     "mail:route": "tsx src/run.ts mail:route",
+    "edge:shield": "tsx src/run.ts edge:shield",
     "db:export": "tsx src/run.ts db:export",
     "d1:create": "tsx src/run.ts d1:create",
     "db:accounts": "tsx src/run.ts db:accounts",

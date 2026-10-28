@@ -34,6 +34,8 @@ the owner says the site is going live, and confirm the list with them first.
 Not dev tooling, and stays at launch: the `#/trace` page (`viewTrace()`) and
 the `trace` command (`engine/src/trace.ts`, the `trace` option in `pg.yml`).
 They turn a leaked pick's hidden code back into the account that copied it.
+`edge:shield` (`engine/src/shield.ts`, with `worker/src/shield.ts`) is setup too and stays: it keeps AI
+crawlers and scrapers out at Cloudflare's edge and rate-limits single addresses.
 `mail:setup` (`engine/src/mailsetup.ts`) is setup, not dev tooling, and stays too:
 it re-checks Brevo's DNS records and sends a test email. `mail:auth` (`engine/src/authmail.ts`)
 is setup too and stays: it switches Supabase's sign-in emails to the Worker's designed ones
