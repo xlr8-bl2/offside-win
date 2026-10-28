@@ -11,6 +11,21 @@ meaningful step, and commits it with that step, not at the end of the day.
 
 ## Right now
 
+### Bots kept out (28 October, branch `claude/project-thread-qxwnep`)
+
+After a surge in traffic the owner chose: search engines in (Google, Bing, Apple, DuckDuckGo),
+AI crawlers and assistants, SEO crawlers and scraping libraries out. Link previews stay in.
+- `public/robots.txt`: search engines allowed, the AI and SEO crawlers named and disallowed,
+  `Content-Signal: search=yes, ai-input=no, ai-train=no`.
+- `worker/src/shield.ts`: the lists, used by both layers below. The Worker refuses those agents
+  (403) and limits one address to 300 requests a minute (429), via the `RATE_LIMIT` binding in
+  `wrangler.toml`. Search engines are not counted; the engine door and the webhooks are untouched.
+- `edge:shield` (`engine/src/shield.ts`, pg.yml option, arg `on` / `off` / blank to check): WAF
+  custom rules on the zone (block the listed agents; block a "Googlebot" Cloudflare does not
+  verify) and a rate-limiting rule (150 requests in 10 seconds per address, verified bots exempt).
+  Covers static files too, which the Worker never sees. Needs Zone > Zone WAF > Edit on
+  `CF_API_TOKEN`; rules by others on the zone are kept. Setup, not dev tooling: stays at launch.
+
 ### Stage 1 is live: the public site runs on Cloudflare D1
 
 Since about 02:20 UTC on 7 October the site reads from D1 and the engine writes to it (PR #154,
