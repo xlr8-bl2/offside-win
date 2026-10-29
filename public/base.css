@@ -926,7 +926,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   padding-bottom: var(--space-8);
   border-bottom: var(--border) solid var(--hairline);
 }
-.foot-col h4 {
+.foot-col h3 {
   margin: 0 0 var(--space-4);
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
