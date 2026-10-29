@@ -3316,11 +3316,11 @@ async function viewBoard(params = new URLSearchParams()) {
       const cut = unit === 'game' && g.list.length > FIRST + 1 && !openGroups.has(name);
       return `
             <section class="league-block${themeOf(g.id) ? ` comp-${themeOf(g.id)}` : ''}">
-              <h3 class="league-head">
+              <h2 class="league-head">
                 ${g.id ? `<a href="#/league/${encodeURIComponent(g.id)}">${crest(name, 'xs', g.id, 'league')}${esc(name)}</a>`
                        : `${crest(name, 'xs', g.id, 'league')}${esc(name)}`}
                 <span class="count">${g.list.length} ${g.list.length === 1 ? unit : `${unit}s`}</span>
-              </h3>
+              </h2>
               ${(cut ? g.list.slice(0, FIRST) : g.list).map(rowHTML).join('')}
               ${cut ? `<button type="button" class="league-more" data-more="${esc(name)}">Show all ${g.list.length} ${esc(name)} games</button>` : ''}
             </section>`;
@@ -6022,14 +6022,14 @@ async function viewLeague(id, params = new URLSearchParams()) {
     </a>`;
   const listBlock = (title, list, note = '') => list.length ? `
     <section class="league-block fixture-list">
-      <h3 class="league-head">${esc(title)} <span class="count">${list.length}</span></h3>
+      <h2 class="league-head">${esc(title)} <span class="count">${list.length}</span></h2>
       ${list.map(listRow).join('')}
       ${note ? `<p class="fl-note">${esc(note)}</p>` : ''}
     </section>` : '';
 
   const gamesHTML = (ahead.length ? [...byDay.entries()].map(([day, list]) => `
     <section class="league-block">
-      <h3 class="league-head">${esc(day)} <span class="count">${list.length}</span></h3>
+      <h2 class="league-head">${esc(day)} <span class="count">${list.length}</span></h2>
       ${list.map(rowHTML).join('')}
     </section>`).join('') : '')
     + listBlock(ahead.length ? 'Further ahead' : 'Coming up', nextList,
@@ -6037,7 +6037,7 @@ async function viewLeague(id, params = new URLSearchParams()) {
 
   const resultsHTML = (played.length ? `
     <section class="league-block">
-      <h3 class="league-head">Played <span class="count">${played.length}</span></h3>
+      <h2 class="league-head">Played <span class="count">${played.length}</span></h2>
       ${played.map(rowHTML).join('')}
     </section>` : '') + listBlock(played.length ? 'Earlier' : 'Latest results', lastList);
 

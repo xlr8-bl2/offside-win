@@ -109,14 +109,16 @@
      bet365, Betway, Paddy Power and every tipster site own it, so it reads as
      gambling promo. It means won here and nothing else. */
   --won:       #2fbf71;
-  --lost:      #f0435a;
-  --void:      #7b8596;
+  /* Lifted from #f0435a and #7b8596, which measured 4.2:1 on the terrace
+     surface the result marks sit on: under the 4.5:1 body text needs. */
+  --lost:      #f5596d;
+  --void:      #8a94a5;
   --warn:      #f5a524;
 
   /* Price movement is a different meaning from a settled result and gets its
      own tokens, even where the colour currently agrees. */
   --shorten:   #2fbf71;
-  --drift:     #f0435a;
+  --drift:     #f5596d;
 
   /* ------------------------------------------------------------ typography */
 
