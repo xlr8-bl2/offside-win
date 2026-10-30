@@ -54,6 +54,10 @@ interface Env extends PayEnv, LiveEnv, AdminEnv, HookEnv {
   ASSETS: Fetcher;
 }
 
+/** The Apple Pay domain-association file, as the provider issued it. Public by design. */
+const APPLE_PAY_PATH = '/.well-known/apple-developer-merchantid-domain-association';
+const APPLE_PAY_ASSOCIATION = '7b2276657273696f6e223a312c227073704964223a2236343641384242363234393134464232453835354239443531364642353530333338314132444446383545414643463630323336443830413044434235334632222c22637265617465644f6e223a313736303636343737373433327d';
+
 function fail(message: string, status: number): Response {
   return new Response(JSON.stringify({ error: message }), {
     status,
@@ -170,6 +174,16 @@ const worker = {
     if (!path.startsWith('/api/') && (url.hostname.endsWith('.workers.dev') || url.hostname.startsWith('www.')) && env.SITE_URL?.startsWith('https://')) {
       const to = new URL(url.pathname + url.search, env.SITE_URL);
       return Response.redirect(to.toString(), 301);
+    }
+
+    // Apple Pay's proof that this domain may take Apple Pay through the
+    // payment provider (owner, 30 October). Served by the Worker rather than
+    // as a file because the asset upload can leave out dot-folders, and Apple
+    // compares the bytes exactly: no trailing newline.
+    if (path === APPLE_PAY_PATH) {
+      return new Response(APPLE_PAY_ASSOCIATION, {
+        headers: { 'content-type': 'text/plain', 'cache-control': 'public, max-age=3600' },
+      });
     }
 
     if (!path.startsWith('/api/')) {

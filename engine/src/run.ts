@@ -472,6 +472,12 @@ const commands: Record<string, () => Promise<unknown>> = {
   },
 
   // Mail to support@ and hello@, forwarded to the owner's inbox (Cloudflare Email Routing).
+  // Daily Cloudflare usage against the free plan's limits (cfusage.ts).
+  async 'cf:usage'() {
+    const { cfUsage } = await import('./cfusage.ts');
+    return cfUsage();
+  },
+
   async 'mail:route'() {
     const { mailRoute } = await import('./mailroute.ts');
     return mailRoute(process.argv[3] ?? (process.env['GRANT_EMAIL'] || undefined));
