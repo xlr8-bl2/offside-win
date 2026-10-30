@@ -37,6 +37,7 @@
     "whop:check": "npm -w engine run whop:check",
     "gemini:check": "npm -w engine run gemini:check",
     "mail:route": "npm -w engine run mail:route",
+    "cf:usage": "npm -w engine run cf:usage",
     "db:export": "npm -w engine run db:export",
     "d1:create": "npm -w engine run d1:create",
     "db:accounts": "npm -w engine run db:accounts",
