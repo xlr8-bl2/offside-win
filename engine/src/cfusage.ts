@@ -68,6 +68,21 @@ export async function cfUsage(): Promise<void> {
     console.log(`  ${g.dimensions.date}  queries ${s.readQueries + s.writeQueries}  rows read ${s.rowsRead} (${pct(s.rowsRead, FREE.rowsRead)})  rows written ${s.rowsWritten} (${pct(s.rowsWritten, FREE.rowsWritten)})`);
   }
 
+  // Which statements do the reading: the top ones over the last two days.
+  try {
+    const q = await gql(token, `query($a: String!, $s: Time!, $u: Time!, $db: String!) { viewer { accounts(filter: {accountTag: $a}) {
+      d1QueriesAdaptiveGroups(limit: 25, orderBy: [sum_rowsRead_DESC], filter: {datetime_geq: $s, datetime_leq: $u, databaseId: $db}) {
+        sum { rowsRead rowsWritten queryDurationMs } count dimensions { query } } } } }`,
+      { a: accountId, s: new Date(until.getTime() - 2 * 86400_000).toISOString(), u: until.toISOString(), db: dbId });
+    console.log('\nTop statements by rows read, last two days (rows read, times run, rows a time):');
+    for (const g of (q?.viewer?.accounts?.[0]?.d1QueriesAdaptiveGroups ?? []) as any[]) {
+      const sql = String(g.dimensions.query).replace(/\s+/g, ' ').slice(0, 220);
+      console.log(`  ${g.sum.rowsRead}  x${g.count}  ~${Math.round(g.sum.rowsRead / Math.max(1, g.count))}/run  ${sql}`);
+    }
+  } catch (err) {
+    console.log(`top statements: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   const info = await fetch(`${API}/accounts/${accountId}/d1/database/${dbId}`, { headers: { authorization: `Bearer ${token}` } })
     .then((r) => r.json()).catch(() => null) as any;
   const bytes = Number(info?.result?.file_size ?? 0);
