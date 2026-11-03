@@ -369,6 +369,20 @@ Stage 2, accounts:
   `ow.ref` (30 days) is in the cookie table. Tests: `worker/test/referral.test.ts`.
   Known and not touched: at 390px a signed-in free account's header (Upgrade + menu) overflows
   by 10px.
+- **3 November: engine review; the lab runs on D1 again; a point of price slack (thread "Improve
+  the prediction engine's picks").** Every lab command had failed since the 7 October move: `loadHistory`
+  (`engine/src/lab/run.ts`) used a Postgres LATERAL join for the referee record. It now reads the match
+  table once and looks the record up in memory (`refereeLookup`, tested in `test/lab-referee.test.ts`);
+  `lab:slices` skips its two Postgres-only slices on D1. New read-only `lab:review` (pg.yml): the
+  production rule by market, price band, handicap line, rank and probability over A/B/C, and candidate
+  rules scored against it with days resampled. Findings on 5,171 finished games: the lab replays the live
+  engine within half a point (`lab:live`); since late September the rule made 4 to 5 calls a day at
+  80-82% landed and -3.2% / +0.6% a call, because the value test (best price at or above fair) turned
+  away three fixtures in four. Every family at every probability loses 1-5% at the best price over the
+  whole history, so there is no edge to tune for, only volume and landing rate. Change: `minEv` -0.02
+  and `minSharpEv` -0.01 (was -0.01 and 0), `PROD` in `lab/tune.ts` to match: about 15 calls a day,
+  83-85% landed, -0.6% / -0.8% on B / C. Re-check with `lab:review` once a fortnight has settled.
+
 - **3 November: the front page always leads with a match, and draws it at once.** Two causes of
   "no match in the hero": the members' front page (`viewDashboard`) dropped the headline for a plain
   masthead whenever its call had been withdrawn, and the landing page (`viewLanding`) took its lead

@@ -426,8 +426,29 @@ export const config = {
      * own probability; -1 turns it off. Near zero the best price has to be
      * at or about the consensus's fair price: the one condition that separated
      * the rules that earned in the lab from the ones that did not.
+     *
+     * Loosened by a point, with minSharpEv, on 3 November 2026 (lab:review,
+     * 5,171 fixtures). Since late September this test and its sharp-book
+     * twin turned away about three fixtures in four, leaving 4 to 5 calls a
+     * day and a near-empty board, and the rule was not earning for it: the
+     * lab replays the live engine to within half a point (lab:live), and on
+     * the two newest periods (B, C: 23 September to 3 November) it returned
+     * -3.2% and +0.6% a call. Letting the best price sit up to a point below
+     * fair:
+     *
+     *                        calls a day   landed (B / C)   return (B / C)
+     *   production             4.6         80.2 / 82.0%     -3.2 / +0.6%
+     *   within 1% of fair     15.5         84.5 / 83.4%     -0.6 / -0.8%
+     *
+     * Three times the calls, landing more often, at the same return. Half a
+     * point (8 a day, -5.4 / -1.8%) and a point and a half (24 a day, -2.3 /
+     * -2.2%) did not line up in order, so read the return as "about -1%,
+     * as before", not as an improvement; the gain is volume and landing. Every
+     * family at every probability loses 1-5% at the best price over the
+     * whole history (lab deep, section 5), so no threshold here buys an edge;
+     * what it decides is how many calls the board has and how often they land.
      */
-    minEv: num('CONF_MIN_EV', -0.01),
+    minEv: num('CONF_MIN_EV', -0.02),
     /**
      * A best price this far above the consensus's fair odds (odds × fair
      * probability) is a book that has not moved, not an opportunity anyone
@@ -446,9 +467,9 @@ export const config = {
     /**
      * The value test against the sharp book as well, where it priced the
      * market: the best price must be within this of its fair price. Null
-     * skips it.
+     * skips it. A point below fair since 3 November 2026; see minEv.
      */
-    minSharpEv: process.env.CONF_MIN_SHARP_EV ? Number(process.env.CONF_MIN_SHARP_EV) : (0 as number | null),
+    minSharpEv: process.env.CONF_MIN_SHARP_EV ? Number(process.env.CONF_MIN_SHARP_EV) : (-0.01 as number | null),
     /**
      * Price movement: leave a call the money has gone against since the market
      * opened, by more than this (one point: 80% at the open, under 79% now).
