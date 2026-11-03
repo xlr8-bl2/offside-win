@@ -596,6 +596,25 @@ export function freeTimeMail({ days, until }: { days: number; until: number }): 
   });
 }
 
+/** A friend who came on this reader's link has joined: the thank-you days are on. */
+export function referralRewardMail({ days, until }: { days: number; until: number }): Mail {
+  const span = days === 7 ? 'a week' : days === 14 ? 'two weeks' : `${days} days`;
+  const Span = `${span[0]!.toUpperCase()}${span.slice(1)}`;
+  return compose({
+    tag: 'referral-reward',
+    subject: `Your mate joined. ${Span} on us`,
+    preheader: `Thanks for passing it on. Every call is open to you until at least ${shortDate(until)}.`,
+    heading: `${Span} on us.`,
+    look: { ticker: 'Thanks for passing it on', hero: 'hero-free', lead: `${Span} on us.`, features: FEATURES },
+    parts: [
+      { p: `Someone you sent our way has become a member. That is the best thing anyone can do for a site like this, so we have added ${span} to yours.` },
+      { facts: [['Added', Span], ['Open until', shortDate(until)], ['Cost', 'Nothing']] },
+      { p: 'If you pay through Whop, your next payment moves back by the same. Nothing to claim and nothing to do.' },
+      { button: 'Share your link again', href: `${SITE}/#/account?tab=invite` },
+    ],
+  });
+}
+
 /** The account and what was held about it are gone. */
 export function accountDeletedMail({ stoppedRenewal }: { stoppedRenewal: boolean }): Mail {
   return compose({
