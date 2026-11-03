@@ -36,7 +36,7 @@
 import { isFinishedStatus, settleSelection, type Result } from '../../engine/src/grade.ts';
 import { postMortem } from '../../engine/src/postmortem.ts';
 import type { MarketCode, Outcome } from '../../engine/src/types.ts';
-import { noteAllowance } from './live.ts';
+import { leftFrom, mayAsk, spent } from './allowance.ts';
 
 interface Stmt {
   bind(...v: unknown[]): Stmt;
@@ -123,7 +123,8 @@ async function askProvider(env: FulltimeEnv, id: number): Promise<{ status: stri
     const res = await fetch(new URL(`/api/v2/events/${id}/`, env.BSD_BASE_URL || BASE).toString(), {
       headers: { Authorization: `Token ${env.BSD_API_KEY}`, Accept: 'application/json', 'User-Agent': 'offside-win-live/1.0 (+https://offside.win)' },
     });
-    noteAllowance(res);
+    // Results come first: no floor, but still counted, and what is left is shared.
+    await spent(env.DB as never, 'results', 1, leftFrom(res));
     if (!res.ok) return null;
     const ev = await res.json() as Record<string, unknown>;
     return { status: String(ev['status'] ?? ''), hg: numOr(ev['home_score']), ag: numOr(ev['away_score']) };
@@ -160,6 +161,44 @@ async function settleSlips(db: FulltimeDb, now: number): Promise<number> {
   return settled;
 }
 
+/**
+ * The writes that grade one finished match on its final score: each
+ * unsettled call the score can grade, and the score and state on the fixture.
+ */
+async function gradeWrites(db: FulltimeDb, id: number, hg: number, ag: number, now: number): Promise<{ writes: Stmt[]; settled: number; left: number }> {
+  const picks = (await db.prepare(`SELECT id, market, outcome, line, odds, opening_odds, closing_odds, evidence_json
+      FROM pick WHERE fixture_id = ? AND settled_at IS NULL`).bind(id).all<PickRow>()).results ?? [];
+  const writes: Stmt[] = [];
+  let settled = 0;
+  for (const p of picks) {
+    const g = gradePick(p, hg, ag);
+    if (!g) continue;
+    writes.push(db.prepare('UPDATE pick SET settled_at = ?, result = ?, pnl = ?, clv = ?, postmortem_json = ? WHERE id = ? AND settled_at IS NULL')
+      .bind(now, g.result, g.pnl, g.clv, g.postmortem, p.id));
+    settled++;
+  }
+  // The score the grade was made on, on the fixture, as settlement writes it:
+  // every page reads a finished match from these two columns. The status
+  // too, which the slate would not rewrite until its next pass, so a graded
+  // call no longer sits beside a match still marked as in play.
+  writes.push(db.prepare("UPDATE fixture SET home_goals = ?, away_goals = ?, status = 'finished' WHERE id = ?").bind(hg, ag, id));
+  return { writes, settled, left: picks.length - settled };
+}
+
+/**
+ * The owner's final score for a match (the admin dashboard, when the provider
+ * cannot be asked): graded exactly as a score from the provider would be.
+ * Calls on corners or cards stay for the engine, which reads the match numbers.
+ */
+export async function setFinalScore(db: FulltimeDb, id: number, hg: number, ag: number, now = Math.floor(Date.now() / 1000)): Promise<{ settled: number; left: number; slips: number }> {
+  const g = await gradeWrites(db, id, hg, ag, now);
+  const writes = [...g.writes];
+  if (g.settled) writes.push(kvPut(db, 'settled:recent', addRecent(await kvGet<Recent>(db, 'settled:recent'), [id], now), now));
+  await db.batch(writes);
+  const slips = g.settled ? await settleSlips(db, now) : 0;
+  return { settled: g.settled, left: g.left, slips };
+}
+
 export interface FulltimeReport { candidates: number; asked: number; settled: number; matches: number[]; slips: number }
 
 /** One run: the matches with an ungraded call that could be over, asked about, and graded if they are. */
@@ -184,26 +223,13 @@ export async function settleFinished(env: FulltimeEnv, now = Math.floor(Date.now
     const id = Number(d.fixture_id);
     asked[String(id)] = now;
     report.asked++;
+    if (!await mayAsk(db as never, 'results', now)) break;
     const ev = await askProvider(env, id);
     if (!ev || ev.hg === null || ev.ag === null || !isFinishedStatus(ev.status)) continue;
-
-    const picks = (await db.prepare(`SELECT id, market, outcome, line, odds, opening_odds, closing_odds, evidence_json
-        FROM pick WHERE fixture_id = ? AND settled_at IS NULL`).bind(id).all<PickRow>()).results ?? [];
-    let any = false;
-    for (const p of picks) {
-      const g = gradePick(p, ev.hg, ev.ag);
-      if (!g) continue;
-      writes.push(db.prepare('UPDATE pick SET settled_at = ?, result = ?, pnl = ?, clv = ?, postmortem_json = ? WHERE id = ? AND settled_at IS NULL')
-        .bind(now, g.result, g.pnl, g.clv, g.postmortem, p.id));
-      report.settled++;
-      any = true;
-    }
-    // The score the grade was made on, on the fixture, as settlement writes it:
-    // every page reads a finished match from these two columns. The status
-    // too, which the slate would not rewrite until its next pass, so a graded
-    // call no longer sits beside a match still marked as in play.
-    writes.push(db.prepare("UPDATE fixture SET home_goals = ?, away_goals = ?, status = 'finished' WHERE id = ?").bind(ev.hg, ev.ag, id));
-    if (any) report.matches.push(id);
+    const g = await gradeWrites(db, id, ev.hg, ev.ag, now);
+    writes.push(...g.writes);
+    report.settled += g.settled;
+    if (g.settled) report.matches.push(id);
   }
 
   // Forget matches past the window, so the key stays a handful of entries.

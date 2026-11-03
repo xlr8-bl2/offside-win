@@ -454,6 +454,20 @@ Stage 2, accounts:
     with the full-time report. Below 600 left (`RateLimit` header, `allowanceLow` in `live.ts`)
     the changes feed stops too; the live list and the full-time check keep going. Check
     `/api/live` and the slate log's "provider requests left" on the next big night.
+- **3 November: the sports API allowance has priorities and budgets** (after it ran out that
+  evening). Order, as floors (ask only while more than this is left), in `worker/src/allowance.ts`:
+  results 0 (full-time scores: `fulltime.ts`, and the engine's settle score reads inside
+  `asResults` in `bsd.ts`), live scores list 400, fixture changes 1,500, slate 1,800 (slate.yml),
+  anything else 2,500 (new engine default, was 500), ratings 3,000. The Worker's uses also have an
+  hourly budget for the whole site (results 45, live 40, changes 30, kv `bsd:worker`); over budget
+  or below floor, live scores come from the last shared copy (up to 15 min old) instead. What is
+  left is shared in kv `bsd:left` ({n, at, by}): the Worker writes it from every answer, slate
+  passes, settle and ratings start from it (`engine/src/allowance.ts` syncAllowance) and write it
+  back. The admin dashboard's Engine card shows it ("Sports API: N of 7,500 left", amber at 1,500,
+  red at 400). **Manual fallback:** `#/admin/calls` lists matches 90+ min past kick-off with calls
+  still open, each with a final-score form (`POST /api/admin/score`, `adminScore` in
+  `admindb.ts`, `setFinalScore` in `fulltime.ts`): graded with the same rules, logged as
+  `final_score` in admin_log; corners and cards calls still wait for the engine.
 - **28 October: no engine talk on the public site.** The owner asked that the site stop saying an
   engine or model does the analysis. A sweep of pages, meta tags, `llms.txt`, the Worker's prerendered
   pages, emails and studio captions found two lines, both on `#/results` (`viewResults()`), now neutral.

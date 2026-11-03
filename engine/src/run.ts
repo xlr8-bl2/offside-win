@@ -17,6 +17,7 @@ import { fitAllLeagues } from './ratings/fit.ts';
 import { syncTeamShots } from './images/sync.ts';
 import { coinflowCharger, renewDue } from './membership/renew.ts';
 import { runSettle } from './settle.ts';
+import { shareAllowance, syncAllowance } from './allowance.ts';
 import { pruneBoard, runSlate } from './slate.ts';
 import { closeDb, dbStats, migrate, schemaFile, select } from './store.ts';
 
@@ -165,7 +166,10 @@ const commands: Record<string, () => Promise<unknown>> = {
     requireEnv();
     await ensureSchema();
     console.log('Fitting ratings...');
-    return fitAllLeagues();
+    await syncAllowance();
+    const r = await fitAllLeagues();
+    await shareAllowance('ratings');
+    return r;
   },
 
   async slate() {
@@ -222,6 +226,9 @@ const commands: Record<string, () => Promise<unknown>> = {
       // back: each pass asks afresh, and the first answer says where it stands.
       bsdQuota.exhausted = false;
       bsdQuota.remaining = null;
+      // Unless someone (the Worker, another job) has seen it lately: then
+      // start from that, so a pass below its floor asks for nothing.
+      await syncAllowance();
       try {
         await commands.slate!();
         failures = 0;
@@ -244,6 +251,7 @@ const commands: Record<string, () => Promise<unknown>> = {
         console.error('slate:loop: settle failed:', err instanceof Error ? err.message : err);
       }
       if (cacheFile) await saveCache(cacheFile).catch(() => {});
+      await shareAllowance('slate');
       console.log(`slate:loop: pass ${pass} took ${((Date.now() - t0) / 60_000).toFixed(1)} min`
         + `${bsdQuota.remaining !== null ? `, ${bsdQuota.remaining} provider requests left today` : ''}`);
       const next = t0 + every;
@@ -256,7 +264,10 @@ const commands: Record<string, () => Promise<unknown>> = {
   async settle() {
     requireEnv();
     await ensureSchema();
-    return runSettle();
+    await syncAllowance();
+    const r = await runSettle();
+    await shareAllowance('settle');
+    return r;
   },
 
   async plans() {

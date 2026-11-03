@@ -1,5 +1,5 @@
 import { settleSlips } from './slip.ts';
-import { bsdOrNull, num } from './bsd.ts';
+import { asResults, bsdOrNull, num } from './bsd.ts';
 import { decidedBy, postMortem, type DecidedEvent, type DecidedSide } from './postmortem.ts';
 import { isFinishedStatus, settleSelection, type FinalScore, type Result } from './grade.ts';
 import { writeMissingReports } from './report.ts';
@@ -404,7 +404,9 @@ export async function runSettle(): Promise<SettleReport> {
   const voided = new Set<number>();
   const unresolvedLog: string[] = [];
 
-  for (const id of fixtureIds) {
+  // Results come first: the final scores are read even when this job is at
+  // its floor (bsd.ts asResults).
+  await asResults(async () => { for (const id of fixtureIds) {
     const local = await select<{
       home_goals: number | null;
       away_goals: number | null;
@@ -468,7 +470,7 @@ export async function runSettle(): Promise<SettleReport> {
           ? null
           : (row.home_reds ?? 0) + (row.away_reds ?? 0),
     });
-  }
+  } });
 
   const updates: Array<{
     id: number;

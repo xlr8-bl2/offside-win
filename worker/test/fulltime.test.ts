@@ -130,3 +130,22 @@ test('recently graded matches are kept six hours', () => {
   assert.deepEqual(r, { at: NOW, ids: { 2: NOW - 3600, 3: NOW } });
   assert.deepEqual(addRecent(null, [], NOW), { at: 0, ids: {} });
 });
+
+test('the owner\'s final score grades a match\'s calls like the provider\'s would, and is logged', async () => {
+  const { adminCall } = await import('../src/admindb.ts');
+  const { sqlite, db } = localD1();
+  seed(sqlite);
+  const real = Math.floor(Date.now() / 1000);
+  sqlite.prepare('UPDATE fixture SET kickoff = ? WHERE id IN (10, 12)').run(real - 2 * 3600);
+  sqlite.prepare('UPDATE fixture SET kickoff = ? WHERE id = 11').run(real - 30 * 60);
+  const r = await adminCall(db, 'admin_score', { p_actor: 'owner', p_fixture: 10, p_home: 0, p_away: 0 }) as any;
+  assert.equal(r.ok, true);
+  assert.equal(r.settled, 2);
+  const res = sqlite.prepare('SELECT result FROM pick WHERE fixture_id = 10 ORDER BY id').all().map((x: any) => x.result);
+  assert.deepEqual(res, ['LOST', 'LOST']);
+  assert.equal((sqlite.prepare("SELECT action FROM admin_log").get() as any).action, 'final_score');
+  assert.ok(JSON.parse((sqlite.prepare("SELECT v FROM kv WHERE k = 'settled:recent'").get() as any).v).ids['10']);
+  assert.match((await adminCall(db, 'admin_score', { p_actor: 'owner', p_fixture: 10, p_home: 1, p_away: 0 }) as any).error, /already graded/);
+  assert.match((await adminCall(db, 'admin_score', { p_actor: 'owner', p_fixture: 11, p_home: 1, p_away: 0 }) as any).error, /not had time/);
+  assert.match((await adminCall(db, 'admin_score', { p_actor: 'owner', p_fixture: 12, p_home: -1, p_away: 0 }) as any).error, /whole numbers/);
+});

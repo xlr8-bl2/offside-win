@@ -30,9 +30,11 @@ export const config = {
     /**
      * Requests of the day's free allowance (7,500) this job leaves for the
      * others: below it, it asks for nothing and works from what it has
-     * (bsd.ts, quota). Each workflow sets its own.
+     * (bsd.ts, quota). Each workflow sets its own; the order of priorities is
+     * in worker/src/allowance.ts. 2,500 for anything that does not say: only
+     * results (bsd.ts asResults), live scores and the slate may go lower.
      */
-    reserve: num('BSD_RESERVE', 500),
+    reserve: num('BSD_RESERVE', 2500),
   },
 
   /**
