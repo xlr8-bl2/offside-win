@@ -6459,6 +6459,7 @@ const reading = () => { try { return sessionStorage.getItem(READING_KEY); } catc
  * sequence does for a magic link.
  */
 async function afterSignIn() {
+  adSignedUp();
   state.member = null;
   state.account = null;
   cacheClear();
@@ -7280,6 +7281,7 @@ async function viewSignin() {
     const undo = busy(button, 'Sending the link…');
     try {
       await signInWithEmail(email);
+      adLead(email);
       /*
        * The sent state replaces the form. A form that stays on screen under
        * "check your email" invites a second tap, a second email, and a rate
@@ -8248,6 +8250,46 @@ function loadAdPixel() {
 }
 function adPageView() {
   if (adPixelOn && canMeasureAds()) { try { window.whop?.track('page'); } catch { /* a lost view is fine */ } }
+}
+
+/*
+ * Sign-ups, for an ad campaign that optimises for leads (Whop Ads asks for a
+ * `lead` event before it will run one). Same consent as the page views: no
+ * yes to ad measurement, no pixel, nothing sent.
+ *
+ *   lead                   an email typed in for a sign-in link, or a first
+ *                          sign-in with Google (which has no email step)
+ *   complete_registration  a brand-new account's first session
+ *
+ * No email address or name goes to Whop. Each event carries an event_id, so a
+ * resend of the link, a reload or the same person on a second tab counts once:
+ * the lead is keyed on a hash of the address, the registration on the account.
+ */
+async function adEventId(prefix, text) {
+  try {
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return `${prefix}_${[...new Uint8Array(hash)].slice(0, 8).map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+  } catch { return null; }
+}
+function adEvent(name, params) {
+  if (!adPixelOn || !canMeasureAds()) return;
+  try { window.whop?.track(name, params); } catch { /* a lost event is fine */ }
+}
+async function adLead(email) {
+  if (!adPixelOn || !canMeasureAds() || !email) return;
+  const id = await adEventId('lead', String(email).trim().toLowerCase());
+  adEvent('lead', id ? { event_id: id } : undefined);
+}
+/** After a sign-in: a lead and a registration if the account was made just now. */
+async function adSignedUp() {
+  if (!adPixelOn || !canMeasureAds()) return;
+  try {
+    const user = await currentUser({ real: true });
+    const since = Date.parse(user?.since ?? '');
+    if (!user?.id || !(Date.now() - since < 30 * 60 * 1000)) return;
+    await adLead(user.email);
+    adEvent('complete_registration', { event_id: `reg_${user.id}`, external_id: user.id });
+  } catch { /* a lost event is fine */ }
 }
 
 function applyConsent(value) {
@@ -9536,6 +9578,7 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
       headerAuth();
       cookieNotice();
       loadAdPixel();
+      adSignedUp();
       return;
     }
     if (intent && intent.startsWith('#/')) location.hash = intent;
@@ -9553,4 +9596,5 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
   cookieNotice();
   // After the first page has drawn: the pixel records that page itself.
   loadAdPixel();
+  if (signedInJustNow) adSignedUp();
 })();

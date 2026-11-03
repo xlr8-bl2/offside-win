@@ -11,6 +11,18 @@ meaningful step, and commits it with that step, not at the end of the day.
 
 ## Right now
 
+### Ad test: lead events for Whop Ads (3 November 2026, branch `claude/project-thread-p7u2m5`)
+
+Whop Ads would not run a leads campaign on the homepage because the pixel had never sent a `lead`.
+`public/app.js` now sends, only with the reader's yes to ad measurement: `lead` when an email is
+typed in for a sign-in link (or on a brand-new account's first sign-in, which covers Google), and
+`complete_registration` on a new account's first session (`since` under 30 minutes). No email or
+name goes to Whop; `event_id` is `lead_<16 hex of sha256(email)>` and `reg_<account id>`, so repeats
+count once. The privacy and cookie notices say so (`legal.js`, regenerated `privacy.html` /
+`terms.html`, UPDATED 3 November 2026). The pixel still loads only after consent, so Whop sees
+nothing from a visitor who ignores the notice. Checked in Chromium against the local server: both
+events queue with consent, nothing loads without it.
+
 ### Stage 1 is live: the public site runs on Cloudflare D1
 
 Since about 02:20 UTC on 7 October the site reads from D1 and the engine writes to it (PR #154,

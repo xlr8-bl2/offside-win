@@ -10,7 +10,7 @@
  * page. One source, so the two can never disagree.
  */
 
-export const UPDATED = '9 October 2026';
+export const UPDATED = '3 November 2026';
 
 /*
  * The address on the contact page. It is referenced from the privacy policy and
@@ -121,8 +121,10 @@ export const LEGAL = {
       <p><b>Ad measurement.</b> Where you consent, the Site loads the Whop pixel, which reports to Whop
          each page of the Site you open, together with the technical information transmitted with the
          request (including your IP address and browser details) and any identifier Whop sets, so
-         that we can measure which of our advertisements led to visits and purchases. Where you do not
-         consent, the pixel is not loaded.</p>
+         that we can measure which of our advertisements led to visits and purchases. It also tells
+         Whop when you ask for a sign-in link and when you create an Account, marked with a code
+         derived from your email address or Account; your email address itself is not sent. Where you
+         do not consent, the pixel is not loaded and none of this is reported.</p>
       <p>We do not process special category data, do not acquire personal data from third parties for
          marketing purposes and do not use data brokers.</p>`,
       },
@@ -143,7 +145,7 @@ export const LEGAL = {
           <tr><td>Preventing fraud, abuse and payment disputes</td><td>Account, payment records, request logs</td><td>Legitimate interests (Art. 6(1)(f))</td></tr>
           <tr><td>Responding to correspondence and complaints</td><td>Correspondence</td><td>Legitimate interests (Art. 6(1)(f)) or performance of a contract</td></tr>
           <tr><td>Saved pages and visit counting</td><td>Storage on your device; aggregate count</td><td>Consent (Art. 6(1)(a)), which may be withdrawn at any time</td></tr>
-          <tr><td>Measuring our advertising (the Whop pixel)</td><td>Pages opened, technical request information, Whop’s identifier</td><td>Consent (Art. 6(1)(a)) and, for the device access involved, regulation 6 of PECR; consent may be withdrawn at any time</td></tr>
+          <tr><td>Measuring our advertising (the Whop pixel)</td><td>Pages opened, sign-ups (by code, not email address), technical request information, Whop’s identifier</td><td>Consent (Art. 6(1)(a)) and, for the device access involved, regulation 6 of PECR; consent may be withdrawn at any time</td></tr>
           <tr><td>Establishing, exercising or defending legal claims</td><td>Data relevant to the claim</td><td>Legitimate interests (Art. 6(1)(f))</td></tr>
         </tbody>
       </table></div>
@@ -813,7 +815,7 @@ export const LEGAL = {
         <tbody>
           <tr><td>Saved pages (<code>ow.c1:…</code>)</td><td>A copy of each page’s data, so that the Site opens immediately on your next visit and then updates.</td><td>Replaced as pages update; deleted if consent is withdrawn</td></tr>
           <tr><td>Visit counting</td><td>An anonymous count of each page opened, by category of page. Nothing is stored on your device for this purpose.</td><td>Not stored on your device</td></tr>
-          <tr><td>Ad measurement (the Whop pixel, from <code>t.whop.tw</code>)</td><td>Reports each page you open to Whop, so that we can tell which of our advertisements brought you to the Site. Whop may store its own identifier on your device for this purpose.</td><td>As set by Whop; the pixel stops loading as soon as consent is withdrawn</td></tr>
+          <tr><td>Ad measurement (the Whop pixel, from <code>t.whop.tw</code>)</td><td>Reports each page you open, and when you sign up, to Whop, so that we can tell which of our advertisements brought you to the Site. Whop may store its own identifier on your device for this purpose.</td><td>As set by Whop; the pixel stops loading as soon as consent is withdrawn</td></tr>
         </tbody>
       </table></div>
 
