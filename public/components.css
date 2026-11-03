@@ -3513,6 +3513,39 @@
 .ld-lead-free span { color: var(--floodlight-hi); font-size: var(--text-sm); font-weight: var(--weight-bold); }
 .ld-lead-free b { font-weight: var(--weight-bold); }
 .ld-lead-free:hover b { color: var(--floodlight-hi); }
+/* The free call as a pick, large: the line a stranger stays for. */
+.ld-pick {
+  margin-top: var(--space-6);
+  padding: var(--space-5) var(--space-6);
+  border-left: 3px solid var(--floodlight);
+  background: color-mix(in srgb, var(--floodlight) 10%, transparent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.ld-pick-tag {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  color: var(--floodlight-hi);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+}
+.ld-pick-tag span { color: var(--chalk-2); font-weight: var(--weight-medium); }
+.ld-pick-sel {
+  display: block;
+  margin-top: var(--space-3);
+  color: var(--chalk);
+  font-family: var(--display);
+  font-size: var(--text-3xl);
+  font-weight: 700;
+  line-height: 1;
+  font-variation-settings: 'wdth' var(--condensed);
+  overflow-wrap: anywhere;
+}
+.ld-pick-sel:hover { color: var(--floodlight-hi); }
+.ld-pick-mkt { margin: var(--space-2) 0 0; color: var(--chalk-3); font-size: var(--text-sm); }
+.ld-pick-go { display: inline-block; margin-top: var(--space-4); color: var(--floodlight-hi); font-size: var(--text-sm); font-weight: var(--weight-bold); }
+.ld-pick-go:hover { color: var(--chalk); }
 
 /* The competitions, as one line of links. */
 .ld-comps {
