@@ -20,6 +20,8 @@
  * slate pass.
  */
 
+import { leftFrom, mayAsk, spent, type Use } from './allowance.ts';
+
 export interface LiveEnv {
   BSD_API_KEY?: string;
   BSD_BASE_URL?: string;
@@ -173,30 +175,7 @@ export function reduceChanges(raw: unknown[]): FixtureChange[] {
   return [...byKey.values()].sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
 }
 
-/*
- * What the provider says is left of its allowance (`RateLimit: ...;r=<n>`),
- * as last seen by this copy of the Worker. On 3 November 2026 the allowance
- * went from 6,770 at 19:00 UTC to nothing by 19:54, with no engine job
- * asking: a Champions League evening of match pages, each polling its
- * timeline and numbers. Nothing was left to read the final scores with, so
- * every call that night stayed ungraded. Below LOW the extras (a match's
- * timeline and numbers, the changes feed) stop and only the live list and
- * the full-time check (fulltime.ts) still ask.
- */
-const LOW = 600;
-let left: { n: number; at: number } | null = null;
-export function noteAllowance(res: { headers: { get(k: string): string | null } }): void {
-  const r = /;r=(\d+)/.exec(res.headers.get('ratelimit') ?? '');
-  if (r) left = { n: Number(r[1]), at: Date.now() };
-}
-/** Whether the allowance is too low for anything but scores (seen in the last half hour). */
-export function allowanceLow(now = Date.now()): boolean {
-  return Boolean(left && left.n < LOW && now - left.at < 30 * 60_000);
-}
-/** For tests. */
-export function resetAllowance(): void { left = null; }
-
-async function provider<T = unknown>(env: LiveEnv, path: string, params: Record<string, string | number> = {}): Promise<T> {
+async function provider<T = unknown>(env: LiveEnv, use: Use, path: string, params: Record<string, string | number> = {}): Promise<T> {
   const url = new URL(path, env.BSD_BASE_URL || BASE);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
   const res = await fetch(url.toString(), {
@@ -206,8 +185,9 @@ async function provider<T = unknown>(env: LiveEnv, path: string, params: Record<
       'User-Agent': 'offside-win-live/1.0 (+https://offside.win)',
     },
   });
-  noteAllowance(res);
-  if (res.status === 429) left = { n: 0, at: Date.now() };
+  // Counted against this use's hourly budget, and what is left shared with
+  // the engine (allowance.ts).
+  await spent(env.DB, use, 1, leftFrom(res));
   if (!res.ok) throw new Error(`provider ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -261,6 +241,15 @@ async function cachedValue<T>(
   return value;
 }
 
+/** A shared copy (cachedValue's kv `live:<key>`) up to `maxAge` seconds old, for when asking is not allowed. */
+async function lastShared<T>(env: LiveEnv, key: string, maxAge: number): Promise<T | null> {
+  if (!env.DB) return null;
+  try {
+    const row = await env.DB.prepare('SELECT v FROM kv WHERE k = ? AND updated_at > ?').bind(`live:${key}`, Math.floor(Date.now() / 1000) - maxAge).first<{ v: string }>();
+    return row?.v ? (JSON.parse(row.v) as T) : null;
+  } catch { return null; }
+}
+
 // The browser may keep a copy for a little under the refresh interval.
 const json = (body: unknown, ttl: number) => new Response(JSON.stringify(body), { headers: HEADERS(Math.max(5, Math.floor(ttl / 2))) });
 
@@ -286,7 +275,10 @@ interface ListValue { matches: LiveMatch[]; unread?: string[]; asked?: boolean }
 
 const matchesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue<ListValue>('list', LIST_TTL, ctx, async () => {
   if (!await onNow(env)) return { matches: [], unread: undefined, asked: false };
-  const raw = await provider(env, '/api/v2/events/live/', { limit: 500 });
+  // Below its floor or over its hour's budget: the last shared list, if it
+  // is under a quarter of an hour old, rather than a new request.
+  if (!await mayAsk(env.DB, 'live')) return { matches: (await lastShared<ListValue>(env, 'list', 900))?.matches ?? [], asked: false };
+  const raw = await provider(env, 'live', '/api/v2/events/live/', { limit: 500 });
   const matches = listOf(raw, 'results').map(compactMatch).filter((m): m is LiveMatch => m !== null);
   const count = numOr(rec(raw)?.['count']);
   // The provider says matches are on and none were read: the list's key has
@@ -299,13 +291,13 @@ const matchesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue<ListValue>('list', L
 }, env, (v) => v.asked !== false);
 
 const changesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('changes', CHANGES_TTL, ctx, async () => {
-  if (allowanceLow()) throw new Error('allowance low');
+  if (!await mayAsk(env.DB, 'changes')) return (await lastShared<FixtureChange[]>(env, 'changes', 6 * 3600)) ?? [];
   let since = new Date(Date.now() - 7 * 86400e3 + 60e3).toISOString();
   const all: unknown[] = [];
   // The feed pages by time: when a page is cut short, ask again from the
   // last change received rather than moving on, or the rest is skipped.
   for (let i = 0; i < 6; i++) {
-    const page = await provider<Record<string, unknown>>(env, '/api/v2/fixtures/changes/', { change: 'kickoff,status', since, limit: 500 });
+    const page = await provider<Record<string, unknown>>(env, 'changes', '/api/v2/fixtures/changes/', { change: 'kickoff,status', since, limit: 500 });
     const rows = listOf(page, 'changes');
     all.push(...rows);
     if (page?.['truncated'] !== true || !rows.length) break;

@@ -286,6 +286,13 @@ export async function admin(request: Request, env: AdminEnv, jwt: string | null,
     if (!(await saveSocials(env as unknown as SocialEnv, next))) return refuse('Could not save just now. Nothing changed.', 503);
     return reply({ ok: true, socials: next });
   }
+  if (post && route === 'score') {
+    // A match's final score, typed in by the owner when the provider cannot
+    // be asked (adminScore in admindb.ts). D1 only.
+    if (!env.DB) return refuse('Only on D1.', 400);
+    const b = await body(request);
+    return db(env, 'admin_score', { p_actor: who.id, p_fixture: int(b['fixture']), p_home: int(b['home']), p_away: int(b['away']) });
+  }
   if (post && route === 'end') {
     const b = await body(request);
     const user = String(b['user'] ?? '');

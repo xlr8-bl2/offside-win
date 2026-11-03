@@ -168,7 +168,7 @@ test('a second data centre takes the first one\'s copy from D1 instead of asking
 });
 
 test('a match page for an id not on now asks the provider nothing', async () => {
-  const { allowanceLow, liveMatch: lm, noteAllowance, resetAllowance } = await import('../src/live.ts');
+  const { liveMatch: lm } = await import('../src/live.ts');
   const asked: string[] = [];
   const real = globalThis.fetch;
   globalThis.fetch = (async (url: string | URL) => {
@@ -183,9 +183,4 @@ test('a match page for an id not on now asks the provider nothing', async () => 
     assert.equal(body.report, null);
     assert.ok(asked.every((u) => u.includes('/events/live/')), 'only the live list, never the match itself');
   } finally { globalThis.fetch = real; }
-  noteAllowance({ headers: { get: () => 'limit=7500;r=120' } });
-  assert.equal(allowanceLow(), true, 'below the floor: scores only');
-  noteAllowance({ headers: { get: () => 'limit=7500;r=5000' } });
-  assert.equal(allowanceLow(), false);
-  resetAllowance();
 });

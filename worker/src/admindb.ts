@@ -10,6 +10,7 @@
 
 import type { AuthDb } from './auth.ts';
 import { getHealth, type D1Read } from './d1read.ts';
+import { setFinalScore, type FulltimeDb } from './fulltime.ts';
 
 type Rec = Record<string, any>;
 const now = () => Math.floor(Date.now() / 1000);
@@ -78,6 +79,12 @@ export async function adminOverview(db: AuthDb): Promise<Rec> {
     first<{ v: string }>(db, `SELECT v FROM kv WHERE k = 'settle:last_run'`),
     first<{ v: string }>(db, `SELECT v FROM kv WHERE k = 'gemini:budget'`),
   ]);
+  // The sports provider's allowance: what is left, as last seen, and the
+  // Worker's own use this hour (worker/src/allowance.ts).
+  const [left, worker] = await Promise.all([
+    first<{ v: string }>(db, `SELECT v FROM kv WHERE k = 'bsd:left'`),
+    first<{ v: string }>(db, `SELECT v FROM kv WHERE k = 'bsd:worker'`),
+  ]);
   return {
     at: t,
     accounts: { total: acc?.total ?? 0, day: acc?.day ?? 0, week: acc?.week ?? 0, month: acc?.month ?? 0 },
@@ -91,6 +98,7 @@ export async function adminOverview(db: AuthDb): Promise<Rec> {
     engine: {
       health: await getHealth(db as unknown as D1Read),
       slate: slate ? json(slate.v) : null, settle: settle ? json(settle.v) : null, writer: writer ? json(writer.v) : null,
+      allowance: left ? json(left.v) : null, worker: worker ? json(worker.v) : null,
     },
   };
 }
@@ -172,6 +180,25 @@ export async function adminEnd(db: AuthDb, actor: string, user: string): Promise
 }
 
 /* -------------------------------------------------------------- calls */
+
+/**
+ * The owner's final score for a match, when the provider cannot be asked
+ * (fulltime.ts setFinalScore): its calls graded as a score from the provider
+ * would grade them. Only a match that kicked off at least ninety minutes ago
+ * and has a call still open.
+ */
+export async function adminScore(db: AuthDb, actor: string, fixture: number, home: number, away: number): Promise<Rec> {
+  const goals = (n: number) => Number.isInteger(n) && n >= 0 && n <= 30;
+  if (!Number.isInteger(fixture) || !goals(home) || !goals(away)) return { error: 'Goals as whole numbers, 0 to 30.' };
+  const t = now();
+  const f = await first<{ kickoff: number; home_team: string; away_team: string }>(db, 'SELECT kickoff, home_team, away_team FROM fixture WHERE id = ?', fixture);
+  if (!f) return { error: 'No such match.' };
+  if (f.kickoff > t - 90 * 60) return { error: 'This match has not had time to finish yet.' };
+  if (!await first(db, 'SELECT 1 AS x FROM pick WHERE fixture_id = ? AND settled_at IS NULL', fixture)) return { error: 'Every call on this match is already graded.' };
+  const r = await setFinalScore(db as unknown as FulltimeDb, fixture, home, away, t);
+  await log(db, actor, 'final_score', `fixture:${fixture}`, { fixture, home, away, settled: r.settled, slips: r.slips });
+  return { ok: true, ...r, match: `${f.home_team} ${home}-${away} ${f.away_team}` };
+}
 
 export async function adminPicks(db: AuthDb): Promise<Rec> {
   const t = now();
@@ -404,6 +431,7 @@ export async function adminCall(db: AuthDb, fn: string, a: Rec): Promise<unknown
     case 'admin_grant': return adminGrant(db, String(a.p_actor), String(a.p_user), Number(a.p_days));
     case 'admin_end': return adminEnd(db, String(a.p_actor), String(a.p_user));
     case 'admin_picks': return adminPicks(db);
+    case 'admin_score': return adminScore(db, String(a.p_actor), Number(a.p_fixture), Number(a.p_home), Number(a.p_away));
     case 'admin_plans': return adminPlans(db);
     case 'admin_save_plan': return adminSavePlan(db, String(a.p_actor), String(a.p_id), a.p_name ?? null, a.p_amount ?? null, a.p_active ?? null);
     case 'admin_promos': return adminPromos(db);
