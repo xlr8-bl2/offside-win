@@ -19,6 +19,7 @@
     "lab:slices": "tsx src/run.ts lab:slices",
     "record:reset": "tsx src/run.ts record:reset",
     "lab:live": "tsx src/run.ts lab:live",
+    "lab:review": "tsx src/run.ts lab:review",
     "lab:record": "tsx src/run.ts lab:record",
     "lab:calib": "tsx src/run.ts lab:calib",
     "settle": "tsx src/run.ts settle",

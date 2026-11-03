@@ -380,6 +380,15 @@ const commands: Record<string, () => Promise<unknown>> = {
 
   // The lab's replay of the production rule against what the live engine
   // actually published, over the period it has run that rule (lab/live.ts).
+  // Where the production rule is good and bad, and whether it can make
+  // more calls (lab/review.ts). Read-only.
+  async 'lab:review'() {
+    requireEnv({ provider: false });
+    const { loadHistory } = await import('./lab/run.ts');
+    const { runReview } = await import('./lab/review.ts');
+    runReview(await loadHistory());
+  },
+
   async 'lab:live'() {
     requireEnv({ provider: false });
     const { loadHistory } = await import('./lab/run.ts');
