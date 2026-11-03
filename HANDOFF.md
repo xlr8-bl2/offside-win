@@ -358,6 +358,14 @@ Stage 2, accounts:
 
 ## Recent work, newest first
 
+- **3 November: D1 connection drops are retried** (branch `claude/project-thread-ssd5zv`). The
+  ratings job of 3 November failed on `D1_ERROR: Network connection lost.` while saving a league:
+  the Worker relays D1's errors as 422, and `viaWorker` treated every 422 as a SQL error. It now
+  retries the passing ones (`transientD1` in `engine/src/store.d1.ts`); the writes are upserts, so
+  a retry is safe. Ratings' other failures (31 Oct, 1 and 2 Nov) were "League discovery returned
+  nothing", the provider refusing, which the free-plan fit (#175) is about. The slate itself did
+  not fail: the three failure emails of 3 November were `pg` lab runs (`lab:live`, `lab:slices`,
+  `lab:tune`), read-only, from before the lab's D1 fix in #178.
 - **3 November: tell a friend** (branch `claude/project-thread-b55ubz`). Every account has a link,
   `offside.win/?ref=<code>` (invite tab on `#/account`, share sheet or copy). A new account made
   on it is stored in `referral` (new D1 tables `referral_code` and `referral`, `worker/src/referral.ts`).

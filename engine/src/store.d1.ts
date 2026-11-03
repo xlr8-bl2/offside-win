@@ -62,7 +62,13 @@ async function viaWorker<T>(statements: Array<{ sql: string; params: unknown[] }
       }
       const body = await res.json().catch(() => null) as { results?: Array<{ rows: T[] }>; error?: string } | null;
       if (!res.ok || !body?.results) {
-        // A SQL error will not succeed on retry.
+        // D1 losing its own connection mid-batch is worth another try (the
+        // batch is one transaction, and the engine's writes are upserts); a
+        // SQL error will not succeed on retry.
+        if (body?.error && transientD1(body.error)) {
+          lastErr = body.error.slice(0, 200);
+          continue;
+        }
         throw new Error(`D1 error: ${body?.error ?? res.status}\nSQL: ${statements[0]?.sql.slice(0, 400)}`);
       }
       const out = body.results.map((r) => r.rows ?? []);
@@ -74,6 +80,16 @@ async function viaWorker<T>(statements: Array<{ sql: string; params: unknown[] }
     }
   }
   throw new Error(`D1 request failed after retries: ${lastErr}`);
+}
+
+/**
+ * D1's own passing failures, as the Worker relays them. The ratings job of
+ * 3 November died on "D1_ERROR: Network connection lost." while saving a
+ * league, which a second try would have written.
+ */
+export function transientD1(message: string): boolean {
+  return /network connection lost|connection reset|timed? ?out|overloaded|internal error|try again|please retry/i.test(message)
+    && !/syntax error|constraint failed|no such (table|column)|SQLITE_ERROR/i.test(message);
 }
 
 /** D1 wants plain values: booleans as 0/1, undefined as null, objects as JSON text. */
