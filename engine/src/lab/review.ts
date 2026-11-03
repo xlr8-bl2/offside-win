@@ -138,6 +138,16 @@ export function candidates(): Policy[] {
       rankFloor: { ...PROD.rankFloor, 1: 0.74, 2: 0.74 },
       fallback: { ...fallback(0.74, 4), rankFloor: { ...PROD.rankFloor, 1: 0.74, 2: 0.74 } },
     },
+    { ...PROD, name: 'more: value within 1.5% of fair', minEv: -0.025, minSharpEv: -0.015 },
+    { ...PROD, name: 'more: value within 0.5% of fair', minEv: -0.015, minSharpEv: -0.005 },
+    {
+      ...PROD, name: 'combined: value within 1%, fallback 74% ranks 1-4', minEv: -0.02, minSharpEv: -0.01,
+      fallback: { ...fallback(0.74, 4), minEv: -0.02, minSharpEv: -0.01 },
+    },
+    {
+      ...PROD, name: 'combined: value within 1%, marquee 74%', minEv: -0.02, minSharpEv: -0.01,
+      rankFloor: { ...PROD.rankFloor, 1: 0.74, 2: 0.74 },
+    },
     { ...PROD, name: 'combined: fallback 74% ranks 1-4, no drift limit', maxDrift: undefined, fallback: { ...fallback(0.74, 4), maxDrift: undefined } },
     {
       ...ex('combined: fallback 74% ranks 1-4, no under 3.5', ['over_under_35 under']),
