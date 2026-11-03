@@ -125,8 +125,37 @@ export function candidates(): Policy[] {
     { ...PROD, name: 'more: market mix 40%', diversity: 0.4 },
     { ...PROD, name: 'more: no market mix', diversity: 0 },
     { ...PROD, name: 'more: rank 3 floor 82%', rankFloor: { ...PROD.rankFloor, 3: 0.82 } },
-    { ...PROD, name: 'more: fallback 74% for ranks 1-4', fallback: { ...PROD, name: 'fallback', minProb: 0.74, excludeRanks: [5, 6, 7, 8, 9, 10] } },
+    { ...PROD, name: 'more: fallback 74% for ranks 1-4', fallback: fallback(0.74, 4) },
+    { ...PROD, name: 'more: fallback 72% for ranks 1-4', fallback: fallback(0.72, 4) },
+    { ...PROD, name: 'more: fallback 76% for every rank', fallback: fallback(0.76, 10) },
+    ex('no handicap on the away side', ['asian_handicap away']),
+    { ...PROD, name: 'marquee floor 74% (was 70%)', rankFloor: { ...PROD.rankFloor, 1: 0.74, 2: 0.74 } },
+    { ...PROD, name: 'more: no drift limit', maxDrift: undefined },
+    { ...PROD, name: 'more: value within 1% of fair', minEv: -0.02, minSharpEv: -0.01 },
+    { ...PROD, name: 'more: value within 2% of fair', minEv: -0.03, minSharpEv: -0.02 },
+    {
+      ...PROD, name: 'combined: marquee 74%, fallback 74% ranks 1-4',
+      rankFloor: { ...PROD.rankFloor, 1: 0.74, 2: 0.74 },
+      fallback: { ...fallback(0.74, 4), rankFloor: { ...PROD.rankFloor, 1: 0.74, 2: 0.74 } },
+    },
+    { ...PROD, name: 'combined: fallback 74% ranks 1-4, no drift limit', maxDrift: undefined, fallback: { ...fallback(0.74, 4), maxDrift: undefined } },
+    {
+      ...ex('combined: fallback 74% ranks 1-4, no under 3.5', ['over_under_35 under']),
+      fallback: { ...fallback(0.74, 4), excludeBuckets: [...(PROD.excludeBuckets ?? []), 'over_under_35 under'] },
+    },
   ];
+}
+
+/**
+ * A second, looser rule for fixtures the production rule passes on: the
+ * same tests at a lower default floor, only in leagues ranked `maxRank` or
+ * better. The rank floors stay as they are (marquee 70%, rank 3 85%).
+ */
+function fallback(floor: number, maxRank: number): Policy {
+  return {
+    ...PROD, name: `fallback ${floor}`, minProb: floor,
+    excludeRanks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].filter((r) => r > maxRank),
+  };
 }
 
 export function runReview(rows: HistRow[]): Record<string, unknown> {
