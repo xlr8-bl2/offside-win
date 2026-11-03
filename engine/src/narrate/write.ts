@@ -26,6 +26,7 @@
 
 import { findBannedInProse } from '../vocabulary.ts';
 import type { PubFact } from './facts.ts';
+import type { Angle } from './angle.ts';
 
 export interface WriteRequest {
   home: string;
@@ -36,6 +37,13 @@ export interface WriteRequest {
   facts: PubFact[];
   /** The price the call is published at, for the members' paragraph. */
   odds?: number | null;
+  /**
+   * What the call is about (angle.ts): the question both paragraphs argue,
+   * and how the members' one argues this selection. Without it the brief is
+   * the general one, led by the reads about chances, which is why every
+   * write-up used to read the same whatever the call was.
+   */
+  angle?: Angle | null;
   /**
    * A match we passed on: the preview alone, no members' paragraph. Written
    * with the day's spare allowance, so a match page with no call still reads
@@ -130,6 +138,16 @@ export function buildPrompt(req: WriteRequest): string {
 - The facts are your evidence, not your sentences. Say each one in your own words and tie it to the next; never copy a fact, and never repeat a line from these instructions.
 - Have a take, and back it. Be willing to say a side's results are flattering them, or that they are better than the table says.`;
 
+  // A call has a question of its own: corners, cards, how many goals, who
+  // avoids defeat. The paragraph argues that, from the facts for it, which
+  // angle.ts has put first; it never says which way any bet goes.
+  const focused = req.angle ? `- This match comes down to one question: ${req.angle.question}. The whole paragraph is about that question.
+- The facts that speak to it come first in the list. Build on at least three of them, and say what they mean for this game, not only what happened.
+- Use the reads about chances, form, the table or team news only where they bear on that question; leave the rest out.
+- Mention an absence only when you can say what it changes for that question, and never as a list of names.
+- The facts are your evidence, not your sentences. Say each one in your own words and tie it to the next; never copy a fact, and never repeat a line from these instructions.
+- Have a take on the question, and back it.` : null;
+
   if (req.previewOnly) {
     return `You are a football pundit writing a preview of ${req.home} v ${req.away} in the ${req.competition}.
 
@@ -162,15 +180,16 @@ WHY:
 <why the call>
 
 PREVIEW: 70 to 120 words about the football only. Count them.
-- Open with your take on how this one goes, in one sentence.
-${analysis}
+- Open with your take on ${req.angle ? req.angle.question.split(':')[0] : 'how this one goes'}, in one sentence.
+${focused ?? analysis}
 - End on the one thing that decides it.
 - Do NOT mention any bet, market, call, odds, price or bookmaker in this paragraph.
 
 WHY: 40 to 90 words explaining why our call is: ${req.call}${odds ? `, ${odds}` : ''}.
-- Show the mechanism: how the reads underneath lead to THIS outcome, not just that one side is better.
-  If the call is about goals, argue about the chances each side makes and gives up.
-  If it is about a side not losing, argue about why the other side cannot hurt them.
+- Show the mechanism: how the facts lead to THIS outcome, not just that one side is better.
+${req.angle ? `  ${req.angle.argue}
+  Use facts the preview did not lean on where you can, so the two paragraphs do not say the same thing.` : `  If the call is about goals, argue about the chances each side makes and gives up.
+  If it is about a side not losing, argue about why the other side cannot hurt them.`}
 - Then say in one sentence what would have to go wrong for it to fail.${odds ? `
 - Include the exact words "${odds}" once.` : ''}
 
