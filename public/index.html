@@ -54,12 +54,36 @@
      Only for a reader with no saved session. Chrome hands a preloaded
      response to a later fetch of the same address whatever headers that
      fetch carries, so a member's first board was the free copy. -->
+<!-- With no session the front page is the landing page (viewLanding), so its
+     own reads are the ones started: the record of the last sixty and the
+     prices, and the matches the Worker wrote into data-lead (seo.ts,
+     homePage): tonight's headline and the free call, so their write-ups are
+     here by the time the app runs instead of a round trip after it. -->
 <script>(function () {
   try { if (localStorage.getItem('ow.session')) return; } catch (e) { /* private mode: preload */ }
   const urls = ['/api/board?hours=72', '/api/hero'];
-  if (!location.hash || /^#\/(home)?$/.test(location.hash)) urls.push('/api/picks?limit=40&settled=true', '/api/slip');
+  if (!location.hash || /^#\/(home)?$/.test(location.hash)) {
+    urls.push('/api/picks?limit=60&settled=true', '/api/plans');
+    for (const id of (document.documentElement.dataset.lead || '').split(' ')) if (/^\d+$/.test(id)) urls.push('/api/fixture/' + id);
+  }
   for (const u of urls) { const l = document.createElement('link'); l.rel = 'preload'; l.as = 'fetch'; l.href = u; l.crossOrigin = 'anonymous'; document.head.append(l); }
 })();</script>
+<!-- The modules app.js imports, asked for alongside it rather than once it
+     has been fetched and read: one round trip fewer before anything draws. -->
+<link rel="modulepreload" href="/js/lib/markets.js">
+<link rel="modulepreload" href="/js/lib/books.js">
+<link rel="modulepreload" href="/js/lib/vocabulary.js">
+<link rel="modulepreload" href="/js/lib/legal.js">
+<link rel="modulepreload" href="/js/lib/whop.js">
+<link rel="modulepreload" href="/js/lib/absence.js">
+<link rel="modulepreload" href="/js/lib/dropdown.js">
+<link rel="modulepreload" href="/js/lib/front.js">
+<link rel="modulepreload" href="/js/lib/comptheme.js">
+<link rel="modulepreload" href="/js/lib/sweat.js">
+<link rel="modulepreload" href="/js/lib/attention.js">
+<link rel="modulepreload" href="/js/lib/live.js">
+<link rel="modulepreload" href="/js/lib/titles.js">
+<link rel="modulepreload" href="/js/lib/auth.js">
 <!--
   The faces are self-hosted (public/fonts). The two that set the first screen
   are preloaded so they arrive with the stylesheet rather than after it:
