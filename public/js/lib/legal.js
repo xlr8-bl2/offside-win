@@ -236,6 +236,7 @@ export const LEGAL = {
         <thead><tr><th>Category</th><th>Retention period</th></tr></thead>
         <tbody>
           <tr><td>Account data and preferences</td><td>Until the Account is deleted</td></tr>
+          <tr><td>Friend links: your link's code, and which Account joined on whose link</td><td>Until either Account is deleted</td></tr>
           <tr><td>Payment records</td><td>Six years from the end of the tax year to which they relate, as required by tax law; following deletion of an Account, without the associated email address</td></tr>
           <tr><td>Whether a deleted Account had a Membership</td><td>Six years from deletion, held only as a one-way fingerprint of the email address, so that a free trial is given once per person</td></tr>
           <tr><td>Checkout confirmations</td><td>Six years from the end of the Membership concerned, being the limitation period for claims in contract</td></tr>
@@ -805,6 +806,7 @@ export const LEGAL = {
           <tr><td><code>ow.session</code></td><td>Maintains your signed-in session. Stored only when you sign in.</td><td>Until you sign out</td></tr>
           <tr><td><code>ow.after-signin</code></td><td>Records the action in progress when you were asked to sign in, such as a purchase, so that you are returned to it.</td><td>Deleted once used</td></tr>
           <tr><td><code>offside.country</code></td><td>The country selected for bookmaker prices, where you have changed it.</td><td>Until changed</td></tr>
+          <tr><td><code>ow.ref</code></td><td>The friend link you arrived on, if any, so the free week it gives you is there when you make an account.</td><td>30 days, or until you make an account</td></tr>
           <tr><td><code>ow.promo</code></td><td>Which offers you have already been shown or have closed, so that the same one is not shown to you again.</td><td>Until the site’s data is cleared</td></tr>
         </tbody>
       </table></div>

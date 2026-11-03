@@ -1,7 +1,7 @@
 # Handoff: read this first
 
-**Last updated:** 3 November 2026, about 16:10 UTC, by the Claude Code session working on branch
-`claude/project-thread-gshj0p` (front page hero and first load; see Recent work).
+**Last updated:** 3 November 2026, about 16:35 UTC, by the Claude Code session on branch
+`claude/project-thread-b55ubz` (tell a friend; see Recent work).
 
 **Keep this file current.** The owner may move the work to a different coding agent or account
 at any time. Whoever is working updates the "Right now" section and the checklist after every
@@ -357,6 +357,18 @@ Stage 2, accounts:
 
 ## Recent work, newest first
 
+- **3 November: tell a friend** (branch `claude/project-thread-b55ubz`). Every account has a link,
+  `offside.win/?ref=<code>` (invite tab on `#/account`, share sheet or copy). A new account made
+  on it is stored in `referral` (new D1 tables `referral_code` and `referral`, `worker/src/referral.ts`).
+  The friend gets 7 free days as a Whop trial on Monthly or 3 months when they have never been a
+  member (`friendTrial` in `pay.ts`; stacks with a deal, never with a trial; Whop metadata
+  `referral: '1'`). The sharer gets 14 days once the friend's first real payment is in `payment`,
+  capped at 10 friends a year, applied by the 10-minute cron (`rewards()`): Whop `add_free_days`
+  for a renewing Whop member, a complimentary membership extension otherwise, then
+  `referralRewardMail`. The code rides on the email link (`&ref=`) and in the verify/Google body;
+  `ow.ref` (30 days) is in the cookie table. Tests: `worker/test/referral.test.ts`.
+  Known and not touched: at 390px a signed-in free account's header (Upgrade + menu) overflows
+  by 10px.
 - **3 November: engine review; the lab runs on D1 again; a point of price slack (thread "Improve
   the prediction engine's picks").** Every lab command had failed since the 7 October move: `loadHistory`
   (`engine/src/lab/run.ts`) used a Postgres LATERAL join for the referee record. It now reads the match

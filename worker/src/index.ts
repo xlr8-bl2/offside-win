@@ -29,6 +29,7 @@ import { bearer, jsonHeaders } from './http.ts';
 import { charge, checkout, confirm, payStatus, sweepWhop, renewal, webhook, type PayEnv } from './pay.ts';
 import { deleteAccount } from './account.ts';
 import { goodwill } from './goodwill.ts';
+import { referralRoute, rewards as referralRewards } from './referral.ts';
 import { pulledAlerts } from './pulled.ts';
 
 /** The daily run that gives quiet days back; listed in wrangler.toml beside the sweep. */
@@ -157,6 +158,8 @@ const worker = {
     ctx.waitUntil(sweepWhop(env));
     // Spent sign-in links and sessions (auth.ts).
     ctx.waitUntil(authCleanup(env.DB as unknown as AuthDb | undefined).catch((err) => console.error('auth cleanup:', err instanceof Error ? err.message : String(err))));
+    // Friends who came on someone's link and have paid: the sharer's thank-you days (referral.ts).
+    ctx.waitUntil(referralRewards(env as never).catch((err) => console.error('referral:', err instanceof Error ? err.message : String(err))));
     // Calls pulled since the last run: tell the members (pulled.ts).
     ctx.waitUntil(pulledAlerts(env).catch((err) => console.error('pulled:', err instanceof Error ? err.message : String(err))));
   },
@@ -253,6 +256,8 @@ const worker = {
       // Deleting an account: the reader's token names the account, GoTrue
       // vouches for it, and the service key does the removing. account.ts.
       if (path === '/api/account/delete') return await deleteAccount(request, env, jwt);
+      // The reader's own tell-a-friend link and how it is going (referral.ts).
+      if (path === '/api/referral') return await referralRoute(request, env as never, jwt);
       // The account's own settings (profile.ts).
       if (path.startsWith('/api/account/')) return await accountWrite(request, env.DB as unknown as AuthDb | undefined, path.slice('/api/account/'.length), jwt);
 

@@ -28,7 +28,7 @@ import { sessionAccount } from './auth.ts';
 import { adminCall } from './admindb.ts';
 import { accountEmail } from './paydb.ts';
 import { composeReply, replySubject, sendSupport } from './support.ts';
-import { accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, goodwillEndMail, goodwillStartMail, membershipMail, noticeMail, pulledMail, receiptMail, renewalStoppedMail, renewedMail, sendMail } from './mail.ts';
+import { accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, goodwillEndMail, goodwillStartMail, membershipMail, noticeMail, pulledMail, receiptMail, referralRewardMail, renewalStoppedMail, renewedMail, sendMail } from './mail.ts';
 
 export interface AdminEnv extends PayEnv {
   /** Comma-separated SHA-256 hex digests of the owner's lower-cased email. */
@@ -261,6 +261,7 @@ export async function admin(request: Request, env: AdminEnv, jwt: string | null,
       renewedMail({ plan: 'monthly', until }),
       renewalStoppedMail({ plan: 'monthly', until }),
       freeTimeMail({ days: 7, until: now + 7 * 86400 }),
+      referralRewardMail({ days: 14, until: now + 14 * 86400 }),
       accessEndedMail({ reason: 'refund' }),
       goodwillStartMail({ until: until + 86400, whop: true }),
       goodwillEndMail({ days: 9, until: until + 9 * 86400, whop: false }),

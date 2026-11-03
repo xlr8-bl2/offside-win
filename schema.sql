@@ -330,6 +330,30 @@ CREATE TABLE IF NOT EXISTS promo (
   CHECK (audience IN ('everyone', 'signed_out', 'free'))
 );
 
+-- Bring a mate (worker/src/referral.ts). One short code per account, made
+-- the first time its owner opens the invite tab; one row per account that
+-- signed up through someone's link. reward_days is set once the friend's
+-- first real payment lands (0 when the referrer is over the yearly cap), and
+-- rewarded_at once those days are on the referrer's membership.
+CREATE TABLE IF NOT EXISTS referral_code (
+  code TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS referral (
+  referred_id TEXT PRIMARY KEY,
+  referrer_id TEXT NOT NULL,
+  code TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  paid_at INTEGER,
+  reward_days INTEGER,
+  rewarded_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS referral_referrer ON referral (referrer_id);
+CREATE INDEX IF NOT EXISTS referral_open ON referral (paid_at, rewarded_at);
+
 CREATE TABLE IF NOT EXISTS pulled_call (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   pick_id INTEGER NOT NULL,
