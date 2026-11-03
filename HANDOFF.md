@@ -1,7 +1,7 @@
 # Handoff: read this first
 
-**Last updated:** 7 October 2026, about 13:00 UTC, by the Claude Code session working on branch
-`claude/amazing-galileo-isfeue`.
+**Last updated:** 3 November 2026, about 16:10 UTC, by the Claude Code session working on branch
+`claude/project-thread-gshj0p` (front page hero and first load; see Recent work).
 
 **Keep this file current.** The owner may move the work to a different coding agent or account
 at any time. Whoever is working updates the "Right now" section and the checklist after every
@@ -345,6 +345,19 @@ Stage 2, accounts:
 
 ## Recent work, newest first
 
+- **3 November: the front page always leads with a match, and draws it at once.** Two causes of
+  "no match in the hero": the members' front page (`viewDashboard`) dropped the headline for a plain
+  masthead whenever its call had been withdrawn, and the landing page (`viewLanding`) took its lead
+  card off when there was no free call yet or its write-up had nothing quotable. Now the lead is
+  tonight's biggest game (`/api/hero`, else `biggestOnBoard` from the board), with the free call named
+  under it when that is another match (`drawLandingLead`). Slow first load: the lead waited for the
+  board, the record (`limit=60`, never preloaded) and the prices, then made a second trip for the
+  write-up, about 3 to 5 s on a cold visit. Now the Worker writes the hero into `/` (`ow-boot` JSON,
+  `data-lead` on `<html>`, the star ball preloaded on a Champions League night: `homePage` and
+  `render` in `seo.ts`); the head preloads the landing's own reads and both write-ups; the 14 modules
+  `app.js` imports are `modulepreload`ed. Measured: the match shows in about 0.2 s (was 3 to 5 s),
+  its write-up in about 1.3 s. `get_hero`'s fallback now prefers the next 36 hours over rank. No new
+  reads on the Worker: `/` already read the hero, and every read stays edge-cached.
 - **28 October: no engine talk on the public site.** The owner asked that the site stop saying an
   engine or model does the analysis. A sweep of pages, meta tags, `llms.txt`, the Worker's prerendered
   pages, emails and studio captions found two lines, both on `#/results` (`viewResults()`), now neutral.
