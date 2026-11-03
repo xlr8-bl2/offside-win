@@ -254,12 +254,15 @@ export async function regradeSettled(limit = 5000): Promise<number> {
   // history job writes, so it wins where both have one, and the fixture's
   // copy is brought into line with it.
   // Postgres and SQLite (3.33+, which D1 is) both take UPDATE ... FROM.
+  // Only fixtures from the last month (they are gone a week after kick-off
+  // anyway): unbounded, D1 walked the whole match table to answer, 116,000
+  // rows read every settlement.
   await exec(
     `UPDATE fixture SET home_goals = m.home_goals, away_goals = m.away_goals
        FROM match m
-      WHERE m.id = fixture.id AND m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL
+      WHERE m.id = fixture.id AND fixture.kickoff > ? AND m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL
         AND (fixture.home_goals IS DISTINCT FROM m.home_goals OR fixture.away_goals IS DISTINCT FROM m.away_goals)`,
-    [],
+    [Math.floor(Date.now() / 1000) - 30 * 86400],
   );
   const rows = await select<{
     id: number;

@@ -30,8 +30,12 @@ export interface EngineDbEnv {
   ENGINE_DB_KEY?: string;
 }
 
-/** Statements a single request may carry; D1 allows 1,000 queries a Worker invocation. */
-const MAX_STATEMENTS = 500;
+/**
+ * Statements a single request may carry. D1 allows 50 queries a Worker
+ * invocation on the free plan (1,000 on Workers Paid), and each statement in a
+ * batch counts; the engine sends at most 40 (config.d1.batchSize).
+ */
+const MAX_STATEMENTS = 50;
 
 function answer(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

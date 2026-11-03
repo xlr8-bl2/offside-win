@@ -123,3 +123,45 @@ test('a half-time score is not one until half time, and the live list is read un
     globalThis.fetch = realFetch;
   }
 });
+
+test('a second data centre takes the first one\'s copy from D1 instead of asking the provider again', async () => {
+  const kv = new Map<string, { v: string; updated_at: number }>();
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind(...v: unknown[]) {
+          return {
+            async first<T>() {
+              if (sql.startsWith('SELECT 1 AS x FROM fixture')) return { x: 1 } as T;
+              const row = kv.get(String(v[0]));
+              return (row && row.updated_at > Number(v[1]) ? { v: row.v } : null) as T | null;
+            },
+            async run() {
+              if (sql.startsWith('INSERT INTO kv')) kv.set(String(v[0]), { v: String(v[1]), updated_at: Number(v[3]) });
+              return {};
+            },
+          };
+        },
+      };
+    },
+  };
+  let asked = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    asked++;
+    if (String(input).includes('/fixtures/changes/')) return new Response(JSON.stringify({ changes: [] }));
+    return new Response(JSON.stringify({ results: [{ id: 7, status: 'inprogress', period: '1st_half', current_minute: 12, home_score: 1, away_score: 0 }] }));
+  }) as typeof fetch;
+  try {
+    const env = { BSD_API_KEY: 'k', DB: db };
+    const first = await (await liveList(env)).json() as { matches: Array<{ id: number }> };
+    assert.deepEqual(first.matches.map((m) => m.id), [7]);
+    const before = asked;
+    assert.ok(kv.has('live:list'), 'the list is kept for the whole site');
+    const second = await (await liveList(env)).json() as { matches: Array<{ id: number; minute: number }> };
+    assert.deepEqual(second.matches.map((m) => [m.id, m.minute]), [[7, 12]]);
+    assert.equal(asked, before, 'no second call to the provider');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

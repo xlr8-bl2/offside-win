@@ -261,8 +261,12 @@ export async function fixturePreview(db: D1Read, id: number): Promise<Rec | null
       home_id: s.home_team_id, away_id: s.away_team_id, hg: null, ag: null };
   } else {
     // The id must appear in the text for a row to hold it, which keeps this to the lists that matter.
+    // A range on the key, not LIKE 'league:%:next': a LIKE with a wildcard in
+    // the middle scans every kv row (16,000 a call, 86 million rows read in two
+    // days, mostly crawlers asking for old match ids), where the range reads
+    // only the league lists.
     const lists = await rows<{ k: string; v: string }>(db, `SELECT k, v FROM kv
-      WHERE (k LIKE 'league:%:next' OR k LIKE 'league:%:last') AND instr(v, ?) > 0`, String(id));
+      WHERE k >= 'league:' AND k < 'league;' AND (k LIKE '%:next' OR k LIKE '%:last') AND instr(v, ?) > 0`, String(id));
     for (const k of lists) {
       const list = field(tryJson(k.v), 'rows');
       const r = (Array.isArray(list) ? list : []).find((x) => text(field(x, 'id')) === String(id));
@@ -440,7 +444,7 @@ export async function getLeagues(db: D1Read): Promise<Rec[]> {
   const [lg, sched, nexts] = await db.batch([
     db.prepare('SELECT id, name, country FROM league WHERE tracked = 1'),
     db.prepare('SELECT league_id, min(kickoff) AS next FROM schedule WHERE kickoff > ? GROUP BY league_id').bind(t),
-    db.prepare(`SELECT k, v FROM kv WHERE k LIKE 'league:%:next'`),
+    db.prepare(`SELECT k, v FROM kv WHERE k >= 'league:' AND k < 'league;' AND k LIKE '%:next'`),
   ]);
   const fromSchedule = new Map<number, number>();
   for (const r of (sched?.results ?? []) as Rec[]) fromSchedule.set(r.league_id, r.next);
@@ -547,7 +551,7 @@ export async function getPlayer(db: D1Read, id: number, leagueArg?: number | nul
   const t = now();
   const key = String(id);
   const [lists, reports] = await db.batch([
-    db.prepare(`SELECT k, v FROM kv WHERE k LIKE 'league:%:scorers' AND instr(v, ?) > 0`).bind(key),
+    db.prepare(`SELECT k, v FROM kv WHERE k >= 'league:' AND k < 'league;' AND k LIKE '%:scorers' AND instr(v, ?) > 0`).bind(key),
     db.prepare(`SELECT f.id, f.kickoff, f.league_id, l.name AS league, f.home_team, f.away_team, f.home_team_id, f.away_team_id,
         f.home_goals, f.away_goals, f.report_json
       FROM fixture f LEFT JOIN league l ON l.id = f.league_id

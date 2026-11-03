@@ -25,19 +25,25 @@ import { parseIncidents, parseTeamStats } from '../../engine/src/report-parse.ts
 export interface LiveEnv {
   BSD_API_KEY?: string;
   BSD_BASE_URL?: string;
-  DB?: { prepare(sql: string): { bind(...v: unknown[]): { first<T>(): Promise<T | null> } } };
+  DB?: { prepare(sql: string): { bind(...v: unknown[]): { first<T>(): Promise<T | null>; run(): Promise<unknown> } } };
 }
 
 /*
- * The provider's free plan is 7,500 requests a day for everything, and this
- * is asked from every data centre with a visitor in it. So the list is built
- * at most every two minutes per data centre, the changes feed every fifteen,
- * a match's own page every minute, and none of it is asked for at all while
- * no match on the board could be in play (onNow).
+ * The provider's free plan is 7,500 requests a day for everything, the
+ * engine included. Each answer is kept twice: in the data centre's own cache,
+ * and once for the whole site in D1 (kv `live:<key>`), so a second data centre
+ * takes the first one's copy instead of asking the provider again. Until
+ * November 2026 only the first existed, and every data centre with a reader
+ * in it asked for itself.
+ *
+ * The list is built at most every two minutes, the changes feed every
+ * fifteen, a match's own page every two (its numbers every six), and none of
+ * it is asked for while no match on the board could be in play (onNow).
  */
 const LIST_TTL = 120;
 const CHANGES_TTL = 900;
-const MATCH_TTL = 60;
+const MATCH_TTL = 120;
+const STATS_TTL = 360;
 
 /** Whether any match on the board kicked off in the last two and a half hours or is about to. */
 async function onNow(env: LiveEnv): Promise<boolean> {
@@ -196,17 +202,40 @@ const HEADERS = (maxAge: number) => ({
  * Cache API is a no-op on workers.dev, which only means the fallback address
  * asks the provider every time; offside.win itself is cached.
  */
-async function cachedValue<T>(key: string, ttl: number, ctx: Ctx | undefined, build: () => Promise<T>): Promise<T> {
+async function cachedValue<T>(
+  key: string, ttl: number, ctx: Ctx | undefined, build: () => Promise<T>,
+  env?: LiveEnv, share: (v: T) => boolean = () => true,
+): Promise<T> {
   const cacheKey = new Request(`https://offside-live.internal/${key}`);
   const cache = (globalThis as { caches?: { default?: Cache } }).caches?.default;
   if (cache) {
     const hit = await cache.match(cacheKey);
     if (hit) return await hit.json() as T;
   }
+  const keepHere = (text: string) => {
+    if (!cache) return;
+    const put = cache.put(cacheKey, new Response(text, { headers: HEADERS(ttl) }));
+    if (ctx) ctx.waitUntil(put); else return put;
+  };
+  const t = Math.floor(Date.now() / 1000);
+  // Another data centre's copy, if it is young enough.
+  if (env?.DB) {
+    try {
+      const row = await env.DB.prepare('SELECT v FROM kv WHERE k = ? AND updated_at > ?').bind(`live:${key}`, t - ttl).first<{ v: string }>();
+      if (row?.v) {
+        await keepHere(row.v);
+        return JSON.parse(row.v) as T;
+      }
+    } catch { /* ask the provider instead */ }
+  }
   const value = await build();
-  if (cache) {
-    const put = cache.put(cacheKey, new Response(JSON.stringify(value), { headers: HEADERS(ttl) }));
-    if (ctx) ctx.waitUntil(put); else await put;
+  const text = JSON.stringify(value);
+  await keepHere(text);
+  if (env?.DB && share(value)) {
+    const write = env.DB.prepare(`INSERT INTO kv (k, v, expires_at, updated_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(k) DO UPDATE SET v = excluded.v, expires_at = excluded.expires_at, updated_at = excluded.updated_at`)
+      .bind(`live:${key}`, text, t + 86400, t).run().catch(() => { /* this data centre still has it */ });
+    if (ctx) ctx.waitUntil(write); else await write;
   }
   return value;
 }
@@ -232,8 +261,10 @@ function listOf(raw: unknown, key: string): unknown[] {
   return [];
 }
 
-const matchesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('list', LIST_TTL, ctx, async () => {
-  if (!await onNow(env)) return { matches: [] as LiveMatch[], unread: undefined };
+interface ListValue { matches: LiveMatch[]; unread?: string[]; asked?: boolean }
+
+const matchesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue<ListValue>('list', LIST_TTL, ctx, async () => {
+  if (!await onNow(env)) return { matches: [], unread: undefined, asked: false };
   const raw = await provider(env, '/api/v2/events/live/', { limit: 500 });
   const matches = listOf(raw, 'results').map(compactMatch).filter((m): m is LiveMatch => m !== null);
   const count = numOr(rec(raw)?.['count']);
@@ -241,8 +272,10 @@ const matchesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('list', LIST_TTL, ct
   // changed. Its field names (never values) go out with the body so that is
   // visible from a phone, rather than a board that silently stops moving.
   const unread = count && !matches.length ? Object.keys(rec(raw) ?? {}) : undefined;
-  return { matches, unread };
-});
+  return { matches, unread, asked: true };
+  // "Nothing in play" is not written: every data centre can work that out
+  // from its own board.
+}, env, (v) => v.asked !== false);
 
 const changesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('changes', CHANGES_TTL, ctx, async () => {
   let since = new Date(Date.now() - 7 * 86400e3 + 60e3).toISOString();
@@ -259,7 +292,7 @@ const changesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('changes', CHANGES_T
     since = last;
   }
   return reduceChanges(all);
-});
+}, env);
 
 /**
  * GET /api/live: every match in play, and the week's fixture changes, in one
@@ -280,12 +313,16 @@ export async function liveList(env: LiveEnv, ctx?: Ctx): Promise<Response> {
 export async function liveMatch(env: LiveEnv, id: number, ctx?: Ctx): Promise<Response> {
   if (!env.BSD_API_KEY) return off();
   return json(await cachedValue(`match/${id}`, MATCH_TTL, ctx, async () => {
+    // The score and minute come from the live list when the match is in it
+    // (already asked for, once for every match): one provider call fewer.
+    const listed = (await matchesNow(env, ctx).catch(() => null))?.matches.find((x) => x.id === id) ?? null;
     const [event, incidents, stats] = await Promise.all([
-      provider(env, `/api/v2/events/${id}/`).catch(() => null),
+      listed ? null : provider(env, `/api/v2/events/${id}/`).catch(() => null),
       provider(env, `/api/v2/events/${id}/incidents/`).catch(() => null),
-      provider(env, `/api/v2/events/${id}/stats/`).catch(() => null),
+      // The team numbers move slowly; every six minutes is enough.
+      cachedValue(`stats/${id}`, STATS_TTL, ctx, () => provider(env, `/api/v2/events/${id}/stats/`).catch(() => null), env, (v) => v !== null),
     ]);
-    const m = compactMatch(event);
+    const m = listed ?? compactMatch(event);
     const inc = parseIncidents(incidents);
     return {
       enabled: true,
@@ -297,7 +334,14 @@ export async function liveMatch(env: LiveEnv, id: number, ctx?: Ctx): Promise<Re
         stats: parseTeamStats(stats),
       },
     };
-  }), MATCH_TTL);
+  }, env), MATCH_TTL);
+}
+
+/** The shared copies of matches long over (cachedValue), cleared by the ten-minute cron. */
+export async function liveCleanup(env: LiveEnv): Promise<void> {
+  if (!env.DB) return;
+  const t = Math.floor(Date.now() / 1000);
+  await env.DB.prepare("DELETE FROM kv WHERE k >= 'live:' AND k < 'live;' AND updated_at < ?").bind(t - 86400).run();
 }
 
 /** GET /api/changes: kick-offs moved and matches postponed, the last week. */
