@@ -3494,6 +3494,25 @@
   font-weight: var(--weight-bold);
 }
 .ld-lead-go:hover { color: var(--chalk); }
+/* Waiting for the write-up: three lines in its place, the same height, so
+   nothing moves when the words arrive. */
+.ld-lead-why-wait { display: grid; gap: var(--space-3); }
+.ld-lead-why-wait .skeleton-line { display: block; width: 100%; margin: 0; }
+.ld-lead-why-wait .skeleton-line:last-child { width: 62%; }
+/* The free call, when it is another match: one line under the headline. */
+.ld-lead-free {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: var(--border) solid var(--hairline);
+  color: var(--chalk);
+}
+.ld-lead-free span { color: var(--floodlight-hi); font-size: var(--text-sm); font-weight: var(--weight-bold); }
+.ld-lead-free b { font-weight: var(--weight-bold); }
+.ld-lead-free:hover b { color: var(--floodlight-hi); }
 
 /* The competitions, as one line of links. */
 .ld-comps {

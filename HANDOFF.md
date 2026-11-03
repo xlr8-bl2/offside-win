@@ -1,6 +1,6 @@
 # Handoff: read this first
 
-**Last updated:** 3 November 2026, by the Claude Code session on branch
+**Last updated:** 3 November 2026, about 16:35 UTC, by the Claude Code session on branch
 `claude/project-thread-b55ubz` (tell a friend; see Recent work).
 
 **Keep this file current.** The owner may move the work to a different coding agent or account
@@ -10,6 +10,18 @@ meaningful step, and commits it with that step, not at the end of the day.
 ---
 
 ## Right now
+
+### Ad test: lead events for Whop Ads (3 November 2026, branch `claude/project-thread-p7u2m5`)
+
+Whop Ads would not run a leads campaign on the homepage because the pixel had never sent a `lead`.
+`public/app.js` now sends, only with the reader's yes to ad measurement: `lead` when an email is
+typed in for a sign-in link (or on a brand-new account's first sign-in, which covers Google), and
+`complete_registration` on a new account's first session (`since` under 30 minutes). No email or
+name goes to Whop; `event_id` is `lead_<16 hex of sha256(email)>` and `reg_<account id>`, so repeats
+count once. The privacy and cookie notices say so (`legal.js`, regenerated `privacy.html` /
+`terms.html`, UPDATED 3 November 2026). The pixel still loads only after consent, so Whop sees
+nothing from a visitor who ignores the notice. Checked in Chromium against the local server: both
+events queue with consent, nothing loads without it.
 
 ### Stage 1 is live: the public site runs on Cloudflare D1
 
@@ -357,6 +369,19 @@ Stage 2, accounts:
   `ow.ref` (30 days) is in the cookie table. Tests: `worker/test/referral.test.ts`.
   Known and not touched: at 390px a signed-in free account's header (Upgrade + menu) overflows
   by 10px.
+- **3 November: the front page always leads with a match, and draws it at once.** Two causes of
+  "no match in the hero": the members' front page (`viewDashboard`) dropped the headline for a plain
+  masthead whenever its call had been withdrawn, and the landing page (`viewLanding`) took its lead
+  card off when there was no free call yet or its write-up had nothing quotable. Now the lead is
+  tonight's biggest game (`/api/hero`, else `biggestOnBoard` from the board), with the free call named
+  under it when that is another match (`drawLandingLead`). Slow first load: the lead waited for the
+  board, the record (`limit=60`, never preloaded) and the prices, then made a second trip for the
+  write-up, about 3 to 5 s on a cold visit. Now the Worker writes the hero into `/` (`ow-boot` JSON,
+  `data-lead` on `<html>`, the star ball preloaded on a Champions League night: `homePage` and
+  `render` in `seo.ts`); the head preloads the landing's own reads and both write-ups; the 14 modules
+  `app.js` imports are `modulepreload`ed. Measured: the match shows in about 0.2 s (was 3 to 5 s),
+  its write-up in about 1.3 s. `get_hero`'s fallback now prefers the next 36 hours over rank. No new
+  reads on the Worker: `/` already read the hero, and every read stays edge-cached.
 - **28 October: no engine talk on the public site.** The owner asked that the site stop saying an
   engine or model does the analysis. A sweep of pages, meta tags, `llms.txt`, the Worker's prerendered
   pages, emails and studio captions found two lines, both on `#/results` (`viewResults()`), now neutral.
