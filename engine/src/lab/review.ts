@@ -110,6 +110,7 @@ export function bootstrap(base: Graded[], v: Graded[], draws = 2000, seed = 7): 
 export function candidates(): Policy[] {
   const ex = (name: string, more: string[]): Policy => ({ ...PROD, name, excludeBuckets: [...(PROD.excludeBuckets ?? []), ...more] });
   return [
+    { ...PROD, name: 'the rule before 3 November 2026 (best price at fair)', minEv: -0.01, minSharpEv: 0 },
     ex('no "either side to win" (double chance 12)', ['double_chance 12']),
     ex('no double chance at all', ['double_chance 12', 'double_chance home', 'double_chance away']),
     ex('no draw no bet', ['draw_no_bet home', 'draw_no_bet away']),
