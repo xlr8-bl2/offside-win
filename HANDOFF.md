@@ -362,6 +362,8 @@ Stage 2, accounts:
   that keeps a visitor: the landing lead now shows today's free call as a pick in big type, in words
   ("Two or more goals", with "Total Goals: Over 1.5" under it), linked to its match (`freePickHTML`,
   `.ld-pick`). Still no odds on the front page, because ads land there; the price is one tap away.
+  Set in its own face, used nowhere else (owner's ask): Unbounded 800, uppercase, self-hosted
+  (`public/fonts/unbounded-latin.woff2`, 50 KB, loaded only when the pick is drawn).
 - **3 November: tell a friend** (branch `claude/project-thread-b55ubz`). Every account has a link,
   `offside.win/?ref=<code>` (invite tab on `#/account`, share sheet or copy). A new account made
   on it is stored in `referral` (new D1 tables `referral_code` and `referral`, `worker/src/referral.ts`).

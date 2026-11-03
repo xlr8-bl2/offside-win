@@ -9,6 +9,7 @@ that set the first screen can be preloaded.
 | `archivo-latin.woff2`, `archivo-latin-ext.woff2` | Archivo, variable weight 400-800 | SIL OFL 1.1 |
 | `offside-wordmark.woff2` | Offside Wordmark, derived from Geist | SIL OFL 1.1 |
 | `caveat-latin.woff2` | Caveat, variable weight | SIL OFL 1.1 |
+| `unbounded-latin.woff2` | Unbounded, variable weight 700-900, the front page's free pick only | SIL OFL 1.1 |
 | `offside-figures-600/700/800.woff2` | Offside Figures, derived from Big Shoulders | SIL OFL 1.1 |
 
 The Latin and Latin Extended subsets are the ones Google Fonts serves; they

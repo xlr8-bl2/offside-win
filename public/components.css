@@ -3533,14 +3533,17 @@
 .ld-pick-tag span { color: var(--chalk-2); font-weight: var(--weight-medium); }
 .ld-pick-sel {
   display: block;
-  margin-top: var(--space-3);
+  margin-top: var(--space-4);
   color: var(--chalk);
-  font-family: var(--display);
-  font-size: var(--text-3xl);
-  font-weight: 700;
-  line-height: 1;
-  font-variation-settings: 'wdth' var(--condensed);
+  font-family: 'Unbounded', var(--display);
+  font-size: clamp(1.6rem, 1.2rem + 1.6vw, 2.35rem);
+  font-weight: 800;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  text-transform: uppercase;
+  text-wrap: balance;
   overflow-wrap: anywhere;
+  text-shadow: 0 2px 24px color-mix(in srgb, var(--floodlight) 55%, transparent);
 }
 .ld-pick-sel:hover { color: var(--floodlight-hi); }
 .ld-pick-mkt { margin: var(--space-2) 0 0; color: var(--chalk-3); font-size: var(--text-sm); }
