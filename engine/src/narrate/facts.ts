@@ -623,6 +623,8 @@ function didWhat(goals: number, assists: number): string | null {
  */
 export function playerFacts(b: Bundle): PubFact[] {
   const out: PubFact[] = [];
+  // The bundle's clock, not the wall's: a fact's age is measured from when the match is written up.
+  const now = b.now ?? Math.floor(Date.now() / 1000);
   const players = (b.players ?? []).filter((p) => str(p.name) && (p.side === 'home' || p.side === 'away'));
   const bySide = (side: 'home' | 'away', fit: boolean) => players
     .filter((p) => p.side === side && (p.status === 'fit') === fit)
@@ -640,7 +642,7 @@ export function playerFacts(b: Bundle): PubFact[] {
     const shared = new Set([...dates].filter(([, k]) => k >= 3).map(([d]) => d));
     // The three absentees who matter most. Absence is news every time.
     for (const p of bySide(side, false).slice(0, 3)) {
-      out.push(...onePlayer(shared.has(str(p.expected_return) ?? '') ? { ...p, expected_return: null } : p, team, side));
+      out.push(...onePlayer(shared.has(str(p.expected_return) ?? '') ? { ...p, expected_return: null } : p, team, side, now));
     }
   }
 
@@ -651,7 +653,7 @@ export function playerFacts(b: Bundle): PubFact[] {
     const team = side === 'home' ? b.home : b.away;
     // Below the team news and the form: the threat colours the argument, it
     // does not lead it.
-    for (const f of onePlayer(threat, team, side)) out.push({ ...f, weight: Math.min(f.weight, 68), threat: threatKey(threat.name ?? '') });
+    for (const f of onePlayer(threat, team, side, now)) out.push({ ...f, weight: Math.min(f.weight, 68), threat: threatKey(threat.name ?? '') });
   }
   return out;
 }
@@ -697,7 +699,7 @@ function pickThreat(fit: BundlePlayer[], b: Bundle): BundlePlayer | null {
   return best;
 }
 
-function onePlayer(p: BundlePlayer, team: string, side: 'home' | 'away'): PubFact[] {
+function onePlayer(p: BundlePlayer, team: string, side: 'home' | 'away', now: number): PubFact[] {
   const out: PubFact[] = [];
   const name = str(p.name)!;
   const absent = p.status !== 'fit';
@@ -765,7 +767,7 @@ function onePlayer(p: BundlePlayer, team: string, side: 'home' | 'away'): PubFac
   // For an absentee, only one who matters: a squad player's goal in August
   // is not team news.
   const worthIt = !absent || imp >= 0.1;
-  if (worthIt && so && opp && did && num(so.kickoff) && (absent || Date.now() / 1000 - so.kickoff! <= 21 * 86400)) {
+  if (worthIt && so && opp && did && num(so.kickoff) && (absent || now - so.kickoff! <= 21 * 86400)) {
     const score = str(so.score);
     const res = score ? (so.won === true ? `the ${score} win over ${opp}`
       : so.won === false && score.split('-')[0] !== score.split('-')[1] ? `the ${score} defeat to ${opp}`
@@ -810,7 +812,6 @@ function onePlayer(p: BundlePlayer, team: string, side: 'home' | 'away'): PubFac
     }
     const t = c.tournament;
     const ended = num(t?.ended);
-    const now = Date.now() / 1000;
     const tn = str(t?.name)?.replace(/^(FIFA|UEFA|CONMEBOL|CAF|AFC|CONCACAF|OFC)\s+/i, '').replace(/\s*20\d\d(\/\d\d)?$/, '');
     if (t && tn && ended && now - ended <= 120 * 86400 && (num(t.apps) ?? 0) >= 2) {
       const m = new Date(ended * 1000).getUTCMonth();
