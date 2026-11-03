@@ -182,6 +182,15 @@ export interface Page {
   image?: { url: string; alt: string };
   /** An image to start fetching from the head: the front page's masthead photograph. */
   preloadImage?: string;
+  /** The same, as a responsive set (imagesrcset and imagesizes): the Champions League ball. */
+  preloadSet?: { srcset: string; sizes: string };
+  /**
+   * Data the app draws its first screen from without waiting on a fetch: the
+   * front page's headline match. Public, the same as /api/hero.
+   */
+  boot?: Rec;
+  /** Matches whose /api/fixture the head starts fetching for a reader with no session. */
+  lead?: number[];
   /** The same thing as data: the API address an agent can read instead of the page. */
   json?: string;
 }
@@ -530,11 +539,16 @@ export async function homePage(env: SeoEnv, site: string): Promise<Page> {
     read<Rec>(env, 'get_board', { p_from: now - 3 * 3600, p_to: now + 48 * 3600 }),
     read<Rec>(env, 'get_hero', {}).catch(() => null),
   ]);
-  // No masthead photograph to preload any more: the front page a visitor
-  // gets is the landing page (viewLanding), which has none. Members get the
-  // dashboard and its photograph loads as it always did on other pages.
-  void hero;
   const fixtures: Rec[] = Array.isArray(b?.fixtures) ? b!.fixtures : [];
+  // The headline match goes in the page itself, so the first screen leads
+  // with tonight's biggest game the moment the app runs rather than seconds
+  // later, once its fetches come back (owner, November 2026: "an empty
+  // skeleton of text, then after a few seconds the match pops up"). The
+  // matches it and the free call are about are fetched from the head.
+  const lead = [hero?.fixture_id, hero?.free_fixture_id].map(Number).filter((n, i, a) => n > 0 && a.indexOf(n) === i);
+  // A Champions League headline paints the competition's night and its ball:
+  // the picture starts with the page rather than after the app has drawn.
+  const ucl = Number(hero?.league_id) === 7 && lead.length > 0;
   const calls = fixtures.filter((f) => f.top_pick || f.locked || f.called).length;
   const comps = new Set(fixtures.map((f) => f.league)).size;
   const free = fixtures.find((f) => f.free_call && f.top_pick);
@@ -555,6 +569,9 @@ export async function homePage(env: SeoEnv, site: string): Promise<Page> {
     ${LANDING_FAQ.map(([q, a]) => `<h3>${esc(q)}</h3><p>${esc(a)}</p>`).join('')}
     ${moreHTML()}
   </article>`,
+    ...(hero?.fixture_id ? { boot: { hero } } : {}),
+    ...(lead.length ? { lead } : {}),
+    ...(ucl ? { preloadSet: { srcset: '/brand/starball-480.webp 480w, /brand/starball.webp 900w', sizes: '(max-width: 760px) 150vw, 64vw' } } : {}),
     jsonLd: [{
       '@context': 'https://schema.org',
       '@type': 'FAQPage',
@@ -665,7 +682,10 @@ export function render(shell: string, page: Page): string {
     .replace(/<meta property="og:image:alt" content="[^"]*">/, (m) => (page.image ? `<meta property="og:image:alt" content="${esc(page.image.alt)}">` : m))
     .replace(/<meta name="twitter:image" content="[^"]*">/, (m) => (page.image ? `<meta name="twitter:image" content="${esc(page.image.url)}">` : m))
     .replace(/<meta name="robots" content="[^"]*">/, page.noindex ? '<meta name="robots" content="noindex">' : '$&')
-    .replace('</head>', `<meta property="og:url" content="${esc(page.canonical)}">\n${page.json ? `<link rel="alternate" type="application/json" href="${esc(page.json)}">\n` : ''}${page.preloadImage ? `<link rel="preload" as="image" href="${esc(page.preloadImage)}" fetchpriority="high">\n` : ''}${ld}\n</head>`);
+    .replace('</head>', `<meta property="og:url" content="${esc(page.canonical)}">\n${page.json ? `<link rel="alternate" type="application/json" href="${esc(page.json)}">\n` : ''}${page.preloadImage ? `<link rel="preload" as="image" href="${esc(page.preloadImage)}" fetchpriority="high">\n` : ''}${page.preloadSet ? `<link rel="preload" as="image" imagesrcset="${esc(page.preloadSet.srcset)}" imagesizes="${esc(page.preloadSet.sizes)}" fetchpriority="high">\n` : ''}${page.boot ? `<script type="application/json" id="ow-boot">${JSON.stringify(page.boot).replace(/</g, '\\u003c')}</script>\n` : ''}${ld}\n</head>`);
+  // The matches the first screen is about, for the head's preload script
+  // (index.html), which reads them off the root element before the app runs.
+  if (page.lead?.length) html = html.replace(/<html(?=[\s>])/, `<html data-lead="${page.lead.map((n) => Math.trunc(n)).join(' ')}"`);
   // The loading skeleton stays, with the page's words beside it. Where the
   // app runs, the words are hidden (html.js, base.css) and the skeleton shows
   // until the app draws the page, so nobody sees a page of text that is then

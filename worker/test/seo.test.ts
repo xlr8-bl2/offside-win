@@ -216,6 +216,27 @@ test('the front page is the landing page: its words and FAQ data, and no photogr
   assert.match(html, /Do your calls always come in\?/);
 });
 
+test('the front page carries its headline match, so the first screen can draw it before any fetch', async () => {
+  const hero = { fixture_id: 212602, free_fixture_id: 7, home: 'Iceland', away: 'Estonia', league_id: 7, kicker: '</script><b>' };
+  const e = env({ get_board: { fixtures: [FIX] }, get_hero: hero });
+  const html = await (await seoResponse(new Request('https://offside.win/'), e as any))!.text();
+  const boot = html.match(/<script type="application\/json" id="ow-boot">([\s\S]*?)<\/script>/);
+  assert.ok(boot, 'the headline is in the page');
+  assert.doesNotMatch(boot![1]!, /<\//, 'nothing in it can close the script early');
+  assert.equal(JSON.parse(boot![1]!).hero.fixture_id, 212602);
+  // The head's preload script reads the matches off the root element.
+  assert.match(html, /<html data-lead="212602 7"[\s>]/);
+  // A Champions League headline starts the ball's picture with the page.
+  assert.match(html, /rel="preload" as="image" imagesrcset="\/brand\/starball-480\.webp 480w/);
+});
+
+test('the front page with no headline carries no headline data and no picture', async () => {
+  const html = await (await seoResponse(new Request('https://offside.win/'), env({ get_board: { fixtures: [FIX] }, get_hero: {} }) as any))!.text();
+  assert.doesNotMatch(html, /id="ow-boot"/);
+  assert.doesNotMatch(html, /data-lead=/);
+  assert.doesNotMatch(html, /rel="preload" as="image"/);
+});
+
 test('the match event carries everything Google requires, and nests no other event', async () => {
   const p = (await matchPage(env({ get_fixture: FIX }) as any, 212602, 'https://offside.win'))!;
   const ld = p.jsonLd[0] as any;

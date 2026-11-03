@@ -780,6 +780,32 @@ const state = {
   member: null,
 };
 
+/*
+ * The headline match, written into the front page by the Worker (seo.ts,
+ * homePage) so the first screen can lead with it before any fetch is back.
+ * Read once; the page asks /api/hero again behind it, as it always did.
+ */
+const BOOT = (() => {
+  try { return JSON.parse(document.getElementById('ow-boot')?.textContent || 'null'); } catch { return null; }
+})();
+const bootHero = () => (BOOT?.hero?.fixture_id ? BOOT.hero : null);
+
+/*
+ * The biggest game still to come, or being played, from the board itself:
+ * the headline when the stored one is missing (the hero read failed, or the
+ * slate never chose one). The front page always leads with a match.
+ */
+function biggestOnBoard(fixtures = []) {
+  const on = fixtures.filter((f) => ['live', 'upcoming'].includes(matchState(f).kind));
+  const soon = on.filter((f) => Number(f.kickoff) < Date.now() / 1000 + 36 * 3600);
+  const f = (soon.length ? soon : on).slice()
+    .sort((a, b) => (a.rank ?? 9) - (b.rank ?? 9) || (a.kickoff ?? 0) - (b.kickoff ?? 0))[0];
+  return f ? {
+    fixture_id: f.id, kickoff: f.kickoff, league: f.league, league_id: f.league_id,
+    home: f.home, away: f.away, home_id: f.home_id, away_id: f.away_id, venue_id: f.venue_id,
+  } : null;
+}
+
 /**
  * The hash, split into a path and a query.
  *
@@ -1414,7 +1440,7 @@ function heroHTML(hero = null, venueIds = [], detail = null, free = null, row = 
         <!-- The heading is words only; the stacked lines are its picture.
              With the crests' initials inside it, the page's heading read
              "G Germany G Greece" to anything that reads text. -->
-        <h1 class="visually-hidden">The biggest game we have a call on: ${esc(hero.home)} v ${esc(hero.away)}</h1>
+        <h1 class="visually-hidden">Today’s biggest game: ${esc(hero.home)} v ${esc(hero.away)}</h1>
         <div class="fx-stack" aria-hidden="true">
           <span class="fx-line">${crest(hero.home, 'md', hero.home_id)}<span class="name">${esc(hero.home)}</span></span>
           <span class="fx-line">${crest(hero.away, 'md', hero.away_id)}<span class="name">${esc(hero.away)}</span></span>
@@ -2561,6 +2587,59 @@ function landingDepth() {
   move();
 }
 
+/** The football from a match's write-up, for the landing page's lead: no call, no price. */
+function landingWhy(fx) {
+  return excerpt((fx?.verdicts ?? []).map((v) => v.why ?? v.narrative).find(Boolean))
+    || excerpt((fx?.published ?? []).map((p) => p.why ?? p.narrative).find(Boolean));
+}
+
+/*
+ * The landing page's lead story: tonight's biggest game, every time there is
+ * a game on. With its write-up when that has come back (and a line of
+ * waiting text until then), the free call named under it when that is a
+ * different match, and the Champions League night behind the header when it
+ * is a Champions League game. Drawn up to three times as the reads land,
+ * each time from scratch, so it never shows half of an older one.
+ */
+function drawLandingLead(hero, leadFx, freeFx) {
+  const lead = app.querySelector('[data-ld="call"]');
+  const ldHero = app.querySelector('.ld-hero');
+  if (!lead || !ldHero || !hero?.fixture_id) return;
+  ldHero.classList.remove('ld-solo');
+  const m = { ...hero, ...(leadFx ?? {}) };
+  m.id = hero.fixture_id;
+  const isFree = Number(hero.free_fixture_id) === Number(m.id);
+  const why = landingWhy(leadFx);
+  const other = !isFree && freeFx?.id && Number(freeFx.id) !== Number(m.id) && landingWhy(freeFx) ? freeFx : null;
+  const soon = Number(m.kickoff) > Date.now() / 1000;
+  const occasion = unshout(hero.kicker);
+  const tag = isFree ? 'Today’s free call'
+    : occasion && occasion.toLowerCase() !== String(m.league ?? '').toLowerCase() ? occasion
+    : soon ? 'The biggest game today' : 'The biggest game on';
+  const href = `#/fixture/${encodeURIComponent(m.id)}`;
+  lead.innerHTML = `
+      <p class="ld-lead-tag">${esc(tag)}</p>
+      <p class="ld-lead-comp">${m.league ? `${crest(m.league, 'xs', m.league_id, 'league')}<span>${esc(m.league)}</span>` : ''}<span>${esc(kickoffLabel(m.kickoff))}</span></p>
+      <h2 class="ld-lead-teams"><a href="${href}">
+        <span>${crest(m.home, 'md', m.home_id)}${esc(m.home)}</span>
+        <span>${crest(m.away, 'md', m.away_id)}${esc(m.away)}</span></a></h2>
+      ${soon ? `<p class="ld-lead-count">Kick-off in <b data-countdown="${Number(m.kickoff)}" data-done="now">—</b></p>` : ''}
+      ${why ? `<p class="ld-lead-why">${esc(why)}</p>`
+        : leadFx ? '<p class="ld-lead-why">Team news, form, the table and the last few meetings, all on the match page, free.</p>'
+        : '<div class="ld-lead-why ld-lead-why-wait" aria-hidden="true"><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-line"></span></div>'}
+      <a class="ld-lead-go" href="${href}">${isFree ? 'Read the whole call, free' : 'Read the match, free'}</a>
+      ${other ? `<a class="ld-lead-free" href="#/fixture/${encodeURIComponent(other.id)}"><span>Today’s free call</span><b>${esc(other.home)} v ${esc(other.away)}</b></a>` : ''}`;
+  smartQuotes(lead);
+  const theme = themeOf(m.league_id);
+  for (const c of [...ldHero.classList]) if (c.startsWith('theme-') && c !== `theme-${theme}`) ldHero.classList.remove(c);
+  const shot = app.querySelector('[data-ld="shot"]');
+  if (theme && !ldHero.classList.contains(`theme-${theme}`)) {
+    ldHero.classList.add(`theme-${theme}`);
+    if (shot) shot.innerHTML = themeArt(theme);
+  } else if (!theme && shot?.querySelector('.comp-art')) shot.innerHTML = '';
+  tickCountdowns();
+}
+
 async function viewLanding() {
   const nav = navTicket;
   document.body.dataset.page = 'landing';
@@ -2578,12 +2657,43 @@ async function viewLanding() {
       { duration: 420, delay: 40 + i * 50, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'backwards' }));
   }
 
-  const [board, hero, picks, plans] = await Promise.all([
-    loadBoard().catch(() => null),
-    getJSON('/api/hero').catch(() => null),
-    getJSON('/api/picks?limit=60&settled=true').then((r) => r.picks ?? []).catch(() => []),
-    getJSON('/api/plans').catch(() => []),
-  ]);
+  /*
+   * The lead story is tonight's biggest game, and it draws the moment its
+   * match is known: from the page itself (the Worker writes the headline
+   * in), then from /api/hero and the match's own write-up, without waiting
+   * for the board, the record or the prices. It used to wait for all of
+   * those and then make a second trip for the write-up, so a cold phone
+   * visit sat on bare words for four or five seconds; and with no free call
+   * yet, or one whose write-up had nothing quotable, it was taken off and
+   * the header had no match in it at all (owner, November 2026).
+   */
+  const details = new Map();
+  const detailOf = (id) => {
+    if (!id) return Promise.resolve(null);
+    if (!details.has(Number(id))) {
+      details.set(Number(id), getJSON(`/api/fixture/${id}`).then((d) => d?.fixture ?? d).catch(() => null));
+    }
+    return details.get(Number(id));
+  };
+  const boot = again ? null : bootHero();
+  if (boot) { detailOf(boot.fixture_id); detailOf(boot.free_fixture_id); }
+  if (boot && !again) drawLandingLead(boot, null, null);
+  const heroReq = getJSON('/api/hero').catch(() => null);
+  const boardReq = loadBoard().catch(() => null);
+  const picksReq = getJSON('/api/picks?limit=60&settled=true').then((r) => r.picks ?? []).catch(() => []);
+  const plansReq = getJSON('/api/plans').catch(() => []);
+
+  const fresh = await heroReq;
+  if (nav !== navTicket) return;
+  let hero = fresh?.fixture_id ? fresh : (boot ? { ...boot, ...(fresh ?? {}), fixture_id: boot.fixture_id } : fresh);
+  let freeId = hero?.free_fixture_id ?? null;
+  // Started now, side by side: the headline's write-up and the free call's.
+  let [leadFx, freeFx] = await Promise.all([detailOf(hero?.fixture_id), detailOf(freeId)]);
+  if (nav !== navTicket) return;
+  // A headline with no write-up behind it yet still leads with its match.
+  if (hero?.fixture_id) drawLandingLead(hero, leadFx, freeFx);
+
+  const [board, picks, plans] = await Promise.all([boardReq, picksReq, plansReq]);
   /*
    * The record is the calls we published, and nothing else: the pick table,
    * the same rows the results page and the match pages read, so a reader who
@@ -2598,69 +2708,64 @@ async function viewLanding() {
   const put = (key, html) => { const el = app.querySelector(`[data-ld="${key}"]`); if (el) { el.innerHTML = html; smartQuotes(el); } return el; };
   if (ahead.length) put('count', `${ahead.length} games still to play`);
 
-  // Today's free call: the match and the reasoning, linked. No pick, no price.
-  const freeId = hero?.free_fixture_id ?? fixtures.find((f) => f.free_call)?.id ?? null;
-  const freeRow = freeId ? fixtures.find((f) => Number(f.id) === Number(freeId)) : null;
-  const detail = freeId ? await getJSON(`/api/fixture/${freeId}`).catch(() => null) : null;
+  // No headline and no free call from the hero read: the board decides.
+  if (!freeId) {
+    freeId = fixtures.find((f) => f.free_call)?.id ?? null;
+    if (freeId) freeFx = await detailOf(freeId);
+  }
+  if (!hero?.fixture_id) {
+    const big = biggestOnBoard(fixtures);
+    hero = big ? { ...(hero ?? {}), ...big } : hero;
+    if (hero?.fixture_id) leadFx = await detailOf(hero.fixture_id);
+  }
   if (nav !== navTicket) return;
-  const fx = detail?.fixture ?? detail ?? freeRow;
-  const why = excerpt((fx?.verdicts ?? []).map((v) => v.why ?? v.narrative).find(Boolean))
-    || excerpt((fx?.published ?? []).map((p) => p.why ?? p.narrative).find(Boolean));
+  if (hero?.fixture_id) drawLandingLead(hero, leadFx, freeFx);
+
+  // Today's free call, for the buttons and the examples below: the match and
+  // the reasoning, linked. No pick, no price.
+  const fx = freeFx ?? (freeId ? fixtures.find((f) => Number(f.id) === Number(freeId)) : null);
+  const why = fx ? landingWhy(fx) : '';
   if (fx && why) {
     for (const a of app.querySelectorAll('[data-ld="free"], [data-ld="end-go"]')) a.setAttribute('href', `#/fixture/${encodeURIComponent(fx.id)}`);
     const endTitle = app.querySelector('[data-ld="end-title"]');
     if (endTitle) endTitle.textContent = `Today’s free call is ${fx.home} v ${fx.away}.`;
-    const soon = fx.kickoff > Date.now() / 1000;
-    put('call', `
-      <p class="ld-lead-tag">Today’s free call</p>
-      <p class="ld-lead-comp">${fx.league ? `${crest(fx.league, 'xs', fx.league_id, 'league')}<span>${esc(fx.league)}</span>` : ''}<span>${esc(kickoffLabel(fx.kickoff))}</span></p>
-      <h2 class="ld-lead-teams"><a href="#/fixture/${encodeURIComponent(fx.id)}">
-        <span>${crest(fx.home, 'md', fx.home_id)}${esc(fx.home)}</span>
-        <span>${crest(fx.away, 'md', fx.away_id)}${esc(fx.away)}</span></a></h2>
-      ${soon ? `<p class="ld-lead-count">Kick-off in <b data-countdown="${Number(fx.kickoff)}" data-done="now">—</b></p>` : ''}
-      <p class="ld-lead-why">${esc(why)}</p>
-      <a class="ld-lead-go" href="#/fixture/${encodeURIComponent(fx.id)}">Read the whole call, free</a>`);
   }
   {
     /*
      * The ground behind the header, kept low so the words stay easy to read
      * (owner, October 2026). The engine names a ground it has a photograph
-     * for (shot_venue_id); then the free call's own, then the board's. The
+     * for (shot_venue_id); then the headline's own, then the board's. The
      * browser works down the list until one is a real photograph (venueShot).
+     * A Champions League headline has the competition's night instead
+     * (drawLandingLead).
      */
     const shot = app.querySelector('[data-ld="shot"]');
-    // A Champions League free call brings the competition's night and its
-    // ball in place of the ground.
-    const theme = fx && why ? themeOf(fx.league_id) : null;
     const ldHero = app.querySelector('.ld-hero');
-    if (theme && ldHero && !ldHero.classList.contains(`theme-${theme}`)) {
-      ldHero.classList.add(`theme-${theme}`);
-      if (shot) shot.innerHTML = themeArt(theme);
-    }
-    const venues = [...new Set([hero?.shot_venue_id, fx?.venue_id, ...fixtures.filter(hasCall).map((f) => f.venue_id), ...fixtures.map((f) => f.venue_id)].filter(Boolean))];
-    if (!theme && shot && !shot.querySelector('img') && venues.length) {
+    const themed = ldHero && [...ldHero.classList].some((c) => c.startsWith('theme-'));
+    const venues = [...new Set([hero?.shot_venue_id, hero?.venue_id, leadFx?.venue_id, fx?.venue_id, ...fixtures.filter(hasCall).map((f) => f.venue_id), ...fixtures.map((f) => f.venue_id)].filter(Boolean))];
+    if (!themed && shot && !shot.querySelector('img') && venues.length) {
       shot.innerHTML = venueShot(venues.slice(0, 6), 'ld-shot-img', true);
       const img = shot.querySelector('img');
       img?.addEventListener('load', () => img.classList.add('is-in'), { once: true });
     }
     landingDepth();
   }
-  if (!(fx && why)) {
+  if (!hero?.fixture_id && !(fx && why)) {
     app.querySelector('.ld-lead')?.remove();
     app.querySelector('.ld-hero')?.classList.add('ld-solo');
-    /*
-     * No free call yet today: the board can be empty of calls for hours
-     * before team news lands. Say what is there instead, and when the call
-     * usually arrives, rather than a button that leads to nothing.
-     */
-    if (!freeId) {
-      for (const a of app.querySelectorAll('[data-ld="free"], [data-ld="end-go"]')) {
-        a.textContent = 'See today’s games, free';
-        a.setAttribute('href', '#/board');
-      }
-      const assure = app.querySelector('.ld-assure');
-      if (assure) assure.textContent = 'No free call yet today. It goes up as team news lands, usually a few hours before kick-off. Every preview is free in the meantime, no sign-up.';
+  }
+  /*
+   * No free call yet today: the board can be empty of calls for hours
+   * before team news lands. Say what is there instead, and when the call
+   * usually arrives, rather than a button that leads to nothing.
+   */
+  if (!freeId) {
+    for (const a of app.querySelectorAll('[data-ld="free"], [data-ld="end-go"]')) {
+      a.textContent = 'See today’s games, free';
+      a.setAttribute('href', hero?.fixture_id ? `#/fixture/${encodeURIComponent(hero.fixture_id)}` : '#/board');
     }
+    const assure = app.querySelector('.ld-assure');
+    if (assure) assure.textContent = 'No free call yet today. It goes up as team news lands, usually a few hours before kick-off. Every preview is free in the meantime, no sign-up.';
   }
 
   // The record: settled calls, newest first, voids aside.
@@ -2741,6 +2846,9 @@ async function viewLanding() {
 async function viewDashboard() {
   // Which navigation this page belongs to: a newer one makes it stand down (see route).
   const nav = navTicket;
+  // The headline the Worker wrote into the page, when this is the first draw:
+  // the masthead shows the match at once instead of a generic one.
+  if (!state.hero?.fixture_id && bootHero()) state.hero = bootHero();
   placeholder(heroHTML(state.hero, state.heroVenue) + skeletonHTML('rows'));
   // Everything the page needs, asked for at once. They used to go in three
   // rounds -- board and masthead, then the masthead's bundle, then the record
@@ -2754,10 +2862,12 @@ async function viewDashboard() {
   // no longer waits for it: a third round trip before anything drew was most
   // of a cold front page's wait on a phone. It is slotted in when it lands.
   const heroReq = getJSON('/api/hero').catch(() => null);
+  let fresh = null;
   const detailReq = heroReq.then((h) => (h?.fixture_id
     ? getJSON(`/api/fixture/${h.fixture_id}`).catch(() => null) : null));
   try {
-    [board, state.hero] = await Promise.all([loadBoard(), heroReq]);
+    [board, fresh] = await Promise.all([loadBoard(), heroReq]);
+    state.hero = fresh?.fixture_id ? fresh : (bootHero() ?? fresh);
     // Already here (a cached read, usually): draw with it. Otherwise without.
     state.heroDetail = await Promise.race([detailReq, new Promise((r) => setTimeout(() => r(null), 60))]);
   } catch (err) {
@@ -2794,15 +2904,17 @@ async function viewDashboard() {
   };
   // The free call's row, flagged by the board itself.
   const freeFx = fixtures.find((f) => f.free_call && f.top_pick) ?? null;
-  let heroRow = state.hero?.fixture_id ? fixtures.find((f) => Number(f.id) === Number(state.hero.fixture_id)) ?? null : null;
-  // A headline whose call was withdrawn since the slate chose it (calls are
-  // looked at again every fifteen minutes) stands down for the plain
-  // masthead rather than lead with a match we no longer have a call on.
-  if (heroRow && !hasCall(heroRow) && !heroRow.called && matchState(heroRow).kind === 'upcoming') {
-    state.hero = null;
-    state.heroDetail = null;
-    heroRow = null;
+  // No headline from the slate (or the read failed): the board's biggest game.
+  if (!state.hero?.fixture_id) {
+    const big = biggestOnBoard(fixtures);
+    if (big) state.hero = { ...(state.hero ?? {}), ...big };
   }
+  const heroRow = state.hero?.fixture_id ? fixtures.find((f) => Number(f.id) === Number(state.hero.fixture_id)) ?? null : null;
+  // A headline whose call was withdrawn since the slate chose it keeps the
+  // masthead: it is still the biggest game of the night, and the masthead
+  // simply carries no call (heroCallHTML). It used to stand down for a plain
+  // masthead with no match on it at all, which is what readers saw on the
+  // nights a call came down (owner, November 2026).
   if (nav !== navTicket) return;
   app.innerHTML =
     `<div data-live="ticker">${tickerHTML(fixtures, recent)}</div>` +
@@ -2836,7 +2948,11 @@ async function viewDashboard() {
 
   if (!state.heroDetail && state.hero?.fixture_id) {
     const heroId = state.hero.fixture_id;
-    detailReq.then((d) => {
+    // The headline may be the board's own pick (no stored one), whose bundle
+    // was not asked for with the hero's.
+    const req = Number(heroId) === Number(fresh?.fixture_id) ? detailReq
+      : getJSON(`/api/fixture/${heroId}`).catch(() => null);
+    req.then((d) => {
       const inner = app.querySelector('.hero .hero-inner');
       // The space was kept for it (the mc-wait box, its usual height): put in
       // after the first paint, it pushed everything under the masthead down
