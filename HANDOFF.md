@@ -2,6 +2,7 @@
 
 **Last updated:** 3 November 2026, about 16:35 UTC, by the Claude Code session on branch
 `claude/project-thread-b55ubz` (tell a friend; see Recent work).
+Also on 3 November: `claude/project-thread-5spo7d` (fit to the free plans; see Recent work).
 
 **Keep this file current.** The owner may move the work to a different coding agent or account
 at any time. Whoever is working updates the "Right now" section and the checklist after every
@@ -268,9 +269,9 @@ Stage 2, accounts:
 
 ### Design for D1, and why
 
-- **The Worker may parse now.** The "parse nothing, stream one Postgres function's bytes" rule in
-  older notes came from the free plan's 10 ms CPU limit. The account is on Workers Paid now
-  (30 seconds of CPU), so building a response in the Worker from D1 rows is fine. Keep large
+- **The Worker is on the free plan again (30 October 2026): 10 ms of CPU a request**, 50 D1
+  queries an invocation, 5M rows read and 100k written a day. Building a response from D1 rows is
+  still done, but keep it rare (the edge copies in `edge.ts`) and check `cf:usage` after changes. Keep large
   pre-rendered JSON as stored text (`fixture.bundle_json` and the like) and splice it in rather
   than re-serialising it.
 - **The engine reaches D1 through the Worker, not the REST API.** The plan is an internal
@@ -382,6 +383,29 @@ Stage 2, accounts:
   whole history, so there is no edge to tune for, only volume and landing rate. Change: `minEv` -0.02
   and `minSharpEv` -0.01 (was -0.01 and 0), `PROD` in `lab/tune.ts` to match: about 15 calls a day,
   83-85% landed, -0.6% / -0.8% on B / C. Re-check with `lab:review` once a fortnight has settled.
+- **3 November: fitted to the free plans (Cloudflare Workers Free since 30 October; the provider's
+  7,500 a day).** `cf:usage` now also lists the D1 statements that read and write the most rows
+  (last 48 h). Before this change, a week of use: Worker requests 39k to 52k a day (free: 100k),
+  CPU p50 3 ms but p99 20 to 60 ms (free: 10 ms), D1 rows read 12M to 71M a day (free: 5M), rows
+  written 50k to 103k (free: 100k), database 309 MB (free: 500 MB). What changed:
+  - Match preview for an unknown id (`fixturePreview`) and the competitions list scanned the whole
+    `kv` table with `LIKE 'league:%:next'` (86M rows read in two days, mostly crawlers asking for
+    old match ids). Now a key range (`k >= 'league:' AND k < 'league;'`).
+  - Edge copies (`edge.ts`): fresh for 2 minutes (was 30 s), served stale for 30 (was 5) while
+    refreshed behind the reader, and 404s are kept too. Fewer refills, and a reader almost never
+    waits on the database (the "skeleton for a few seconds" on first load).
+  - `regradeSettled`'s score sync walked all of `match` (116k rows a settle): limited to fixtures
+    from the last 30 days.
+  - Schedule (`schedule.ts`): read every 4 h, not every pass (up to 20 provider requests each), and
+    an unchanged row is not rewritten (was ~40k rows written a day).
+  - Live scores (`live.ts`): each answer is shared through D1 (`kv` `live:*`), so one data centre's
+    copy serves the rest instead of each asking the provider; a match page every 2 min (was 1),
+    its stats every 6, and its score from the live list rather than a separate call. Old `live:*`
+    rows cleared by the daily cron.
+  - Engine door (`enginedb.ts`): at most 50 statements a request (D1's free limit per invocation);
+    the engine sends at most 1 MB a request (was 8 MB) so the JSON parse fits 10 ms of CPU.
+  - Not changed: `engine/test` cross-form test 86 fails on every branch since 2 November
+    (`narrate/facts.ts` uses `Date.now()`); fixed separately on PR #174.
 
 - **3 November: the front page always leads with a match, and draws it at once.** Two causes of
   "no match in the hero": the members' front page (`viewDashboard`) dropped the headline for a plain

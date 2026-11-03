@@ -8,18 +8,28 @@
  * runs, so the Worker keeps one copy per address in Cloudflare's cache at the
  * edge nearest the reader:
  *
- *   - under 30 seconds old, it is served as it is;
- *   - up to five minutes old, it is served at once and a fresh one is fetched
+ *   - under two minutes old, it is served as it is;
+ *   - up to half an hour old, it is served at once and a fresh one is fetched
  *     behind it, so the next reader gets that;
  *   - older, or absent, the reader waits for the database once.
+ *
+ * On the free plan (November 2026) D1 allows five million rows read a day,
+ * and these refills were most of the site's reads: every data centre asked
+ * again every thirty seconds. The engine writes at most once an hour, so two
+ * minutes loses nothing, and half an hour of grace means a reader almost never
+ * waits on the database (the "empty page for a few seconds" was that wait).
+ *
+ * A 404 is kept too: a match id the site has never heard of (old links,
+ * crawlers) is asked about thousands of times a day, and the answer is the
+ * same each time.
  *
  * Only for a request with no token. A reader's own board (a member's, with the
  * calls in it) is never stored here: that is the leak http.ts exists to
  * prevent, and the caller checks it before this is reached.
  */
 
-const FRESH_S = 30;
-const KEEP_S = 300;
+const FRESH_S = 120;
+const KEEP_S = 1800;
 const STAMP = 'x-edge-stored';
 
 export interface Ctx { waitUntil(p: Promise<unknown>): void }
@@ -52,6 +62,9 @@ async function store(cache: Cache, key: Request, res: Response, now: number): Pr
   await cache.put(key, new Response(res.body, { status: res.status, headers }));
 }
 
+/** A body worth keeping: a real answer, or a settled "no such thing". */
+const keepable = (res: Response) => res.ok || res.status === 404;
+
 export async function edgeCached(request: Request, ctx: Ctx | undefined, build: () => Promise<Response>, now = Date.now()): Promise<Response> {
   const cache = cacheOf();
   if (!cache || !ctx || request.method !== 'GET') return build();
@@ -64,14 +77,14 @@ export async function edgeCached(request: Request, ctx: Ctx | undefined, build: 
     if (age < KEEP_S) {
       ctx.waitUntil((async () => {
         const next = await build();
-        if (next.ok) await store(cache, key, next, Date.now());
+        if (keepable(next)) await store(cache, key, next, Date.now());
       })().catch(() => { /* the stale copy stays */ }));
       return served(hit, 'stale');
     }
   }
 
   const res = await build();
-  if (!res.ok) return res;
+  if (!keepable(res)) return res;
   const [mine, theirs] = res.body ? res.body.tee() : [null, null];
   const keep = new Response(theirs, { status: res.status, headers: res.headers });
   ctx.waitUntil(store(cache, key, keep, now).catch(() => { /* uncached, not broken */ }));

@@ -68,6 +68,30 @@ export async function cfUsage(): Promise<void> {
     console.log(`  ${g.dimensions.date}  queries ${s.readQueries + s.writeQueries}  rows read ${s.rowsRead} (${pct(s.rowsRead, FREE.rowsRead)})  rows written ${s.rowsWritten} (${pct(s.rowsWritten, FREE.rowsWritten)})`);
   }
 
+  // Which statements read and write the rows: the top 25 of the last two days.
+  // SQL text only (bound values are not in it), so nothing here is secret.
+  try {
+    const twoDays = new Date(until.getTime() - 2 * 86400_000).toISOString();
+    const q = await gql(token, `query($a: String!, $s: Time!, $u: Time!, $db: String!) { viewer { accounts(filter: {accountTag: $a}) {
+      d1QueriesAdaptiveGroups(limit: 1000, filter: {datetime_geq: $s, datetime_leq: $u, databaseId: $db}) {
+        count sum { rowsRead rowsWritten queryDurationMs } dimensions { query } } } } }`,
+      { a: accountId, s: twoDays, u: until.toISOString(), db: dbId });
+    const groups = ((q?.viewer?.accounts?.[0]?.d1QueriesAdaptiveGroups ?? []) as any[]);
+    const show = (key: 'rowsRead' | 'rowsWritten') => {
+      const top = [...groups].sort((a, b) => b.sum[key] - a.sum[key]).slice(0, 25);
+      console.log(`\nD1, top statements by ${key} over the last 48 h (calls, rows read, rows written, ms):`);
+      for (const g of top) {
+        if (!g.sum[key]) continue;
+        const sql = String(g.dimensions.query ?? '').replace(/\s+/g, ' ').slice(0, 220);
+        console.log(`  ${g.count}  r ${g.sum.rowsRead}  w ${g.sum.rowsWritten}  ${Math.round(g.sum.queryDurationMs)}ms  ${sql}`);
+      }
+    };
+    show('rowsRead');
+    show('rowsWritten');
+  } catch (err) {
+    console.log(`\nD1 per-statement analytics unavailable: ${err instanceof Error ? err.message.slice(0, 300) : String(err)}`);
+  }
+
   const info = await fetch(`${API}/accounts/${accountId}/d1/database/${dbId}`, { headers: { authorization: `Bearer ${token}` } })
     .then((r) => r.json()).catch(() => null) as any;
   const bytes = Number(info?.result?.file_size ?? 0);

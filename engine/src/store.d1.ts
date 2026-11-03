@@ -22,8 +22,12 @@ interface D1Response<T> {
   result: Array<{ results?: T[]; success: boolean; meta?: Record<string, unknown> }>;
 }
 
-/** Bytes of statements a request to the Worker may carry; D1's own ceiling is 32 MiB. */
-const MAX_BATCH_BYTES = 8_000_000;
+/**
+ * Bytes of statements a request to the Worker may carry. D1's own ceiling is
+ * 32 MiB, but the Worker reads the body as JSON, and on the free plan it has
+ * 10 ms of CPU for the whole request: a megabyte parses in a few.
+ */
+const MAX_BATCH_BYTES = 1_000_000;
 
 export const dbStats = { queries: 0, rowsWritten: 0, rowsRead: 0 };
 

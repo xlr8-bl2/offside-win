@@ -44,7 +44,7 @@ test('an older copy is served at once and replaced behind it', async () => {
   const build = async () => { calls++; return body(calls)(); };
   const t0 = 2_000_000;
   await edgeCached(req(), ctx, build, t0); await settle();
-  const stale = await edgeCached(req(), ctx, build, t0 + 60_000);
+  const stale = await edgeCached(req(), ctx, build, t0 + 200_000);
   assert.equal(stale.headers.get('x-edge'), 'stale');
   assert.deepEqual(await stale.json(), { n: 1 }, 'no wait for the database');
   await settle();
@@ -53,10 +53,10 @@ test('an older copy is served at once and replaced behind it', async () => {
   assert.deepEqual(await next.json(), { n: 2 });
 });
 
-test('past five minutes the reader waits for a fresh one, and an error is never stored', async () => {
+test('past half an hour the reader waits for a fresh one, and an error is never stored', async () => {
   const t0 = 3_000_000;
   await edgeCached(req(), ctx, body(1), t0); await settle();
-  const old = await edgeCached(req(), ctx, body(2), t0 + 400_000);
+  const old = await edgeCached(req(), ctx, body(2), t0 + 2_000_000);
   assert.equal(old.headers.get('x-edge'), 'miss');
   assert.deepEqual(await old.json(), { n: 2 });
   await settle();
@@ -65,6 +65,19 @@ test('past five minutes the reader waits for a fresh one, and an error is never 
   assert.equal(bad.status, 502);
   await settle();
   assert.equal(store.size, 0);
+});
+
+test('a 404 is kept, so an unknown match id does not reach the database every time', async () => {
+  store.clear();
+  let calls = 0;
+  const build = async () => { calls++; return new Response('{"error":"fixture not found"}', { status: 404 }); };
+  const t0 = 4_000_000;
+  const a = await edgeCached(req(), ctx, build, t0); await settle();
+  assert.equal(a.status, 404);
+  const b = await edgeCached(req(), ctx, build, t0 + 5_000);
+  assert.equal(b.status, 404);
+  assert.equal(b.headers.get('x-edge'), 'hit');
+  assert.equal(calls, 1);
 });
 
 test('only the public reads qualify', () => {

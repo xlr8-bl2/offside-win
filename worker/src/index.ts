@@ -42,7 +42,7 @@ import { recordView, serve, type D1Read } from './d1read.ts';
 import { auth, authCleanup, boundToken, viewerFor, type AuthDb } from './auth.ts';
 import { accountWrite } from './profile.ts';
 import { socials, type SocialEnv } from './social.ts';
-import { fixtureChanges, liveList, liveMatch, type LiveEnv } from './live.ts';
+import { fixtureChanges, liveCleanup, liveList, liveMatch, type LiveEnv } from './live.ts';
 import { EDGE_PATHS, edgeCached } from './edge.ts';
 
 interface Env extends PayEnv, LiveEnv, AdminEnv, HookEnv {
@@ -153,6 +153,8 @@ const worker = {
     // Once a day, its own invocation: quiet days given back (goodwill.ts).
     if (event?.cron === GOODWILL_CRON) {
       ctx.waitUntil(goodwill(env).catch((err) => console.error('goodwill:', err instanceof Error ? err.message : String(err))));
+      // Live scores' shared copies of matches long over (live.ts).
+      ctx.waitUntil(liveCleanup(env).catch((err) => console.error('live cleanup:', err instanceof Error ? err.message : String(err))));
       return;
     }
     ctx.waitUntil(sweepWhop(env));

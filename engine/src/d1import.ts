@@ -17,8 +17,9 @@ import { config } from './config.ts';
 import { d1Create } from './d1setup.ts';
 
 /** Statements to a batch, and bytes: a batch is one request and one transaction. */
-const MAX_STATEMENTS = 200;
-const MAX_BYTES = 4_000_000;
+// Within the Worker's free-plan limits: 50 queries and 10 ms of CPU a request.
+const MAX_STATEMENTS = 40;
+const MAX_BYTES = 1_000_000;
 
 export async function d1Import(dir = 'export'): Promise<void> {
   // The database by name, so this needs no id handed to it (d1setup.ts).

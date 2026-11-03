@@ -1493,7 +1493,8 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
   // The next two weeks of matches, for search. Never allowed to fail the slate.
   try {
     const listed = await refreshSchedule(fitted);
-    console.log(`  listed ${listed} upcoming match${listed === 1 ? '' : 'es'} for search`);
+    if (listed === null) console.log('  search list: read within the last four hours, not due');
+    else console.log(`  listed ${listed} upcoming match${listed === 1 ? '' : 'es'} for search`);
   } catch (err) {
     console.log(`  schedule skipped: ${err instanceof Error ? err.message : String(err)}`);
   }
