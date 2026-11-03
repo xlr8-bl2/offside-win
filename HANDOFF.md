@@ -345,6 +345,17 @@ Stage 2, accounts:
 
 ## Recent work, newest first
 
+- **3 November: a call's write-up argues that call.** The owner said the long write-up on a call said
+  the same thing every time (who makes the better chances) whatever we had called. Every call got the
+  same fact list, led by the chance reads (insight.ts, weights 84-99), and a brief that told the writer
+  to lead on them. Now `engine/src/narrate/angle.ts` adds facts for the call's own market from the
+  matches the slate already loads (games over the line, both teams scoring, corners won and given,
+  red cards, wins by two or more, home and away records), puts the facts that bear on that question
+  first, and gives `write.ts` the question (`angle.question`, for the free paragraph, which still
+  never names a bet) and how to argue this selection (`angle.argue`, for "Why this call"). Same one
+  request per call. `narrativeKey` gained `a1` so calls still on the board are written again once.
+  Previews of matches with no call are unchanged. Tests: `engine/test/angle.test.ts`.
+
 - **28 October: no engine talk on the public site.** The owner asked that the site stop saying an
   engine or model does the analysis. A sweep of pages, meta tags, `llms.txt`, the Worker's prerendered
   pages, emails and studio captions found two lines, both on `#/results` (`viewResults()`), now neutral.

@@ -21,6 +21,7 @@ import { geminiWriter } from './narrate/gemini.ts';
 import { fromReads } from './narrate/rescue.ts';
 import { budgeted, keyId, left, spent, todays, type BudgetState } from './narrate/budget.ts';
 import { write, type Writer } from './narrate/write.ts';
+import { angleOf, focusFacts } from './narrate/angle.ts';
 import { freeBoard, freeBundle } from './membership/redact.ts';
 import { parsePrediction, providerMarkets } from './provider-model.ts';
 import { bucketOf, buildCandidates, confidentEligible, DayMix, standingGate, whyNoCall, type NoCallReason, driversFor, floorForRank, isLean, marketLabel, rankConfident, select, setAsideFor, type CalibrationMap } from './select.ts';
@@ -185,8 +186,13 @@ export function leagueRank(leagueId: number): number {
  * call, and re-reading a preview because a full-back is fit is not worth a
  * request.
  */
+/*
+ * `a1`: written to the call's own question (narrate/angle.ts, 3 November
+ * 2026). Bumped so the calls still on the board are written again once, to
+ * the new brief, instead of keeping the old paragraph for its fourteen days.
+ */
 export function narrativeKey(fixtureId: number, c: Candidate, news = ''): string {
-  return `narr:${fixtureId}:${c.market}:${c.outcome}:${c.line ?? ''}${news ? `:${fnv(news)}` : ''}`;
+  return `narr:a1:${fixtureId}:${c.market}:${c.outcome}:${c.line ?? ''}${news ? `:${fnv(news)}` : ''}`;
 }
 
 /**
@@ -791,7 +797,11 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
             break;
           }
           narrateAttempts++;
-          const facts = factsFor();
+          // The facts for this call's own question first (corners, cards, how
+          // many goals, who avoids defeat), from the matches already loaded.
+          const facts = focusFacts(factsFor(), v.candidate,
+            { name: analysis.home_team, id: ctx.home.team_id, rows: ctx.styleMatches.home },
+            { name: analysis.away_team, id: ctx.away.team_id, rows: ctx.styleMatches.away });
           const result = await write({
             home: analysis.home_team,
             away: analysis.away_team,
@@ -799,6 +809,7 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
             call: plainCall(v.candidate, analysis.home_team, analysis.away_team),
             facts,
             odds: v.candidate.odds,
+            angle: angleOf(v.candidate, analysis.home_team, analysis.away_team),
           }, writer);
           // Kept after every write, not only at the end, so a run that dies
           // halfway still leaves the day's count right for the next one.
