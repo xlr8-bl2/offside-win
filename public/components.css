@@ -6880,3 +6880,39 @@ body[data-page="landing"] .foot-top { display: none; }
 .hero .fx-line .crest { flex: none; }
 .hero .fx-line .name { flex: 1 1 auto; min-width: 0; font-size: clamp(2.25rem, 4.4vw, 4.25rem); line-height: 0.98; text-wrap: balance; }
 .hero-call .freecall-sel { font-size: var(--text-2xl); }
+
+/* ------------------------------------------------------------- tell a friend
+ *
+ * The invite tab on the account page, and the lines that tell someone who
+ * came on a mate's link what it gets them (app.js, js/lib/referral.js). Said
+ * plainly in the page's own type: a recommendation, not a promo banner.
+ */
+.invite-lead { max-width: 60ch; margin: 0 0 var(--space-4); font-size: var(--text-md); line-height: var(--leading-normal); color: var(--chalk-2); }
+.invite-deal { margin: 0 0 var(--space-5); }
+.invite-link { display: flex; flex-direction: column; gap: var(--space-3); max-width: 440px; }
+.invite-url {
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--stand);
+  color: var(--chalk);
+  font: inherit;
+  font-size: var(--text-md);
+}
+.invite-url:focus-visible { outline: 2px solid var(--floodlight); outline-offset: 2px; }
+.invite-count { margin: 0; font-size: var(--text-sm); color: var(--chalk-2); }
+.invite-nudge, .plan-friend-note, .ld-friend {
+  max-width: 62ch;
+  margin: 0 0 var(--space-6);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--floodlight);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  color: var(--chalk-2);
+}
+.plan-friend-note b { color: var(--chalk); }
+.invite-nudge a, .plan-friend-note a, .ld-friend a { color: var(--floodlight-hi); }
+.ld-friend { margin: var(--space-4) 0 0; font-size: var(--text-sm); }
+.plan-friend { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--floodlight-hi); }

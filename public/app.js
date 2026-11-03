@@ -23,6 +23,7 @@ import { sweat } from './js/lib/sweat.js';
 import * as attention from './js/lib/attention.js';
 import { anchorClock, clockText, diffEvents, eachFixture, eventKey, fixtureIdOf, ingest, inPlayWindow, overlay, signature } from './js/lib/live.js';
 import { TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle, ukDay } from './js/lib/titles.js';
+import { captureRef, shareLink, storedRef } from './js/lib/referral.js';
 import { accountRpc, authHeaders, completeSignIn, currentUser, endedReason, signedInDevices, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, prepareGoogleRedirect, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, siteConfig, viewingAsFree, hasStoredSession } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
@@ -2476,6 +2477,7 @@ function landingHTML() {
           <a class="ld-alt" href="#/board">See today’s games</a>
         </div>
         <p class="ld-assure">Free, no sign-up, no card. 18+, and no guaranteed winners, because there’s no such thing.</p>
+        ${storedRef() ? `<p class="ld-friend">A mate sent you here. <a href="#/pricing">Your first week of membership is free</a>, whenever you want it.</p>` : ''}
         <p class="ld-proof" data-ld="proof"></p>
       </div>
       <article class="ld-lead" data-ld="call" aria-label="Today’s free call"><div class="ld-lead-wait"></div></article>
@@ -6617,6 +6619,9 @@ async function viewPricing() {
     if (account) state.account = account;
   }
   const mine = liveMembership(account);
+  // A mate's link (js/lib/referral.js): signed in, the Worker says whether it
+  // counts; signed out, the link this device arrived on, for a new account.
+  const friendDays = mine ? 0 : user ? Number(account?.invite?.friend_days) || 0 : storedRef() ? 7 : 0;
   // A deal or a free trial on a plan, when one is running and this reader
   // may have it (js/lib/promo.js). Checkout finds the same one by the plan.
   const promo = Array.isArray(running) && running.length && !mine ? await import('./js/lib/promo.js').catch(() => null) : null;
@@ -6696,7 +6701,8 @@ async function viewPricing() {
       ${callsToday > 1 ? `<li><b>${callsToday} calls</b> on the board still to kick off. One is free.</li>` : ''}
     </ul>` : ''}
     ${board?.fixtures?.length && !callsToday ? `<p class="plan-quiet" role="note">No calls are up yet today. They go up through the day as team news lands, and members get each one the moment it does.</p>` : ''}
-    ${freeLineHTML(free)}`}
+    ${freeLineHTML(free)}
+    ${friendDays ? `<p class="plan-friend-note" role="note"><b>You came on a mate's link.</b> Your first ${friendDays} days are free on the month or three months${user ? '' : ' once you make an account'}. A card is needed to start, and nothing is taken until they are up.</p>` : ''}`}
 
     <div class="plans" data-public-price>
       ${order.map((id) => {
@@ -6714,6 +6720,7 @@ async function viewPricing() {
             <span>then ${esc(money(p.amount_minor, p.currency))} ${esc(per(p))}</span></p>` : `<p class="plan-price"><b>${esc(money(p.amount_minor, p.currency))}</b>
             <span>${esc(per(p))}</span></p>`}
           ${o ? `<p class="plan-ends">Ends in <span class="plan-clock" data-ends="${esc(o.ends_at)}"></span></p>` : ''}
+          ${friendDays && c.renews && o?.kind !== 'trial' ? `<p class="plan-friend">First ${friendDays} days free on your mate's link</p>` : ''}
           ${perMonth(p) ? `<p class="plan-per">${esc(perMonth(p))}</p>` : ''}
           <p class="plan-blurb">${esc(c.blurb)}</p>
           ${b.note ? `<p class="plan-switch">${esc(b.note)}</p>` : ''}
@@ -6910,9 +6917,15 @@ async function viewCheckout(params) {
   // id goes with the payment; the Worker checks it and sets the price.
   const promo = moving || block ? null : await import('./js/lib/promo.js').catch(() => null);
   const offer = promo ? await promo.offerForPlan(planId, { signedIn: true, member: !!m, returning: !!account?.returning }, promoId).catch(() => null) : null;
-  const trial = offer?.kind === 'trial' ? offer : null;
   const deal = offer?.kind === 'deal' ? offer : null;
   const amount = deal ? deal.price_minor : Number(plan.amount_minor);
+  // A mate's link (js/lib/referral.js): the first days free on a plan that
+  // renews, for someone who has never been a member, with a deal if one is
+  // running. The Worker applies it by itself; this only says so.
+  const friend = !moving && !block && renews && offer?.kind !== 'trial' && Number(account?.invite?.friend_days) > 0
+    ? { kind: 'trial', friend: true, trial_days: Number(account.invite.friend_days), title: deal ? `${deal.title}, and your first week free` : "Your mate's free week" }
+    : null;
+  const trial = offer?.kind === 'trial' ? offer : friend;
   const price = money(amount, plan.currency);
   if (offer) promo.ensureStyles();
   // Whop's card fields go on this page only for a straight payment; a switch,
@@ -6934,9 +6947,13 @@ async function viewCheckout(params) {
           starts now and its first payment waits until then. The ${esc((PLAN_NAME[moving.plan_id] ?? 'membership').toLowerCase())} stops renewing.
           You keep every day you already have and pay for none twice.</p>` : `
         ${trial ? `
-        <p class="co-price"><b>${esc(trial.trial_days)} days free</b> <span>then ${esc(money(plan.amount_minor, plan.currency))} ${esc(terms.per)}</span></p>
+        <p class="co-price"><b>${esc(trial.trial_days)} days free</b> <span>then ${deal ? `<s>${esc(money(plan.amount_minor, plan.currency))}</s> ` : ''}${esc(money(amount, plan.currency))} ${esc(terms.per)}</span></p>
+        ${trial.friend ? `
+        <p class="co-terms"><b>${esc(trial.title)}.</b> You came on a mate's link, so the first ${esc(trial.trial_days)} days are on us.
+          Then ${esc(money(amount, plan.currency))} ${esc(terms.per)} unless you cancel. A card is needed to start, and nothing is taken until the free days are up.</p>
+        ${deal ? `<p class="co-offer">The deal ends in <span class="co-clock" data-ends="${esc(deal.ends_at)}"></span></p>` : ''}` : `
         <p class="co-terms"><b>${esc(trial.title)}.</b> ${esc(promo.terms(trial))}</p>
-        <p class="co-offer">Ends in <span class="co-clock" data-ends="${esc(trial.ends_at)}"></span></p>` : deal ? `
+        <p class="co-offer">Ends in <span class="co-clock" data-ends="${esc(trial.ends_at)}"></span></p>`}` : deal ? `
         <p class="co-price"><s>${esc(money(plan.amount_minor, plan.currency))}</s> <b>${esc(price)}</b> <span>${esc(terms.per)}</span></p>
         <p class="co-terms"><b>${esc(deal.title)}.</b> ${esc(promo.terms(deal))}</p>
         <p class="co-offer">Ends in <span class="co-clock" data-ends="${esc(deal.ends_at)}"></span></p>` : `
@@ -6972,7 +6989,7 @@ async function viewCheckout(params) {
         <button class="btn btn-accent btn-lg co-button" id="co-pay" type="button" disabled>${trial ? `Start the ${esc(trial.trial_days)} free days` : moving ? 'Switch, nothing to pay today' : embedding ? `Pay ${esc(price)}` : 'Continue to payment'}</button>
         <p class="co-need" aria-live="polite">Tick both boxes above to go on.</p>
         <p class="co-error" role="alert" hidden></p>
-        <p class="co-note">${trial ? `By starting you agree to ${esc(money(plan.amount_minor, plan.currency))} ${esc(terms.per)} after the ${esc(trial.trial_days)} free days, until you cancel. ` : renews ? `By ${moving ? 'switching' : 'paying'} you agree to ${esc(price)} ${esc(terms.per)}${moving ? ` from ${esc(shortDate(moving.expires_at))}` : ''} until you cancel. ` : ''}Card details go
+        <p class="co-note">${trial ? `By starting you agree to ${esc(money(trial.friend ? amount : plan.amount_minor, plan.currency))} ${esc(terms.per)} after the ${esc(trial.trial_days)} free days, until you cancel. ` : renews ? `By ${moving ? 'switching' : 'paying'} you agree to ${esc(price)} ${esc(terms.per)}${moving ? ` from ${esc(shortDate(moving.expires_at))}` : ''} until you cancel. ` : ''}Card details go
           straight to Whop, who take the payment. They never reach offside.win.</p>`}
       </section>
 
@@ -7325,7 +7342,7 @@ const PLAN_DAYS = { matchday: 7, monthly: 30, quarter: 90, season: 365 };
  * Four tabs, in the address like the match page's, so a reload or a shared
  * link opens the same one.
  */
-const ACCOUNT_TABS = [['profile', 'Profile'], ['following', 'Following'], ['membership', 'Membership'], ['settings', 'Settings']];
+const ACCOUNT_TABS = [['profile', 'Profile'], ['following', 'Following'], ['membership', 'Membership'], ['invite', 'Invite'], ['settings', 'Settings']];
 
 /**
  * A face for the account, as the reader chose it on the account page:
@@ -7351,6 +7368,47 @@ function avatarHTML(user, name, size = 'md', profile = state.account?.profile) {
 /** The name to call someone by: what they saved, else what Google said, else their email's first part. */
 function accountName(user, profile) {
   return profile?.display_name || user?.name || String(user?.email ?? '').split('@')[0] || 'Your account';
+}
+
+/**
+ * The invite tab's link and its share button (worker/src/referral.ts). The
+ * phone's own share sheet where there is one; else the link is copied. The
+ * link is always shown too, selectable, for a device that can do neither.
+ */
+async function fillInvite(el) {
+  const box = el?.querySelector('.invite-link');
+  if (!box) return;
+  let r = null;
+  try { r = await getJSON('/api/referral', { fresh: true }); } catch { /* said below */ }
+  if (!el.isConnected) return;
+  if (!r?.link) {
+    box.innerHTML = '<p class="acct-hint">Your link could not be fetched just now. Open this tab again in a minute.</p>';
+    return;
+  }
+  const shown = r.link.replace(/^https?:\/\//, '');
+  const message = 'The football site I use. One call a day is free, and the reasoning behind every match is properly argued. Your first week of membership is free on my link:';
+  box.innerHTML = `
+    <label class="visually-hidden" for="invite-url">Your link</label>
+    <input class="invite-url" id="invite-url" type="text" readonly value="${esc(r.link)}" aria-label="Your link" size="${shown.length}">
+    <div class="acct-actions">
+      <button class="btn btn-accent" type="button" id="invite-share">${navigator.share ? 'Share your link' : 'Copy your link'}</button>
+      <span class="acct-note" id="invite-note" role="status"></span>
+    </div>
+    ${r.joined ? `<p class="invite-count">${r.joined === 1 ? 'One mate has' : `${esc(r.joined)} mates have`} joined on your link${r.paid ? `, ${r.paid === 1 ? 'one is' : `${esc(r.paid)} are`} members` : ''}${r.days_earned ? `, and you have had ${esc(r.days_earned)} days on us` : ''}. Thank you.</p>` : ''}
+    <p class="acct-hint">The free week is for people who have never been members. Your days go on once their first payment is through, and if you pay through Whop, your next payment moves back by the same.</p>`;
+  const input = box.querySelector('#invite-url');
+  input.onfocus = () => input.select();
+  const button = box.querySelector('#invite-share');
+  const note = box.querySelector('#invite-note');
+  button.onclick = async () => {
+    try {
+      const how = await shareLink(r.link, message);
+      note.textContent = how === 'copied' ? 'Link copied. Paste it wherever your mates are.' : how === 'shared' ? 'Sent. Thank you.' : '';
+    } catch {
+      input.focus();
+      note.textContent = 'Copy the link above and send it on.';
+    }
+  };
 }
 
 async function viewAccount() {
@@ -7609,7 +7667,19 @@ async function viewAccount() {
       </div>
     </div>`;
 
-  const panes = { profile: profileHTML, following: followingHTML, membership: membershipHTML, settings: settingsHTML };
+  // --- invite: the reader's own tell-a-friend link (js/lib/referral.js), filled in once it arrives.
+  const inviteHTML = `
+    <section class="invite" id="invite" aria-live="polite">
+      <h2 class="acct-sub">Tell a mate</h2>
+      <p class="invite-lead">Know someone who argues about football at the pub? Send them your link.</p>
+      <ul class="ticks invite-deal">
+        <li><b>They get their first week free</b> when they join for the month or for three months.</li>
+        <li><b>You get two weeks on us</b> once they become a member. Up to ten mates a year.</li>
+      </ul>
+      <div class="invite-link"><span class="muted">Getting your link…</span></div>
+    </section>`;
+
+  const panes = { profile: profileHTML, following: followingHTML, membership: membershipHTML, invite: inviteHTML, settings: settingsHTML };
 
   if (nav !== navTicket) return;
   app.innerHTML = `
@@ -7627,6 +7697,7 @@ async function viewAccount() {
       ? 'Payment received. You are in: every call is open.'
       : 'Payment received. Switching your membership on, which usually takes a few seconds.'}</p>
     ${active && paidBack ? `<p class="member-actions"><a class="btn btn-accent" href="${esc(paidBack.href)}">${esc(paidBack.label)}</a></p>` : ''}
+    ${active ? `<p class="invite-nudge">Know someone who would want this? <a href="#/account?tab=invite">Send them your link</a>: their first week is free, and you get two weeks on us when they join.</p>` : ''}
     <p class="paid-confirm">As you asked at checkout, your membership started straight away, and you
       accepted that this ends the 14-day right to cancel for a change of mind. If anything of ours
       fails, you still get it put right or your money back. The <a href="#/legal/terms">terms of use</a>
@@ -7668,6 +7739,8 @@ async function viewAccount() {
       if (Array.isArray(r?.results) && r.results.includes('granted')) { cacheClear(); viewAccount(); headerAuth(); }
     }).catch(() => {});
   }
+
+  fillInvite(app.querySelector('#invite'));
 
   for (const t of app.querySelectorAll('.tab')) {
     t.onclick = () => {
@@ -9490,6 +9563,8 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
     app.innerHTML = `<div class="wrap section narrow"><div class="signing" role="status">
       <span class="spin" aria-hidden="true"></span><p>Signing you in with Google…</p></div></div>`;
   }
+  // A friend's link (js/lib/referral.js): kept before anything reads the address.
+  captureRef();
   try {
     signedInJustNow = await completeSignIn();
   } catch (err) {

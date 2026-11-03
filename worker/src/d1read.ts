@@ -764,11 +764,14 @@ export async function hasMembership(db: D1Read, id: string, email: string): Prom
 
 const PROFILE_COLS = `display_name, odds_format, avatar_style, avatar_color, club_id, club_name, clock, username, call_alerts`;
 
+/** Free days a friend's link gives a new member (referral.ts reads it from here). */
+export const FRIEND_DAYS = 7;
+
 /** get_account() for a signed-in reader. */
 export async function getAccount(db: D1Read, v: { id: string; email: string }): Promise<Rec> {
   const t = now();
   const email = v.email.toLowerCase();
-  const [live, card, whop, receipts, profile, follows, back] = await db.batch([
+  const [live, card, whop, receipts, profile, follows, back, invited] = await db.batch([
     db.prepare(`SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4, via, manage_url FROM (
         SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4, 'card' AS via, NULL AS manage_url
           FROM membership WHERE user_id = ? AND expires_at > ?
@@ -793,6 +796,7 @@ export async function getAccount(db: D1Read, v: { id: string; email: string }): 
         OR EXISTS (SELECT 1 FROM entitlement WHERE email = ?)
         OR EXISTS (SELECT 1 FROM former_member WHERE email_sha256 = ?)) AS ok`)
       .bind(v.id, v.id, email, await sha256Hex(email.trim())),
+    db.prepare('SELECT 1 AS x FROM referral WHERE referred_id = ?').bind(v.id),
   ]);
   const first = (r: { results?: unknown[] } | undefined) => ((r?.results ?? [])[0] as Rec | undefined) ?? null;
   const w = first(whop);
@@ -801,6 +805,8 @@ export async function getAccount(db: D1Read, v: { id: string; email: string }): 
     email: v.email,
     membership: first(live) ?? first(card),
     returning: Boolean(first(back)?.ok),
+    // Came on a friend's link and never had a membership: the free days wait at checkout (referral.ts).
+    invite: first(invited) && !first(back)?.ok ? { friend_days: FRIEND_DAYS } : null,
     whop: w ? { renewing: true, manage_url: w.manage_url, until: w.expires_at } : null,
     receipts: (receipts?.results ?? []) as Rec[],
     profile: p ? { ...p, call_alerts: p.call_alerts === null ? null : Boolean(p.call_alerts) } : null,
