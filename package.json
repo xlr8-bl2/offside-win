@@ -27,6 +27,7 @@
     "lab:slices": "npm -w engine run lab:slices",
     "record:reset": "npm -w engine run record:reset",
     "lab:live": "npm -w engine run lab:live",
+    "lab:review": "npm -w engine run lab:review",
     "lab:record": "npm -w engine run lab:record",
     "lab:calib": "npm -w engine run lab:calib",
     "lab:leans": "npm -w engine run lab:leans",
