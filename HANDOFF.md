@@ -2,7 +2,8 @@
 
 **Last updated:** 3 November 2026, about 16:35 UTC, by the Claude Code session on branch
 `claude/project-thread-b55ubz` (tell a friend; see Recent work).
-Also on 3 November: `claude/project-thread-5spo7d` (fit to the free plans; see Recent work).
+Also on 3 November: `claude/project-thread-5spo7d` (fit to the free plans; see Recent work), and
+`claude/project-thread-bbr97i` (calls graded at full time; see Other things in flight).
 
 **Keep this file current.** The owner may move the work to a different coding agent or account
 at any time. Whoever is working updates the "Right now" section and the checklist after every
@@ -426,6 +427,33 @@ Stage 2, accounts:
   `app.js` imports are `modulepreload`ed. Measured: the match shows in about 0.2 s (was 3 to 5 s),
   its write-up in about 1.3 s. `get_hero`'s fallback now prefers the next 36 hours over rank. No new
   reads on the Worker: `/` already read the hero, and every read stays edge-cached.
+- **3 November: calls graded within minutes of full time (branch `claude/project-thread-bbr97i`).**
+  Settlement ran from Actions at 25 past the hour, behind the slate, so a call on an 8pm kick-off
+  stayed ungraded on the front page, the results and its match page until 10:25 to 11:30. Now:
+  - `worker/src/fulltime.ts`, on a new two-minute cron (`*/2 * * * *`, `FULLTIME_CRON` in
+    `index.ts`): one indexed read for matches with an unsettled call 100 min to 6 h after
+    kick-off (most runs stop there); each asked about at most every 4 min, 3 a run
+    (`/api/v2/events/:id/`, a few dozen requests a day); once the provider says finished
+    (`isFinishedStatus`), goals-only calls are graded with the engine's own grader and
+    post-mortem, the fixture gets its score and `status = 'finished'`, and slips whose legs are all
+    in (or one lost) settle. Corners, cards and withdrawn slip legs stay with the engine, which
+    still re-grades on the nightly score and refreshes calibration.
+  - The pure grader moved to `engine/src/grade.ts` (settleSelection, isFinishedStatus,
+    isQuarterLine); `settle.ts` and `price.ts` re-export it, so imports elsewhere are unchanged.
+  - The page is told: kv `settled:recent` (`{at, ids}`, six hours, written by the Worker and by
+    the engine's settle via `markRecent`) rides on `/api/live` as `settled` (read once a minute per
+    data centre). `public/app.js` then adds `s=<at>` to every read address (a fresh edge key) and
+    re-reads any copy made before it (the edge now sends `x-edge-at`), redrawing the page.
+  - The front page lead and the members' masthead show the score and "Full time" (or live) in
+    place of the kick-off, and the free call or our call says Landed / Missed in its colour.
+  - **The provider allowance ran out that evening:** 6,770 left at 19:00 UTC, 0 by 19:54, with no
+    engine job asking, so nothing could read the final scores. The Worker's match pages were the
+    likely drain (`/api/live/:id`: timeline and team numbers, up to ~90 requests an hour per open
+    match). The owner chose to drop those: `/api/live/:id` now returns only the score and minute
+    from the live list and asks the provider nothing of its own; the timeline and numbers come
+    with the full-time report. Below 600 left (`RateLimit` header, `allowanceLow` in `live.ts`)
+    the changes feed stops too; the live list and the full-time check keep going. Check
+    `/api/live` and the slate log's "provider requests left" on the next big night.
 - **28 October: no engine talk on the public site.** The owner asked that the site stop saying an
   engine or model does the analysis. A sweep of pages, meta tags, `llms.txt`, the Worker's prerendered
   pages, emails and studio captions found two lines, both on `#/results` (`viewResults()`), now neutral.

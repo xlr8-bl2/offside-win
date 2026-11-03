@@ -83,9 +83,10 @@ test('the live list and a match are read from the provider with the key, and the
     const parsed = JSON.parse(list) as { matches: Array<{ status: string; minute: number; score: number[] }>; changes: Array<{ id: number; to: string }> };
     assert.deepEqual([parsed.matches[0]!.status, parsed.matches[0]!.minute, parsed.matches[0]!.score], ['2nd_half', 71, [2, 1]]);
     assert.deepEqual(parsed.changes.map((c) => [c.id, c.to]), [[12, 'postponed']], 'the changes ride in the same body');
-    const one = JSON.parse(await (await liveMatch(env, 9)).text()) as { report: { events: Array<{ t: string }>; stats: { home: { possession: number } } } };
-    assert.deepEqual(one.report.events.map((e) => e.t), ['goal', 'card']);
-    assert.equal(one.report.stats.home.possession, 55);
+    const one = JSON.parse(await (await liveMatch(env, 9)).text()) as { match: { score: number[] }; report: unknown };
+    assert.deepEqual(one.match.score, [2, 1], 'the score from the list');
+    assert.equal(one.report, null, 'no timeline or numbers read live (owner, 3 November 2026)');
+    assert.ok(!seen.some((s) => /incidents|stats|events\/9\//.test(s)), 'a match page asks the provider nothing of its own');
     assert.ok(seen.every((s) => s.endsWith('Token secret-key-123')), 'every provider call carries the key');
   } finally {
     globalThis.fetch = realFetch;
@@ -164,4 +165,27 @@ test('a second data centre takes the first one\'s copy from D1 instead of asking
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test('a match page for an id not on now asks the provider nothing', async () => {
+  const { allowanceLow, liveMatch: lm, noteAllowance, resetAllowance } = await import('../src/live.ts');
+  const asked: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (url: string | URL) => {
+    asked.push(String(url));
+    return new Response(JSON.stringify({ results: [] }), { headers: { ratelimit: 'limit=7500;r=7000' } });
+  }) as typeof fetch;
+  const db = { prepare: () => ({ bind: () => ({ first: async () => null, run: async () => ({}) }) }) };
+  try {
+    const res = await lm({ BSD_API_KEY: 'k', DB: db as never }, 999_001);
+    const body = await res.json() as { match: unknown; report: unknown };
+    assert.equal(body.match, null);
+    assert.equal(body.report, null);
+    assert.ok(asked.every((u) => u.includes('/events/live/')), 'only the live list, never the match itself');
+  } finally { globalThis.fetch = real; }
+  noteAllowance({ headers: { get: () => 'limit=7500;r=120' } });
+  assert.equal(allowanceLow(), true, 'below the floor: scores only');
+  noteAllowance({ headers: { get: () => 'limit=7500;r=5000' } });
+  assert.equal(allowanceLow(), false);
+  resetAllowance();
 });

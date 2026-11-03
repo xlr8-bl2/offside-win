@@ -321,6 +321,15 @@
 /* An h1 in the hero, so the browser's own heading margins have to go. */
 .fx-stack { display: flex; flex-direction: column; gap: var(--space-4); margin: 0; font-weight: inherit; }
 .fx-line { display: flex; align-items: center; gap: var(--space-4); min-width: 0; flex-wrap: wrap; }
+/* The masthead's score, at the end of each side's line (heroHTML). */
+.hero .fx-line:has(.fx-goals) { flex-wrap: nowrap; }
+.hero .fx-line:has(.fx-goals) .name { min-width: 0; }
+.hero .fx-goals { margin-left: auto; padding-left: var(--space-4); font-family: var(--display-figures); font-size: var(--text-hero); font-weight: 700; line-height: 1.05; }
+.hero .timechip.is-live { color: var(--lost); }
+.freecall-out { font-weight: var(--weight-bold); }
+.freecall-out.is-won { color: var(--won); }
+.freecall-out.is-lost { color: var(--lost); }
+.freecall-out.is-part, .freecall-out.is-back { color: var(--chalk-2); }
 .fx-line .name {
   font-family: var(--display);
   font-weight: var(--weight-bold);
@@ -3476,6 +3485,15 @@
 }
 .ld-lead-teams span { display: flex; align-items: center; gap: var(--space-4); min-width: 0; overflow-wrap: anywhere; }
 .ld-lead-teams .crest { flex: none; }
+.ld-lead-teams i { font-style: normal; min-width: 0; }
+/* Under way or over: the goals at the end of each side's line, in figures. */
+.ld-lead-goals {
+  margin-left: auto;
+  padding-left: var(--space-4);
+  font-family: var(--display-figures);
+  font-weight: 700;
+}
+.ld-lead-live { color: var(--lost); font-weight: var(--weight-bold); }
 .ld-lead-teams a:hover { color: var(--floodlight-hi); }
 .ld-lead-why {
   margin: var(--space-7) 0 0;
@@ -3531,6 +3549,13 @@
   font-weight: var(--weight-bold);
 }
 .ld-pick-tag span { color: var(--chalk-2); font-weight: var(--weight-medium); }
+/* Graded: the word, in the result's colour, and the bar in it too. */
+.ld-pick-out { margin-left: auto; }
+.ld-pick.is-won { border-left-color: var(--won); }
+.ld-pick.is-won .ld-pick-out { color: var(--won); }
+.ld-pick.is-lost { border-left-color: var(--lost); }
+.ld-pick.is-lost .ld-pick-out { color: var(--lost); }
+.ld-pick.is-part .ld-pick-out, .ld-pick.is-back .ld-pick-out { color: var(--chalk-2); }
 .ld-pick-sel {
   display: block;
   margin-top: var(--space-4);

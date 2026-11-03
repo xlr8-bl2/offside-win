@@ -157,8 +157,8 @@ function cacheRead(key) {
     return hit;
   } catch { return null; }
 }
-function cacheWrite(key, text) {
-  const hit = { at: Date.now(), text };
+function cacheWrite(key, text, made) {
+  const hit = { at: Date.now(), text, ...(made ? { made } : {}) };
   memo.set(key, hit);
   // On the device only with the reader's yes; in memory for this visit either way.
   if (!canSave()) return;
@@ -177,12 +177,14 @@ function cacheClear({ keepMemory = false } = {}) {
   try { for (const k of Object.keys(localStorage)) if (k.startsWith('ow.c1:')) localStorage.removeItem(k); } catch { /* nothing to clear */ }
 }
 
-async function fetchText(path, headers) {
+async function fetchText(path, headers, meta) {
   // A signed-in read never takes a preloaded (anonymous) response: Chrome
   // matches a preload on the address and credentials mode, not the headers,
   // and the token is a header. We use no cookies, so omitting them is free.
   const res = await fetch(path, headers.authorization ? { headers, credentials: 'omit' } : { headers });
   const text = await res.text();
+  // When the Worker's edge copy was made (worker/src/edge.ts), else now.
+  if (meta) meta.made = Number(res.headers.get('x-edge-at')) || Math.floor(Date.now() / 1000);
   if (!res.ok) {
     let msg = 'Something went wrong loading this.';
     try { msg = JSON.parse(text).error ?? msg; } catch { /* body was not json */ }
@@ -199,10 +201,31 @@ async function fetchText(path, headers) {
 const inflight = new Map();
 function fetchOnce(key, path, headers) {
   if (inflight.has(key)) return inflight.get(key);
-  const p = fetchText(path, headers).finally(() => inflight.delete(key));
+  const meta = {};
+  const p = fetchText(settledPath(path), headers, meta)
+    .then((text) => ({ text, made: meta.made }))
+    .finally(() => inflight.delete(key));
   inflight.set(key, p);
   return p;
 }
+
+/*
+ * Full time. A call is graded within minutes of the whistle now
+ * (worker/src/fulltime.ts), but the reads are edge copies up to two minutes
+ * fresh and this page keeps its own for thirty seconds. /api/live says when a
+ * call was last graded (`settled`). From then on, every read carries that
+ * moment in its address, which the edge has no copy of, so the first reader
+ * in each data centre gets the graded record and the rest share it; and a
+ * copy this page holds that was made before then is read again behind the
+ * page (getJSON), which redraws if anything changed.
+ */
+function settledPath(path) {
+  if (!gradedAt) return path;
+  return `${path}${path.includes('?') ? '&' : '?'}s=${gradedAt}`;
+}
+/** When a call was last graded, from /api/live (liveTick). */
+let gradedAt = 0;
+const madeBefore = (hit, t) => Boolean(t && hit && (hit.made ?? Math.floor(hit.at / 1000)) < t);
 
 async function getJSON(path, { fresh = false, quiet = false } = {}) {
   const headers = await authHeaders();
@@ -211,18 +234,20 @@ async function getJSON(path, { fresh = false, quiet = false } = {}) {
   const key = cacheKey(headers.authorization ? 'auth' : 'anon', path);
   const hit = fresh ? null : cacheRead(key);
   const age = hit ? Date.now() - hit.at : Infinity;
-  if (hit && age < FRESH_MS) return withLive(JSON.parse(hit.text));
+  // A copy from before the last call was graded is read again, however young.
+  const graded = madeBefore(hit, gradedAt);
+  if (hit && age < FRESH_MS && !graded) return withLive(JSON.parse(hit.text));
   if (hit && age < KEEP_MS) {
     // Serve the old copy now; fetch the new one behind it. A prefetch for
     // another page never redraws this one.
-    fetchOnce(key, path, headers).then((text) => {
-      cacheWrite(key, text);
+    fetchOnce(key, path, headers).then(({ text, made }) => {
+      cacheWrite(key, text, made);
       if (text !== hit.text && !quiet) softRefresh();
     }).catch(() => { /* the old copy stays up */ });
     return withLive(JSON.parse(hit.text));
   }
-  const text = await fetchOnce(key, path, headers);
-  cacheWrite(key, text);
+  const { text, made } = await fetchOnce(key, path, headers);
+  cacheWrite(key, text, made);
   return withLive(JSON.parse(text));
 }
 
@@ -524,6 +549,13 @@ async function liveTick({ force = false } = {}) {
           toast(e);
         }
         for (const [id, sig] of before) if (signature(id, live) !== sig) redraw = true;
+        // A call graded since this page last heard: if one of its matches is
+        // on the page, read the page again (getJSON sees its copies are older).
+        const st = body.settled;
+        if (st && Number.isInteger(st.at) && st.at > gradedAt) {
+          gradedAt = st.at;
+          if (Array.isArray(st.ids) && st.ids.some((id) => live.seen.has(id))) redraw = true;
+        }
         // Views that keep a read between routes get the new state too.
         for (const o of [state.board, state.hero, state.heroDetail]) if (o) withLive(o);
         paintNavLive(state.board);
@@ -1355,11 +1387,14 @@ function heroCallHTML(hero, row) {
   const v = row.top_pick ?? null;
   if (v) {
     const d = market({ market: v.market, outcome: v.outcome, line: v.line, home: hero.home, away: hero.away, odds: v.odds });
+    // Graded at full time (worker/src/fulltime.ts): how it went, in its colour.
+    const res = st.kind === 'ft' ? (row.called?.result ?? v.result ?? null) : null;
+    const out = RESULT_WORD[res] ? `<b class="freecall-out is-${RESULT_TONE[res]}">${esc(RESULT_WORD[res])}</b> ` : '';
     return `
     <div class="freecall hero-call">
       <span class="freecall-tag${row.free_call ? '' : ' is-ours'}">${row.free_call ? 'Our call, free today' : 'Our call'}</span>
       <p class="freecall-sel">${betHTML(d)}</p>
-      <p class="freecall-meta" data-public-price>${st.kind === 'live' ? `${trackHTML(liveTrack(v, row))} ` : ''}<b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
+      <p class="freecall-meta" data-public-price>${out}${st.kind === 'live' ? `${trackHTML(liveTrack(v, row))} ` : ''}<b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
     </div>`;
   }
   if (!row.locked) return '';
@@ -1412,7 +1447,13 @@ function heroHTML(hero = null, venueIds = [], detail = null, free = null, row = 
     </section>`;
   }
 
-  const when = kickoffLabel(hero.kickoff);
+  // Under way or over, the chip says so and each side carries its goals: the
+  // board's row for the match has the score (and the live one laid over it).
+  const st = row ? matchState(row) : { kind: 'upcoming' };
+  const sc = st.kind === 'ft' && Array.isArray(row?.score) ? row.score
+    : st.kind === 'live' && Array.isArray(row?.live_score) ? row.live_score : null;
+  const goalsOf = (i) => (sc && Number.isInteger(sc[i]) ? `<b class="fx-goals" data-fx="${esc(hero.fixture_id)}">${sc[i]}</b>` : '');
+  const when = st.kind === 'ft' ? 'Full time' : st.kind === 'live' ? st.label : kickoffLabel(hero.kickoff);
   // The competition sits above the tie as a link to its page, in the same
   // face as everything else: a handwritten league name read as a
   // decoration rather than a fact, and could not be tapped. An occasion
@@ -1433,7 +1474,7 @@ function heroHTML(hero = null, venueIds = [], detail = null, free = null, row = 
     ${theme ? themeArt(theme) : `<div class="hero-media">${venueShot(queue, '', true)}</div>`}
     <div class="wrap hero-inner">
       <div class="hero-copy">
-        <span class="timechip${isSoon(hero.kickoff) ? ' soon' : ''}">${esc(when)}</span>
+        <span class="timechip${st.kind === 'upcoming' && isSoon(hero.kickoff) ? ' soon' : ''}${st.kind === 'live' ? ' is-live' : ''}">${esc(when)}</span>
         ${compHTML}
         <!-- The tie is the page's heading. Without this the home page had no
              h1 at all whenever a hero fixture was set, which is the one case
@@ -1443,8 +1484,8 @@ function heroHTML(hero = null, venueIds = [], detail = null, free = null, row = 
              "G Germany G Greece" to anything that reads text. -->
         <h1 class="visually-hidden">Today’s biggest game: ${esc(hero.home)} v ${esc(hero.away)}</h1>
         <div class="fx-stack" aria-hidden="true">
-          <span class="fx-line">${crest(hero.home, 'md', hero.home_id)}<span class="name">${esc(hero.home)}</span></span>
-          <span class="fx-line">${crest(hero.away, 'md', hero.away_id)}<span class="name">${esc(hero.away)}</span></span>
+          <span class="fx-line">${crest(hero.home, 'md', hero.home_id)}<span class="name">${esc(hero.home)}</span>${goalsOf(0)}</span>
+          <span class="fx-line">${crest(hero.away, 'md', hero.away_id)}<span class="name">${esc(hero.away)}</span>${goalsOf(1)}</span>
         </div>
         ${heroCallHTML(hero, row)}
         <div class="hero-cta">
@@ -2611,12 +2652,14 @@ function freePickHTML(fx, row, named) {
   if (!sel) return '';
   const listed = d.bet?.market && d.bet?.selection && d.bet.selection !== sel ? `${d.bet.market}: ${d.bet.selection}` : d.bet?.market ?? '';
   const href = `#/fixture/${encodeURIComponent(fx.id)}`;
+  // Graded at full time (worker/src/fulltime.ts): the result goes up with it.
+  const done = v.settled !== false && RESULT_WORD[v.result] ? v.result : null;
   return `
-      <div class="ld-pick">
-        <p class="ld-pick-tag">Today’s free call${named ? `<span>${esc(fx.home)} v ${esc(fx.away)}</span>` : ''}</p>
+      <div class="ld-pick${done ? ` is-${RESULT_TONE[done]}` : ''}">
+        <p class="ld-pick-tag">Today’s free call${named ? `<span>${esc(fx.home)} v ${esc(fx.away)}</span>` : ''}${done ? `<b class="ld-pick-out">${esc(RESULT_WORD[done])}</b>` : ''}</p>
         <a class="ld-pick-sel" href="${href}">${esc(sel)}</a>
         ${listed ? `<p class="ld-pick-mkt">${esc(listed)}</p>` : ''}
-        <a class="ld-pick-go" href="${href}">The odds and the reason, free</a>
+        <a class="ld-pick-go" href="${href}">${done ? 'How it went, and why we called it' : 'The odds and the reason, free'}</a>
       </div>`;
 }
 
@@ -2645,6 +2688,15 @@ function drawLandingLead(hero, leadFx, freeFx, freeRow = null) {
   const pickFx = isFree ? { ...m, ...(freeFx ?? {}) } : other ?? (freeFx?.id && Number(freeFx.id) !== Number(m.id) ? freeFx : null);
   const pick = pickFx ? freePickHTML(pickFx, freeRow, !isFree) : '';
   const soon = Number(m.kickoff) > Date.now() / 1000;
+  // Under way or over: the score beside each side, and the state in place of
+  // the kick-off time, so the header says what happened the moment it has.
+  const st = matchState(m);
+  const sc = st.kind === 'ft' && Array.isArray(m.score) ? m.score
+    : st.kind === 'live' && Array.isArray(m.live_score) ? m.live_score : null;
+  const goalsOf = (i) => (sc && Number.isInteger(sc[i]) ? `<b class="ld-lead-goals" data-fx="${esc(m.id)}">${sc[i]}</b>` : '');
+  const when = st.kind === 'ft' ? 'Full time'
+    : st.kind === 'live' ? (st.label === 'Half time' ? 'Half time' : 'Live')
+    : kickoffLabel(m.kickoff);
   const occasion = unshout(hero.kicker);
   const tag = isFree ? 'Today’s free call'
     : occasion && occasion.toLowerCase() !== String(m.league ?? '').toLowerCase() ? occasion
@@ -2652,10 +2704,10 @@ function drawLandingLead(hero, leadFx, freeFx, freeRow = null) {
   const href = `#/fixture/${encodeURIComponent(m.id)}`;
   lead.innerHTML = `
       <p class="ld-lead-tag">${esc(tag)}</p>
-      <p class="ld-lead-comp">${m.league ? `${crest(m.league, 'xs', m.league_id, 'league')}<span>${esc(m.league)}</span>` : ''}<span>${esc(kickoffLabel(m.kickoff))}</span></p>
-      <h2 class="ld-lead-teams"><a href="${href}">
-        <span>${crest(m.home, 'md', m.home_id)}${esc(m.home)}</span>
-        <span>${crest(m.away, 'md', m.away_id)}${esc(m.away)}</span></a></h2>
+      <p class="ld-lead-comp">${m.league ? `${crest(m.league, 'xs', m.league_id, 'league')}<span>${esc(m.league)}</span>` : ''}<span${st.kind === 'live' ? ' class="ld-lead-live"' : ''}>${esc(when)}</span></p>
+      <h2 class="ld-lead-teams${sc ? ' has-score' : ''}"><a href="${href}">
+        <span>${crest(m.home, 'md', m.home_id)}<i>${esc(m.home)}</i>${goalsOf(0)}</span>
+        <span>${crest(m.away, 'md', m.away_id)}<i>${esc(m.away)}</i>${goalsOf(1)}</span></a></h2>
       ${isFree ? pick : ''}
       ${soon ? `<p class="ld-lead-count">Kick-off in <b data-countdown="${Number(m.kickoff)}" data-done="now">—</b></p>` : ''}
       ${why ? `<p class="ld-lead-why">${esc(why)}</p>`

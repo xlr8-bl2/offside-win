@@ -1,12 +1,14 @@
 import { settleSlips } from './slip.ts';
 import { bsdOrNull, num } from './bsd.ts';
 import { decidedBy, postMortem, type DecidedEvent, type DecidedSide } from './postmortem.ts';
-import { isQuarterLine } from './price.ts';
+import { isFinishedStatus, settleSelection, type FinalScore, type Result } from './grade.ts';
 import { writeMissingReports } from './report.ts';
-import { exec, insertMany, kvSetJSON, select } from './store.ts';
+import { exec, insertMany, kvGetJSON, kvSetJSON, select } from './store.ts';
 import { MARKET_FAMILY } from './types.ts';
 import { config } from './config.ts';
 import type { MarketCode, MarketFamily, Outcome } from './types.ts';
+
+export { isFinishedStatus, settleSelection, type FinalScore, type Result } from './grade.ts';
 
 /**
  * Grading published picks, and feeding the result back into how much the model
@@ -18,141 +20,6 @@ import type { MarketCode, MarketFamily, Outcome } from './types.ts';
  * market" cuts both ways: if our corner calls have been losing, the corner
  * shrinkage should rise on its own rather than waiting for someone to notice.
  */
-
-export type Result = 'WON' | 'LOST' | 'PUSH' | 'HALF_WON' | 'HALF_LOST' | 'VOID';
-
-interface FinalScore {
-  homeGoals: number;
-  awayGoals: number;
-  homeCorners: number | null;
-  awayCorners: number | null;
-  reds: number | null;
-}
-
-/**
- * Settle one selection. Returns the result and the profit on a one-unit stake.
- *
- * Asian handicaps are the fiddly part and the reason this is not a one-liner:
- * a whole line refunds on the exact margin, a quarter line splits the stake, and
- * getting either wrong silently corrupts every performance number downstream.
- */
-export function settleSelection(
-  market: MarketCode,
-  outcome: Outcome,
-  line: number | null,
-  odds: number,
-  s: FinalScore,
-): { result: Result; pnl: number } | null {
-  const total = s.homeGoals + s.awayGoals;
-  const win = (): { result: Result; pnl: number } => ({ result: 'WON', pnl: odds - 1 });
-  const lose = (): { result: Result; pnl: number } => ({ result: 'LOST', pnl: -1 });
-  const push = (): { result: Result; pnl: number } => ({ result: 'PUSH', pnl: 0 });
-  const won = (b: boolean) => (b ? win() : lose());
-
-  switch (market) {
-    case '1x2':
-      return won(
-        (outcome === 'HOME' && s.homeGoals > s.awayGoals) ||
-          (outcome === 'DRAW' && s.homeGoals === s.awayGoals) ||
-          (outcome === 'AWAY' && s.homeGoals < s.awayGoals),
-      );
-
-    case 'double_chance':
-      return won(
-        (outcome === '1X' && s.homeGoals >= s.awayGoals) ||
-          (outcome === '12' && s.homeGoals !== s.awayGoals) ||
-          (outcome === 'X2' && s.homeGoals <= s.awayGoals),
-      );
-
-    case 'draw_no_bet':
-      if (s.homeGoals === s.awayGoals) return push();
-      return won(
-        (outcome === 'HOME' && s.homeGoals > s.awayGoals) ||
-          (outcome === 'AWAY' && s.homeGoals < s.awayGoals),
-      );
-
-    case 'btts':
-      return won((outcome === 'yes') === (s.homeGoals >= 1 && s.awayGoals >= 1));
-
-    case 'over_under_05':
-    case 'over_under_15':
-    case 'over_under_25':
-    case 'over_under_35': {
-      const l = line ?? Number(market.slice(-2)) / 10;
-      return won((outcome === 'over') === (total > l));
-    }
-
-    case 'european_handicap': {
-      if (line === null) return null;
-      const adj = s.homeGoals + line;
-      return won(
-        (outcome === 'HOME' && adj > s.awayGoals) ||
-          (outcome === 'DRAW' && adj === s.awayGoals) ||
-          (outcome === 'AWAY' && adj < s.awayGoals),
-      );
-    }
-
-    case 'asian_handicap': {
-      if (line === null) return null;
-      const legs = isQuarterLine(line) ? [line - 0.25, line + 0.25] : [line];
-      let pnl = 0;
-      let wins = 0;
-      let losses = 0;
-      let pushes = 0;
-      for (const leg of legs) {
-        const share = 1 / legs.length;
-        const margin = outcome === 'HOME' ? s.homeGoals + leg - s.awayGoals : s.awayGoals - leg - s.homeGoals;
-        if (margin > 0) {
-          pnl += share * (odds - 1);
-          wins++;
-        } else if (margin < 0) {
-          pnl -= share;
-          losses++;
-        } else {
-          pushes++;
-        }
-      }
-      const result: Result =
-        wins === legs.length ? 'WON'
-        : losses === legs.length ? 'LOST'
-        : pushes === legs.length ? 'PUSH'
-        : wins > 0 && pushes > 0 ? 'HALF_WON'
-        : losses > 0 && pushes > 0 ? 'HALF_LOST'
-        : 'PUSH';
-      return { result, pnl };
-    }
-
-    case 'total_corners': {
-      if (line === null || s.homeCorners === null || s.awayCorners === null) return null;
-      const c = s.homeCorners + s.awayCorners;
-      if (Number.isInteger(line) && c === line) return push();
-      return won((outcome === 'over') === (c > line));
-    }
-
-    case 'corners_1x2': {
-      if (s.homeCorners === null || s.awayCorners === null) return null;
-      return won(
-        (outcome === 'HOME' && s.homeCorners > s.awayCorners) ||
-          (outcome === 'DRAW' && s.homeCorners === s.awayCorners) ||
-          (outcome === 'AWAY' && s.homeCorners < s.awayCorners),
-      );
-    }
-
-    case 'total_red_cards': {
-      if (line === null || s.reds === null) return null;
-      if (Number.isInteger(line) && s.reds === line) return push();
-      return won((outcome === 'over') === (s.reds > line));
-    }
-
-    case 'red_card': {
-      if (s.reds === null) return null;
-      return won((outcome === 'yes') === (s.reds > 0));
-    }
-
-    default:
-      return null;
-  }
-}
 
 export interface SettleReport {
   considered: number;
@@ -209,22 +76,6 @@ export async function backfillScores(): Promise<void> {
        )`,
     [],
   );
-}
-
-/**
- * Whether the provider's status says the match is over.
- *
- * It was `/finish|ft|ended|after/`, and "halftime" contains "ft". On 19
- * September 2026 a run of late kick-offs in MLS and the USL were graded
- * against their half-time scores: New England 4-2 Orlando went down as "over
- * 1.5 goals, missed" at 1-0, DC United 1-2 Charlotte the same at 0-1. Four
- * published calls marked lost had won, and one marked won had lost. So the
- * statuses that mean the end are named, and anything else waits.
- */
-export function isFinishedStatus(status: string): boolean {
-  const s = status.trim().toLowerCase().replace(/[\s-]+/g, '_');
-  if (/half|progress|live|1st|2nd|break|interrupt|delay|suspend|postpon|not_?started|scheduled/.test(s)) return false;
-  return /^(finished|ended|ft|full_?time|aet|ap|pen|after_(extra_?time|et|penalties|pen|ot|overtime)|finished_(aet|ap|pen|after_[a-z_]+))$/.test(s);
 }
 
 /**
@@ -485,6 +336,21 @@ export async function gradePulled(now = Math.floor(Date.now() / 1000)): Promise<
   return graded;
 }
 
+/**
+ * The matches graded in the last six hours, for the page (kv `settled:recent`,
+ * the same key the Worker writes at full time: worker/src/fulltime.ts). The
+ * site's reads are edge copies; a page showing one of these, drawn before it
+ * was graded, reads again (public/app.js).
+ */
+export async function markRecent(fixtureIds: number[], now = Math.floor(Date.now() / 1000)): Promise<void> {
+  if (!fixtureIds.length) return;
+  const prev = await kvGetJSON<{ at?: number; ids?: Record<string, number> }>('settled:recent').catch(() => null);
+  const ids: Record<string, number> = {};
+  for (const [id, at] of Object.entries(prev?.ids ?? {})) if (Number(at) > now - 6 * 3600) ids[id] = Number(at);
+  for (const id of fixtureIds) ids[String(id)] = now;
+  await kvSetJSON('settled:recent', { at: now, ids });
+}
+
 export async function runSettle(): Promise<SettleReport> {
   const now = Math.floor(Date.now() / 1000);
   // Late enough that a match can have finished: 110 minutes covers a half,
@@ -688,6 +554,10 @@ export async function runSettle(): Promise<SettleReport> {
       'UPDATE pick SET settled_at = ?, result = ?, pnl = ?, clv = ?, postmortem_json = ? WHERE id = ?',
       [now, u.result, u.pnl, u.clv, u.postmortem, u.id],
     );
+  }
+  if (updates.length) {
+    const byId = new Map(pending.map((p) => [p.id, p.fixture_id]));
+    await markRecent([...new Set(updates.map((u) => byId.get(u.id)!).filter((x) => x !== undefined))], now);
   }
 
   await backfillScores();

@@ -34,6 +34,8 @@ import { pulledAlerts } from './pulled.ts';
 
 /** The daily run that gives quiet days back; listed in wrangler.toml beside the sweep. */
 const GOODWILL_CRON = '20 6 * * *';
+/** Every two minutes: calls graded at full time (fulltime.ts). */
+const FULLTIME_CRON = '*/2 * * * *';
 import { authEmailHook, type HookEnv } from './authhook.ts';
 import { admin, type AdminEnv } from './admin.ts';
 import { inbound, type InboundMessage } from './support.ts';
@@ -44,6 +46,7 @@ import { accountWrite } from './profile.ts';
 import { socials, type SocialEnv } from './social.ts';
 import { fixtureChanges, liveCleanup, liveList, liveMatch, type LiveEnv } from './live.ts';
 import { EDGE_PATHS, edgeCached } from './edge.ts';
+import { settleFinished, type FulltimeEnv } from './fulltime.ts';
 
 interface Env extends PayEnv, LiveEnv, AdminEnv, HookEnv {
   /** Cloudflare D1. When bound, the public reads come from here (d1read.ts), not Supabase. */
@@ -150,6 +153,14 @@ const worker = {
   // Every ten minutes: ask Whop for paid memberships and switch on any the
   // webhook did not. See sweepWhop in pay.ts.
   async scheduled(event: { cron?: string }, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<void> {
+    // Calls on a match that has just ended, graded within minutes (fulltime.ts).
+    // Its own invocation, so its D1 queries and CPU are its own too.
+    if (event?.cron === FULLTIME_CRON) {
+      ctx.waitUntil(settleFinished(env as unknown as FulltimeEnv).then((r) => {
+        if (r.asked) console.log(`fulltime: ${r.candidates} due, ${r.asked} asked, ${r.settled} graded on ${r.matches.length} matches, ${r.slips} slips`);
+      }).catch((err) => console.error('fulltime:', err instanceof Error ? err.message : String(err))));
+      return;
+    }
     // Once a day, its own invocation: quiet days given back (goodwill.ts).
     if (event?.cron === GOODWILL_CRON) {
       ctx.waitUntil(goodwill(env).catch((err) => console.error('goodwill:', err instanceof Error ? err.message : String(err))));
