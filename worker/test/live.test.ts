@@ -108,6 +108,22 @@ test('a changes feed that fails costs the changes, not the scores', async () => 
   }
 });
 
+test('a live list the provider refuses still answers, so the page still hears what was graded', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => (String(input).includes('/events/live/')
+    ? new Response('{}', { status: 429 })
+    : new Response(JSON.stringify({ changes: [] })))) as typeof fetch;
+  try {
+    const res = await liveList({ BSD_API_KEY: 'k' });
+    assert.equal(res.status, 200, 'not {"error":"provider 429"}');
+    const body = await res.json() as { enabled: boolean; matches: unknown[] };
+    assert.equal(body.enabled, true);
+    assert.deepEqual(body.matches, []);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test('a half-time score is not one until half time, and the live list is read under any of its usual keys', async () => {
   const first = compactMatch({ id: 1, status: 'inprogress', period: '1st_half', current_minute: 36, home_score: 1, away_score: 0, home_score_ht: 1, away_score_ht: 0 });
   assert.equal(first!.ht, null);

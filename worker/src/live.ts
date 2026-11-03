@@ -278,7 +278,11 @@ const matchesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue<ListValue>('list', L
   // Below its floor or over its hour's budget: the last shared list, if it
   // is under a quarter of an hour old, rather than a new request.
   if (!await mayAsk(env.DB, 'live')) return { matches: (await lastShared<ListValue>(env, 'list', 900))?.matches ?? [], asked: false };
-  const raw = await provider(env, 'live', '/api/v2/events/live/', { limit: 500 });
+  // Refused (a 429 when the allowance is out): the last shared list, kept as
+  // this data centre's copy for LIST_TTL, so a refusal is not asked again by
+  // every reader.
+  const raw = await provider(env, 'live', '/api/v2/events/live/', { limit: 500 }).catch(() => null);
+  if (raw === null) return { matches: (await lastShared<ListValue>(env, 'list', 900))?.matches ?? [], asked: false };
   const matches = listOf(raw, 'results').map(compactMatch).filter((m): m is LiveMatch => m !== null);
   const count = numOr(rec(raw)?.['count']);
   // The provider says matches are on and none were read: the list's key has
@@ -316,8 +320,11 @@ const changesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('changes', CHANGES_T
  */
 export async function liveList(env: LiveEnv, ctx?: Ctx): Promise<Response> {
   if (!env.BSD_API_KEY) return off();
+  // A list that cannot be read (the provider out of requests, 3 November
+  // 2026) costs the scores, not the body: `settled` still has to reach the
+  // page, or a match graded by hand stays "under way" on every open page.
   const [{ matches, unread }, changes, settled] = await Promise.all([
-    matchesNow(env, ctx),
+    matchesNow(env, ctx).catch(async () => ({ matches: (await lastShared<ListValue>(env, 'list', 900).catch(() => null))?.matches ?? [], unread: undefined })),
     changesNow(env, ctx).catch(() => [] as FixtureChange[]),
     settledNow(env, ctx).catch(() => null),
   ]);
@@ -343,6 +350,11 @@ const settledNow = (env: LiveEnv, ctx?: Ctx) => cachedValue<{ at: number; ids: n
   if (!at) return null;
   return { at, ids: Object.keys(v.ids ?? {}).map(Number).filter(Number.isInteger) };
 });
+
+/** When a call was last graded, for the edge's copies (edge.ts); null when none in six hours. */
+export async function gradedAt(env: LiveEnv, ctx?: Ctx): Promise<number | null> {
+  return (await settledNow(env, ctx))?.at ?? null;
+}
 
 /** GET /api/live/:id: one match in play, its score and minute. No provider request of its own. */
 export async function liveMatch(env: LiveEnv, id: number, ctx?: Ctx): Promise<Response> {

@@ -1313,8 +1313,13 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
           'ON CONFLICT (id) DO UPDATE SET ' +
           'league_id = excluded.league_id, kickoff = excluded.kickoff, ' +
           'home_team = excluded.home_team, away_team = excluded.away_team, ' +
-          'status = excluded.status, provisional = excluded.provisional, ' +
-          'home_goals = excluded.home_goals, away_goals = excluded.away_goals, ' +
+          // A final score already written (full time, or the owner's own
+          // from the admin page) is a fact too: a feed that still says "not
+          // started" with no score does not take it back.
+          'status = CASE WHEN fixture.home_goals IS NOT NULL AND excluded.home_goals IS NULL ' +
+          'THEN fixture.status ELSE excluded.status END, provisional = excluded.provisional, ' +
+          'home_goals = COALESCE(excluded.home_goals, fixture.home_goals), ' +
+          'away_goals = COALESCE(excluded.away_goals, fixture.away_goals), ' +
           'live_home = excluded.live_home, live_away = excluded.live_away, live_minute = excluded.live_minute, ' +
           'home_team_id = excluded.home_team_id, away_team_id = excluded.away_team_id, ' +
           'rank = excluded.rank, computed_at = excluded.computed_at, ' +

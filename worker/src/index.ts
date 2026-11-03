@@ -44,7 +44,7 @@ import { recordView, serve, type D1Read } from './d1read.ts';
 import { auth, authCleanup, boundToken, viewerFor, type AuthDb } from './auth.ts';
 import { accountWrite } from './profile.ts';
 import { socials, type SocialEnv } from './social.ts';
-import { fixtureChanges, liveCleanup, liveList, liveMatch, type LiveEnv } from './live.ts';
+import { fixtureChanges, gradedAt, liveCleanup, liveList, liveMatch, type LiveEnv } from './live.ts';
 import { EDGE_PATHS, edgeCached } from './edge.ts';
 import { settleFinished, type FulltimeEnv } from './fulltime.ts';
 
@@ -252,7 +252,8 @@ const worker = {
     // database rather than round again.
     if (request.method === 'GET' && !jwt && EDGE_PATHS.test(path) && !request.headers.has('x-edge-fill')) {
       const fill = new Request(request.url, { method: 'GET', headers: { 'x-edge-fill': '1' } });
-      return edgeCached(request, ctx, () => worker.fetch(fill, env, ctx));
+      return edgeCached(request, ctx, () => worker.fetch(fill, env, ctx), Date.now(),
+        () => gradedAt(env as unknown as LiveEnv, ctx));
     }
 
     try {

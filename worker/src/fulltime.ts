@@ -117,18 +117,64 @@ export function gradePick(p: PickRow, hg: number, ag: number): { result: Result;
   return { result: graded.result, pnl: graded.pnl, clv, postmortem: JSON.stringify(pm) };
 }
 
-/** The provider's word on one match: its status and score. Null when it would not say. */
-async function askProvider(env: FulltimeEnv, id: number): Promise<{ status: string; hg: number | null; ag: number | null } | null> {
+type Final = { status: string; hg: number | null; ag: number | null };
+const finalOf = (ev: Record<string, unknown>): Final => ({ status: String(ev['status'] ?? ''), hg: numOr(ev['home_score']), ag: numOr(ev['away_score']) });
+
+/** One provider request, counted as results (no floor, but counted, and what is left shared). */
+async function ask(env: FulltimeEnv, path: string, params: Record<string, string | number> = {}): Promise<unknown> {
   try {
-    const res = await fetch(new URL(`/api/v2/events/${id}/`, env.BSD_BASE_URL || BASE).toString(), {
+    const url = new URL(path, env.BSD_BASE_URL || BASE);
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
+    const res = await fetch(url.toString(), {
       headers: { Authorization: `Token ${env.BSD_API_KEY}`, Accept: 'application/json', 'User-Agent': 'offside-win-live/1.0 (+https://offside.win)' },
     });
-    // Results come first: no floor, but still counted, and what is left is shared.
     await spent(env.DB as never, 'results', 1, leftFrom(res));
-    if (!res.ok) return null;
-    const ev = await res.json() as Record<string, unknown>;
-    return { status: String(ev['status'] ?? ''), hg: numOr(ev['home_score']), ag: numOr(ev['away_score']) };
+    return res.ok ? await res.json() : null;
   } catch { return null; }
+}
+
+const dayOf = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
+
+/**
+ * The final word on these matches, in as few requests as it takes: one
+ * request for a competition's finished games that day when two or more of
+ * them are due (a Champions League night is one request, not nine), one
+ * match's own page otherwise.
+ */
+async function finals(env: FulltimeEnv, due: Array<{ fixture_id: number; kickoff: number; league_id: number | null }>): Promise<Map<number, Final>> {
+  const out = new Map<number, Final>();
+  const byLeague = new Map<string, typeof due>();
+  for (const d of due) {
+    const k = d.league_id === null ? `x${d.fixture_id}` : String(d.league_id);
+    byLeague.set(k, [...(byLeague.get(k) ?? []), d]);
+  }
+  for (const [league, group] of byLeague) {
+    if (group.length >= 2 && !league.startsWith('x')) {
+      const from = Math.min(...group.map((g) => g.kickoff));
+      const to = Math.max(...group.map((g) => g.kickoff));
+      const body = await ask(env, '/api/v2/events/', { league_id: league, status: 'finished', date_from: dayOf(from), date_to: dayOf(to + 86400), limit: 200 }) as { results?: unknown[] } | null;
+      const want = new Set(group.map((g) => Number(g.fixture_id)));
+      for (const r of Array.isArray(body?.results) ? body!.results : []) {
+        const ev = r as Record<string, unknown>;
+        const id = numOr(ev['id']);
+        if (id !== null && want.has(id)) out.set(id, finalOf(ev));
+      }
+    } else {
+      for (const g of group) {
+        const ev = await ask(env, `/api/v2/events/${g.fixture_id}/`) as Record<string, unknown> | null;
+        if (ev) out.set(Number(g.fixture_id), finalOf(ev));
+      }
+    }
+  }
+  return out;
+}
+
+/** Matches the shared live list (live.ts, kv `live:list`) still has in play: not worth a request yet. */
+async function stillPlaying(db: FulltimeDb, now: number): Promise<Set<number>> {
+  const list = await kvGet<{ matches?: Array<{ id: number; status: string }> }>(db, 'live:list').catch(() => null);
+  const row = await db.prepare('SELECT updated_at AS at FROM kv WHERE k = ?').bind('live:list').first<{ at: number }>().catch(() => null);
+  if (!list || !row || now - Number(row.at) > 600) return new Set();
+  return new Set((list.matches ?? []).filter((m) => m.status !== 'finished').map((m) => Number(m.id)));
 }
 
 /** Open bet slips that can be settled now that more legs are graded. Mirrors engine/src/slip.ts settleSlips. */
@@ -208,23 +254,35 @@ export async function settleFinished(env: FulltimeEnv, now = Math.floor(Date.now
   if (!db || !env.BSD_API_KEY) return report;
 
   // pick_unsettled (settled_at, kickoff): only the rows in the window are read.
-  const due = (await db.prepare(`SELECT fixture_id, min(kickoff) AS kickoff FROM pick
-      WHERE settled_at IS NULL AND kickoff BETWEEN ? AND ? GROUP BY fixture_id ORDER BY kickoff ASC LIMIT 20`)
-    .bind(now - LATEST, now - EARLIEST).all<{ fixture_id: number; kickoff: number }>()).results ?? [];
+  const due = (await db.prepare(`SELECT p.fixture_id, min(p.kickoff) AS kickoff, f.league_id FROM pick p
+      LEFT JOIN fixture f ON f.id = p.fixture_id
+      WHERE p.settled_at IS NULL AND p.kickoff BETWEEN ? AND ? GROUP BY p.fixture_id ORDER BY 2 ASC LIMIT 20`)
+    .bind(now - LATEST, now - EARLIEST).all<{ fixture_id: number; kickoff: number; league_id: number | null }>()).results ?? [];
   report.candidates = due.length;
   if (!due.length) return report;
 
   const asked = (await kvGet<Record<string, number>>(db, 'settle:asked')) ?? {};
-  const ready = due.filter((d) => !(Number(asked[String(d.fixture_id)] ?? 0) > now - ASK_EVERY)).slice(0, PER_RUN);
+  // Still in the live list: not over, and not worth a request.
+  const playing = await stillPlaying(db, now);
+  const ready = due.filter((d) => !playing.has(Number(d.fixture_id)) && !(Number(asked[String(d.fixture_id)] ?? 0) > now - ASK_EVERY));
   if (!ready.length) return report;
+  if (!await mayAsk(db as never, 'results', now)) return report;
+  // At most PER_RUN requests: a competition's games count as one.
+  const leagues = new Set<string>();
+  const batch = ready.filter((d) => {
+    const k = d.league_id === null ? `x${d.fixture_id}` : String(d.league_id);
+    if (!leagues.has(k) && leagues.size >= PER_RUN) return false;
+    leagues.add(k);
+    return true;
+  });
 
   const writes: Stmt[] = [];
-  for (const d of ready) {
+  const got = await finals(env, batch);
+  for (const d of batch) {
     const id = Number(d.fixture_id);
     asked[String(id)] = now;
     report.asked++;
-    if (!await mayAsk(db as never, 'results', now)) break;
-    const ev = await askProvider(env, id);
+    const ev = got.get(id);
     if (!ev || ev.hg === null || ev.ag === null || !isFinishedStatus(ev.status)) continue;
     const g = await gradeWrites(db, id, ev.hg, ev.ag, now);
     writes.push(...g.writes);
