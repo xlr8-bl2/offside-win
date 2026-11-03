@@ -68,7 +68,9 @@ ADMIN_EMAIL_SHA256 = "5a2087bbcb792ea743dd4e445fcef43ccb4818f37f5199981e3ec93d9e
 [triggers]
 # And once a day at 06:20 UTC, a day added to every paying member for each
 # quiet day of an international break or close season (src/goodwill.ts).
-crons = ["*/10 * * * *", "20 6 * * *"]
+# Every two minutes, calls on a match that has just ended are graded
+# (src/fulltime.ts); most runs make one small read and stop.
+crons = ["*/10 * * * *", "20 6 * * *", "*/2 * * * *"]
 
 # The site's database since October 2026 (HANDOFF.md, "The move to D1"). The
 # public reads (src/d1read.ts) and the engine's door (src/enginedb.ts) use it.

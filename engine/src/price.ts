@@ -207,10 +207,8 @@ export function priceAsianHandicap(m: ScoreMatrix, line: number): AsianResult {
   return { effective, push };
 }
 
-export function isQuarterLine(line: number): boolean {
-  const frac = Math.abs(line % 1);
-  return Math.abs(frac - 0.25) < 1e-9 || Math.abs(frac - 0.75) < 1e-9;
-}
+import { isQuarterLine } from './grade.ts';
+export { isQuarterLine };
 
 export function pushRuleFor(line: number): PushRule {
   if (isQuarterLine(line)) return 'half';

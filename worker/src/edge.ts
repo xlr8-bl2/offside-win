@@ -51,6 +51,9 @@ function served(res: Response, how: 'hit' | 'stale' | 'miss'): Response {
   headers.set('cache-control', res.headers.get('x-edge-client-cache') ?? 'public, max-age=30');
   headers.delete('x-edge-client-cache');
   headers.set('x-edge', how);
+  // When this copy was made, so the page can tell a copy from before a call
+  // was graded from one after (public/app.js, settled in /api/live).
+  headers.set('x-edge-at', String(Math.floor(Number(res.headers.get(STAMP) ?? 0) / 1000)));
   return new Response(res.body, { status: res.status, headers });
 }
 
@@ -90,5 +93,6 @@ export async function edgeCached(request: Request, ctx: Ctx | undefined, build: 
   ctx.waitUntil(store(cache, key, keep, now).catch(() => { /* uncached, not broken */ }));
   const out = new Response(mine, { status: res.status, headers: res.headers });
   out.headers.set('x-edge', 'miss');
+  out.headers.set('x-edge-at', String(Math.floor(now / 1000)));
   return out;
 }

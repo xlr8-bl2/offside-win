@@ -177,6 +177,29 @@ export function reduceChanges(raw: unknown[]): FixtureChange[] {
   return [...byKey.values()].sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
 }
 
+/*
+ * What the provider says is left of its allowance (`RateLimit: ...;r=<n>`),
+ * as last seen by this copy of the Worker. On 3 November 2026 the allowance
+ * went from 6,770 at 19:00 UTC to nothing by 19:54, with no engine job
+ * asking: a Champions League evening of match pages, each polling its
+ * timeline and numbers. Nothing was left to read the final scores with, so
+ * every call that night stayed ungraded. Below LOW the extras (a match's
+ * timeline and numbers, the changes feed) stop and only the live list and
+ * the full-time check (fulltime.ts) still ask.
+ */
+const LOW = 600;
+let left: { n: number; at: number } | null = null;
+export function noteAllowance(res: { headers: { get(k: string): string | null } }): void {
+  const r = /;r=(\d+)/.exec(res.headers.get('ratelimit') ?? '');
+  if (r) left = { n: Number(r[1]), at: Date.now() };
+}
+/** Whether the allowance is too low for anything but scores (seen in the last half hour). */
+export function allowanceLow(now = Date.now()): boolean {
+  return Boolean(left && left.n < LOW && now - left.at < 30 * 60_000);
+}
+/** For tests. */
+export function resetAllowance(): void { left = null; }
+
 async function provider<T = unknown>(env: LiveEnv, path: string, params: Record<string, string | number> = {}): Promise<T> {
   const url = new URL(path, env.BSD_BASE_URL || BASE);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
@@ -187,6 +210,8 @@ async function provider<T = unknown>(env: LiveEnv, path: string, params: Record<
       'User-Agent': 'offside-win-live/1.0 (+https://offside.win)',
     },
   });
+  noteAllowance(res);
+  if (res.status === 429) left = { n: 0, at: Date.now() };
   if (!res.ok) throw new Error(`provider ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -278,6 +303,7 @@ const matchesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue<ListValue>('list', L
 }, env, (v) => v.asked !== false);
 
 const changesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('changes', CHANGES_TTL, ctx, async () => {
+  if (allowanceLow()) throw new Error('allowance low');
   let since = new Date(Date.now() - 7 * 86400e3 + 60e3).toISOString();
   const all: unknown[] = [];
   // The feed pages by time: when a page is cut short, ask again from the
@@ -302,12 +328,33 @@ const changesNow = (env: LiveEnv, ctx?: Ctx) => cachedValue('changes', CHANGES_T
  */
 export async function liveList(env: LiveEnv, ctx?: Ctx): Promise<Response> {
   if (!env.BSD_API_KEY) return off();
-  const [{ matches, unread }, changes] = await Promise.all([
+  const [{ matches, unread }, changes, settled] = await Promise.all([
     matchesNow(env, ctx),
     changesNow(env, ctx).catch(() => [] as FixtureChange[]),
+    settledNow(env, ctx).catch(() => null),
   ]);
-  return json({ enabled: true, at: Math.floor(Date.now() / 1000), matches, changes, ...(unread ? { unread } : {}) }, LIST_TTL);
+  return json({ enabled: true, at: Math.floor(Date.now() / 1000), matches, changes, ...(settled ? { settled } : {}), ...(unread ? { unread } : {}) }, LIST_TTL);
 }
+
+/** How long a data centre keeps its copy of `settled:recent`. */
+const SETTLED_TTL = 60;
+
+/**
+ * The matches whose calls were graded in the last six hours, and when
+ * (`settled:recent`, written by fulltime.ts and the engine's settlement). The
+ * page reads again any page that shows one of them and was drawn from a copy
+ * older than that (public/app.js). Read from D1 at most once a minute per data
+ * centre: it is one small row, and it is not shared back.
+ */
+const settledNow = (env: LiveEnv, ctx?: Ctx) => cachedValue<{ at: number; ids: number[] } | null>('settled', SETTLED_TTL, ctx, async () => {
+  if (!env.DB) return null;
+  const row = await env.DB.prepare('SELECT v FROM kv WHERE k = ?').bind('settled:recent').first<{ v: string }>();
+  if (!row?.v) return null;
+  const v = JSON.parse(row.v) as { at?: unknown; ids?: Record<string, unknown> };
+  const at = numOr(v.at);
+  if (!at) return null;
+  return { at, ids: Object.keys(v.ids ?? {}).map(Number).filter(Number.isInteger) };
+});
 
 /** GET /api/live/:id: one match in play, with its timeline and numbers. */
 export async function liveMatch(env: LiveEnv, id: number, ctx?: Ctx): Promise<Response> {
@@ -316,6 +363,13 @@ export async function liveMatch(env: LiveEnv, id: number, ctx?: Ctx): Promise<Re
     // The score and minute come from the live list when the match is in it
     // (already asked for, once for every match): one provider call fewer.
     const listed = (await matchesNow(env, ctx).catch(() => null))?.matches.find((x) => x.id === id) ?? null;
+    // Only a match on our board that could be on now: any other id (an old
+    // link, a crawler) was three provider requests every two minutes. And
+    // with the allowance nearly gone, the score from the list and nothing more.
+    if (!listed && !await couldBeOn(env, id)) return { enabled: true, at: Math.floor(Date.now() / 1000), match: null, report: null };
+    if (allowanceLow()) {
+      return { enabled: true, at: Math.floor(Date.now() / 1000), match: listed, report: null };
+    }
     const [event, incidents, stats] = await Promise.all([
       listed ? null : provider(env, `/api/v2/events/${id}/`).catch(() => null),
       provider(env, `/api/v2/events/${id}/incidents/`).catch(() => null),
@@ -335,6 +389,16 @@ export async function liveMatch(env: LiveEnv, id: number, ctx?: Ctx): Promise<Re
       },
     };
   }, env), MATCH_TTL);
+}
+
+/** Whether a fixture on the board kicked off in the last four hours or is about to. */
+async function couldBeOn(env: LiveEnv, id: number): Promise<boolean> {
+  if (!env.DB) return true;
+  const t = Math.floor(Date.now() / 1000);
+  try {
+    const r = await env.DB.prepare('SELECT 1 AS x FROM fixture WHERE id = ? AND kickoff BETWEEN ? AND ?').bind(id, t - 4 * 3600, t + 900).first<{ x: number }>();
+    return Boolean(r);
+  } catch { return true; }
 }
 
 /** The shared copies of matches long over (cachedValue), cleared by the ten-minute cron. */

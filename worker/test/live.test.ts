@@ -165,3 +165,26 @@ test('a second data centre takes the first one\'s copy from D1 instead of asking
     globalThis.fetch = realFetch;
   }
 });
+
+test('a match page for an id not on now asks the provider nothing', async () => {
+  const { allowanceLow, liveMatch: lm, noteAllowance, resetAllowance } = await import('../src/live.ts');
+  const asked: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (url: string | URL) => {
+    asked.push(String(url));
+    return new Response(JSON.stringify({ results: [] }), { headers: { ratelimit: 'limit=7500;r=7000' } });
+  }) as typeof fetch;
+  const db = { prepare: () => ({ bind: () => ({ first: async () => null, run: async () => ({}) }) }) };
+  try {
+    const res = await lm({ BSD_API_KEY: 'k', DB: db as never }, 999_001);
+    const body = await res.json() as { match: unknown; report: unknown };
+    assert.equal(body.match, null);
+    assert.equal(body.report, null);
+    assert.ok(asked.every((u) => u.includes('/events/live/')), 'only the live list, never the match itself');
+  } finally { globalThis.fetch = real; }
+  noteAllowance({ headers: { get: () => 'limit=7500;r=120' } });
+  assert.equal(allowanceLow(), true, 'below the floor: scores only');
+  noteAllowance({ headers: { get: () => 'limit=7500;r=5000' } });
+  assert.equal(allowanceLow(), false);
+  resetAllowance();
+});

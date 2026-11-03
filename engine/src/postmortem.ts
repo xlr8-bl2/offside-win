@@ -1,5 +1,5 @@
 import type { MarketCode, Outcome } from './types.ts';
-import { settleSelection, type Result } from './settle.ts';
+import { settleSelection, type Result } from './grade.ts';
 
 /**
  * Why a call landed, and why one missed.
