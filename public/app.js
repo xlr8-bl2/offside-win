@@ -2595,6 +2595,31 @@ function landingWhy(fx) {
     || excerpt((fx?.published ?? []).map((p) => p.why ?? p.narrative).find(Boolean));
 }
 
+/**
+ * Today's free call as a pick, spelled out large: "LASK to win", what kind
+ * of bet it is, and the match when it is not the headline. From the match's
+ * own published call, else the board's row. Empty when there is no pick yet.
+ */
+function freePickHTML(fx, row, named) {
+  const v = (fx?.published ?? []).find((x) => x?.market)
+    ?? (row && Number(row.id) === Number(fx.id) && row.free_call ? row.top_pick : null);
+  if (!v?.market) return '';
+  const d = market({ market: v.market, outcome: v.outcome, line: v.line, home: fx.home, away: fx.away });
+  // The words first ("Two or more goals"), the way a bookmaker lists it
+  // under them ("Total Goals: Over 1.5"), so it can be found on any slip.
+  const sel = d.name || d.bet?.selection;
+  if (!sel) return '';
+  const listed = d.bet?.market && d.bet?.selection && d.bet.selection !== sel ? `${d.bet.market}: ${d.bet.selection}` : d.bet?.market ?? '';
+  const href = `#/fixture/${encodeURIComponent(fx.id)}`;
+  return `
+      <div class="ld-pick">
+        <p class="ld-pick-tag">Today’s free call${named ? `<span>${esc(fx.home)} v ${esc(fx.away)}</span>` : ''}</p>
+        <a class="ld-pick-sel" href="${href}">${esc(sel)}</a>
+        ${listed ? `<p class="ld-pick-mkt">${esc(listed)}</p>` : ''}
+        <a class="ld-pick-go" href="${href}">The odds and the reason, free</a>
+      </div>`;
+}
+
 /*
  * The landing page's lead story: tonight's biggest game, every time there is
  * a game on. With its write-up when that has come back (and a line of
@@ -2603,7 +2628,7 @@ function landingWhy(fx) {
  * is a Champions League game. Drawn up to three times as the reads land,
  * each time from scratch, so it never shows half of an older one.
  */
-function drawLandingLead(hero, leadFx, freeFx) {
+function drawLandingLead(hero, leadFx, freeFx, freeRow = null) {
   const lead = app.querySelector('[data-ld="call"]');
   const ldHero = app.querySelector('.ld-hero');
   if (!lead || !ldHero || !hero?.fixture_id) return;
@@ -2613,6 +2638,12 @@ function drawLandingLead(hero, leadFx, freeFx) {
   const isFree = Number(hero.free_fixture_id) === Number(m.id);
   const why = landingWhy(leadFx);
   const other = !isFree && freeFx?.id && Number(freeFx.id) !== Number(m.id) && landingWhy(freeFx) ? freeFx : null;
+  // The free call itself, in words and in big type: the hook that keeps a
+  // stranger on the page (owner, November 2026). No price beside it: the
+  // front page is where ads land, and it carries no odds (offside-ui, "Two
+  // registers"). The odds and the book are one tap away on the match page.
+  const pickFx = isFree ? { ...m, ...(freeFx ?? {}) } : other ?? (freeFx?.id && Number(freeFx.id) !== Number(m.id) ? freeFx : null);
+  const pick = pickFx ? freePickHTML(pickFx, freeRow, !isFree) : '';
   const soon = Number(m.kickoff) > Date.now() / 1000;
   const occasion = unshout(hero.kicker);
   const tag = isFree ? 'Today’s free call'
@@ -2625,12 +2656,14 @@ function drawLandingLead(hero, leadFx, freeFx) {
       <h2 class="ld-lead-teams"><a href="${href}">
         <span>${crest(m.home, 'md', m.home_id)}${esc(m.home)}</span>
         <span>${crest(m.away, 'md', m.away_id)}${esc(m.away)}</span></a></h2>
+      ${isFree ? pick : ''}
       ${soon ? `<p class="ld-lead-count">Kick-off in <b data-countdown="${Number(m.kickoff)}" data-done="now">—</b></p>` : ''}
       ${why ? `<p class="ld-lead-why">${esc(why)}</p>`
         : leadFx ? '<p class="ld-lead-why">Team news, form, the table and the last few meetings, all on the match page, free.</p>'
         : '<div class="ld-lead-why ld-lead-why-wait" aria-hidden="true"><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-line"></span></div>'}
       <a class="ld-lead-go" href="${href}">${isFree ? 'Read the whole call, free' : 'Read the match, free'}</a>
-      ${other ? `<a class="ld-lead-free" href="#/fixture/${encodeURIComponent(other.id)}"><span>Today’s free call</span><b>${esc(other.home)} v ${esc(other.away)}</b></a>` : ''}`;
+      ${!isFree && pick ? pick
+        : other ? `<a class="ld-lead-free" href="#/fixture/${encodeURIComponent(other.id)}"><span>Today’s free call</span><b>${esc(other.home)} v ${esc(other.away)}</b></a>` : ''}`;
   smartQuotes(lead);
   const theme = themeOf(m.league_id);
   for (const c of [...ldHero.classList]) if (c.startsWith('theme-') && c !== `theme-${theme}`) ldHero.classList.remove(c);
@@ -2721,7 +2754,7 @@ async function viewLanding() {
     if (hero?.fixture_id) leadFx = await detailOf(hero.fixture_id);
   }
   if (nav !== navTicket) return;
-  if (hero?.fixture_id) drawLandingLead(hero, leadFx, freeFx);
+  if (hero?.fixture_id) drawLandingLead(hero, leadFx, freeFx, freeId ? fixtures.find((f) => Number(f.id) === Number(freeId)) : null);
 
   // Today's free call, for the buttons and the examples below: the match and
   // the reasoning, linked. No pick, no price.
