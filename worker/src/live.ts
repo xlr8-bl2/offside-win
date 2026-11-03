@@ -11,16 +11,14 @@
  * data centre.
  *
  * The provider key lives here as a Worker secret and never leaves: the browser
- * is only ever handed the compact shapes below. The parsing of a match in play
- * is the engine's own (engine/src/report-parse.ts), so a goal reads the same
- * during the match as in the full-time report.
+ * is only ever handed the compact shapes below. A match's timeline and team
+ * numbers are not read live (owner, 3 November 2026): they come with the
+ * full-time report.
  *
  * Fixture changes (a kick-off moved, a match postponed or abandoned) come the
  * same way, so a postponement shows within a minute instead of at the next
  * slate pass.
  */
-
-import { parseIncidents, parseTeamStats } from '../../engine/src/report-parse.ts';
 
 export interface LiveEnv {
   BSD_API_KEY?: string;
@@ -37,13 +35,11 @@ export interface LiveEnv {
  * in it asked for itself.
  *
  * The list is built at most every two minutes, the changes feed every
- * fifteen, a match's own page every two (its numbers every six), and none of
- * it is asked for while no match on the board could be in play (onNow).
+ * fifteen, and none of it is asked for while no match on the board could be in play (onNow).
  */
 const LIST_TTL = 120;
 const CHANGES_TTL = 900;
 const MATCH_TTL = 120;
-const STATS_TTL = 360;
 
 /** Whether any match on the board kicked off in the last two and a half hours or is about to. */
 async function onNow(env: LiveEnv): Promise<boolean> {
@@ -356,49 +352,17 @@ const settledNow = (env: LiveEnv, ctx?: Ctx) => cachedValue<{ at: number; ids: n
   return { at, ids: Object.keys(v.ids ?? {}).map(Number).filter(Number.isInteger) };
 });
 
-/** GET /api/live/:id: one match in play, with its timeline and numbers. */
+/** GET /api/live/:id: one match in play, its score and minute. No provider request of its own. */
 export async function liveMatch(env: LiveEnv, id: number, ctx?: Ctx): Promise<Response> {
   if (!env.BSD_API_KEY) return off();
-  return json(await cachedValue(`match/${id}`, MATCH_TTL, ctx, async () => {
-    // The score and minute come from the live list when the match is in it
-    // (already asked for, once for every match): one provider call fewer.
-    const listed = (await matchesNow(env, ctx).catch(() => null))?.matches.find((x) => x.id === id) ?? null;
-    // Only a match on our board that could be on now: any other id (an old
-    // link, a crawler) was three provider requests every two minutes. And
-    // with the allowance nearly gone, the score from the list and nothing more.
-    if (!listed && !await couldBeOn(env, id)) return { enabled: true, at: Math.floor(Date.now() / 1000), match: null, report: null };
-    if (allowanceLow()) {
-      return { enabled: true, at: Math.floor(Date.now() / 1000), match: listed, report: null };
-    }
-    const [event, incidents, stats] = await Promise.all([
-      listed ? null : provider(env, `/api/v2/events/${id}/`).catch(() => null),
-      provider(env, `/api/v2/events/${id}/incidents/`).catch(() => null),
-      // The team numbers move slowly; every six minutes is enough.
-      cachedValue(`stats/${id}`, STATS_TTL, ctx, () => provider(env, `/api/v2/events/${id}/stats/`).catch(() => null), env, (v) => v !== null),
-    ]);
-    const m = listed ?? compactMatch(event);
-    const inc = parseIncidents(incidents);
-    return {
-      enabled: true,
-      at: Math.floor(Date.now() / 1000),
-      match: m,
-      report: {
-        events: inc.events,
-        ht: m?.status === '1st_half' ? null : inc.ht ?? m?.ht ?? null,
-        stats: parseTeamStats(stats),
-      },
-    };
-  }, env), MATCH_TTL);
-}
-
-/** Whether a fixture on the board kicked off in the last four hours or is about to. */
-async function couldBeOn(env: LiveEnv, id: number): Promise<boolean> {
-  if (!env.DB) return true;
-  const t = Math.floor(Date.now() / 1000);
-  try {
-    const r = await env.DB.prepare('SELECT 1 AS x FROM fixture WHERE id = ? AND kickoff BETWEEN ? AND ?').bind(id, t - 4 * 3600, t + 900).first<{ x: number }>();
-    return Boolean(r);
-  } catch { return true; }
+  // The score and minute from the live list, already asked for once for
+  // every match. The match's own timeline and team numbers used to be asked
+  // for too, up to ninety requests an hour for every match someone had open,
+  // and on 3 November that spent the provider's allowance before full time.
+  // The owner chose to drop them (3 November 2026): the full report, goals,
+  // cards and numbers, goes up after the match (engine/src/report.ts).
+  const listed = (await matchesNow(env, ctx).catch(() => null))?.matches.find((x) => x.id === id) ?? null;
+  return json({ enabled: true, at: Math.floor(Date.now() / 1000), match: listed, report: null }, MATCH_TTL);
 }
 
 /** The shared copies of matches long over (cachedValue), cleared by the ten-minute cron. */

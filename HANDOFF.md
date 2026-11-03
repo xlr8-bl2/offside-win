@@ -448,10 +448,11 @@ Stage 2, accounts:
     place of the kick-off, and the free call or our call says Landed / Missed in its colour.
   - **The provider allowance ran out that evening:** 6,770 left at 19:00 UTC, 0 by 19:54, with no
     engine job asking, so nothing could read the final scores. The Worker's match pages were the
-    likely drain (`/api/live/:id` for any id, three requests every two minutes). Now
-    `/api/live/:id` asks only for a board match that kicked off in the last 4 h (or the next
-    15 min), and below 600 left (`RateLimit` header, `allowanceLow` in `live.ts`) the timeline,
-    numbers and changes feed stop; the live list and the full-time check keep going. Check
+    likely drain (`/api/live/:id`: timeline and team numbers, up to ~90 requests an hour per open
+    match). The owner chose to drop those: `/api/live/:id` now returns only the score and minute
+    from the live list and asks the provider nothing of its own; the timeline and numbers come
+    with the full-time report. Below 600 left (`RateLimit` header, `allowanceLow` in `live.ts`)
+    the changes feed stops too; the live list and the full-time check keep going. Check
     `/api/live` and the slate log's "provider requests left" on the next big night.
 - **28 October: no engine talk on the public site.** The owner asked that the site stop saying an
   engine or model does the analysis. A sweep of pages, meta tags, `llms.txt`, the Worker's prerendered

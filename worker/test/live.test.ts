@@ -83,9 +83,10 @@ test('the live list and a match are read from the provider with the key, and the
     const parsed = JSON.parse(list) as { matches: Array<{ status: string; minute: number; score: number[] }>; changes: Array<{ id: number; to: string }> };
     assert.deepEqual([parsed.matches[0]!.status, parsed.matches[0]!.minute, parsed.matches[0]!.score], ['2nd_half', 71, [2, 1]]);
     assert.deepEqual(parsed.changes.map((c) => [c.id, c.to]), [[12, 'postponed']], 'the changes ride in the same body');
-    const one = JSON.parse(await (await liveMatch(env, 9)).text()) as { report: { events: Array<{ t: string }>; stats: { home: { possession: number } } } };
-    assert.deepEqual(one.report.events.map((e) => e.t), ['goal', 'card']);
-    assert.equal(one.report.stats.home.possession, 55);
+    const one = JSON.parse(await (await liveMatch(env, 9)).text()) as { match: { score: number[] }; report: unknown };
+    assert.deepEqual(one.match.score, [2, 1], 'the score from the list');
+    assert.equal(one.report, null, 'no timeline or numbers read live (owner, 3 November 2026)');
+    assert.ok(!seen.some((s) => /incidents|stats|events\/9\//.test(s)), 'a match page asks the provider nothing of its own');
     assert.ok(seen.every((s) => s.endsWith('Token secret-key-123')), 'every provider call carries the key');
   } finally {
     globalThis.fetch = realFetch;
