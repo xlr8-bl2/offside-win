@@ -3,7 +3,8 @@
 **Last updated:** 3 November 2026, about 16:35 UTC, by the Claude Code session on branch
 `claude/project-thread-b55ubz` (tell a friend; see Recent work).
 Also on 3 November: `claude/project-thread-5spo7d` (fit to the free plans; see Recent work), and
-`claude/project-thread-bbr97i` (calls graded at full time; see Other things in flight).
+`claude/project-thread-bbr97i` (calls graded at full time, and a hand-typed score showing at once;
+see the 3 November entries under "Other things in flight" and below).
 
 **Keep this file current.** The owner may move the work to a different coding agent or account
 at any time. Whoever is working updates the "Right now" section and the checklist after every
@@ -468,6 +469,19 @@ Stage 2, accounts:
   still open, each with a final-score form (`POST /api/admin/score`, `adminScore` in
   `admindb.ts`, `setFinalScore` in `fulltime.ts`): graded with the same rules, logged as
   `final_score` in admin_log; corners and cards calls still wait for the engine.
+- **3 November, late: a hand-typed score showed "under way".** The data was right (board and match
+  page read `finished` from D1), but `/api/live` answered `{"error":"provider 429"}` with the
+  allowance out, so open pages never got `settled` and kept their old copies, and the edge served a
+  board up to 30 min old. Now: a refused live list falls back to the last shared list and the body
+  still carries `settled` (`matchesNow`/`liveList` in `live.ts`); the edge does not serve a stale
+  copy made before the last grading (`gradedAt` passed to `edgeCached`, `edge.ts`); the slate's
+  fixture upsert keeps a written score when the feed has none (`slate.ts`, test in
+  `schema.test.ts`). When the provider is back, the nightly history's score in `match` wins:
+  `regradeSettled` corrects the fixture and goals calls, reopens slips with a leg on a re-graded
+  match (`reopenSlips`, so `settleSlips` re-settles them) and marks the matches recent; the
+  match report (goals, cards) comes from `writeMissingReports`. Full time (`fulltime.ts`) asks one
+  request per competition (`/api/v2/events/?league_id&status=finished`, up to 200 a page) rather
+  than one per match, and skips matches the last live list still shows in play.
 - **28 October: no engine talk on the public site.** The owner asked that the site stop saying an
   engine or model does the analysis. A sweep of pages, meta tags, `llms.txt`, the Worker's prerendered
   pages, emails and studio captions found two lines, both on `#/results` (`viewResults()`), now neutral.

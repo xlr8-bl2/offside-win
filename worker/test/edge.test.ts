@@ -67,6 +67,21 @@ test('past half an hour the reader waits for a fresh one, and an error is never 
   assert.equal(store.size, 0);
 });
 
+test('a copy made before a call was graded is not served stale: the reader waits for the new one', async () => {
+  const t0 = 4_000_000;
+  await edgeCached(req(), ctx, body(1), t0); await settle();
+  // Graded a minute after the copy was made, and read five minutes on.
+  const graded = async () => (t0 + 60_000) / 1000;
+  const after = await edgeCached(req(), ctx, body(2), t0 + 300_000, graded);
+  assert.equal(after.headers.get('x-edge'), 'miss');
+  assert.deepEqual(await after.json(), { n: 2 });
+  await settle();
+  // The new copy is after the grading: served stale as before.
+  const later = await edgeCached(req(), ctx, body(3), t0 + 600_000, graded);
+  assert.equal(later.headers.get('x-edge'), 'stale');
+  await settle();
+});
+
 test('a 404 is kept, so an unknown match id does not reach the database every time', async () => {
   store.clear();
   let calls = 0;

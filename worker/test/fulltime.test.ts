@@ -35,10 +35,18 @@ function seed(sqlite: any) {
 }
 
 function fakeProvider(byId: Record<number, Record<string, unknown>>) {
-  const asked: number[] = [];
+  const asked: Array<number | string> = [];
   const real = globalThis.fetch;
   globalThis.fetch = (async (url: string | URL) => {
-    const id = Number(String(url).match(/events\/(\d+)\//)?.[1]);
+    const u = new URL(String(url));
+    const one = u.pathname.match(/events\/(\d+)\//);
+    if (!one) {
+      // A competition's finished games: the provider filters on status.
+      asked.push(`league ${u.searchParams.get('league_id')}`);
+      const results = Object.entries(byId).filter(([, b]) => b['status'] === u.searchParams.get('status')).map(([id, b]) => ({ id: Number(id), ...b }));
+      return new Response(JSON.stringify({ count: results.length, results }));
+    }
+    const id = Number(one[1]);
     asked.push(id);
     const body = byId[id];
     return new Response(body ? JSON.stringify(body) : '{}', { status: body ? 200 : 404 });
@@ -52,7 +60,7 @@ test('a finished match: its calls graded, its score and state written, the slip 
   const p = fakeProvider({ 10: { status: 'finished', home_score: 2, away_score: 1 }, 12: { status: 'finished', home_score: 0, away_score: 0 } });
   try {
     const r = await settleFinished({ DB: db, BSD_API_KEY: 'k' }, NOW);
-    assert.deepEqual(p.asked.sort(), [10, 12], 'only matches past 100 minutes are asked about');
+    assert.deepEqual(p.asked, ['league 1'], 'one request for the competition, only for matches past 100 minutes');
     assert.equal(r.settled, 2);
     assert.deepEqual(r.matches, [10]);
     assert.equal(r.slips, 1);
@@ -83,13 +91,23 @@ test('a match still being played is asked about again only after four minutes, a
   try {
     await settleFinished({ DB: db, BSD_API_KEY: 'k' }, NOW);
     await settleFinished({ DB: db, BSD_API_KEY: 'k' }, NOW + 120);
-    assert.equal(p.asked.length, 2, 'the second run, two minutes on, asks nobody');
+    assert.equal(p.asked.length, 1, 'the second run, two minutes on, asks nobody');
     await settleFinished({ DB: db, BSD_API_KEY: 'k' }, NOW + ASK_EVERY + 1);
-    assert.equal(p.asked.length, 4);
+    assert.equal(p.asked.length, 2);
   } finally { p.restore(); }
   const n = (sqlite.prepare('SELECT count(*) AS n FROM pick WHERE settled_at IS NOT NULL').get() as any).n;
   assert.equal(n, 0, '"halftime" contains "ft" and is not the end');
   assert.equal((sqlite.prepare('SELECT home_goals FROM fixture WHERE id = 10').get() as any).home_goals, null);
+});
+
+test('one match alone in its competition is asked about on its own; one still in the live list is not asked about', async () => {
+  const { sqlite, db } = localD1();
+  seed(sqlite);
+  sqlite.prepare('UPDATE fixture SET league_id = 2 WHERE id = 12').run();
+  sqlite.prepare(`INSERT INTO kv (k, v, updated_at) VALUES ('live:list', ?, ?)`).run(JSON.stringify({ matches: [{ id: 12, status: '2nd_half' }] }), NOW - 60);
+  const p = fakeProvider({ 10: { status: 'finished', home_score: 1, away_score: 1 } });
+  try { await settleFinished({ DB: db, BSD_API_KEY: 'k' }, NOW); } finally { p.restore(); }
+  assert.deepEqual(p.asked, [10]);
 });
 
 test('nothing due: one read, no provider, no writes', async () => {

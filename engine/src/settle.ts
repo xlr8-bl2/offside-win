@@ -117,6 +117,7 @@ export async function regradeSettled(limit = 5000): Promise<number> {
   );
   const rows = await select<{
     id: number;
+    fixture_id: number;
     market: MarketCode;
     outcome: Outcome;
     line: number | null;
@@ -128,7 +129,7 @@ export async function regradeSettled(limit = 5000): Promise<number> {
     closing_odds: number | null;
     evidence_json: string | null;
   }>(
-    `SELECT p.id, p.market, p.outcome, p.line, p.odds, p.result,
+    `SELECT p.id, p.fixture_id, p.market, p.outcome, p.line, p.odds, p.result,
             p.opening_odds, p.closing_odds, p.evidence_json,
             CASE WHEN m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL THEN m.home_goals ELSE f.home_goals END AS home_goals,
             CASE WHEN m.home_goals IS NOT NULL AND m.away_goals IS NOT NULL THEN m.away_goals ELSE f.away_goals END AS away_goals
@@ -144,6 +145,7 @@ export async function regradeSettled(limit = 5000): Promise<number> {
   );
 
   let fixed = 0;
+  const matches = new Set<number>();
   for (const r of rows) {
     const graded = settleSelection(r.market, r.outcome, r.line, r.odds, {
       homeGoals: r.home_goals,
@@ -184,9 +186,36 @@ export async function regradeSettled(limit = 5000): Promise<number> {
         `was ${r.result}, is ${graded.result}`,
     );
     fixed++;
+    matches.add(Number(r.fixture_id));
   }
-  if (fixed) console.log(`Re-graded ${fixed} picks against the final score.`);
+  if (fixed) {
+    console.log(`Re-graded ${fixed} picks against the final score.`);
+    await reopenSlips(matches);
+    // Every open page showing one of these matches reads it again.
+    await markRecent([...matches]);
+  }
   return fixed;
+}
+
+/**
+ * A settled slip with a leg on a match just re-graded is opened again, so
+ * settleSlips (run after this) settles it on the corrected calls. A wrong
+ * score typed into the admin page, put right by the provider's, would
+ * otherwise leave the slip on the wrong result.
+ */
+async function reopenSlips(matches: Set<number>): Promise<void> {
+  if (!matches.size) return;
+  const settled = await select<{ id: number; legs_json: string }>(
+    'SELECT id, legs_json FROM slip WHERE settled_at IS NOT NULL AND first_kickoff > ?',
+    [Math.floor(Date.now() / 1000) - 30 * 86400],
+  );
+  for (const s of settled) {
+    let legs: Array<{ fixture_id?: unknown }> = [];
+    try { legs = JSON.parse(s.legs_json) as typeof legs; } catch { continue; }
+    if (!Array.isArray(legs) || !legs.some((l) => matches.has(Number(l?.fixture_id)))) continue;
+    await exec('UPDATE slip SET result = NULL, settled_at = NULL WHERE id = ?', [s.id]);
+    console.log(`  slip ${s.id} opened again: a leg's match was re-graded`);
+  }
 }
 
 export async function backfillPostMortems(limit = 400): Promise<number> {

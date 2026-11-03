@@ -68,7 +68,17 @@ async function store(cache: Cache, key: Request, res: Response, now: number): Pr
 /** A body worth keeping: a real answer, or a settled "no such thing". */
 const keepable = (res: Response) => res.ok || res.status === 404;
 
-export async function edgeCached(request: Request, ctx: Ctx | undefined, build: () => Promise<Response>, now = Date.now()): Promise<Response> {
+/**
+ * `gradedAt`, when given, is when a call was last graded (settled:recent, in
+ * seconds). A copy past its two fresh minutes that was made before then is not
+ * served while a new one is fetched: it is the board that still said "under
+ * way" after the owner typed in a final score (3 November 2026), and the
+ * reader waits for the database once instead.
+ */
+export async function edgeCached(
+  request: Request, ctx: Ctx | undefined, build: () => Promise<Response>, now = Date.now(),
+  gradedAt?: () => Promise<number | null>,
+): Promise<Response> {
   const cache = cacheOf();
   if (!cache || !ctx || request.method !== 'GET') return build();
   const key = new Request(new URL(request.url).toString(), { method: 'GET' });
@@ -77,7 +87,9 @@ export async function edgeCached(request: Request, ctx: Ctx | undefined, build: 
   if (hit) {
     const age = (now - Number(hit.headers.get(STAMP) ?? 0)) / 1000;
     if (age < FRESH_S) return served(hit, 'hit');
-    if (age < KEEP_S) {
+    const made = Number(hit.headers.get(STAMP) ?? 0) / 1000;
+    const graded = age < KEEP_S && gradedAt ? await gradedAt().catch(() => null) : null;
+    if (age < KEEP_S && !(graded && graded > made)) {
       ctx.waitUntil((async () => {
         const next = await build();
         if (keepable(next)) await store(cache, key, next, Date.now());
