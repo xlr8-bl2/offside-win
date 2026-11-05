@@ -337,12 +337,33 @@ export async function getFixture(db: D1Read, id: number, member = false): Promis
   return b;
 }
 
-/** get_picks(p_limit, p_settled). */
-export async function getPicks(db: D1Read, limit = 60, settled?: string | null, member = false): Promise<Rec> {
-  const freeId = await freeFixtureId(db);
+/**
+ * The record's totals. Counting them reads every settled call (about 4,000
+ * rows), and every data centre asked for it on each refill: 1.9 million rows
+ * a day of the free plan's 5 million. So the count is kept for the whole site
+ * in kv (`picks:summary`) and redone at most every ten minutes.
+ */
+const SUMMARY_S = 600;
+async function picksSummary(db: D1Read): Promise<Rec | null> {
+  const t = now();
+  try {
+    const kept = await one<{ v: string }>(db, 'SELECT v FROM kv WHERE k = ? AND updated_at > ?', 'picks:summary', t - SUMMARY_S);
+    if (kept) return JSON.parse(kept.v) as Rec;
+  } catch { /* count it below */ }
   const sum = await one(db, `SELECT count(*) AS n, sum(CASE WHEN result IN ('WON', 'HALF_WON') THEN 1 ELSE 0 END) AS wins,
       sum(pnl) AS pnl, avg(odds) AS avg_odds
     FROM pick WHERE settled_at IS NOT NULL AND result IS NOT 'VOID' AND kind = 'CONFIDENT'`);
+  try {
+    await db.prepare(`INSERT INTO kv (k, v, expires_at, updated_at) VALUES (?, ?, NULL, ?)
+      ON CONFLICT(k) DO UPDATE SET v = excluded.v, updated_at = excluded.updated_at`).bind('picks:summary', JSON.stringify(sum ?? {}), t).all();
+  } catch { /* counted again next time */ }
+  return sum;
+}
+
+/** get_picks(p_limit, p_settled). */
+export async function getPicks(db: D1Read, limit = 60, settled?: string | null, member = false): Promise<Rec> {
+  const freeId = await freeFixtureId(db);
+  const sum = await picksSummary(db);
   const which = settled === 'true' ? 'AND pk.settled_at IS NOT NULL' : settled === 'false' ? 'AND pk.settled_at IS NULL' : '';
   const got = await rows(db, `SELECT pk.id, pk.fixture_id, coalesce(f.kickoff, pk.kickoff) AS kickoff, pk.market, pk.outcome, pk.line, pk.kind,
         pk.model_prob, pk.book_prob, pk.edge, pk.odds, pk.bookmaker, pk.kelly,
