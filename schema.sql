@@ -594,6 +594,10 @@ CREATE INDEX IF NOT EXISTS pick_unsettled ON pick (settled_at, kickoff);
 
 CREATE INDEX IF NOT EXISTS pick_created ON pick (created_at);
 
+-- The results list, newest first (get_picks in worker/src/d1read.ts): walks the
+-- newest calls and stops at the limit, where it read every call before.
+CREATE INDEX IF NOT EXISTS pick_kind_kickoff ON pick (kind, kickoff);
+
 CREATE UNIQUE INDEX IF NOT EXISTS pick_unique_line ON pick (fixture_id, market, outcome, COALESCE(line, -1e9), kind);
 
 CREATE INDEX IF NOT EXISTS fixture_kickoff ON fixture (kickoff);
@@ -610,6 +614,10 @@ CREATE INDEX IF NOT EXISTS schedule_kickoff ON schedule (kickoff);
 
 -- Which competitions have games to come (search, get_leagues in worker/src/d1read.ts).
 CREATE INDEX IF NOT EXISTS schedule_league ON schedule (league_id, kickoff);
+
+-- A team's games to come (get_team): read the whole schedule on every team page.
+CREATE INDEX IF NOT EXISTS schedule_home_team ON schedule (home_team_id, kickoff);
+CREATE INDEX IF NOT EXISTS schedule_away_team ON schedule (away_team_id, kickoff);
 
 CREATE INDEX IF NOT EXISTS admin_log_at ON admin_log (at DESC);
 

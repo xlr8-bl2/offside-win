@@ -410,6 +410,10 @@ Stage 2, accounts:
     copy serves the rest instead of each asking the provider; a match page every 2 min (was 1),
     its stats every 6, and its score from the live list rather than a separate call. Old `live:*`
     rows cleared by the daily cron.
+  - 5 November, first full day after (4 Nov): D1 rows read 6.1M (was 12M to 71M; free 5M), written
+    53k, CPU p99 23 ms. Second pass: the record's totals kept in kv `picks:summary` for 10 minutes
+    (1.9M rows a day), and indexes `pick_kind_kickoff`, `schedule_home_team`, `schedule_away_team` so
+    the results list and team pages stop reading whole tables.
   - Engine door (`enginedb.ts`): at most 50 statements a request (D1's free limit per invocation);
     the engine sends at most 1 MB a request (was 8 MB) so the JSON parse fits 10 ms of CPU.
   - Not changed: `engine/test` cross-form test 86 fails on every branch since 2 November
