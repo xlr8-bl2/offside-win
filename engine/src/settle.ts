@@ -417,7 +417,10 @@ export async function runSettle(): Promise<SettleReport> {
     report.reports = await writeMissingReports({ sinceDays: 7, limit: 60 });
     report.decided = await enrichPostMortems();
     await gradePulled(now);
-    await kvSetJSON('settle:last_run', { at: now, ...report });
+    // The results page keeps its summary ready-made for ten minutes
+  // (worker/src/d1read.ts pickSummary); a settle makes it count again at once.
+  if (report.settled || report.regraded || report.voided) await exec(`DELETE FROM kv WHERE k = 'picks:summary'`, []);
+  await kvSetJSON('settle:last_run', { at: now, ...report });
     return report;
   }
 
@@ -601,6 +604,9 @@ export async function runSettle(): Promise<SettleReport> {
   report.decided = await enrichPostMortems();
   await gradePulled(now);
   await refreshCalibration();
+  // The results page keeps its summary ready-made for ten minutes
+  // (worker/src/d1read.ts pickSummary); a settle makes it count again at once.
+  if (report.settled || report.regraded || report.voided) await exec(`DELETE FROM kv WHERE k = 'picks:summary'`, []);
   await kvSetJSON('settle:last_run', { at: now, ...report });
 
   console.log(

@@ -337,12 +337,35 @@ export async function getFixture(db: D1Read, id: number, member = false): Promis
   return b;
 }
 
+/**
+ * The record's summary ("552 of 700 landed"), kept ready-made in kv and
+ * recounted at most every ten minutes. Counting it on every request read
+ * every pick each time: 9.2 million rows in two days, the largest single
+ * reader of D1 (cf:usage, 17 November), and the free plan allows 5 million a day.
+ */
+const SUMMARY_KEY = 'picks:summary';
+const SUMMARY_FOR = 600;
+async function pickSummary(db: D1Read): Promise<Rec | null> {
+  const t = now();
+  const saved = await one<{ v: string; updated_at: number }>(db, 'SELECT v, updated_at FROM kv WHERE k = ?', SUMMARY_KEY);
+  if (saved && t - saved.updated_at < SUMMARY_FOR) {
+    const v = tryJson(saved.v);
+    if (isObj(v)) return v;
+  }
+  const sum = await one(db, `SELECT count(*) AS n, sum(CASE WHEN result IN ('WON', 'HALF_WON') THEN 1 ELSE 0 END) AS wins,
+      sum(pnl) AS pnl, avg(odds) AS avg_odds
+    FROM pick WHERE kind = 'CONFIDENT' AND settled_at IS NOT NULL AND result IS NOT 'VOID'`);
+  try {
+    await db.batch([db.prepare(`INSERT INTO kv (k, v, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT (k) DO UPDATE SET v = excluded.v, updated_at = excluded.updated_at`).bind(SUMMARY_KEY, JSON.stringify(sum ?? {}), t)]);
+  } catch { /* a failed save only means the next request counts again */ }
+  return sum;
+}
+
 /** get_picks(p_limit, p_settled). */
 export async function getPicks(db: D1Read, limit = 60, settled?: string | null, member = false): Promise<Rec> {
   const freeId = await freeFixtureId(db);
-  const sum = await one(db, `SELECT count(*) AS n, sum(CASE WHEN result IN ('WON', 'HALF_WON') THEN 1 ELSE 0 END) AS wins,
-      sum(pnl) AS pnl, avg(odds) AS avg_odds
-    FROM pick WHERE settled_at IS NOT NULL AND result IS NOT 'VOID' AND kind = 'CONFIDENT'`);
+  const sum = await pickSummary(db);
   const which = settled === 'true' ? 'AND pk.settled_at IS NOT NULL' : settled === 'false' ? 'AND pk.settled_at IS NULL' : '';
   const got = await rows(db, `SELECT pk.id, pk.fixture_id, coalesce(f.kickoff, pk.kickoff) AS kickoff, pk.market, pk.outcome, pk.line, pk.kind,
         pk.model_prob, pk.book_prob, pk.edge, pk.odds, pk.bookmaker, pk.kelly,
@@ -445,7 +468,10 @@ export async function getLeagues(db: D1Read): Promise<Rec[]> {
   const t = now();
   const [lg, sched, nexts] = await db.batch([
     db.prepare('SELECT id, name, country FROM league WHERE tracked = 1'),
-    db.prepare('SELECT league_id, min(kickoff) AS next FROM schedule WHERE kickoff > ? GROUP BY league_id').bind(t),
+    // One index seek per covered league, rather than a pass over the whole
+    // schedule (about 670 thousand rows read in two days, cf:usage 17 November).
+    db.prepare(`SELECT l.id AS league_id, (SELECT min(s.kickoff) FROM schedule s WHERE s.league_id = l.id AND s.kickoff > ?) AS next
+      FROM league l WHERE l.tracked = 1`).bind(t),
     db.prepare(`SELECT k, v FROM kv WHERE k >= 'league:' AND k < 'league;' AND k LIKE '%:next'`),
   ]);
   const fromSchedule = new Map<number, number>();

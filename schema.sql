@@ -594,6 +594,15 @@ CREATE INDEX IF NOT EXISTS pick_unsettled ON pick (settled_at, kickoff);
 
 CREATE INDEX IF NOT EXISTS pick_created ON pick (created_at);
 
+-- The results list and its summary read the confident calls newest first
+-- (worker/src/d1read.ts getPicks); without this they read the whole table.
+CREATE INDEX IF NOT EXISTS pick_kind_kickoff ON pick (kind, kickoff);
+CREATE INDEX IF NOT EXISTS pick_kind_settled ON pick (kind, settled_at, result);
+
+-- A team's later games (getTeam): by either side, not the whole schedule.
+CREATE INDEX IF NOT EXISTS schedule_home_team ON schedule (home_team_id, kickoff);
+CREATE INDEX IF NOT EXISTS schedule_away_team ON schedule (away_team_id, kickoff);
+
 CREATE UNIQUE INDEX IF NOT EXISTS pick_unique_line ON pick (fixture_id, market, outcome, COALESCE(line, -1e9), kind);
 
 CREATE INDEX IF NOT EXISTS fixture_kickoff ON fixture (kickoff);
