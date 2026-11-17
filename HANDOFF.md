@@ -68,7 +68,22 @@ What has changed so far:
   reason we gave sit behind one tap (`.recap-more`). The phone page went from
   about 13,200px to 9,400px.
 
-Still to do: ad slots with a consent tool.
+- Adverts, built and switched off (17 November). `public/js/lib/ads.js`
+  draws hidden markers (`adSlotHTML`) and fills them only when
+  `ADSENSE_CLIENT` and `ADSENSE_SLOT` in `worker/wrangler.toml` hold real
+  AdSense ids (`adsConfig` in index.ts checks the format). The places are
+  home after "Next up"; board after the 2nd call group and the 2nd and 6th
+  other groups; results after the 2nd and 5th day; fixture after the call
+  panel and at the end. All are below the first screen, labelled
+  "Advertisement", reserving 300px, and they close up when unfilled.
+  `/ads.txt` is served once a publisher is set. The privacy and cookie
+  notices describe Google's adverts.
+- To switch adverts on: the owner applies at adsense.google.com with
+  offside.win, then (1) turns on the European regulations message in
+  Privacy & messaging (Google's certified consent tool; needed for UK and EEA
+  readers), (2) under Blocking controls, keeps "Gambling & Betting" blocked
+  (never a bookmaker), and (3) creates one responsive display unit. Put the
+  `ca-pub-` id and the unit id in wrangler.toml and deploy.
 
 ### Fitting the Workers free plan (17 November 2026)
 

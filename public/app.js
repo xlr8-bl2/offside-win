@@ -24,6 +24,7 @@ import * as attention from './js/lib/attention.js';
 import { anchorClock, clockText, diffEvents, eachFixture, eventKey, fixtureIdOf, ingest, inPlayWindow, overlay, signature } from './js/lib/live.js';
 import { TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle, ukDay } from './js/lib/titles.js';
 import { captureRef, shareLink, storedRef } from './js/lib/referral.js';
+import { adSlotHTML, fillAds } from './js/lib/ads.js';
 import { accountRpc, authHeaders, completeSignIn, currentUser, endedReason, signedInDevices, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, prepareGoogleRedirect, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, siteConfig, viewingAsFree, hasStoredSession } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
@@ -1619,6 +1620,15 @@ function nextRowHTML(f) {
 const isMember = () => FREE || Boolean(state.member ?? state.board?.member);
 
 /**
+ * A list of page blocks with advert places between them: after the blocks
+ * counted in `at`, and only where more of the list follows, so an advert is
+ * never the last thing in a section. js/lib/ads.js.
+ */
+function withAds(parts, place, at = [2, 6]) {
+  return parts.map((html, i) => (at.includes(i + 1) && i + 1 < parts.length ? html + adSlotHTML(`${place}-${i + 1}`) : html)).join('');
+}
+
+/**
  * The membership, offered once on the front page, as a ticket: what it adds
  * on the left, what it costs on the stub. The same shape as the ticket a
  * member holds on their account page, so buying one looks like getting one.
@@ -3035,6 +3045,7 @@ async function viewDashboard() {
     ((c) => (c ? `<div class="wrap section dense home-calls-top">${c}</div>` : ''))(openCallsHTML(fixtures, '')) +
     `<div data-live="mine">${yourGamesHTML(fixtures)}</div>` +
     `<div data-live="rail">${nextRailHTML(rail())}</div>` +
+    `<div class="wrap">${adSlotHTML('home-1')}</div>` +
     ((t) => (t ? `<div class="wrap section dense">${t}</div>` : ''))(trapHTML(state.hero?.trap, { on: 'home' })) +
     `<div class="wrap section dense">
        <div class="with-side">
@@ -3574,14 +3585,14 @@ async function viewBoard(params = new URLSearchParams()) {
                ${!elsewhere.length && state.hours < 240 ? '<button type="button" class="btn btn-ghost" data-hours="240">Look ten days ahead</button>' : ''}
              </p></div>`
       : shown.length
-        ? `${callGroups.map((g) => block(g, 'call')).join('')}${
+        ? `${withAds(callGroups.map((g) => block(g, 'call')), 'board-calls', [2])}${
             !called.length ? `<p class="board-none">No call on any of these${state.when === 'played' ? '' : ' yet'}.${
               state.when === 'upcoming' ? ' Calls go up through the day as team news lands and prices settle, right up to kick-off.' : ''}</p>` : ''}${
             rest.length ? `
             <div class="board-rest">
               <h2 class="board-sub">${called.length ? 'Every other game we looked at' : 'Every game we looked at'}</h2>
               <p class="board-sub-note">${state.when === 'played' ? 'We passed on these.' : 'Nothing here was strong enough to back, so each carries our read instead: what we think happens, free, with no price, because we would not bet it.'} The preview, team news and form are on each match's page.</p>
-              ${restGroups.map((g) => block(g, 'game')).join('')}
+              ${withAds(restGroups.map((g) => block(g, 'game')), 'board-rest', [2, 6])}
             </div>` : ''}`
         : fixtures.length
           ? `<div class="empty-state"><b>No calls here yet</b>
@@ -5092,6 +5103,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
               !played && f.read?.text ? `<div class="read-line"><small>Our read</small><b>${esc(f.read.text)}</b>
                   <p>What we think happens. It is a read, not a call: we would not bet it, so it has no price and it is not in our record.</p></div>` : ''}`}
         </div>
+        ${adSlotHTML('fixture-1')}
         ${reads.length ? `<div class="panel">
           <p class="panel-head">${verdicts.length ? (played ? 'What made us call it' : 'What made the call') : 'What stood out'}</p>
           <div class="reads">${reads.map((r) => `<div class="read"><b>${esc(r.label)}</b><p>${f._link(esc(r.note))}</p></div>`).join('')}</div>
@@ -5206,6 +5218,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
         aria-selected="${k === open}">${esc(label)}</button>`).join('')}
     </div>` : ''}
     ${TABS.map(([k, , html]) => `<div class="tabpane" data-pane="${k}"${k === open ? '' : ' hidden'}>${html}</div>`).join('')}
+    ${adSlotHTML('fixture-2')}
   </div>`;
   // The locked call says when it closes; keep that count running.
   tickCountdowns();
@@ -5683,8 +5696,10 @@ async function viewResults() {
       if (!host) return;
       host.innerHTML =
         groupByDay(ordered.slice((p - 1) * PER, p * PER))
-          .map((g) => dayHTML(g, dayTotals.get(new Date(g.at * 1000).toDateString()))).join('') +
+          .map((g) => dayHTML(g, dayTotals.get(new Date(g.at * 1000).toDateString())))
+          .map((html, i, all) => ((i === 1 || i === 4) && i + 1 < all.length ? html + adSlotHTML(`results-${i + 1}`) : html)).join('') +
         pagerHTML(p, pages, 'Results pages');
+      fillAds(host);
       for (const b of host.querySelectorAll('[data-page]')) {
         b.onclick = (e) => {
           e.preventDefault();
@@ -9118,6 +9133,7 @@ function finishRoute(name, soft, keepY, backTo) {
     if (state.board) paintFooter(state.board);
     enhanceSelects(app);
     readAhead();
+    fillAds(app);
     if (state.liveFixture) markLiveEvents(Number(state.liveFixture.id), document.getElementById('live-centre'));
     smartQuotes(app);
     crawlable(app);

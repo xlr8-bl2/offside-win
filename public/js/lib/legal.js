@@ -125,6 +125,15 @@ export const LEGAL = {
          Whop when you ask for a sign-in link and when you create an Account, marked with a code
          derived from your email address or Account; your email address itself is not sent. Where you
          do not consent, the pixel is not loaded and none of this is reported.</p>
+      <p><b>Advertising.</b> The Site is free and is paid for by advertising. Where the Site shows
+         adverts, they are served by Google (Google Ireland Limited, through Google AdSense), which
+         receives the page you are on and the technical information sent with the request, and may
+         read or store its own identifiers on your device to choose, show and measure adverts. In the
+         United Kingdom, the European Economic Area and Switzerland, Google’s consent message asks
+         you before any of this is used for personalised advertising, and you can change your answer
+         at any time from the link it shows; without your consent only non-personalised adverts are
+         shown. Gambling adverts are blocked on the Site. Google’s use of this information is
+         described at <a href="https://policies.google.com/technologies/partner-sites" target="_blank" rel="noopener noreferrer">policies.google.com/technologies/partner-sites</a>.</p>
       <p>We do not process special category data, do not acquire personal data from third parties for
          marketing purposes and do not use data brokers.</p>`,
       },
@@ -819,11 +828,12 @@ export const LEGAL = {
           <tr><td>Saved pages (<code>ow.c1:…</code>)</td><td>A copy of each page’s data, so that the Site opens immediately on your next visit and then updates.</td><td>Replaced as pages update; deleted if consent is withdrawn</td></tr>
           <tr><td>Visit counting</td><td>An anonymous count of each page opened, by category of page. Nothing is stored on your device for this purpose.</td><td>Not stored on your device</td></tr>
           <tr><td>Ad measurement (the Whop pixel, from <code>t.whop.tw</code>)</td><td>Reports each page you open, and when you sign up, to Whop, so that we can tell which of our advertisements brought you to the Site. Whop may store its own identifier on your device for this purpose.</td><td>As set by Whop; the pixel stops loading as soon as consent is withdrawn</td></tr>
+          <tr><td>Advertising (Google AdSense, from <code>googlesyndication.com</code> and <code>doubleclick.net</code>)</td><td>Where the Site shows adverts: chooses, shows and measures them, and limits how often you see the same one. Personalised only with your consent, which Google’s own message asks for in the United Kingdom, the EEA and Switzerland.</td><td>As set by Google, up to 13 months; managed from Google’s consent message</td></tr>
         </tbody>
       </table></div>
 
       <h2>Other technologies</h2>
-      <p>Apart from the Whop pixel above, which runs only with your consent, the Site uses no
+      <p>Apart from the Whop pixel and Google’s advertising above, the Site uses no other
          advertising cookies, tracking pixels, social media plug-ins or third-party analytics services.
          Fonts are served from the Site itself. A Global Privacy Control signal sent
          by your browser is treated as a refusal of consent.</p>

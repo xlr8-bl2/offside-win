@@ -55,6 +55,9 @@ interface Env extends PayEnv, LiveEnv, AdminEnv, HookEnv {
   SUPABASE_ANON_KEY: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_REDIRECT?: string;
+  /** AdSense publisher (ca-pub-…) and display unit id; empty until the account is approved. Public. */
+  ADSENSE_CLIENT?: string;
+  ADSENSE_SLOT?: string;
   ASSETS: Fetcher;
 }
 
@@ -200,6 +203,15 @@ const worker = {
       return new Response(APPLE_PAY_ASSOCIATION, {
         headers: { 'content-type': 'text/plain', 'cache-control': 'public, max-age=3600' },
       });
+    }
+
+    // AdSense's list of who may sell adverts on this site. Only once a
+    // publisher is set (wrangler.toml); before that there is nothing to list.
+    if (path === '/ads.txt') {
+      const ads = adsConfig(env);
+      return ads
+        ? new Response(adsTxt(ads.client), { headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=3600' } })
+        : new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } });
     }
 
     if (!path.startsWith('/api/')) {
@@ -375,9 +387,22 @@ const worker = {
  * second substitution step in the deploy, and sign-in happens browser-to-GoTrue
  * without the Worker in the path at all.
  */
+/**
+ * Adverts are on only when both the publisher and the unit are set and look
+ * like AdSense's own ids: they go into the page as attributes, so nothing
+ * else gets through.
+ */
+export function adsConfig(env: { ADSENSE_CLIENT?: string; ADSENSE_SLOT?: string }): { client: string; slot: string } | null {
+  const client = (env.ADSENSE_CLIENT ?? '').trim();
+  const slot = (env.ADSENSE_SLOT ?? '').trim();
+  return /^ca-pub-\d{10,20}$/.test(client) && /^\d{6,12}$/.test(slot) ? { client, slot } : null;
+}
+/** The ads.txt line Google asks for: its exchange, the publisher id, a direct seller, Google's certification id. */
+export const adsTxt = (client: string): string => `google.com, ${client.replace(/^ca-/, '')}, DIRECT, f08c47fec0942fa0\n`;
+
 function config(env: Env): Response {
   return new Response(
-    JSON.stringify({ supabaseUrl: env.SUPABASE_URL ?? '', anonKey: env.SUPABASE_ANON_KEY ?? '', googleClientId: env.GOOGLE_CLIENT_ID ?? '', googleRedirect: env.GOOGLE_REDIRECT === '1', whopAccount: env.WHOP_COMPANY_ID ?? '' }),
+    JSON.stringify({ supabaseUrl: env.SUPABASE_URL ?? '', anonKey: env.SUPABASE_ANON_KEY ?? '', googleClientId: env.GOOGLE_CLIENT_ID ?? '', googleRedirect: env.GOOGLE_REDIRECT === '1', whopAccount: env.WHOP_COMPANY_ID ?? '', ads: adsConfig(env) }),
     {
       headers: {
         'content-type': 'application/json; charset=utf-8',
