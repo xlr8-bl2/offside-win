@@ -14,6 +14,32 @@ meaningful step, and commits it with that step, not at the end of the day.
 
 ## Right now
 
+### Fitting the Workers free plan (17 November 2026)
+
+The paid Workers plan lapsed. On the free plan the limits that matter are
+100k requests/day, 10 ms CPU per request, 5M D1 rows read/day, 100k rows
+written/day and 500 MB per database. `npm run cf:usage` (pg.yml `cf:usage`)
+reads the live numbers and the top statements by rows read.
+
+Before this fix, reads ran at 8 to 14 million a day. Two-thirds of that came
+from `getPicks`: its summary counted every pick on each request, and its list
+had no `(kind, kickoff)` index. What changed:
+
+- The summary is kept in kv `picks:summary` for ten minutes
+  (`pickSummary` in `worker/src/d1read.ts`). `settle.ts` deletes the key after
+  any settle, so the count updates straight away.
+- New indexes in `schema.sql` (deploy applies them): `pick_kind_kickoff`,
+  `pick_kind_settled`, `schedule_home_team`, `schedule_away_team`.
+- `getLeagues` seeks each tracked league's next game, so it no longer scans
+  the whole schedule.
+- `clubSeasonStart` (`engine/src/context/players.ts`) reads one row per side
+  instead of every game the club has played.
+
+Still open:
+
+- Re-run `cf:usage` after a day to confirm reads are under 5M.
+- The DB is 377 of 500 MB and growing (probably `image`).
+
 ### Ad test: lead events for Whop Ads (3 November 2026, branch `claude/project-thread-p7u2m5`)
 
 Whop Ads would not run a leads campaign on the homepage because the pixel had never sent a `lead`.
