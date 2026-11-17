@@ -298,6 +298,29 @@ function warm(hash) {
   }
 }
 const linkHash = (a) => a.dataset?.hash ?? a.getAttribute('href');
+
+/*
+ * A card that is about one match opens that match wherever it is tapped
+ * (owner, 17 November 2026): a result, the surest call, the trap, a slip leg.
+ * Each still has a real link inside it, which is what a keyboard or a screen
+ * reader uses; this only makes the rest of the card answer a tap too. Taps on
+ * the card's own controls (a link, a button, the "how it went" toggle) do
+ * their own job, and a tap that ends a text selection is left alone.
+ */
+document.addEventListener('click', (e) => {
+  if (e.defaultPrevented || e.button !== 0) return;
+  const card = e.target.closest?.('[data-href]');
+  if (!card || e.target.closest('a[href], button, summary, input, select, textarea, label')) return;
+  if (String(window.getSelection?.() ?? '').length) return;
+  const to = card.dataset.href;
+  if (!/^#\//.test(to)) return;
+  if (e.metaKey || e.ctrlKey || e.shiftKey) { window.open(`${location.pathname}${to}`, '_blank', 'noopener'); return; }
+  location.hash = to;
+});
+document.addEventListener('pointerdown', (e) => {
+  const card = e.target.closest?.('[data-href]');
+  if (card) warm(card.dataset.href);
+}, { passive: true, capture: true });
 document.addEventListener('pointerdown', (e) => {
   const a = e.target.closest?.('a[href^="#/"], a[data-hash]');
   if (a) warm(linkHash(a));
@@ -1253,7 +1276,7 @@ function freeCallHTML(hero, detail, free = null) {
     const WORD = { won: 'Landed', lost: 'Missed', part: 'Half back', back: 'Stake back' };
     const shown = score ?? (Array.isArray(free.live_score) ? free.live_score : null);
     return `
-  <div class="freecall">
+  <div class="freecall" data-href="#/fixture/${encodeURIComponent(tie.id)}">
     <span class="freecall-tag">Our surest call today</span>
     <a class="freecall-tie" href="#/fixture/${encodeURIComponent(tie.id)}">${crest(tie.home, 'xs', tie.home_id)}${esc(tie.home)}
       ${shown ? `<b>${esc(shown[0])}–${esc(shown[1])}</b>` : 'v'} ${crest(tie.away, 'xs', tie.away_id)}${esc(tie.away)}
@@ -1274,7 +1297,7 @@ function freeCallHTML(hero, detail, free = null) {
   }
 
   return `
-  <div class="freecall">
+  <div class="freecall" data-href="#/fixture/${encodeURIComponent(tie.id)}">
     <span class="freecall-tag">Our surest call today</span>
     ${elsewhere ? `<a class="freecall-tie" href="#/fixture/${encodeURIComponent(tie.id)}">${crest(tie.home, 'xs', tie.home_id)}${esc(tie.home)} v ${crest(tie.away, 'xs', tie.away_id)}${esc(tie.away)}<span>${esc(kickoffLabel(tie.kickoff))}</span></a>` : ''}
     <p class="freecall-sel">${elsewhere ? `<a href="#/fixture/${encodeURIComponent(tie.id)}">${betHTML(d)}</a>` : betHTML(d)}</p>
@@ -1403,7 +1426,7 @@ function heroCallHTML(hero, row) {
     const res = st.kind === 'ft' ? (row.called?.result ?? v.result ?? null) : null;
     const out = RESULT_WORD[res] ? `<b class="freecall-out is-${RESULT_TONE[res]}">${esc(RESULT_WORD[res])}</b> ` : '';
     return `
-    <div class="freecall hero-call">
+    <div class="freecall hero-call" data-href="#/fixture/${encodeURIComponent(hero.fixture_id)}">
       <span class="freecall-tag${row.free_call ? '' : ' is-ours'}">${row.free_call ? 'Our surest call today' : 'Our call'}</span>
       <p class="freecall-sel">${betHTML(d)}</p>
       <p class="freecall-meta" data-public-price>${out}${st.kind === 'live' ? `${trackHTML(liveTrack(v, row))} ` : ''}<b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
@@ -1759,7 +1782,7 @@ function slipHTML(data, fixtures = []) {
     ${legs ? `<ol class="slip-list">${legs.map((l) => {
       const d = market({ market: l.market, outcome: l.outcome, line: l.line, home: l.home, away: l.away, odds: l.odds });
       return `
-        <li><a href="#/fixture/${encodeURIComponent(l.fixture_id)}">
+        <li data-href="#/fixture/${encodeURIComponent(l.fixture_id)}"><a href="#/fixture/${encodeURIComponent(l.fixture_id)}">
           <span class="slip-tie">${esc(l.home)} v ${esc(l.away)}</span>
           <span class="slip-sel">${betHTML(d)}</span>
           <span class="slip-meta">${esc(kickoffLabel(l.kickoff))}<span class="slip-state">${legState(l)}<b>${oddsTag(l.odds)}</b></span></span>
@@ -1901,7 +1924,7 @@ async function viewSlip() {
           </div>
           <ul class="played-calls">${(r.legs ?? []).map((l) => {
             const d = market({ market: l.market, outcome: l.outcome, line: l.line, home: l.home, away: l.away, odds: l.odds });
-            return `<li><span>${esc(l.home)} v ${esc(l.away)}: ${esc(betText(d))}</span><span>${oddsTag(l.odds)}</span></li>`;
+            return `<li data-href="#/fixture/${encodeURIComponent(l.fixture_id)}"><a href="#/fixture/${encodeURIComponent(l.fixture_id)}">${esc(l.home)} v ${esc(l.away)}: ${esc(betText(d))}</a><span>${oddsTag(l.odds)}</span></li>`;
           }).join('')}</ul>
         </div>`).join('')}
       </div>
@@ -2525,7 +2548,7 @@ function trapHTML(t, { on = 'landing' } = {}) {
     ${on === 'landing' ? `<div class="ld-sec-head"><h2 class="ld-h2">One to leave alone</h2></div>
     <p class="ld-sub">The trap of the day: a favourite everyone’s on that we wouldn’t touch. Free, every day.</p>`
       : '<div class="section-head"><div><h2 class="display">One to leave alone</h2></div></div>'}
-    <article class="trap">
+    <article class="trap" data-href="#/fixture/${encodeURIComponent(t.fixture_id)}">
       <div class="trap-tape" aria-hidden="true"></div>
       <div class="trap-who">
         ${crest(t.team, 'xl', teamId)}
@@ -5967,7 +5990,7 @@ function recapCardHTML(x) {
   });
 
   return `
-  <article class="recap is-${esc(tone)}">
+  <article class="recap is-${esc(tone)}" data-href="#/fixture/${encodeURIComponent(x.fixture_id)}">
     <a class="recap-tie" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
       <span class="recap-side">${crest(x.home_team ?? '', 'sm', x.home_team_id)}<span>${esc(x.home_team ?? '')}</span>${
         hasScore ? `<b class="row-goals${hg > ag ? ' won' : ''}">${esc(hg)}</b>` : ''}</span>

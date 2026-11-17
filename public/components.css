@@ -7037,3 +7037,7 @@ body[data-page="landing"] .foot-top { display: none; }
 /* No advert to show (AdSense marks the unit unfilled): the place closes up
    rather than leaving a labelled hole. */
 .ad-slot:has(ins[data-ad-status="unfilled"]) { display: none; }
+
+/* A card that opens its match from anywhere (the click handler beside
+   linkHash in app.js) says so to a pointer. */
+[data-href] { cursor: pointer; }
