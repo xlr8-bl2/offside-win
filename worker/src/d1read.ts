@@ -855,6 +855,16 @@ export async function recordView(db: D1Read, page: string): Promise<void> {
 
 type Args = Record<string, string | number | undefined>;
 
+/**
+ * The site is free (owner, 17 November 2026): every call, the slip's legs and
+ * the reasoning are open to every reader, signed in or not. The membership
+ * machinery stays in place for the accounts that already hold one, but no
+ * read is walled any more. Set to false to bring the wall back.
+ */
+export let FREE = true;
+/** For the tests that check the wall itself, which is still there to switch back on. */
+export function setFree(on: boolean): void { FREE = on; }
+
 /** Who is reading: an account and whether it holds a live membership. */
 export interface Viewer { id: string; email: string; member: boolean }
 const int = (v: unknown) => (v === undefined || v === null || v === '' ? null : Number(v));
@@ -865,7 +875,7 @@ const int = (v: unknown) => (v === undefined || v === null || v === '' ? null : 
  * should say so rather than guess.
  */
 export async function serve(db: D1Read, fn: string, args: Args, viewer: Viewer | null = null): Promise<unknown> {
-  const member = viewer?.member ?? false;
+  const member = FREE || (viewer?.member ?? false);
   switch (fn) {
     case 'get_board': return getBoard(db, Number(args.p_from), Number(args.p_to), int(args.p_league), member);
     case 'get_fixture': return getFixture(db, Number(args.p_id), member);

@@ -51,6 +51,9 @@ use. Only the account whose email hashes to `ADMIN_EMAIL_SHA256`
 
 ## Standing rules
 
+- The site is free and paid for by ads (owner, 17 November 2026). Never add
+  bookmaker affiliate links or bookmaker deals of any kind.
+
 - The owner works from a phone only. Trigger workflows and read logs yourself;
   never hand back steps that need a computer.
 - Secrets go in GitHub Actions secrets, never in chat. The repo is public, so

@@ -168,7 +168,7 @@ async function windowPage(env: SeoEnv, site: string, o: {
   <article class="wrap section narrow seo">
     ${c.html}
     <h1 class="display">${esc(o.h1)}</h1>
-    <p>${esc(lead)} ${esc(MOVES)} One call a day is free; <a href="/pricing">members</a> get the rest.</p>
+    <p>${esc(lead)} ${esc(MOVES)} Every call is free.</p>
     ${free ? `<p>The free call is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
     ${byDayAndLeague(fixtures)}
     ${moreHTML(liveKinds(picks))}
@@ -238,7 +238,7 @@ export async function freePage(env: SeoEnv, site: string): Promise<Page> {
     <h2><a href="${esc(matchPath(f))}">${esc(`${home} v ${away}`)}</a>: ${esc(name)}</h2>
     <p>${Number.isFinite(odds) ? `At odds of ${esc(odds.toFixed(2))}${pub.bookmaker ? ` with ${esc(pub.bookmaker)}` : ''}.` : ''}${esc(result)} ${esc(MOVES)}</p>
     ${why ? `<h2>Why</h2><p>${esc(why)}</p>` : ''}
-    <p>This one is free every day: the call we are surest of. <a href="/pricing">Members</a> get every call the moment it goes up. <a href="/results">Every result is on the record</a>.</p>
+    <p>The call we are surest of today. Every call is free, and <a href="/results">every result is on the record</a>.</p>
     ${moreHTML(liveKinds(picks))}
   </article>`,
     jsonLd: [c.ld],
@@ -292,7 +292,7 @@ export async function kindPage(env: SeoEnv, slugName: string, site: string): Pro
     <h1 class="display">${esc(kind.name)} predictions</h1>
     <p>${esc(kind.what)}</p>
     <p>${esc(line)} Every one of them is on <a href="/results">the results page</a> with the score that settled it.</p>
-    <p>Today's ${esc(kind.name.toLowerCase())} calls are on <a href="/today">today's board</a>: one call a day is free, and <a href="/pricing">members</a> get the rest the moment they go up. ${esc(MOVES)}</p>
+    <p>Today's ${esc(kind.name.toLowerCase())} calls are on <a href="/today">today's board</a>: every call is free, and goes up the moment it is made. ${esc(MOVES)}</p>
     <h2>The latest ${esc(kind.name.toLowerCase())} calls, settled</h2>
     <ul class="seo-list">${mine.slice(0, 30).map((p) => {
       const home = String(p.home_team ?? '');

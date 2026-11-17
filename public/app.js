@@ -228,7 +228,10 @@ let gradedAt = 0;
 const madeBefore = (hit, t) => Boolean(t && hit && (hit.made ?? Math.floor(hit.at / 1000)) < t);
 
 async function getJSON(path, { fresh = false, quiet = false } = {}) {
-  const headers = await authHeaders();
+  // On a free site a public read is the same for everyone, so it goes without
+  // the token: it is then the edge's copy, the head's preload and the stored
+  // copy, all shared, and it never waits on a session refresh first.
+  const headers = FREE && CACHEABLE.test(path) ? {} : await authHeaders();
   if (!CACHEABLE.test(path)) return withLive(JSON.parse(await fetchText(path, headers)));
 
   const key = cacheKey(headers.authorization ? 'auth' : 'anon', path);
@@ -778,6 +781,14 @@ const READ_LABEL = {
 };
 
 // ------------------------------------------------------------------ state
+
+/*
+ * The site is free (owner, 17 November 2026): every call, the slip and the
+ * reasoning are open to every reader, and nothing is sold. The Worker opens
+ * the reads (worker/src/d1read.ts FREE); this side stops drawing the wall and
+ * the plans. Accounts that already hold a membership keep their account page.
+ */
+const FREE = true;
 
 const state = {
   board: null, hours: 72, leagueName: '', heroVenue: [], hero: null,
@@ -1397,7 +1408,7 @@ function heroCallHTML(hero, row) {
       <p class="freecall-meta" data-public-price>${out}${st.kind === 'live' ? `${trackHTML(liveTrack(v, row))} ` : ''}<b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
     </div>`;
   }
-  if (!row.locked) return '';
+  if (!row.locked || FREE) return '';
   if (st.kind !== 'upcoming') {
     return `<p class="hero-closed">${liveBadge(st)} Our call closed at kick-off. It is not sold once a match is on;
       it goes up here with how it went at full time.</p>`;
@@ -1593,7 +1604,7 @@ function nextRowHTML(f) {
   const lock = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>';
   const mark = f.top_pick ? '<small class="next-pick">Pick</small>'
     : f.locked && st.kind === 'live' ? '<small class="next-pick is-closed" title="Calls close at kick-off">Closed</small>'
-    : f.locked ? `<small class="next-pick" title="A pick for members">${lock}Pick</small>` : '';
+    : f.locked && !FREE ? `<small class="next-pick" title="A pick for members">${lock}Pick</small>` : '';
   return `
   <li><a class="next-row" href="#/fixture/${encodeURIComponent(f.id)}">
     <span class="next-side home"><span class="next-name">${esc(f.home)}</span>${crest(f.home, 'sm', f.home_id)}</span>
@@ -1603,7 +1614,7 @@ function nextRowHTML(f) {
 }
 
 /** Is the reader a member? The account says so once it has loaded; the board's own answer until then. */
-const isMember = () => Boolean(state.member ?? state.board?.member);
+const isMember = () => FREE || Boolean(state.member ?? state.board?.member);
 
 /**
  * The membership, offered once on the front page, as a ticket: what it adds
@@ -1742,7 +1753,7 @@ function slipHTML(data, fixtures = []) {
           <span class="slip-meta">${esc(kickoffLabel(l.kickoff))}<span class="slip-state">${legState(l)}<b>${oddsTag(l.odds)}</b></span></span>
         </a></li>`;
     }).join('')}</ol>`
-    : `<div class="slip-locked">
+    : FREE ? '' : `<div class="slip-locked">
         <p>The ${cur.legs_count} matches and the calls on them are for members.</p>
         <a class="btn btn-accent" href="#/pricing">See what membership costs</a>
       </div>`}
@@ -2468,6 +2479,7 @@ function spread(fixtures, limit) {
  * belongs to a member, and the board is the first thing either page needs.
  */
 async function viewHome() {
+  if (FREE) return viewDashboard();
   if (!hasStoredSession()) return viewLanding();
   const board = await loadBoard().catch(() => null);
   return isMember() || board?.member ? viewDashboard() : viewLanding();
@@ -3696,6 +3708,8 @@ async function viewBoard(params = new URLSearchParams()) {
  * and it does not nag.
  */
 function lockedHTML(fixture = null) {
+  // Free: no wall to draw, even from a copy cached before the switch.
+  if (FREE) return '';
   // Kick-off closes the call. Nothing is sold once a match is on, so the offer
   // gives way to what happens next: it is graded, and shown, at full time.
   if (fixture?.kickoff && matchState(fixture).kind === 'live') {
@@ -7649,7 +7663,10 @@ async function viewAccount() {
     : /^#\/fixture\//.test(came) ? { href: came, label: 'Back to the match you were reading' }
     : /^#\/slip/.test(came) ? { href: came, label: "Back to today's slip" }
     : { href: came, label: 'Back to where you were' };
-  const open = ACCOUNT_TABS.some(([k]) => k === asked) ? asked : justPaid ? 'membership' : 'profile';
+  // Free: no invitations (they offered a free week of membership), and the
+  // membership tab only for an account that has held one.
+  const tabs = ACCOUNT_TABS.filter(([k]) => !FREE || (k !== 'invite' && (k !== 'membership' || account.membership)));
+  const open = tabs.some(([k]) => k === asked) ? asked : justPaid && tabs.some(([k]) => k === 'membership') ? 'membership' : 'profile';
 
   const follows = Array.isArray(account.follows) ? account.follows : [];
 
@@ -7789,7 +7806,7 @@ async function viewAccount() {
                 : m.auto_renew
                   ? `<span>Renews ${m.card_last4 ? `on ${esc(m.card_brand ?? 'card')} ending ${esc(m.card_last4)}` : 'itself'}</span><button class="btn btn-quiet btn-sm" id="cancel">Stop renewing</button>`
                   : `<span>Does not renew</span><button class="btn btn-primary btn-sm" id="resume">Renew each month</button>`)
-          : `<a class="btn btn-accent" href="#/pricing">See the plans</a>`}
+          : FREE ? `<span>Everything on offside.win is free. There is nothing to buy.</span>` : `<a class="btn btn-accent" href="#/pricing">See the plans</a>`}
       </div>
     </section>
     ${active && m.via !== 'whop' && account.whop?.renewing ? `
@@ -7906,9 +7923,9 @@ async function viewAccount() {
       fails, you still get it put right or your money back. The <a href="#/legal/terms">terms of use</a>
       (in force from ${esc(TERMS_DATE)}) apply.</p>` : ''}
     <div class="tabs" role="tablist">
-      ${ACCOUNT_TABS.map(([k, label]) => `<button class="tab${k === open ? ' on' : ''}" data-tab="${k}" role="tab" aria-selected="${k === open}">${esc(label)}</button>`).join('')}
+      ${tabs.map(([k, label]) => `<button class="tab${k === open ? ' on' : ''}" data-tab="${k}" role="tab" aria-selected="${k === open}">${esc(label)}</button>`).join('')}
     </div>
-    ${ACCOUNT_TABS.map(([k]) => `<div class="tabpane acct-pane" data-pane="${k}"${k === open ? '' : ' hidden'}>${panes[k]}</div>`).join('')}
+    ${tabs.map(([k]) => `<div class="tabpane acct-pane" data-pane="${k}"${k === open ? '' : ' hidden'}>${panes[k]}</div>`).join('')}
   </div>`;
 
   if (justPaid && !active) {
@@ -9220,6 +9237,8 @@ async function footerSocials() {
 }
 
 async function schedulePromos() {
+  // No offers on a free site: nothing to sell, and no read for them either.
+  if (FREE) { document.getElementById('promo-bar')?.remove(); return; }
   try {
     const running = await getJSON('/api/promos').catch(() => []);
     if (!Array.isArray(running) || !running.length) { document.getElementById('promo-bar')?.remove(); sellOffer(null); return; }
@@ -9272,6 +9291,8 @@ async function render(name, parts, params) {
     if (name === 'search') return await viewSearch(params);
     if (name === 'results') return await viewResults();
     if (name === 'how-sure') return await viewHowSure();
+    // Nothing to buy: the plans and the checkout go to the front page.
+    if (FREE && (name === 'pricing' || name === 'checkout')) { location.replace('#/'); return; }
     if (name === 'pricing') return await viewPricing();
     if (name === 'checkout') return await viewCheckout(params);
     if (name === 'slip') return await viewSlip();
@@ -9369,14 +9390,14 @@ function accountMenuHTML() {
     </div>
     <a class="am-plan${m ? ' on' : ''}" href="#/account?tab=membership" role="menuitem">
       ${m ? `<b>${esc(PLAN_NAME[m.plan_id] ?? 'Membership')}</b><span>Runs to ${esc(until)}${renewsItself(m) ? ', renews by itself' : ''}</span>`
-          : `<b>Free account</b><span>One call a day. See the plans for every call.</span>`}
+          : `<b>Your account</b><span>${FREE ? 'Every call is free. Follow your teams to see their games first.' : 'One call a day. See the plans for every call.'}</span>`}
     </a>
     <nav class="am-links" aria-label="Your account">
       <a href="#/account?tab=profile" role="menuitem">Your profile</a>
       <a href="#/account?tab=following" role="menuitem">Teams you follow</a>
       <a href="#/account?tab=membership" role="menuitem">${m ? 'Membership and payments' : 'Membership'}</a>
       <a href="#/account?tab=settings" role="menuitem">Settings</a>
-      <a class="am-cta" href="#/pricing" role="menuitem">${m ? 'See all plans' : 'See the plans'}</a>
+      ${FREE ? '' : `<a class="am-cta" href="#/pricing" role="menuitem">${m ? 'See all plans' : 'See the plans'}</a>`}
       ${state.isAdmin ? '<a class="am-admin" href="#/admin" role="menuitem">Admin dashboard</a>' : ''}
     </nav>
     <button class="am-out" type="button" id="am-out" role="menuitem">Sign out</button>`;
@@ -9472,7 +9493,7 @@ async function headerAuth() {
         state.member = Boolean(state.account.membership?.expires_at * 1000 > Date.now());
         // If the account says otherwise (an advert shown to a member, a call
         // drawn without its member marks), draw it again with the right one.
-        if (was !== state.member) softRefresh();
+        if (!FREE && was !== state.member) softRefresh();
         const f = state.account.profile?.odds_format;
         const c = state.account.profile?.clock;
         const oddsChanged = (f && f !== oddsFormat) || (c && c !== clockFormat);
@@ -9845,7 +9866,7 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
    */
   if (signedInJustNow) {
     const intent = takeIntent();
-    if (intent?.startsWith('buy')) {
+    if (!FREE && intent?.startsWith('buy')) {
       location.hash = '#/pricing';
       await faces;
       await route();

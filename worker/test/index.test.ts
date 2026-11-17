@@ -1,6 +1,11 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/index.ts';
+import { setFree } from '../src/d1read.ts';
+
+// These check the wall and the checkout, which the free site switches off
+// (d1read.ts FREE); free-site.test.ts checks the site as it runs now.
+setFree(false);
 
 /**
  * The routing and header wiring, driven end to end.
