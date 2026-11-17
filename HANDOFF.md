@@ -60,8 +60,15 @@ What has changed so far:
   drops its "This week" and "Next up" columns, the header says "1 live", and
   the floating break chip is gone.
 
-Still to do: home page order on phones (the countdown block sits above the
-surest call), and ad slots with a consent tool.
+- Front page on phones: the open calls are drawn again straight after the
+  day's tally (`openCallsHTML`, `.home-calls-top`; the side column's copy
+  hides below 1040px), and the masthead's match centre (countdown, table,
+  meetings) is hidden below 680px. Results: each card shows the score, the
+  call and one line on how it finished; the scorers, the post-mortem and the
+  reason we gave sit behind one tap (`.recap-more`). The phone page went from
+  about 13,200px to 9,400px.
+
+Still to do: ad slots with a consent tool.
 
 ### Fitting the Workers free plan (17 November 2026)
 

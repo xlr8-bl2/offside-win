@@ -1950,17 +1950,17 @@ function leaguesTodayHTML(fixtures) {
  * The column beside the record. It used to render only when a reader could
  * see calls, so for everyone not signed in it was a blank half of the page.
  */
-function sideHTML(fixtures, slip) {
+/**
+ * The calls still to play, with their odds: what a daily reader opens the
+ * site for. In the side column on a wide screen; on a phone the side column
+ * comes last, so the same list is drawn again near the top (dashboard) and
+ * each copy hides where the other shows (home-calls-side / home-calls-top).
+ */
+function openCallsHTML(fixtures, cls) {
   const withCall = fixtures.filter((f) => f.top_pick && matchState(f).kind === 'upcoming').slice(0, 8);
-  // The blocks that move while a match is on sit in named slots, so the
-  // front page's refresh can redraw them in place without touching the rest.
+  if (!withCall.length) return '';
   return `
-  <aside class="home-side">
-    <div data-live="slip">${slipHTML(slip, fixtures)}</div>
-    <div data-live="live">${liveNowHTML(fixtures)}</div>
-    ${leaguesTodayHTML(fixtures)}
-    ${withCall.length ? `
-    <section class="panel side-block">
+    <section class="panel side-block ${cls}">
       <p class="panel-head">Open calls <a href="#/board">All</a></p>
       <div class="side-list">
         ${withCall.map((f) => {
@@ -1968,9 +1968,8 @@ function sideHTML(fixtures, slip) {
             market: f.top_pick.market, outcome: f.top_pick.outcome, line: f.top_pick.line,
             home: f.home, away: f.away, odds: f.top_pick.odds,
           });
-          // The free call is public by design, and says so.
           return `
-          <a class="side-item" href="#/fixture/${encodeURIComponent(f.id)}"${f.free_call ? ' data-public-price' : ''}>
+          <a class="side-item" href="#/fixture/${encodeURIComponent(f.id)}">
             <span class="side-thumb">${crest(f.home, 'sm', f.home_id)}${crest(f.away, 'sm', f.away_id)}</span>
             <span class="side-body">
               <span class="side-sel">${betHTML(d)}${f.free_call ? ' <span class="freecall-tag">Surest</span>' : ''}</span>
@@ -1979,7 +1978,18 @@ function sideHTML(fixtures, slip) {
           </a>`;
         }).join('')}
       </div>
-    </section>` : ''}
+    </section>`;
+}
+
+function sideHTML(fixtures, slip) {
+  // The blocks that move while a match is on sit in named slots, so the
+  // front page's refresh can redraw them in place without touching the rest.
+  return `
+  <aside class="home-side">
+    <div data-live="slip">${slipHTML(slip, fixtures)}</div>
+    <div data-live="live">${liveNowHTML(fixtures)}</div>
+    ${leaguesTodayHTML(fixtures)}
+    ${openCallsHTML(fixtures, 'home-calls-side')}
   </aside>`;
 }
 
@@ -3022,6 +3032,7 @@ async function viewDashboard() {
     heroHTML(state.hero, state.heroVenue, state.heroDetail, freeFx, heroRow) +
     freeBandHTML(freeFx, state.hero) +
     `<div data-live="today">${todayStripHTML(fixtures, recent)}</div>` +
+    ((c) => (c ? `<div class="wrap section dense home-calls-top">${c}</div>` : ''))(openCallsHTML(fixtures, '')) +
     `<div data-live="mine">${yourGamesHTML(fixtures)}</div>` +
     `<div data-live="rail">${nextRailHTML(rail())}</div>` +
     ((t) => (t ? `<div class="wrap section dense">${t}</div>` : ''))(trapHTML(state.hero?.trap, { on: 'home' })) +
@@ -5947,13 +5958,21 @@ function recapCardHTML(x) {
         hasScore ? `<b class="row-goals${hg > ag ? ' won' : ''}">${esc(hg)}</b>` : ''}</span>
       <span class="recap-side">${crest(x.away_team ?? '', 'sm', x.away_team_id)}<span>${esc(x.away_team ?? '')}</span>${
         hasScore ? `<b class="row-goals${ag > hg ? ' won' : ''}">${esc(ag)}</b>` : ''}</span>
-      ${scorersHTML(x.goals)}
     </a>
     <div class="recap-body">
       <p class="recap-call">We said <b>${esc(betText(d))}</b>${x.odds ? ` at ${oddsOf(x.odds)}` : ''}.</p>
       ${said ? `<p class="recap-what">${esc(said)}</p>` : ''}
-      ${disputed ? '' : postMortemHTML(x)}
       ${(() => {
+        /*
+         * Everything past the call and the score, closed until asked for: the
+         * scorers, how the game went against our reading and the reason we
+         * gave. All of it open made a hundred and twenty results about
+         * fourteen phone screens; closed, a day's results fit on one.
+         * Nothing is removed; every word is one tap away.
+         */
+        const scorers = scorersHTML(x.goals);
+        const pm = disputed ? '' : postMortemHTML(x);
+        const why = (() => {
         /*
          * The argument we made before kick-off, shown back against what
          * happened. On a loss it is the most useful thing on the page and the
@@ -5972,12 +5991,19 @@ function recapCardHTML(x) {
         // -- see verdictHTML).
         const templated = new RegExp(`\\b(?:at|priced)\\s+${dec(x.odds).replace('.', '\\.')}\\b`).test(String(x.narrative ?? ''));
         const allowed = [String(x.odds), dec(x.odds), String(x.line), x.line];
-        const why = cleanProse(x.why, allowed) ?? (templated ? null : cleanProse(x.narrative, allowed));
-        if (!why) return '';
+        const text = cleanProse(x.why, allowed) ?? (templated ? null : cleanProse(x.narrative, allowed));
+        if (!text) return '';
         return `
-        <details class="recap-why">
-          <summary>${tone === 'lost' ? 'The reason we gave' : 'Why we said it'}</summary>
-          <p>${esc(why)}</p>
+        <div class="recap-why">
+          <p class="recap-why-head">${tone === 'lost' ? 'The reason we gave' : 'Why we said it'}</p>
+          <p>${esc(text)}</p>
+        </div>`;
+        })();
+        if (!scorers && !pm && !why) return '';
+        return `
+        <details class="recap-more">
+          <summary>${tone === 'lost' ? 'What went wrong, and why we said it' : 'How it went, and why we said it'}</summary>
+          ${scorers}${pm}${why}
         </details>`;
       })()}
     </div>
