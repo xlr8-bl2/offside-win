@@ -1189,10 +1189,8 @@
   padding: var(--space-2) var(--space-3);
   border: var(--border) solid currentColor;
   border-radius: var(--radius-sm);
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
   font-weight: var(--weight-bold);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
   white-space: nowrap;
 }
 .mark.won  { color: var(--won); }
@@ -3848,17 +3846,43 @@
 /* The argument we made before kick-off, kept closed. Open by choice, because
    on a loss it is the most interesting thing on the page and on a win nobody
    needs convincing twice. */
-.recap-why { margin-top: var(--space-3); }
-.recap-why summary {
-  display: inline-block;
-  font-size: var(--text-2xs);
+/* Everything past the call, behind one tap (recapCardHTML). The summary is
+   a real control: a full-width row with a chevron, big enough for a thumb. */
+.recap-more { margin-top: var(--space-3); }
+.recap-more > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  list-style: none;
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
-  color: var(--chalk-3);
+  color: var(--floodlight-ink);
   cursor: pointer;
 }
-.recap-why summary:hover { color: var(--chalk-2); }
-.recap-why[open] summary { margin-bottom: var(--space-2); color: var(--chalk-2); }
-.recap-why p {
+.recap-more > summary::-webkit-details-marker { display: none; }
+.recap-more > summary::after {
+  content: '';
+  width: 7px; height: 7px;
+  margin-left: 2px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.recap-more[open] > summary::after { transform: rotate(-135deg) translateY(-1px); }
+.recap-more > summary:hover { color: var(--chalk); }
+.recap-more > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+.recap-more[open] > summary { margin-bottom: var(--space-3); }
+.recap-more .scorers { margin-bottom: var(--space-3); }
+.recap-why { margin-top: var(--space-3); }
+.recap-why-head {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--chalk-3);
+}
+.recap-why p:not(.recap-why-head) {
   padding-left: var(--space-4);
   border-left: var(--border) solid var(--rule-firm);
   font-size: var(--text-sm);
@@ -6969,3 +6993,22 @@ body[data-page="landing"] .foot-top { display: none; }
 .invite-nudge a, .plan-friend-note a, .ld-friend a { color: var(--floodlight-hi); }
 .ld-friend { margin: var(--space-4) 0 0; font-size: var(--text-sm); }
 .plan-friend { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--floodlight-hi); }
+
+/* =========================================================== front page, phone
+ *
+ * What a daily reader came for is the calls. On a phone the side column
+ * (slip, open calls) stacks under everything else, so the open calls were
+ * about six screens down, below a countdown box that filled most of the first.
+ * Below the side column's breakpoint the open calls are drawn again straight
+ * after the day's tally (openCallsHTML), and the masthead's match centre goes
+ * on a phone: its kick-off time is already on the masthead, and the table and
+ * the meetings are one tap away on the match page.
+ */
+.home-calls-top { display: none; }
+@media (max-width: 1040px) {
+  .home-calls-top { display: block; }
+  .home-side .home-calls-side { display: none; }
+}
+@media (max-width: 680px) {
+  .hero .matchcentre { display: none; }
+}
