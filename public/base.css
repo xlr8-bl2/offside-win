@@ -498,7 +498,9 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 }
 @media (prefers-reduced-motion: reduce) { .nav-live i::after { animation: none; opacity: 0; } }
 .nav-live b {
-  font-family: var(--display-figures);
+  /* The reading face: the scoreboard figures draw a 1 as a bare stroke,
+     which beside the dot read as "●|" rather than one match live. */
+  font-family: var(--body);
   font-size: 1.0625rem;
   font-weight: var(--weight-bold);
   line-height: 1;
@@ -524,7 +526,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   height: 36px; padding: 0 var(--space-3) 0 var(--space-4);
   border: var(--border) solid var(--rule);
   border-radius: var(--radius);
-  background: rgba(244, 246, 250, 0.03);
+  background: color-mix(in srgb, var(--chalk) 3%, transparent);
   color: var(--chalk-3);
   font-size: var(--text-sm);
   white-space: nowrap;
@@ -546,7 +548,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .top-right .btn { white-space: nowrap; }
 /* Signing in is a word, not a box: the one box on the bar is the offer. */
 .top-right #account-link.btn { border-color: transparent; color: var(--chalk-2); padding-inline: var(--space-4); }
-.top-right #account-link.btn:hover { color: var(--chalk); background: rgba(244, 246, 250, 0.06); }
+.top-right #account-link.btn:hover { color: var(--chalk); background: color-mix(in srgb, var(--chalk) 6%, transparent); }
 .top-right .btn-sm { min-height: 36px; }
 
 /*
@@ -570,7 +572,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   white-space: nowrap;
 }
 .plan-tag:hover { color: var(--chalk); border-color: var(--chalk-3); }
-.plan-tag.on { background: var(--floodlight); border-color: var(--floodlight); color: #fff; }
+.plan-tag.on { background: var(--floodlight); border-color: var(--floodlight-ink); color: #fff; }
 
 .live {
   display: inline-flex;
@@ -590,9 +592,9 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .live.ok { color: var(--chalk-2); }
 .live.ok i { background: var(--won); animation: ping 2.6s var(--ease-in-out) infinite; }
 @keyframes ping {
-  0%   { box-shadow: 0 0 0 0 rgba(61, 180, 104, 0.5); }
-  70%  { box-shadow: 0 0 0 6px rgba(61, 180, 104, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(61, 180, 104, 0); }
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--won) 50%, transparent); }
+  70%  { box-shadow: 0 0 0 6px color-mix(in srgb, var(--won) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--won) 0%, transparent); }
 }
 
 /*
@@ -628,7 +630,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .burger[aria-expanded="true"] span:nth-child(1) { transform: rotate(45deg); }
 .burger[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
 .burger[aria-expanded="true"] span:nth-child(3) { transform: rotate(-45deg); }
-.burger:hover { background: rgba(244, 246, 250, 0.06); }
+.burger:hover { background: color-mix(in srgb, var(--chalk) 6%, transparent); }
 .burger:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .burger[aria-expanded="true"] { background: var(--terrace); }
 
@@ -701,7 +703,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
     display: flex;
     margin-top: var(--space-4);
     background: var(--floodlight-dim);
-    border: var(--border) solid rgba(122, 90, 248, 0.4);
+    border: var(--border) solid color-mix(in srgb, var(--floodlight) 40%, transparent);
     color: var(--chalk);
   }
   .nav a.nav-only-menu small { color: var(--chalk-2); }
@@ -737,7 +739,8 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   .top-right .plan-tag { display: none; }
   .wordmark { font-size: 1.375rem; }
   .top-right { gap: var(--space-2); }
-  .nav-live span { display: none; }
+  /* The word stays: with no plans button there is room, and a lone "1" in
+     the scoreboard figures reads as a bar ("●|"), not as one match live. */
   .nav-live { padding: 0 var(--space-3) 0 var(--space-3); }
 }
 /* The smallest phones: the live count keeps its dot and gives up the number. */
@@ -814,11 +817,11 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   width: var(--tap);
   min-width: var(--tap);
   padding: 0;
-  background: rgba(247, 244, 237, 0.06);
+  background: color-mix(in srgb, var(--chalk) 6%, transparent);
   border-color: var(--hairline);
   color: var(--chalk);
 }
-.btn-icon:hover { background: rgba(247, 244, 237, 0.12); }
+.btn-icon:hover { background: color-mix(in srgb, var(--chalk) 12%, transparent); }
 .btn-icon svg { width: 16px; height: 16px; }
 
 /*
@@ -842,7 +845,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 .btn-quiet:hover { color: var(--chalk); }
 
 .btn-danger { background: transparent; color: var(--lost); border-color: var(--rule); }
-.btn-danger:hover { border-color: var(--lost); background: rgba(203, 49, 49, 0.1); }
+.btn-danger:hover { border-color: var(--lost); background: color-mix(in srgb, var(--lost) 10%, transparent); }
 
 .btn-sm { min-height: 34px; padding: var(--space-2) var(--space-5); font-size: var(--text-xs); }
 
@@ -888,7 +891,7 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
 }
 .field input::placeholder { color: var(--chalk-3); }
 .field input:hover { border-color: var(--chalk-3); }
-.field input:focus-visible { outline: none; box-shadow: var(--focus-ring); border-color: var(--floodlight); }
+.field input:focus-visible { outline: none; box-shadow: var(--focus-ring); border-color: var(--floodlight-ink); }
 
 /* ---------------------------------------------------------------- footer */
 
@@ -930,6 +933,13 @@ h3.display { font-size: var(--text-lg); letter-spacing: var(--tracking-md); line
   padding: var(--space-9) var(--gutter) calc(var(--space-9) + env(safe-area-inset-bottom, 0px));
   display: grid;
   gap: var(--space-8);
+}
+/* On a phone the footer was longer than some pages: two columns of links,
+   then "This week" and "Next up" again (both already on the page above), the
+   blurb and the small print, about fifteen hundred pixels. Below 680px the
+   two board-drawn columns go; the board itself is a tap away. */
+@media (max-width: 680px) {
+  #foot-comps-col, #foot-next-col { display: none !important; }
 }
 .foot-cols {
   display: grid;

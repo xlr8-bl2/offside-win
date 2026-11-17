@@ -40,7 +40,8 @@ reasoning is written down because otherwise the next pass reverts it by eye.
 | `--stand` / `--terrace` | `#15130f` / `#201c17` | Surface steps of about 4%. Depth comes from these and from hairlines, never from a shadow under every card. |
 | `--chalk` | `#f7f4ed` | Warm white, so type sits on the ground instead of glowing off it. |
 | `--floodlight` | `#7a5af8` | Violet is unclaimed in football — bet365 green, FanDuel blue, DraftKings orange, OneFootball lime, Sofascore royal blue. It is also cool against a warm ground and does not collide with the semantic red and green. |
-| `--won` / `--lost` | `#3db468` / `#cb3131` | Muted on purpose, taken from Polymarket. **These are states, never brand.** |
+| `--won` / `--lost` | `#2dd4bf` / `#f45d64` | Teal-green and coral, chosen so red-green colour-blind readers can tell them apart (17 November 2026; reasoning in `tokens.css`). **These are states, never brand**, and never the only signal: W/L, landed and missed are always written. |
+| `--floodlight-ink` | `#a996ff` | The violet as text. The fill colour is too dark to read at text size on raised surfaces; anything violet that is read, not pressed, uses this. |
 
 **Green is spent.** bet365, Betway, Paddy Power and every tipster site own
 saturated green, so it reads as gambling promo. It is semantic here and

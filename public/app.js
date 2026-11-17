@@ -9186,10 +9186,11 @@ async function scheduleSeason() {
     if (document.getElementById('season-note') || document.getElementById('moment')) return;
     const fresh = moment && !moments.seen(moment.key) ? moment : null;
     if (!fresh && !reading) { season.removeSeason(); return; }
+    // No interruptions (owner, 17 November 2026): nothing opens or floats over
+    // the page by itself. The chip sat fixed in the corner on top of the
+    // content, where the ads will sit too, so it goes as well.
+    if (FREE) { season.removeSeason(); return; }
     if (!fresh && season.dismissed(reading.key)) { season.showChip(reading, helpers); return; }
-    // No interruptions (owner, 17 November 2026): nothing opens over the page
-    // by itself. The week's note waits as its small chip, opened by a tap.
-    if (FREE) { if (reading) season.showChip(reading, helpers); return; }
     const go = () => {
       if ((parseHash().parts[0] || 'home') !== name || landing()) return;
       if (document.getElementById('cookie-notice')) {

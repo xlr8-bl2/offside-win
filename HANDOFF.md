@@ -49,7 +49,19 @@ What has changed so far:
   browser now signs out the oldest only past ten devices
   (`maxDevices()` in auth.ts; it was two, to stop shared memberships).
 
-Still to do: a colour and layout pass, and ad slots with a consent tool.
+- Colour and layout pass, first round (17 November): win and loss are now
+  teal-green `#2dd4bf` and coral `#f45d64`, so red-green colour-blind readers
+  can tell them apart (the old pair simulated to near-identical olives).
+  Violet text uses `--floodlight-ink` (`#a996ff`), because the fill colour
+  failed 4.5:1 on raised surfaces, and `--chalk-3` is lifted to pass
+  everywhere. 70 hard-coded rgba colours in base and components now come
+  from the tokens. The all-caps tracked labels and middle-dot fact strings
+  (results, tags, the book name) are sentence case. On phones the footer
+  drops its "This week" and "Next up" columns, the header says "1 live", and
+  the floating break chip is gone.
+
+Still to do: home page order on phones (the countdown block sits above the
+surest call), and ad slots with a consent tool.
 
 ### Fitting the Workers free plan (17 November 2026)
 
