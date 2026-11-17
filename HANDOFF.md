@@ -37,9 +37,19 @@ What has changed so far:
   signed in or not, gets the edge copy and the head's preloads. Signed-in
   reads used to bypass both and go straight to D1.
 
-Still to do: the audit for everything that still needs an account (following
-teams), a colour and layout pass, and ad slots with a consent tool. See the
-task list in the session.
+- Whop renewals: `whop:stop` (engine/src/whopstop.ts) counts the memberships
+  still set to renew, and with the argument `confirm` stops each one at the
+  end of its paid time. On 17 November there were 3 in all (1 cancelled, 2
+  expired), none renewing, so nothing needed cancelling.
+- Nothing needs an account now. Following works signed out: the list is kept
+  on the device (`ow.follows`, listed in the storage notice) and moves onto
+  the account at sign-in. "Today's free call" is now "our surest call today".
+  The international-break note and the big-moment cards no longer open over
+  the page by themselves; the note waits as its chip. Signing in on a new
+  browser now signs out the oldest only past ten devices
+  (`maxDevices()` in auth.ts; it was two, to stop shared memberships).
+
+Still to do: a colour and layout pass, and ad slots with a consent tool.
 
 ### Fitting the Workers free plan (17 November 2026)
 

@@ -169,7 +169,7 @@ async function windowPage(env: SeoEnv, site: string, o: {
     ${c.html}
     <h1 class="display">${esc(o.h1)}</h1>
     <p>${esc(lead)} ${esc(MOVES)} Every call is free.</p>
-    ${free ? `<p>The free call is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
+    ${free ? `<p>Our surest call today is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
     ${byDayAndLeague(fixtures)}
     ${moreHTML(liveKinds(picks))}
   </article>`,
@@ -228,7 +228,7 @@ export async function freePage(env: SeoEnv, site: string): Promise<Page> {
   const result = pub.result ? ` It ${RESULT_WORD[pub.result] ?? 'was settled'}.` : '';
   return {
     title: `Free football prediction today: ${home} v ${away}, ${name}`,
-    description: clip(`Today's free call: ${name} in ${home} v ${away}, ${when.day} ${when.time} UK${Number.isFinite(odds) ? `, at odds of ${odds.toFixed(2)}` : ''}. The reason behind it, in full.${result}`),
+    description: clip(`Our surest call today: ${name} in ${home} v ${away}, ${when.day} ${when.time} UK${Number.isFinite(odds) ? `, at odds of ${odds.toFixed(2)}` : ''}. The reason behind it, in full.${result}`),
     canonical: `${site}/free-prediction`,
     body: `
   <article class="wrap section narrow seo">

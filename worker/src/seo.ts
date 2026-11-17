@@ -361,7 +361,7 @@ function rowStatus(f: Rec): string {
   }
   if (state === 'live') return f.locked || f.top_pick ? 'Under way. Our call closed at kick-off.' : 'Under way.';
   if (f.later) return 'Analysed closer to kick-off.';
-  if (f.top_pick && f.free_call) return `Today's free call: ${callName(f.top_pick, f.home, f.away)}.`;
+  if (f.top_pick && f.free_call) return `Our surest call today: ${callName(f.top_pick, f.home, f.away)}.`;
   if (f.top_pick || f.locked) return 'We have a call on this one.';
   return 'No call.';
 }
@@ -402,7 +402,7 @@ export async function todayPage(env: SeoEnv, site: string): Promise<Page> {
   const c = crumbs([[SITE, '/'], ["Today's board", '/today']], site);
   return {
     title: todayTitle(day, calls),
-    description: clip(`${calls} calls across ${fixtures.length} matches in ${comps} competitions.${free ? ` Today's free call: ${free.home} v ${free.away}.` : ''} Team news, form and the reason behind every call.`),
+    description: clip(`${calls} calls across ${fixtures.length} matches in ${comps} competitions.${free ? ` Our surest call today: ${free.home} v ${free.away}.` : ''} Team news, form and the reason behind every call.`),
     canonical: `${site}/today`,
     json: `${site}/api/board?hours=48`,
     body: `
@@ -410,7 +410,7 @@ export async function todayPage(env: SeoEnv, site: string): Promise<Page> {
     ${c.html}
     <h1 class="display">Today's board</h1>
     <p>${esc(`${fixtures.length} matches across ${comps} competitions, with ${calls} calls.`)} ${esc(MOVES)} Every call is free.</p>
-    ${free ? `<p>Today's free call is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
+    ${free ? `<p>Our surest call today is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
     ${byDayAndLeague(fixtures)}
   </article>`,
     jsonLd: [c.ld, {
@@ -560,7 +560,7 @@ export async function homePage(env: SeoEnv, site: string): Promise<Page> {
     <h1 class="display">Football predictions for today's biggest games</h1>
     <p>${esc(LANDING_LEDE)}</p>
     <p>${esc(fixtures.length ? `${fixtures.length} matches in the next two days across ${comps} competitions, with ${calls} calls.` : 'The next matches go up as soon as they are analysed.')} <a href="/results">Every result stays on the record</a>. One call a day is free.</p>
-    ${free ? `<p>Today's free call is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
+    ${free ? `<p>Our surest call today is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
     <h2>How it works</h2>
     <ol>${LANDING_STEPS.map(([h, p]) => `<li><b>${esc(h)}</b> ${esc(p)}</li>`).join('')}</ol>
     ${byDayAndLeague(fixtures)}
