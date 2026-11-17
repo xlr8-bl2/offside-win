@@ -36,6 +36,7 @@
     "grant": "npm -w engine run grant --",
     "plans": "npm -w engine run plans --",
     "whop:check": "npm -w engine run whop:check",
+    "whop:stop": "npm -w engine run whop:stop",
     "gemini:check": "npm -w engine run gemini:check",
     "mail:route": "npm -w engine run mail:route",
     "cf:usage": "npm -w engine run cf:usage",

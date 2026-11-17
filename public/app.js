@@ -1229,7 +1229,7 @@ function freeCallHTML(hero, detail, free = null) {
   }
   if (!v || !tie) {
     return hero
-      ? `<p class="hero-blurb">${esc(hero.league ?? '')}${hero.league ? '. ' : ''}Today's free call goes
+      ? `<p class="hero-blurb">${esc(hero.league ?? '')}${hero.league ? '. ' : ''}Our surest call of the day goes
       up once the calls are in.</p>`
       : '';
   }
@@ -1253,7 +1253,7 @@ function freeCallHTML(hero, detail, free = null) {
     const shown = score ?? (Array.isArray(free.live_score) ? free.live_score : null);
     return `
   <div class="freecall">
-    <span class="freecall-tag">Today's free call</span>
+    <span class="freecall-tag">Our surest call today</span>
     <a class="freecall-tie" href="#/fixture/${encodeURIComponent(tie.id)}">${crest(tie.home, 'xs', tie.home_id)}${esc(tie.home)}
       ${shown ? `<b>${esc(shown[0])}–${esc(shown[1])}</b>` : 'v'} ${crest(tie.away, 'xs', tie.away_id)}${esc(tie.away)}
       ${st.kind === 'live' ? liveBadge(st) : ''}</a>
@@ -1263,8 +1263,8 @@ function freeCallHTML(hero, detail, free = null) {
       : trackHTML(liveTrack(v, free))} <b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}
       ${shareButtonHTML({
         text: landed && shown
-          ? `Today's free call ${landed === 'won' ? 'landed' : 'is in'}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}. ${tie.home} ${shown[0]}–${shown[1]} ${tie.away}.`
-          : `Today's free call on ${tie.home} v ${tie.away}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}.`,
+          ? `Our surest call today ${landed === 'won' ? 'landed' : 'is in'}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}. ${tie.home} ${shown[0]}–${shown[1]} ${tie.away}.`
+          : `Our surest call today, ${tie.home} v ${tie.away}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}.`,
         url: matchUrl(tie.id, tie.home, tie.away), title: `${tie.home} v ${tie.away}` })}</p>
     <p class="hero-blurb">${landed
       ? `Free for everyone, as one call is every day.${isMember() ? '' : ' Members had every other call on the board.'}`
@@ -1274,11 +1274,11 @@ function freeCallHTML(hero, detail, free = null) {
 
   return `
   <div class="freecall">
-    <span class="freecall-tag">Today's free call</span>
+    <span class="freecall-tag">Our surest call today</span>
     ${elsewhere ? `<a class="freecall-tie" href="#/fixture/${encodeURIComponent(tie.id)}">${crest(tie.home, 'xs', tie.home_id)}${esc(tie.home)} v ${crest(tie.away, 'xs', tie.away_id)}${esc(tie.away)}<span>${esc(kickoffLabel(tie.kickoff))}</span></a>` : ''}
     <p class="freecall-sel">${elsewhere ? `<a href="#/fixture/${encodeURIComponent(tie.id)}">${betHTML(d)}</a>` : betHTML(d)}</p>
     <p class="freecall-meta" data-public-price><b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}
-      ${shareButtonHTML({ text: `Today's free call on ${tie.home} v ${tie.away}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}.`,
+      ${shareButtonHTML({ text: `Our surest call today, ${tie.home} v ${tie.away}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}.`,
         url: matchUrl(tie.id, tie.home, tie.away), title: `${tie.home} v ${tie.away}` })}</p>
     <p class="hero-blurb">The call we are surest of today, free for everyone.${isMember() ? '' : ' Members get every other call the moment it goes up.'}</p>
   </div>`;
@@ -1403,7 +1403,7 @@ function heroCallHTML(hero, row) {
     const out = RESULT_WORD[res] ? `<b class="freecall-out is-${RESULT_TONE[res]}">${esc(RESULT_WORD[res])}</b> ` : '';
     return `
     <div class="freecall hero-call">
-      <span class="freecall-tag${row.free_call ? '' : ' is-ours'}">${row.free_call ? 'Our call, free today' : 'Our call'}</span>
+      <span class="freecall-tag${row.free_call ? '' : ' is-ours'}">${row.free_call ? 'Our surest call today' : 'Our call'}</span>
       <p class="freecall-sel">${betHTML(d)}</p>
       <p class="freecall-meta" data-public-price>${out}${st.kind === 'live' ? `${trackHTML(liveTrack(v, row))} ` : ''}<b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
     </div>`;
@@ -1561,12 +1561,12 @@ function nextRailHTML(fixtures) {
 /**
  * The reader's own games: every match on the board involving a team they
  * follow or in a competition they follow, live first then soonest. Drawn
- * only for a signed-in reader who follows something, and above everything
- * else below the headline, because it is the reason they made an account.
+ * for anyone who follows something, signed in or not (myFollows), above
+ * everything else below the headline.
  */
 function yourGamesHTML(fixtures) {
-  const follows = state.account?.follows ?? [];
-  if (!state.user || !follows.length) return '';
+  const follows = myFollows();
+  if (!follows.length) return '';
   const teams = new Set(follows.filter((f) => f.kind === 'team').map((f) => Number(f.id)));
   const comps = new Set(follows.filter((f) => f.kind === 'league').map((f) => Number(f.id)));
   const rank = (f) => ({ live: 0, upcoming: 1 })[matchState(f).kind] ?? 2;
@@ -1575,12 +1575,14 @@ function yourGamesHTML(fixtures) {
     .filter((f) => rank(f) < 2)
     .sort((a, b) => rank(a) - rank(b) || (a.kickoff ?? 0) - (b.kickoff ?? 0))
     .slice(0, 8);
-  const name = accountName(state.user, state.account?.profile).split(' ')[0];
+  const name = state.user ? accountName(state.user, state.account?.profile).split(' ')[0] : '';
+  // Signed out, the follows are on this device: each is unfollowed from its
+  // own page, so there is no list to edit and no link to an account page.
   return `
   <div class="wrap section dense">
     <div class="section-head"><div><h2 class="display">Your games</h2>
-      <p>${esc(name)}, the teams and competitions you follow.</p></div>
-      <a class="btn btn-ghost btn-sm" href="#/account?tab=following">Edit</a></div>
+      <p>${name ? `${esc(name)}, the` : 'The'} teams and competitions you follow.</p></div>
+      ${state.user ? '<a class="btn btn-ghost btn-sm" href="#/account?tab=following">Edit</a>' : ''}</div>
     ${mine.length
       ? `<ol class="next-list">${mine.map(nextRowHTML).join('')}</ol>`
       : `<div class="empty-state"><b>Nothing from them in the next few days</b>
@@ -1971,7 +1973,7 @@ function sideHTML(fixtures, slip) {
           <a class="side-item" href="#/fixture/${encodeURIComponent(f.id)}"${f.free_call ? ' data-public-price' : ''}>
             <span class="side-thumb">${crest(f.home, 'sm', f.home_id)}${crest(f.away, 'sm', f.away_id)}</span>
             <span class="side-body">
-              <span class="side-sel">${betHTML(d)}${f.free_call ? ' <span class="freecall-tag">Free</span>' : ''}</span>
+              <span class="side-sel">${betHTML(d)}${f.free_call ? ' <span class="freecall-tag">Surest</span>' : ''}</span>
               <span class="side-meta">${esc(kickoffLabel(f.kickoff))} <b>${oddsTag(f.top_pick.odds)}</b></span>
             </span>
           </a>`;
@@ -2167,8 +2169,8 @@ function rowHTML(f) {
    */
   const kind = played ? null : f.free_call && pick ? 'free' : pick || f.locked ? 'members' : null;
   const kindTag = kind === 'free'
-    ? '<span class="row-kind is-free">Free today</span>'
-    : kind === 'members' && pick
+    ? '<span class="row-kind is-free">Surest today</span>'
+    : kind === 'members' && pick && !FREE
       ? `<span class="row-kind is-members"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>Members</span>`
       : '';
 
@@ -2864,7 +2866,7 @@ async function viewLanding() {
       a.setAttribute('href', hero?.fixture_id ? `#/fixture/${encodeURIComponent(hero.fixture_id)}` : '#/board');
     }
     const assure = app.querySelector('.ld-assure');
-    if (assure) assure.textContent = 'No free call yet today. It goes up as team news lands, usually a few hours before kick-off. Every preview is free in the meantime, no sign-up.';
+    if (assure) assure.textContent = 'No calls yet today. They go up as team news lands, usually a few hours before kick-off. Every preview is up in the meantime.';
   }
 
   // The record: settled calls, newest first, voids aside.
@@ -3821,8 +3823,8 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
   return `
   <div class="verdict${landed ? ` settled ${landed}` : ''}${!played && isMember() && !isFreeFixture(fixture?.id) ? ' is-members' : ''}">
     ${played || landed ? '' : isFreeFixture(fixture?.id) || fixture?.free_call
-      ? '<span class="row-kind is-free">Free call today: open to everyone</span>'
-      : `<span class="row-kind is-members"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>Members' call</span>`}
+      ? '<span class="row-kind is-free">Our surest call today</span>'
+      : FREE ? '' : `<span class="row-kind is-members"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>Members' call</span>`}
     <div class="verdict-head">
       <span class="sel">${betHTML(d)}<span class="bet-tie">${esc(home)} v ${esc(away)}</span></span>
       ${landed
@@ -3844,7 +3846,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
         const text = landed
           ? `${VERDICT_WORD[landed] ?? 'Settled'}: ${betText(d)}, at odds of ${Number(c.odds).toFixed(2)}. ${home} ${hg}–${ag} ${away}.`
           : isFreeFixture(fixture.id) || !isMember()
-            ? `Today's free call on ${tie}: ${betText(d)}, at odds of ${Number(odds).toFixed(2)}.`
+            ? `Our surest call today, ${tie}: ${betText(d)}, at odds of ${Number(odds).toFixed(2)}.`
             : `${tie}: we have a call on this one.`;
         return shareButtonHTML({ text, url, title: tie });
       })() : ''}
@@ -6794,7 +6796,7 @@ function freeLineHTML(free) {
     : `${WORD[(free.published ?? []).find((x) => x?.market)?.result ?? free.called?.result] ?? 'Played.'} Read how it went.`;
   return `
     <a class="freecall-line" href="#/fixture/${encodeURIComponent(free.id ?? free.fixture_id)}">
-      <span class="freecall-tag">Today's free call</span>
+      <span class="freecall-tag">Our surest call today</span>
       <b>${tie}</b>
       <span>${esc(say)}</span>
     </a>`;
@@ -7390,6 +7392,7 @@ async function viewSignin() {
     ? 'Sign in first and your membership will be waiting when you come back.'
     : intent === '#/account'
       ? 'Your account is behind this.'
+      : FREE ? 'Optional. Everything on offside.win works without an account; signing in keeps your teams and settings on every device.'
       : 'Your calls follow you, your slip is yours, and there is nothing to remember.';
 
   // The match the front page leads with, for the picture and a reason to be
@@ -7438,7 +7441,7 @@ async function viewSignin() {
 
         <ul class="auth-facts">
           <li>No password. A link by email, or your Google account.</li>
-          <li>One account is one person's. It stays signed in on two devices at a time.</li>
+          ${FREE ? '' : "<li>One account is one person's. It stays signed in on two devices at a time.</li>"}
         </ul>
         <p class="signin-fine">The link in the email signs you in on the device you open it on.
           By signing in you agree to our <a href="/terms">terms</a> and <a href="/privacy">privacy policy</a>. 18+.</p>
@@ -7865,8 +7868,8 @@ async function viewAccount() {
     </fieldset>
 
     <h2 class="acct-sub">Signing in</h2>
-    <p class="acct-hint">An account is one person's. It stays signed in on two devices at a time; signing in on a third signs out the one you used least recently.
-      Signing out does not touch your membership. Sign back in with the same email and it is still yours.</p>
+    <p class="acct-hint">${FREE ? 'You can stay signed in on up to ten devices; signing in on an eleventh signs out the one you used least recently.' : "An account is one person's. It stays signed in on two devices at a time; signing in on a third signs out the one you used least recently."}
+      ${FREE ? 'Signing out keeps everything on your account; sign back in with the same email.' : 'Signing out does not touch your membership. Sign back in with the same email and it is still yours.'}</p>
     <ul class="acct-devices" id="devices" hidden></ul>
     <div class="acct-actions">
       <button class="btn btn-ghost" id="out">Sign out</button>
@@ -8185,16 +8188,55 @@ function humaneError(err) {
  * next time it draws.
  */
 async function toggleFollow(kind, id, label, on) {
+  if (!state.user) {
+    const rest = deviceFollows().filter((f) => !(f.kind === kind && Number(f.id) === Number(id)));
+    const list = on ? [...rest, { kind, id: Number(id), label }].slice(-100) : rest;
+    saveDeviceFollows(list);
+    return list;
+  }
   const list = await accountRpc('set_follow', { p_kind: kind, p_ref: Number(id), p_label: label, p_on: on });
   if (state.account) state.account.follows = list ?? [];
   return list ?? [];
 }
-const isFollowing = (kind, id) => Boolean(state.account?.follows?.some((f) => f.kind === kind && Number(f.id) === Number(id)));
+
+/*
+ * Following without an account. The site is free and an account is a nice
+ * extra, so a reader who is not signed in follows on this device: the list
+ * sits in this browser and nowhere else. It is kept whatever the cookie
+ * choice, because the reader asked for it by pressing Follow (a setting they
+ * chose, not tracking), and it moves onto the account if they ever sign in
+ * (mergeDeviceFollows).
+ */
+const FOLLOWS_KEY = 'ow.follows';
+function deviceFollows() {
+  try {
+    const v = JSON.parse(localStorage.getItem(FOLLOWS_KEY) || '[]');
+    return Array.isArray(v) ? v.filter((f) => f && (f.kind === 'team' || f.kind === 'league') && Number.isFinite(Number(f.id))) : [];
+  } catch { return []; }
+}
+function saveDeviceFollows(list) {
+  try { if (list.length) localStorage.setItem(FOLLOWS_KEY, JSON.stringify(list)); else localStorage.removeItem(FOLLOWS_KEY); }
+  catch { /* private mode: this visit only, then */ }
+}
+/** What the reader follows: the account's list signed in, this device's otherwise. */
+const myFollows = () => (state.user ? state.account?.follows ?? [] : deviceFollows());
+/** Signed in with follows made on this device: put them on the account, once. */
+async function mergeDeviceFollows() {
+  const local = deviceFollows();
+  if (!state.user || !local.length || !state.account) return;
+  const have = state.account.follows ?? [];
+  for (const f of local) {
+    if (have.some((h) => h.kind === f.kind && Number(h.id) === Number(f.id))) continue;
+    try { state.account.follows = await accountRpc('set_follow', { p_kind: f.kind, p_ref: Number(f.id), p_label: f.label ?? '', p_on: true }) ?? state.account.follows; }
+    catch { return; }
+  }
+  saveDeviceFollows([]);
+}
+const isFollowing = (kind, id) => myFollows().some((f) => f.kind === kind && Number(f.id) === Number(id));
 
 /**
- * A Follow button for a team or competition page. Signed out, it goes to
- * sign-in and comes back here, because following is a reason to have an
- * account and the button should say so rather than disappear.
+ * A Follow button for a team or competition page. It works for everyone:
+ * signed out, the follow is kept on this device (deviceFollows).
  */
 const followText = (on, label, named) => `${on ? 'Following' : 'Follow'}${named ? ` ${label}` : ''}`;
 function followButtonHTML(kind, id, label, { named = false } = {}) {
@@ -8206,7 +8248,6 @@ function followButtonHTML(kind, id, label, { named = false } = {}) {
 function wireFollowButtons() {
   for (const b of app.querySelectorAll('.follow-btn')) {
     b.onclick = async () => {
-      if (!state.user) { setIntent(location.hash); location.hash = '#/signin'; return; }
       const on = b.getAttribute('aria-pressed') !== 'true';
       b.disabled = true;
       try {
@@ -9146,6 +9187,9 @@ async function scheduleSeason() {
     const fresh = moment && !moments.seen(moment.key) ? moment : null;
     if (!fresh && !reading) { season.removeSeason(); return; }
     if (!fresh && season.dismissed(reading.key)) { season.showChip(reading, helpers); return; }
+    // No interruptions (owner, 17 November 2026): nothing opens over the page
+    // by itself. The week's note waits as its small chip, opened by a tap.
+    if (FREE) { if (reading) season.showChip(reading, helpers); return; }
     const go = () => {
       if ((parseHash().parts[0] || 'home') !== name || landing()) return;
       if (document.getElementById('cookie-notice')) {
@@ -9346,7 +9390,9 @@ addEventListener('ow:signedout', async () => {
   state.member = null;
   state.board = null;
   state.account = null;
-  location.hash = '#/signin';
+  // Free: nothing on the page was the account's, so the reader stays where
+  // they are, signed out, rather than being sent to the sign-in page.
+  if (!FREE) location.hash = '#/signin';
   headerAuth();
 });
 
@@ -9501,6 +9547,7 @@ async function headerAuth() {
         if (c && c !== clockFormat) setClock(c);
         // The page may have drawn before the account arrived: redraw it once
         // so the odds and "Your games" are the reader's own.
+        if (deviceFollows().length) await mergeDeviceFollows();
         if (oddsChanged || state.account.follows?.length) softRefresh();
       } catch { state.member = Boolean(state.board?.member); }
     }

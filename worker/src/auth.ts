@@ -33,7 +33,7 @@
  */
 
 import { authMail, deliver, type MailEnv } from './mail.ts';
-import { hasMembership, sha256Hex, type D1Read, type Viewer } from './d1read.ts';
+import { FREE, hasMembership, sha256Hex, type D1Read, type Viewer } from './d1read.ts';
 import { cleanCode, recordReferral } from './referral.ts';
 
 export interface AuthStmt {
@@ -63,6 +63,13 @@ const LINKS_PER_EMAIL = 5;
 const LINKS_PER_HOUR = 300;
 /** Browsers an account is signed in on at once. */
 export const MAX_DEVICES = 2;
+/**
+ * The limit in force. Two browsers was there so one membership could not be
+ * shared round a group; on a free site there is nothing to share, and being
+ * signed out by someone else's sign-in is only an interruption, so the limit
+ * is a generous ten (still a cap on sessions left lying about).
+ */
+export const maxDevices = (): number => (FREE ? 10 : MAX_DEVICES);
 /** New sign-ins an account may make in a day. */
 export const SIGNINS_PER_DAY = 6;
 
@@ -208,7 +215,7 @@ async function startSession(db: AuthDb, accountId: string, request: Request): Pr
     db.prepare(`UPDATE account_session SET ended_at = ?, ended_reason = 'device_limit'
       WHERE account_id = ? AND ended_at IS NULL AND token_sha256 NOT IN (
         SELECT token_sha256 FROM account_session WHERE account_id = ? AND ended_at IS NULL AND expires_at > ?
-         ORDER BY seen_at DESC, created_at DESC LIMIT ${MAX_DEVICES})`).bind(t, accountId, accountId, t),
+         ORDER BY seen_at DESC, created_at DESC LIMIT ${maxDevices()})`).bind(t, accountId, accountId, t),
     // Sessions from before browsers were checked count towards the limit by
     // simply ending: the next sign-in on those browsers is a fresh one.
     db.prepare('DELETE FROM auth_session WHERE account_id = ?').bind(accountId),
@@ -407,7 +414,7 @@ async function me(db: AuthDb, token: string | null): Promise<Response> {
       WHERE account_id = ? AND ended_at IS NULL AND expires_at > ? ORDER BY seen_at DESC`)
     .bind(a.id, t).all<{ device: string | null; seen_at: number; token_sha256: string }>()).results ?? [];
   return answer({
-    user: userOf(a), expires_at: expires, max_devices: MAX_DEVICES,
+    user: userOf(a), expires_at: expires, max_devices: maxDevices(),
     devices: devices.map((d) => ({ device: d.device, seen_at: d.seen_at, current: d.token_sha256 === a.token_sha256 })),
   });
 }

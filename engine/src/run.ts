@@ -5,6 +5,7 @@ import { config, requireEnv } from './config.ts';
 import { backfillHistory, repairCards } from './history.ts';
 import { probe, probeExtras, probePlayers, probeProfiles, probeReds, probeReport } from './probe.ts';
 import { grant, plans } from './grant.ts';
+import { whopStop } from './whopstop.ts';
 import { whopCheck } from './whopcheck.ts';
 import { geminiCheck } from './geminicheck.ts';
 import { mailSetup } from './mailsetup.ts';
@@ -287,6 +288,11 @@ const commands: Record<string, () => Promise<unknown>> = {
 
   async 'whop:check'() {
     return whopCheck();
+  },
+
+  // The site is free: stop every Whop renewal (whopstop.ts). Counts unless ARG is "confirm".
+  async 'whop:stop'() {
+    return whopStop(process.argv[3] ?? process.env['ARG'] ?? '');
   },
 
   async 'gemini:check'() {

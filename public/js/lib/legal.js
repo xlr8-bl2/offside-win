@@ -803,6 +803,7 @@ export const LEGAL = {
         <thead><tr><th>Item</th><th>Purpose</th><th>Duration</th></tr></thead>
         <tbody>
           <tr><td><code>ow.consent</code></td><td>Records your choice below, so that you are not asked again on each visit.</td><td>Until changed, or until the site’s data is cleared</td></tr>
+          <tr><td><code>ow.follows</code></td><td>The teams and competitions you follow while not signed in, stored only when you press Follow, so that their games are shown to you first. Moved onto your account if you sign in.</td><td>Until you unfollow, sign in, or clear the site’s data</td></tr>
           <tr><td><code>ow.session</code></td><td>Maintains your signed-in session. Stored only when you sign in.</td><td>Until you sign out</td></tr>
           <tr><td><code>ow.after-signin</code></td><td>Records the action in progress when you were asked to sign in, such as a purchase, so that you are returned to it.</td><td>Deleted once used</td></tr>
           <tr><td><code>offside.country</code></td><td>The country selected for bookmaker prices, where you have changed it.</td><td>Until changed</td></tr>

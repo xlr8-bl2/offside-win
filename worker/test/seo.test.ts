@@ -113,11 +113,11 @@ test('the sitemap lists the matches on the board and their competitions', async 
   assert.match(xml, /<loc>https:\/\/offside.win\/today<\/loc>/);
 });
 
-test('today\'s board counts what is on and names the free call', async () => {
+test('today\'s board counts what is on and names the surest call', async () => {
   const free = { ...FIX, id: 9, free_call: true, locked: false, top_pick: { market: 'over_under_15', outcome: 'OVER', line: 1.5 } };
   const p = await todayPage(env({ get_board: { fixtures: [FIX, free] } }) as any, 'https://offside.win');
   assert.match(p.title, /2 calls/);
-  assert.match(p.body, /Today's free call is/);
+  assert.match(p.body, /Our surest call today is/);
   assert.deepEqual(findBannedInProse(p.body.replace(/<[^>]+>/g, ' ')).map((v) => v.term), []);
 });
 
@@ -178,7 +178,7 @@ test('a card that is not drawn yet falls back to the site picture instead of a b
   assert.equal(hit.headers.get('content-type'), 'image/jpeg');
 });
 
-test('the front page is written for a crawler: a heading, the free call and a link to every match', async () => {
+test('the front page is written for a crawler: a heading, the surest call and a link to every match', async () => {
   const free = { ...FIX, id: 7, home: 'Real Madrid', away: 'Barcelona', free_call: true, top_pick: { market: 'match_result', outcome: 'home', line: null, odds: 1.9 } };
   const e = env({ get_board: { fixtures: [FIX, free] } });
   const res = await seoResponse(new Request('https://offside.win/'), e as any);
@@ -187,7 +187,7 @@ test('the front page is written for a crawler: a heading, the free call and a li
   assert.match(html, /<title>Offside\.win: football predictions for today(&#39;|')s biggest games<\/title>/, 'the front page keeps its own title');
   assert.match(html, /<link rel="canonical" href="https:\/\/offside\.win\/">/);
   assert.match(html, /href="\/match\/212602\/iceland-v-estonia"/);
-  assert.match(html, /Today's free call is <a href="\/match\/7\/real-madrid-v-barcelona">/);
+  assert.match(html, /Our surest call today is <a href="\/match\/7\/real-madrid-v-barcelona">/);
   const p = await homePage(e as any, 'https://offside.win');
   assert.deepEqual(findBannedInProse(p.body.replace(/<[^>]+>/g, ' ')), []);
 });
