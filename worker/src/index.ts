@@ -40,7 +40,7 @@ import { authEmailHook, type HookEnv } from './authhook.ts';
 import { admin, type AdminEnv } from './admin.ts';
 import { inbound, type InboundMessage } from './support.ts';
 import { engineDb, type EngineDbEnv } from './enginedb.ts';
-import { recordView, serve, type D1Read } from './d1read.ts';
+import { FREE, recordView, serve, type D1Read } from './d1read.ts';
 import { auth, authCleanup, boundToken, viewerFor, type AuthDb } from './auth.ts';
 import { accountWrite } from './profile.ts';
 import { socials, type SocialEnv } from './social.ts';
@@ -225,6 +225,8 @@ const worker = {
         const img = await storedImage(env, path.slice('/img/'.length), 86400);
         return img ?? new Response('Not found', { status: 404, headers: { 'cache-control': 'public, max-age=60' } });
       }
+      // Nothing is sold while the site is free: the old plans page goes home.
+      if (FREE && (path === '/pricing' || path === '/pricing/')) return Response.redirect(`${url.origin}/`, 301);
       try {
         // The readable pages are the same for everyone (the app adds the
         // reader's own view once it runs), so they come from the edge's copy
@@ -247,10 +249,11 @@ const worker = {
     // On D1 a session is tied to the kind of browser it was issued to (auth.ts).
     const jwt = env.DB ? boundToken(bearer(request), request) : bearer(request);
 
-    // A signed-out read of something every visitor sees the same: from the
-    // edge's copy (edge.ts). The inner call carries a marker so it goes to the
-    // database rather than round again.
-    if (request.method === 'GET' && !jwt && EDGE_PATHS.test(path) && !request.headers.has('x-edge-fill')) {
+    // A read every visitor sees the same: from the edge's copy (edge.ts). The
+    // inner call carries a marker so it goes to the database rather than round
+    // again. While the site is free (d1read.ts FREE) that is every reader's
+    // read, signed in or not, since nobody's copy differs any more.
+    if (request.method === 'GET' && (!jwt || FREE) && EDGE_PATHS.test(path) && !request.headers.has('x-edge-fill')) {
       const fill = new Request(request.url, { method: 'GET', headers: { 'x-edge-fill': '1' } });
       return edgeCached(request, ctx, () => worker.fetch(fill, env, ctx), Date.now(),
         () => gradedAt(env as unknown as LiveEnv, ctx));
@@ -288,6 +291,11 @@ const worker = {
         // Read-only: presence of the secrets, never their values.
         if (path === '/api/pay/status' && request.method === 'GET') return await payStatus(env);
         if (request.method !== 'POST') return fail('method not allowed', 405);
+        // Nothing is sold while the site is free. Renewals and the webhook
+        // still run for the memberships already held.
+        if (FREE && (path === '/api/pay/checkout' || path === '/api/pay/charge')) {
+          return fail('Everything on offside.win is free now. Nothing has been charged.', 410);
+        }
         if (path === '/api/pay/checkout') return await checkout(request, env, jwt);
         if (path === '/api/pay/confirm') return await confirm(request, env, jwt);
         if (path === '/api/pay/charge') return await charge(request, env, jwt);

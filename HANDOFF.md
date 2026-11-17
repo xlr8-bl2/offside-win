@@ -14,6 +14,33 @@ meaningful step, and commits it with that step, not at the end of the day.
 
 ## Right now
 
+### The site is free (owner, 17 November 2026)
+
+The owner's new direction: a completely free product with no premium tier,
+paid for by tidy, restrained ads (Google AdSense) rather than memberships.
+Accounts stay, but only as a nice-to-have: every call, the analysis and the
+slip must be usable without one. **Never bookmaker affiliate links or
+bookmaker deals of any kind; the owner said "never ever".**
+
+What has changed so far:
+
+- `FREE` in `worker/src/d1read.ts` opens every read for every reader. The wall
+  code is still there, and setting `FREE` to false brings it back; the wall's
+  own tests run with it off. `public/app.js` has the matching `FREE`:
+  `isMember()` is always true, the front page is the dashboard for everyone,
+  `#/pricing` and `#/checkout` go home, there are no promos, and no lock boxes
+  are drawn.
+- Nothing can be bought. `/api/pay/checkout` and `/api/pay/charge` answer 410,
+  and `/pricing` redirects (301) to `/`. Whop renewals for memberships
+  already held are not cancelled yet; that is the owner's call.
+- Speed: on a free site, public reads go without the token, so every reader,
+  signed in or not, gets the edge copy and the head's preloads. Signed-in
+  reads used to bypass both and go straight to D1.
+
+Still to do: the audit for everything that still needs an account (following
+teams), a colour and layout pass, and ad slots with a consent tool. See the
+task list in the session.
+
 ### Fitting the Workers free plan (17 November 2026)
 
 The paid Workers plan lapsed. On the free plan the limits that matter are

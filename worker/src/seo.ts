@@ -253,11 +253,11 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
     title = matchTitle({ home, away, state });
     if (openCall) {
       const name = callName(openCall, home, away);
-      description = `${home} v ${away}, ${when.day} ${when.time} UK. Today's free call: ${name}. The reasoning, team news, form and head-to-head.`;
-      callHTML = `<p>This is today's free call, open to everyone: <b>${esc(name)}</b>, at odds of ${esc(Number(openCall.odds).toFixed(2))}${openCall.bookmaker ? ` with ${esc(openCall.bookmaker)}` : ''}. ${esc(MOVES)}</p>`;
+      description = `${home} v ${away}, ${when.day} ${when.time} UK. Our call: ${name}. The reasoning, team news, form and head-to-head.`;
+      callHTML = `<p>Our call: <b>${esc(name)}</b>, at odds of ${esc(Number(openCall.odds).toFixed(2))}${openCall.bookmaker ? ` with ${esc(openCall.bookmaker)}` : ''}. ${esc(MOVES)}</p>`;
     } else if (hasCall) {
       description = `${home} v ${away}, ${league}, ${when.day} ${when.time} UK. We have a call on this one. Team news, form and the head-to-head.`;
-      callHTML = `<p>We have a call on this match. Which market, the odds and the book are for <a href="/pricing">members</a>; the reading of the match is free. ${esc(MOVES)}</p>`;
+      callHTML = `<p>We have a call on this match: <a href="${esc(canonical)}">it is on the match page</a>, with the reasoning. ${esc(MOVES)}</p>`;
     } else {
       description = `${home} v ${away}, ${league}, ${when.day} ${when.time} UK. We looked and passed on this one. Team news, form, the table and the head-to-head.`;
       callHTML = `<p>We looked at this match and did not find a call worth making. That can change as team news comes in: ${esc(MOVES.toLowerCase())}</p>`;
@@ -409,7 +409,7 @@ export async function todayPage(env: SeoEnv, site: string): Promise<Page> {
   <article class="wrap section narrow seo">
     ${c.html}
     <h1 class="display">Today's board</h1>
-    <p>${esc(`${fixtures.length} matches across ${comps} competitions, with ${calls} calls.`)} ${esc(MOVES)} One call a day is free; members get the rest.</p>
+    <p>${esc(`${fixtures.length} matches across ${comps} competitions, with ${calls} calls.`)} ${esc(MOVES)} Every call is free.</p>
     ${free ? `<p>Today's free call is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
     ${byDayAndLeague(fixtures)}
   </article>`,
@@ -487,9 +487,8 @@ export async function resultsPage(env: SeoEnv, site: string): Promise<Page> {
 }
 
 /**
- * The bet slip. While it is open its legs are for members, so the page says
- * how many there are, the total odds and when the first one kicks off, and
- * names the legs of settled slips, which are public.
+ * The bet slip: how many legs, the total odds and when the first one kicks
+ * off, and the legs of settled slips.
  */
 export async function slipPage(env: SeoEnv, site: string): Promise<Page> {
   const d = await read<Rec>(env, 'get_slip', {});
@@ -513,7 +512,7 @@ export async function slipPage(env: SeoEnv, site: string): Promise<Page> {
   <article class="wrap section narrow seo">
     ${c.html}
     <h1 class="display">The bet slip</h1>
-    <p>${esc(now)} Which matches and calls are on it is for <a href="/pricing">members</a> until it settles.${esc(so)}</p>
+    <p>${esc(now)}${esc(so)}</p>
     ${recent.length ? `<h2>Settled slips</h2><ul class="seo-list">${recent.slice(0, 10).map((r) => {
       const legs: Rec[] = Array.isArray(r.legs) ? r.legs : [];
       return `<li>${esc(ukTime(Number(r.first_kickoff)).day)}, ${esc(word(legs.length))} legs at ${esc(Number(r.odds).toFixed(2))}: ${esc(r.result === 'WON' ? 'landed' : r.result === 'LOST' ? 'missed' : 'void')}. ${legs.map((l) => `<a href="${esc(matchPath({ id: l.fixture_id, home: l.home, away: l.away }))}">${esc(`${l.home} v ${l.away}`)}</a>`).join(', ')}</li>`;
@@ -794,7 +793,6 @@ export async function sitemap(env: SeoEnv, origin: string): Promise<Response> {
     [`${site}/weekend`, today, 'daily'],
     [`${site}/free-prediction`, today, 'hourly'],
     [`${site}/predictions`, today, 'daily'],
-    [`${site}/pricing`, today, 'monthly'],
     ...Object.keys(LEGAL_PATHS).map((p): [string, string, string] => [`${site}${p}`, today, 'monthly']),
   ];
   // The kinds of prediction with a page behind them (landing.ts: a few settled calls each).
