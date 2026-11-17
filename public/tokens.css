@@ -68,7 +68,7 @@
      it; these come off it. All three clear 4.5:1 on every surface above. */
   --chalk:     #f4f6fa;
   --chalk-2:   #c3c8d2;
-  --chalk-3:   #8d94a3;
+  --chalk-3:   #979eac;
 
   /* ---------------------------------------------------------------- accent */
 
@@ -79,6 +79,13 @@
   --floodlight:     #7a5af8;
   --floodlight-hi:  #9e86ff;
   --floodlight-dim: rgba(122, 90, 248, 0.16);
+  /* The violet as text. The fill (#7a5af8) is too dark to read at text size
+     on the raised surfaces: 4.0:1 on --stand, 2.9:1 on --stand-hi, under the
+     4.5:1 that small text needs. Saturated colour on a dark ground also
+     vibrates; the lighter, softer tint is the dark-theme rule (Material's
+     "200 tone"). 7.2:1 on --stand, 5.4:1 on --stand-hi. Links, kickers,
+     labels: anything violet that is read rather than pressed. */
+  --floodlight-ink: #a996ff;
 
   /* A second note, for anything imminent rather than live. */
   --sodium:    #f5a524;
@@ -108,15 +115,25 @@
   /* Muted on purpose: these are states, not brand. Saturated green is spent —
      bet365, Betway, Paddy Power and every tipster site own it, so it reads as
      gambling promo. It means won here and nothing else. */
-  --won:       #2fbf71;
-  --lost:      #f0435a;
-  --void:      #7b8596;
+  /* Won and lost are told apart by colour-blind readers too. About one man
+     in twelve has red-green colour blindness, and this is a football site.
+     The old pair (#2fbf71 / #f0435a) came out as two near-identical olives
+     for a deuteranope: a difference of 11 on the Lab scale, where 30 or more
+     is easy to see. Pulling the green towards teal and the red towards
+     coral keeps "green won, red lost" for everyone else and lifts that to
+     40 (deuteranopia) and 30 (protanopia). Measured with the Machado (2009)
+     simulation; both clear 4.5:1 on every surface but --stand-hi. The
+     result is still never colour alone: W, L, landed and missed are
+     always written. */
+  --won:       #2dd4bf;
+  --lost:      #f45d64;
+  --void:      #8a93a3;
   --warn:      #f5a524;
 
   /* Price movement is a different meaning from a settled result and gets its
      own tokens, even where the colour currently agrees. */
-  --shorten:   #2fbf71;
-  --drift:     #f0435a;
+  --shorten:   #2dd4bf;
+  --drift:     #f45d64;
 
   /* ------------------------------------------------------------ typography */
 
