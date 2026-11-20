@@ -7012,3 +7012,32 @@ body[data-page="landing"] .foot-top { display: none; }
 @media (max-width: 680px) {
   .hero .matchcentre { display: none; }
 }
+
+/* ================================================================= adverts
+ *
+ * A place for one advert (js/lib/ads.js). Hidden, taking no room, until
+ * adverts are switched on; then it keeps its height before the advert lands,
+ * so nothing under it jumps, and it says what it is. Set apart from the
+ * content by a hairline and the label, never styled like a call.
+ */
+.ad-slot {
+  margin-block: var(--space-6);
+  padding-top: var(--space-2);
+  border-top: var(--border) solid var(--hairline);
+  min-height: 300px;
+}
+.ad-slot[hidden] { display: none; }
+.ad-label {
+  display: block;
+  margin-bottom: var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--chalk-3);
+}
+.ad-slot .adsbygoogle { min-height: 250px; }
+/* No advert to show (AdSense marks the unit unfilled): the place closes up
+   rather than leaving a labelled hole. */
+.ad-slot:has(ins[data-ad-status="unfilled"]) { display: none; }
+
+/* A card that opens its match from anywhere (the click handler beside
+   linkHash in app.js) says so to a pointer. */
+[data-href] { cursor: pointer; }

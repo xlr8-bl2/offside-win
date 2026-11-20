@@ -37,6 +37,13 @@ COINFLOW_BASE_URL = "https://api-sandbox.coinflow.cash"
 COINFLOW_WALLET = ""
 COINFLOW_BLOCKCHAIN = "solana"
 SITE_URL = "https://offside.win"
+# Google AdSense, once the site is approved: the publisher id ("ca-pub-" and
+# digits) and one responsive display unit's id (digits). Both are public: they
+# are in every page that shows an advert. Empty means no adverts, no script and
+# no ads.txt. Keep the "Gambling & Betting" category blocked in AdSense: never
+# a bookmaker on this site (owner, 17 November 2026).
+ADSENSE_CLIENT = ""
+ADSENSE_SLOT = ""
 # Google sign-in's OAuth client ID. Public by design: Google puts it in every
 # sign-in link, and the "Sign in with Google" button needs it in the page. The
 # client secret is not here and never will be; it lives in Supabase only.
