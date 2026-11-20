@@ -351,6 +351,8 @@ export interface Policy {
   floorBump?: Partial<Record<MarketFamily, number>>;
   /** Markets (bucketOf) and league ranks this rule leaves alone. */
   excludeBuckets?: string[];
+  /** Asian handicap lines, as the backed side gets them (+1.5 = given a goal and a half), this rule does not call. */
+  excludeBackedLines?: number[];
   excludeRanks?: number[];
   /** Only markets at least this many books priced in full. */
   minBooks?: number;
@@ -486,6 +488,8 @@ export function ranked(policy: Policy, row: HistRow, options?: Option[]): Pick[]
     if (policy.maxHandicap !== undefined && o.family === 'handicap' && o.line !== null && Math.abs(o.line) > policy.maxHandicap) continue;
     if (policy.minBooks !== undefined && (o.books ?? 0) < policy.minBooks) continue;
     if (policy.excludeBuckets?.includes(bucketOf(o))) continue;
+    if (policy.excludeBackedLines && o.market === 'asian_handicap' && o.line !== null
+      && policy.excludeBackedLines.includes(o.outcome === 'HOME' ? o.line : -o.line)) continue;
     if (policy.excludeRanks?.includes(row.rank)) continue;
     if (policy.requireSharp && o.sharp === null) continue;
     if (policy.minOwnGap !== undefined && (o.own === null || o.own - (o.sharp ?? o.book) < policy.minOwnGap)) continue;

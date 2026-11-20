@@ -14,6 +14,42 @@ meaningful step, and commits it with that step, not at the end of the day.
 
 ## Right now
 
+### The engine's rule, tightened (20 November 2026)
+
+The owner asked for rounds of iteration until the engine is genuinely better
+than its best. `lab:dump` (pg.yml) writes the lab's whole finished-match
+history as a one-day artifact (5,923 fixtures, 13 August to 20 November), so
+studies run locally in seconds against the real lab code. The judge is the
+same A / B / C date split as `lab:tune`, plus 2,000 resamples of the newer
+half's days, plus two-week windows.
+
+Five rounds were tried. What lost or added nothing: our own ratings or the
+provider's model agreeing, recalibrated and learned probabilities (both made
+twice the calls and did worse), money since the open (steam and drift),
+minimum book counts, higher floors alone, growth or EV ranking, price caps,
+the diversity cap, and league-rank floors.
+
+What held in all three periods, and is now live (`config.confident`, with
+`PROD` in `lab/tune.ts` to match):
+- The price at or above the sharp book's fair price (`minSharpEv` 0, was
+  -0.01).
+- No double chance (`excludeMarkets`).
+- No Asian handicap at +1.5 for the backed side (`excludeBackedLines`, new;
+  `excludeBackedLines` in the lab's Policy). Production had lost on it in A,
+  B and C.
+
+| | landed (A / B / C) | return a call (A / B / C) | a day |
+|---|---|---|---|
+| before | 86.6 / 82.0 / 88.2% | +2.5 / -3.1 / +4.4% | ~15 |
+| now | 86.5 / 83.9 / 90.2% | +2.6 / -1.0 / +6.4% | ~14 |
+
+Ahead on return and on landing in 100% of resamples of B+C (+0.8 to +3.6
+points a call). The caveat: B and C were looked at while choosing, so the
+proof is the games after 20 November. Re-run `lab:dump` and score only those
+(the scripts are in the session's scratchpad: `bench.ts`, `r1`..`r6`). The lab
+returns use the best price across books, so they read higher than the
+published record, which uses one quoted book.
+
 ### The site is free (owner, 17 November 2026)
 
 The owner's new direction: a completely free product with no premium tier,

@@ -395,6 +395,8 @@ export function confidentGate(
   if (c.odds < config.confident.minOdds) return 'short';
   if (c.odds > config.confident.maxOdds) return 'long';
   if (config.confident.excludeMarkets.includes(bucketOf(c))) return 'excluded';
+  if (c.market === 'asian_handicap' && c.line !== null
+    && config.confident.excludeBackedLines.includes(c.outcome === 'HOME' ? c.line : -c.line)) return 'excluded';
   // Quarter handicap lines (-1.75, 0.25) are a split stake nobody can explain in a sentence.
   if (!config.confident.quarterLines && c.line !== null && Math.abs((c.line * 4) % 2) === 1) return 'excluded';
   if ((c.books ?? 0) < config.confident.minBooks) return 'excluded';
