@@ -473,6 +473,17 @@ export const config = {
      * whole lines either side of it, +1 and +2, did not; see minSharpEv.
      * Comma-separated to override; empty for none.
      */
+    /**
+     * Most readers do not know what a handicap is (owner, 21 November 2026),
+     * so when the likeliest call is a handicap and a result, goals, corners or
+     * cards call within this much probability also clears every test, that
+     * one is made instead. Measured at 3 points: handicaps from 72% of calls
+     * to 68%, return and landing unchanged within the lab's noise. Wider does
+     * not buy much more: on most fixtures nothing common clears the bar at
+     * all, and leaving handicaps out entirely cuts the board to about four
+     * calls a day. The handicaps that stay are written in plain words.
+     */
+    preferCommon: num('CONF_PREFER_COMMON', 0.03),
     excludeBackedLines: (process.env.CONF_EXCLUDE_AH_LINES ?? '1.5').split(',').map((x) => x.trim()).filter(Boolean).map(Number).filter(Number.isFinite),
     /** Only markets at least this many books priced in full; 0 for any. */
     minBooks: num('CONF_MIN_BOOKS', 0),

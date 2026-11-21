@@ -20,7 +20,7 @@
  * the sheet was out may not carry.
  */
 
-import { kvGetJSON, kvSetJSON } from '../store.ts';
+import { kvGetJSON, kvSetJSON, select } from '../store.ts';
 import type { LineupInfo, SideLineup } from './types.ts';
 
 export interface XiChange {
@@ -99,4 +99,68 @@ export function backsRotatedSide(c: { market: string; outcome: string }, changes
   if (!side || !changes) return null;
   const ch = changes[side];
   return ch && ch.n >= ROTATED_AT ? ch : null;
+}
+
+/*
+ * A predicted eleven is the provider's projection, and the projection does not
+ * know who has stopped being picked. Argentina's was still starting Messi in
+ * November 2026, after he had finished with the national side (owner, 21
+ * November), and the page said he was expected to start and wrote him up as
+ * the threat. So a predicted starter is checked against the side's own recent
+ * team sheets: the starters and substitutes in the reports of its last few
+ * finished games (fixture.report_json). Someone on none of them is not
+ * expected to start, whatever the projection says, and comes off the sheet.
+ * Nothing is checked once the eleven is confirmed, and nothing when fewer
+ * than two recent sheets are held: then there is no evidence either way.
+ */
+const SHEETS = 4;
+const SHEET_WINDOW_S = 540 * 86400;
+
+/** The players on a side's last few team sheets we hold, and how many sheets that was. */
+export async function recentlyPicked(teamId: number, kickoff: number): Promise<{ sheets: number; ids: Set<number> }> {
+  const ids = new Set<number>();
+  let sheets = 0;
+  const rows: Array<{ home_team_id: number | null; away_team_id: number | null; kickoff: number; report_json: string | null }> = [];
+  for (const col of ['home_team_id', 'away_team_id'] as const) {
+    rows.push(...await select<{ home_team_id: number | null; away_team_id: number | null; kickoff: number; report_json: string | null }>(
+      `SELECT home_team_id, away_team_id, kickoff, report_json FROM fixture
+        WHERE ${col} = ? AND kickoff < ? AND kickoff > ? AND report_json IS NOT NULL
+        ORDER BY kickoff DESC LIMIT ${SHEETS}`,
+      [teamId, kickoff - 3 * 3600, kickoff - SHEET_WINDOW_S],
+    ));
+  }
+  for (const r of rows.sort((a, b) => b.kickoff - a.kickoff).slice(0, SHEETS)) {
+    let rep: { lineups?: Record<string, { players?: Array<{ id?: number }> } | null> | null; players?: Array<{ id?: number; team_id?: number | null }> } | null = null;
+    try { rep = JSON.parse(r.report_json ?? 'null'); } catch { rep = null; }
+    const side = r.home_team_id === teamId ? 'home' : 'away';
+    const sheet = rep?.lineups?.[side]?.players ?? [];
+    if (!sheet.length) continue;
+    sheets++;
+    for (const p of sheet) if (Number.isFinite(p.id)) ids.add(Number(p.id));
+    for (const p of rep?.players ?? []) if (p.team_id === teamId && Number.isFinite(p.id)) ids.add(Number(p.id));
+  }
+  return { sheets, ids };
+}
+
+/** A predicted side with every starter nobody has picked lately taken off; the names taken off. */
+export function withoutUnpicked(side: SideLineup, picked: { sheets: number; ids: Set<number> }): { side: SideLineup; dropped: string[] } {
+  if (picked.sheets < 2) return { side, dropped: [] };
+  const dropped = side.players.filter((p) => p.starting && !picked.ids.has(p.id)).map((p) => p.name);
+  if (!dropped.length) return { side, dropped };
+  return { side: { ...side, players: side.players.filter((p) => !(p.starting && !picked.ids.has(p.id))) }, dropped };
+}
+
+/** Apply withoutUnpicked to both sides of a predicted line-up, in place. */
+export async function pruneUnpicked(lineups: LineupInfo, teams: { home: number | null; away: number | null }, kickoff: number): Promise<string[]> {
+  if (lineups.status !== 'predicted') return [];
+  const out: string[] = [];
+  for (const which of ['home', 'away'] as const) {
+    const side = lineups[which];
+    const id = teams[which];
+    if (!side?.players?.length || id === null) continue;
+    const r = withoutUnpicked(side, await recentlyPicked(id, kickoff));
+    lineups[which] = r.side;
+    out.push(...r.dropped);
+  }
+  return out;
 }

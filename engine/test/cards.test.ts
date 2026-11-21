@@ -22,9 +22,9 @@ test('full time names the settled call and how it went', () => {
   const ft = { ...base, score: [2, 1], called: { ...pick, result: 'WON' } };
   assert.equal(cardState(ft), 'ft-2-1');
   const l = cardLine(ft, describe);
-  assert.equal(l.side, 'Landed');
+  assert.equal(l.side, 'Won');
   assert.equal(l.tone, 'won');
-  assert.equal(cardLine({ ...ft, called: { ...pick, result: 'LOST' } }, describe).side, 'Missed');
+  assert.equal(cardLine({ ...ft, called: { ...pick, result: 'LOST' } }, describe).side, 'Lost');
 });
 
 test('the key changes exactly when the picture would', () => {

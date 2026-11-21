@@ -241,6 +241,37 @@ export function betslip(market, outcome, line, H, A) {
   }
 }
 
+/**
+ * A handicap said the way a fan would say it (owner, 21 November 2026: most
+ * readers do not know what a handicap is). The name says what loses or what
+ * wins; a stake that comes back on an exact margin is said in the line under
+ * it (handicapWins), so the name is never wrong about a result:
+ *
+ *   +0.5  Jordan to win or draw          -0.5  Jordan to win
+ *   +1    Jordan not to lose by two      -1    Jordan to win by two or more
+ *         or more (lose by one: back)           (win by one: back)
+ *   +1.5  Jordan not to lose by two      -1.5  Jordan to win by two or more
+ *         or more
+ *    0    Jordan to win (draw: back)
+ *
+ * Quarter lines are never called (config.confident.quarterLines) and keep
+ * the bookmaker's spelling.
+ */
+const NUM_WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+const numWord = (n) => NUM_WORDS[n] ?? String(n);
+export function handicapName(own, team) {
+  if (own === null || own === undefined || !Number.isFinite(Number(own))) return `${team} on the handicap`;
+  const v = Number(own);
+  if (Math.abs(v * 4) % 2 === 1) return `${team} ${handicapLine(v)}`;
+  if (v === 0) return `${team} to win`;
+  if (v < 0) {
+    const by = Math.floor(-v) + 1;
+    return by === 1 ? `${team} to win` : `${team} to win by ${numWord(by)} or more`;
+  }
+  const loseBy = Math.floor(v) + 1;
+  return loseBy === 1 ? `${team} to win or draw` : `${team} not to lose by ${numWord(loseBy)} or more`;
+}
+
 /** "-1.0", "+0.5", "0.0", "-0.75": a handicap the way the books print it. */
 export function handicapLine(n) {
   const v = Math.round(n * 100) / 100;
@@ -281,7 +312,7 @@ function plainly({ market, outcome, line, home, away, odds, stake = purse().stak
       const own = outcome === 'HOME' ? line : -line;
       const start = -own;
       return out(
-        `${t} ${handicapLine(own)}`,
+        handicapName(own, t),
         start > 0 ? `${t}, giving a ${fmtStart(start)} start` : `${t}, with a ${fmtStart(-start)} start`,
         handicapWins(own, t),
         { outcomes: handicapOutcomes(own, t) },

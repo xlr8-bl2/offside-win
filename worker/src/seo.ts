@@ -118,7 +118,7 @@ export function stateOf(f: Rec, now = Date.now() / 1000): 'upcoming' | 'live' | 
   return 'upcoming';
 }
 
-export const RESULT_WORD: Record<string, string> = { WON: 'landed', LOST: 'missed', HALF_WON: 'half landed', HALF_LOST: 'half lost', PUSH: 'stakes back', VOID: 'void' };
+export const RESULT_WORD: Record<string, string> = { WON: 'won', LOST: 'lost', HALF_WON: 'half won', HALF_LOST: 'half lost', PUSH: 'stakes back', VOID: 'void' };
 
 export function callName(p: Rec, home: string, away: string): string {
   try { return describeCall({ market: p.market, outcome: p.outcome, line: p.line, home, away, odds: null, stake: 10 }).name; }
@@ -238,7 +238,7 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
   if (state === 'ft' && score) {
     title = matchTitle({ home, away, state, score });
     description = settledCall
-      ? `${vs} in the ${league}. Our call, ${callName(settledCall, home, away)}, ${RESULT_WORD[settledCall.result] ?? 'was settled'}. Scorers, the stats and how it went.`
+      ? `${vs} in the ${league}. Our call, ${callName(settledCall, home, away)}: ${RESULT_WORD[settledCall.result] ?? 'settled'}. Scorers, the stats and how it went.`
       : `${vs} in the ${league}: the result, the scorers and the stats.${hasCall ? '' : ' We did not have a call on this one.'}`;
     callHTML = settledCall
       ? `<p>Our call was <b>${esc(callName(settledCall, home, away))}</b>, at odds of ${esc(Number(settledCall.odds).toFixed(2))}${settledCall.bookmaker ? ` with ${esc(settledCall.bookmaker)}` : ''}. It ${esc(RESULT_WORD[settledCall.result] ?? 'was settled')}. Every settled call is on <a href="/results">the record</a>.</p>`
@@ -247,7 +247,7 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
     title = matchTitle({ home, away, state, live });
     description = `${home} v ${away} is under way in the ${league}${live ? `, ${live[0]}–${live[1]}${f.live_minute ? ` after ${f.live_minute} minutes` : ''}` : ''}. ${hasCall ? 'Our call closed at kick-off and goes up with how it went at full time.' : 'Team news, form and the head-to-head.'}`;
     callHTML = hasCall
-      ? `<p>We have a call on this match. It closed at kick-off: calls are not sold once a match is on, and this one is shown here at full time with whether it landed.</p>`
+      ? `<p>We have a call on this match. It closed at kick-off: calls are not sold once a match is on, and this one is shown here at full time with whether it won.</p>`
       : `<p>We passed on this match before kick-off.</p>`;
   } else {
     title = matchTitle({ home, away, state });
@@ -429,7 +429,7 @@ export async function leaguePage(env: SeoEnv, id: number, site: string): Promise
   const ahead = fixtures.filter((f) => stateOf(f, now) !== 'ft').sort((a, b) => a.kickoff - b.kickoff);
   const played = fixtures.filter((f) => stateOf(f, now) === 'ft').sort((a, b) => b.kickoff - a.kickoff).slice(0, 12);
   const rows: Rec[] = Array.isArray(d.standings) ? d.standings : [];
-  const rec = d.record && Number(d.record.n) ? `Our calls in the ${name}: ${word(Number(d.record.wins))} of ${word(Number(d.record.n))} landed.` : '';
+  const rec = d.record && Number(d.record.n) ? `Our calls in the ${name}: ${word(Number(d.record.wins))} of ${word(Number(d.record.n))} won.` : '';
   const groups = new Map<string, Rec[]>();
   for (const r of rows) groups.set(String(r.group ?? ''), [...(groups.get(String(r.group ?? '')) ?? []), r]);
   const tables = [...groups].map(([g, rs]) => `
@@ -466,14 +466,14 @@ export async function resultsPage(env: SeoEnv, site: string): Promise<Page> {
   const c = crumbs([[SITE, '/'], ['Results', '/results']], site);
   return {
     title: TITLES.results,
-    description: `${won} of our last ${graded.length} calls landed. Every settled call, with the score that decided it.`,
+    description: `${won} of our last ${graded.length} calls won. Every settled call, with the score that decided it.`,
     canonical: `${site}/results`,
     json: `${site}/api/picks?settled=true&limit=60`,
     body: `
   <article class="wrap section narrow seo">
     ${c.html}
     <h1 class="display">The record</h1>
-    <p>${esc(`${won} of our last ${graded.length} calls landed.`)} Every one is below with the score that settled it, and the record stays public.</p>
+    <p>${esc(`${won} of our last ${graded.length} calls won.`)} Every one is below with the score that settled it, and the record stays public.</p>
     <ul class="seo-list">${picks.map((p) => {
       const home = String(p.home_team ?? p.home ?? '');
       const away = String(p.away_team ?? p.away ?? '');
@@ -498,7 +498,7 @@ export async function slipPage(env: SeoEnv, site: string): Promise<Page> {
   const n = Number(cur?.legs_count ?? 0);
   const odds = Number(cur?.odds);
   const first = cur?.first_kickoff ? ukTime(Number(cur.first_kickoff)) : null;
-  const so = Number(rec.n) ? ` Slips so far: ${word(Number(rec.won))} of ${word(Number(rec.n))} landed.` : '';
+  const so = Number(rec.n) ? ` Slips so far: ${word(Number(rec.won))} of ${word(Number(rec.n))} won.` : '';
   const c = crumbs([[SITE, '/'], ["Today's bet slip", '/slip']], site);
   const now = cur && n && Number.isFinite(odds)
     ? `The slip on now has ${word(n)} legs at total odds of ${odds.toFixed(2)}${first ? `, the first kicking off ${first.day} at ${first.time} UK` : ''}. It is fixed as posted: the legs do not change once it is up.`
@@ -515,7 +515,7 @@ export async function slipPage(env: SeoEnv, site: string): Promise<Page> {
     <p>${esc(now)}${esc(so)}</p>
     ${recent.length ? `<h2>Settled slips</h2><ul class="seo-list">${recent.slice(0, 10).map((r) => {
       const legs: Rec[] = Array.isArray(r.legs) ? r.legs : [];
-      return `<li>${esc(ukTime(Number(r.first_kickoff)).day)}, ${esc(word(legs.length))} legs at ${esc(Number(r.odds).toFixed(2))}: ${esc(r.result === 'WON' ? 'landed' : r.result === 'LOST' ? 'missed' : 'void')}. ${legs.map((l) => `<a href="${esc(matchPath({ id: l.fixture_id, home: l.home, away: l.away }))}">${esc(`${l.home} v ${l.away}`)}</a>`).join(', ')}</li>`;
+      return `<li>${esc(ukTime(Number(r.first_kickoff)).day)}, ${esc(word(legs.length))} legs at ${esc(Number(r.odds).toFixed(2))}: ${esc(r.result === 'WON' ? 'won' : r.result === 'LOST' ? 'lost' : 'void')}. ${legs.map((l) => `<a href="${esc(matchPath({ id: l.fixture_id, home: l.home, away: l.away }))}">${esc(`${l.home} v ${l.away}`)}</a>`).join(', ')}</li>`;
     }).join('')}</ul>` : ''}
     <p><a href="/today">Today's board</a> <span aria-hidden="true">/</span> <a href="/results">The record</a></p>
   </article>`,

@@ -1,4 +1,5 @@
 import { config } from './config.ts';
+import { preferCommonFirst } from './lab/markets.ts';
 import { expectedValue, kelly } from './devig.ts';
 import { findConflicts, topTierCoverage } from './ledger.ts';
 import { findBookMarket } from './odds.ts';
@@ -488,9 +489,13 @@ export function rankConfident(
   floor = config.confident.floor,
   calibration: CalibrationMap = new Map(),
 ): Candidate[] {
-  return candidates
+  const ranked = candidates
     .filter((c) => confidentEligible(c, floor, calibration))
     .sort((a, b) => confidentScore(b) - confidentScore(a));
+  // A bet people know ahead of a handicap that is barely likelier (lab/markets.ts preferCommonFirst).
+  return config.confident.preferCommon > 0
+    ? preferCommonFirst(ranked, (c) => MARKET_FAMILY[c.market] === 'handicap', (c) => c.model_prob, config.confident.preferCommon)
+    : ranked;
 }
 
 export function selectConfident(
