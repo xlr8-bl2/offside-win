@@ -152,8 +152,8 @@ test('the 20 November rule: fair or better against the sharp book, no double cha
   const ah = (outcome: string, line: number) => ok({ ...cand('asian_handicap', outcome, 0.85, 1.2), line, family: 'handicap' } as Candidate);
   assert.equal(confidentGate(ah('HOME', 1.5), 0.78), 'excluded');
   assert.equal(confidentGate(ah('AWAY', -1.5), 0.78), 'excluded');
-  // The lines either side, and the favourite's -1.5, still are.
-  assert.equal(confidentGate(ah('HOME', 1), 0.78), null);
-  assert.equal(confidentGate(ah('AWAY', -2), 0.78), null);
-  assert.equal(confidentGate(ah('HOME', -1.5), 0.78), null);
+  // Since 21 November no goal-margin line is called at all (handicap-limit.test.ts);
+  // the half-goal and level lines still are.
+  assert.equal(confidentGate(ah('HOME', 0.5), 0.78), null);
+  assert.equal(confidentGate(ah('AWAY', 0), 0.78), null);
 });

@@ -484,6 +484,22 @@ export const config = {
      * calls a day. The handicaps that stay are written in plain words.
      */
     preferCommon: num('CONF_PREFER_COMMON', 0.03),
+    /**
+     * No goal-margin handicaps (owner, 21 November 2026: "cut handicap picks
+     * to the least"). An Asian handicap is called only at -0.5, 0 or +0.5 for
+     * the backed side, which the site names as an ordinary bet ("Jordan to
+     * win", "Jordan to win or draw"); never +1, +2, -1.5 and the rest ("not to
+     * lose by three or more"), and never a three-way handicap.
+     *
+     * The lab (round 11, 5,923 fixtures, A / B / C): 7 calls a day instead of
+     * 15, landed 83.5 / 80.7 / 87.3% (was 86.1 / 83.5 / 90.2%), return a call
+     * +1.6 / -2.6 / +5.7% (was +2.4 / -1.4 / +6.4%). That is the cost of it,
+     * stated: about three points of landing and half the board. Leaving out
+     * every handicap did worse still (3.6 a day, 82.5 / 77.3 / 87.7%), and
+     * lowering the floor to win the volume back cost more landing than it
+     * gave in calls. Locked by test/handicap-limit.test.ts.
+     */
+    maxHandicapMargin: num('CONF_MAX_HANDICAP_MARGIN', 0.5),
     excludeBackedLines: (process.env.CONF_EXCLUDE_AH_LINES ?? '1.5').split(',').map((x) => x.trim()).filter(Boolean).map(Number).filter(Number.isFinite),
     /** Only markets at least this many books priced in full; 0 for any. */
     minBooks: num('CONF_MIN_BOOKS', 0),

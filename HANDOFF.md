@@ -59,6 +59,24 @@ published record, which uses one quoted book.
   corners or cards call that is within three points of a handicap. That moves
   handicaps from 72% to 68% of calls at no measurable cost. The live
   `rankConfident` and the lab's `ranked` share `preferCommonFirst`.
+- **No goal-margin handicaps (owner: "cut handicap picks to the least").**
+  `config.confident.maxHandicapMargin` (0.5): an Asian handicap is called only at
+  -0.5, 0 or +0.5 for the backed side, which read as "to win" or "to win or
+  draw"; never +1, +2 or -1.5, and never a three-way handicap. Lab round 11
+  (A / B / C), against the rule before:
+
+  | | a day | landed | return a call |
+  |---|---|---|---|
+  | before | 15.5 | 86.1 / 83.5 / 90.2% | +2.4 / -1.4 / +6.4% |
+  | now | 7.1 | 83.5 / 80.7 / 87.3% | +1.6 / -2.6 / +5.7% |
+  | no handicaps at all | 3.6 | 82.5 / 77.3 / 87.7% | +0.6 / -6.3 / +7.4% |
+
+  That is the cost, said plainly: about three points of landing and half the
+  board. Lower floors to win the volume back cost more landing than they gave.
+  The mix now: level-line "to win" 23%, two or more goals 20%, draw no bet
+  16%, "to win or draw" 11%, corners 10%, match result 7%. Locked by
+  `engine/test/handicap-limit.test.ts`, live and in the lab's `PROD`; loosening
+  it is the owner's decision.
 - **Plain words.** A pick's main line is its plain name: "Argentina to win",
   "Two or more goals", and for a handicap `handicapName` in
   `public/js/lib/markets.js` ("Jordan not to lose by three or more", "Jordan

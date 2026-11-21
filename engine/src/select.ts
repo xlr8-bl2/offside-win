@@ -400,6 +400,9 @@ export function confidentGate(
     && config.confident.excludeBackedLines.includes(c.outcome === 'HOME' ? c.line : -c.line)) return 'excluded';
   // Quarter handicap lines (-1.75, 0.25) are a split stake nobody can explain in a sentence.
   if (!config.confident.quarterLines && c.line !== null && Math.abs((c.line * 4) % 2) === 1) return 'excluded';
+  // No goal-margin handicaps (config.confident.maxHandicapMargin): readers do not know them.
+  if (c.market === 'european_handicap') return 'excluded';
+  if (c.market === 'asian_handicap' && c.line !== null && Math.abs(c.line) > config.confident.maxHandicapMargin) return 'excluded';
   if ((c.books ?? 0) < config.confident.minBooks) return 'excluded';
   if (c.model_prob > config.confident.ceiling) return 'certain';
   // A family that has been overclaiming has to clear a higher bar, by
