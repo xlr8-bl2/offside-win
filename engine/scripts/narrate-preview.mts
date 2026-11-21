@@ -43,7 +43,8 @@ async function main(): Promise<void> {
     [Math.floor(Date.now() / 1000), COUNT * 3],
   );
 
-  const writer = geminiWriter({ apiKey, model: process.env['GEMINI_MODEL'] || undefined });
+  // A longer wait than the slate's: this is one look, not a run with a schedule to keep.
+  const writer = geminiWriter({ apiKey, model: process.env['GEMINI_MODEL'] || undefined, timeoutMs: 180_000 });
   let written = 0;
   let free = 0;
   let seen = 0;
