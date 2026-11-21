@@ -91,7 +91,7 @@ test('goals, corners and handicaps carry the slip\'s own line', () => {
   assert.equal(mkt({ market: 'total_corners', outcome: 'over', line: 9.5, odds: 1.4 }).name, 'Over 9.5 corners');
   const ah = (outcome: string, line: number) => mkt({ market: 'asian_handicap', outcome, line, home: 'Atlanta', away: 'Austin', odds: 1.3 }).name;
   assert.equal(ah('HOME', 0), 'Atlanta draw no bet');
-  assert.equal(ah('AWAY', -0.5), 'Austin or draw');
+  assert.equal(ah('AWAY', -0.5), 'Austin double chance');
   assert.equal(ah('HOME', -0.5), 'Atlanta to win');
   assert.equal(ah('HOME', 2), 'Atlanta +2.0');
 });
@@ -107,7 +107,9 @@ test('the indefinite article agrees with the club name', () => {
 
 test('double chance names the teams', () => {
   const d = mkt({ market: 'double_chance', outcome: '1X', home: 'Genoa', away: 'Sudtirol', odds: 1.15 });
-  assert.equal(d.name, 'Genoa or draw');
+  assert.equal(d.name, 'Genoa double chance');
+  // Either side to win is not one team's double chance (that would mean the team or a draw).
+  assert.equal(mkt({ market: 'double_chance', outcome: '12', home: 'Bayer Leverkusen', away: 'SC Paderborn', odds: 1.14 }).name, 'No draw (double chance)');
   assert.match(d.wins, /Only a Sudtirol win loses/);
 });
 

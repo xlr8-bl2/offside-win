@@ -247,7 +247,7 @@ export function betslip(market, outcome, line, H, A) {
  * they are, and anything else as the book prints it:
  *
  *    0    Jordan draw no bet       (a draw gives the stake back)
- *   +0.5  Jordan or draw           (double chance)
+ *   +0.5  Jordan double chance     (win or draw)
  *   -0.5  Jordan to win
  *   +2    Jordan +2.0              (no longer called; older results)
  *
@@ -257,7 +257,7 @@ export function handicapName(own, team) {
   if (own === null || own === undefined || !Number.isFinite(Number(own))) return `${team} on the handicap`;
   const v = Number(own);
   if (v === 0) return `${team} draw no bet`;
-  if (v === 0.5) return `${team} or draw`;
+  if (v === 0.5) return `${team} double chance`;
   if (v === -0.5) return `${team} to win`;
   return `${team} ${handicapLine(v)}`;
 }
@@ -282,9 +282,9 @@ function plainly({ market, outcome, line, home, away, odds, stake = purse().stak
       return out('Draw', 'The match to end level', 'The match must finish level.');
 
     case 'double_chance':
-      if (outcome === '1X') return out(`${H} or draw`, `Two results out of three`, `${H} must win or draw. Only ${article(A)} ${A} win loses.`);
-      if (outcome === 'X2') return out(`${A} or draw`, `Two results out of three`, `${A} must win or draw. Only ${article(H)} ${H} win loses.`);
-      return out(`${H} or ${A}`, 'Anything but a draw', 'Someone must win. A draw loses.');
+      if (outcome === '1X') return out(`${H} double chance`, `Two results out of three`, `${H} must win or draw. Only ${article(A)} ${A} win loses.`);
+      if (outcome === 'X2') return out(`${A} double chance`, `Two results out of three`, `${A} must win or draw. Only ${article(H)} ${H} win loses.`);
+      return out('No draw (double chance)', 'Anything but a draw', 'Someone must win. A draw loses.');
 
     case 'draw_no_bet': {
       const t = outcome === 'HOME' ? H : A;

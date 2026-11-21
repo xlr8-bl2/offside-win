@@ -66,7 +66,7 @@ both read it, and two lists drift.
 
 Owner, 21 November 2026: a pick is named the way the bet slip names it, so a
 reader can place it. "Under 3.5 goals", "Over 9.5 corners", "Atlanta draw no
-bet", "Atlanta or draw", "Atlanta to win". Not "three goals or fewer". The
+bet", "Atlanta double chance", "No draw (double chance)", "Atlanta to win". Not "three goals or fewer". The
 line in the bet's name (3.5, 9.5) is the one decimal allowed outside the odds.
 The sentence under the name still says, in plain words, what wins, loses and
 comes back. Goal-margin handicaps are no longer called at all

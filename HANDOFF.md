@@ -79,7 +79,7 @@ published record, which uses one quoted book.
   it is the owner's decision.
 - **Bet-slip terms (owner, later the same day).** Names are the slip's own:
   "Under 3.5 goals", "Over 9.5 corners", "Atlanta draw no bet" (also the level
-  handicap), "Atlanta or draw" (also +0.5), "Atlanta to win" (also -0.5), and
+  handicap), "Atlanta double chance" (also +0.5; win or draw), "No draw (double chance)" for either side to win, "Atlanta to win" (also -0.5), and
   "Atlanta +2.0" for any older margin handicap. The engine's writer uses the
   same names (`plainCall` in slate.ts calls `describe`), and its no-decimals
   rule allows the bet's own line (`quotesPrice`). The offside-voice skill
