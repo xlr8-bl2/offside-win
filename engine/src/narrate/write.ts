@@ -515,12 +515,19 @@ ONLY: 35 to 80 words. The thing most previews miss: what is happening underneath
 Hard rules:
 - Use ONLY the facts listed. Do not invent a statistic, a result, a player, a score or a date.
 - Every number you write must appear in the facts, written the same way. When unsure, leave it out and say it in words.
-- No number with a decimal point.
+- No number with a decimal point, except in the bet's own name ("${req.call}"), written exactly like that.
 - Never use these words: ${NEVER}.
 - Never mention odds, a price or a bookmaker: the price sits beside the call and moves after you write. Never list who starts or who is out; mention an absence only for what it changes on the pitch.
 - Short sentences against longer ones, the way a pundit talks on the telly.
 - Never write: "this encounter", "this contest", "this clash", "this match", "ultimately", "set to", "look to", "navigate", "massive", "crippling", "relentless", "showing that", "it is worth noting", "in the final third".
 - No dashes between clauses. No headings beyond the three labels, no sign-off, no quotation marks round a paragraph.`;
+}
+
+/** Whether text names odds, or a decimal that is not the bet's own line. */
+export function quotesPrice(text: string, call: string): boolean {
+  if (/\bodds\b/i.test(text)) return true;
+  const own = new Set(call.match(/\b\d+\.\d+\b/g) ?? []);
+  return (text.match(/\b\d+\.\d+\b/g) ?? []).some((d) => !own.has(d));
 }
 
 /** The three labelled paragraphs, or null for any that is missing. */
@@ -550,8 +557,9 @@ export function validateAnalysis(paras: string[], req: WriteRequest): Rejection[
   const total = paras.reduce((a, p) => a + count(p), 0);
   if (total < ANALYSIS_MIN) out.add('too-short');
   if (total > ANALYSIS_MAX) out.add('too-long');
-  // A price written into the text goes stale the moment the market moves.
-  if (/\bodds\b|\b\d+\.\d+\b/i.test(paras.join(' '))) out.add('banned-term');
+  // A price written into the text goes stale the moment the market moves. The
+  // bet's own line ("Under 3.5 goals") is the one decimal it may carry.
+  if (quotesPrice(paras.join(' '), req.call)) out.add('banned-term');
   return [...out];
 }
 
@@ -565,7 +573,7 @@ function analysisFeedback(paras: Array<string | null>, req: WriteRequest): strin
   if (nums.length) notes.push(`It used ${nums.map((n) => `"${n}"`).join(', ')}, which ${nums.length === 1 ? 'is' : 'are'} not in the facts. Leave ${nums.length === 1 ? 'it' : 'them'} out entirely.`);
   const banned = [...new Set(got.flatMap((p) => findBannedInProse(p, allowed)).map((v) => v.term))];
   if (banned.length) notes.push(`It used ${banned.map((t) => `"${t}"`).join(', ')}, which ${banned.length === 1 ? 'is' : 'are'} not allowed. Say it another way.`);
-  if (/\bodds\b|\b\d+\.\d+\b/i.test(got.join(' '))) notes.push('It mentioned odds or a price. Leave them out: the price is shown beside the call.');
+  if (quotesPrice(got.join(' '), req.call)) notes.push('It mentioned odds or a price. Leave them out: the price is shown beside the call.');
   const words = got.map((p) => p.trim().split(/\s+/).filter(Boolean).length);
   if (words.some((n) => n < PARA_MIN || n > PARA_MAX)) notes.push(`The paragraphs were ${words.join(', ')} words. Keep each between 35 and 90.`);
   const copied = got.map((p) => copiedFact(p, req.facts)).find(Boolean);

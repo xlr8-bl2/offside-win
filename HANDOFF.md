@@ -77,6 +77,13 @@ published record, which uses one quoted book.
   16%, "to win or draw" 11%, corners 10%, match result 7%. Locked by
   `engine/test/handicap-limit.test.ts`, live and in the lab's `PROD`; loosening
   it is the owner's decision.
+- **Bet-slip terms (owner, later the same day).** Names are the slip's own:
+  "Under 3.5 goals", "Over 9.5 corners", "Atlanta draw no bet" (also the level
+  handicap), "Atlanta or draw" (also +0.5), "Atlanta to win" (also -0.5), and
+  "Atlanta +2.0" for any older margin handicap. The engine's writer uses the
+  same names (`plainCall` in slate.ts calls `describe`), and its no-decimals
+  rule allows the bet's own line (`quotesPrice`). The offside-voice skill
+  records the exception.
 - **Plain words.** A pick's main line is its plain name: "Argentina to win",
   "Two or more goals", and for a handicap `handicapName` in
   `public/js/lib/markets.js` ("Jordan not to lose by three or more", "Jordan

@@ -67,11 +67,11 @@ const FRACTIONS = ['1/20', '1/16', '1/12', '1/10', '1/8', '1/7', '1/6', '1/5', '
  * Quarter lines also carry the split spelling some books print.
  */
 /** Coupon names the plain name already says in full. */
-const SAYS_ITSELF = new Set(['Match Result', 'Total Goals', 'Both Teams to Score']);
+const SAYS_ITSELF = new Set(['Match Result', 'Total Goals', 'Both Teams to Score', 'Draw No Bet', 'Double Chance', 'Total Corners', 'Total Red Cards']);
 function betHTML(d) {
   const b = d.bet ?? { selection: d.name, market: '' };
   const coupon = b.market && !SAYS_ITSELF.has(b.market)
-    ? `<span class="bet-mkt">On the coupon: ${esc(b.market)}, ${esc(b.selection)}${b.alt ? `<span class="bet-alt">Some books list it as ${esc(b.alt)}</span>` : ''}</span>` : '';
+    ? `<span class="bet-mkt">On the coupon: ${esc(b.market)}${b.selection !== d.name ? `, ${esc(b.selection)}` : ''}${b.alt ? `<span class="bet-alt">Some books list it as ${esc(b.alt)}</span>` : ''}</span>` : '';
   return `<span class="bet"><span class="bet-sel">${esc(d.name)}</span>${coupon}</span>`;
 }
 
@@ -1295,9 +1295,7 @@ function freeCallHTML(hero, detail, free = null) {
           ? `Our surest call today ${landed === 'won' ? 'won' : 'is in'}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}. ${tie.home} ${shown[0]}–${shown[1]} ${tie.away}.`
           : `Our surest call today, ${tie.home} v ${tie.away}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}.`,
         url: matchUrl(tie.id, tie.home, tie.away), title: `${tie.home} v ${tie.away}` })}</p>
-    <p class="hero-blurb">${landed
-      ? `Free for everyone, as one call is every day.${isMember() ? '' : ' Members had every other call on the board.'}`
-      : `Free for everyone, and under way.${isMember() ? '' : ' Members get every other call the moment it goes up.'}`}</p>
+    <p class="hero-blurb">${landed ? 'Settled. Every call is on the results page, won or lost.' : 'Under way.'}</p>
   </div>`;
   }
 

@@ -78,11 +78,22 @@ test('the away side of a handicap is the mirror of the home one', () => {
   assert.equal(home.name, 'Osasuna -0.75');
 });
 
-test('draw no bet explains the refund rather than naming itself', () => {
+test('draw no bet is named as the slip names it, and still explains the refund', () => {
+  // The owner's call, 21 November 2026: direct betting terms in the name.
   const d = mkt({ market: 'draw_no_bet', outcome: 'HOME', home: 'Genoa', away: 'Sudtirol', odds: 1.5 });
-  assert.equal(d.name, 'Genoa to win');
+  assert.equal(d.name, 'Genoa draw no bet');
   assert.match(d.wins, /stake comes back/i);
-  assert.ok(!/draw no bet/i.test(d.name), 'the jargon name must not survive');
+});
+
+test('goals, corners and handicaps carry the slip\'s own line', () => {
+  assert.equal(mkt({ market: 'over_under_35', outcome: 'under', line: 3.5, home: 'Atlanta', away: 'Austin', odds: 1.3 }).name, 'Under 3.5 goals');
+  assert.equal(mkt({ market: 'over_under_15', outcome: 'over', line: 1.5, odds: 1.2 }).name, 'Over 1.5 goals');
+  assert.equal(mkt({ market: 'total_corners', outcome: 'over', line: 9.5, odds: 1.4 }).name, 'Over 9.5 corners');
+  const ah = (outcome: string, line: number) => mkt({ market: 'asian_handicap', outcome, line, home: 'Atlanta', away: 'Austin', odds: 1.3 }).name;
+  assert.equal(ah('HOME', 0), 'Atlanta draw no bet');
+  assert.equal(ah('AWAY', -0.5), 'Austin or draw');
+  assert.equal(ah('HOME', -0.5), 'Atlanta to win');
+  assert.equal(ah('HOME', 2), 'Atlanta +2.0');
 });
 
 test('the indefinite article agrees with the club name', () => {
@@ -96,7 +107,7 @@ test('the indefinite article agrees with the club name', () => {
 
 test('double chance names the teams', () => {
   const d = mkt({ market: 'double_chance', outcome: '1X', home: 'Genoa', away: 'Sudtirol', odds: 1.15 });
-  assert.equal(d.name, 'Genoa to win or draw');
+  assert.equal(d.name, 'Genoa or draw');
   assert.match(d.wins, /Only a Sudtirol win loses/);
 });
 
