@@ -109,7 +109,7 @@ test('double chance names the teams', () => {
   const d = mkt({ market: 'double_chance', outcome: '1X', home: 'Genoa', away: 'Sudtirol', odds: 1.15 });
   assert.equal(d.name, 'Genoa double chance');
   // Either side to win is not one team's double chance (that would mean the team or a draw).
-  assert.equal(mkt({ market: 'double_chance', outcome: '12', home: 'Bayer Leverkusen', away: 'SC Paderborn', odds: 1.14 }).name, 'No draw (double chance)');
+  assert.equal(mkt({ market: 'double_chance', outcome: '12', home: 'Bayer Leverkusen', away: 'SC Paderborn', odds: 1.14 }).name, 'No draw (double chance 12)');
   assert.match(d.wins, /Only a Sudtirol win loses/);
 });
 

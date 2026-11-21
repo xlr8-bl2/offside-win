@@ -284,7 +284,7 @@ function plainly({ market, outcome, line, home, away, odds, stake = purse().stak
     case 'double_chance':
       if (outcome === '1X') return out(`${H} double chance`, `Two results out of three`, `${H} must win or draw. Only ${article(A)} ${A} win loses.`);
       if (outcome === 'X2') return out(`${A} double chance`, `Two results out of three`, `${A} must win or draw. Only ${article(H)} ${H} win loses.`);
-      return out('No draw (double chance)', 'Anything but a draw', 'Someone must win. A draw loses.');
+      return out('No draw (double chance 12)', 'Anything but a draw', 'Someone must win. A draw loses.');
 
     case 'draw_no_bet': {
       const t = outcome === 'HOME' ? H : A;
