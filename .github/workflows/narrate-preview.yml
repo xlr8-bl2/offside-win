@@ -39,8 +39,10 @@ jobs:
       - run: npm ci
       - name: Write some previews
         env:
-          DB_BACKEND: postgres
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          # D1 through the Worker's engine door, as the slate reads it.
+          DB_BACKEND: d1
+          ENGINE_DB_URL: https://offside.win/api/internal/db
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ inputs.model }}
           PREVIEW_COUNT: ${{ inputs.count || '12' }}

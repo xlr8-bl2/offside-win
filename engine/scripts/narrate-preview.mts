@@ -25,6 +25,8 @@ import { geminiWriter } from '../src/narrate/gemini.ts';
 import { write } from '../src/narrate/write.ts';
 import { freeProse } from '../src/membership/redact.ts';
 import { closeDb, select } from '../src/store.ts';
+// @ts-expect-error -- plain JS module shared with the site
+import { describe } from '../../public/js/lib/markets.js';
 
 const COUNT = Number(process.env['PREVIEW_COUNT'] ?? 12);
 
@@ -55,6 +57,7 @@ async function main(): Promise<void> {
     if (!verdict?.candidate) continue;
     seen++;
 
+    // As much of what the slate hands the writer as the stored bundle keeps.
     const facts = pubFacts({
       home: row.home_team,
       away: row.away_team,
@@ -62,18 +65,26 @@ async function main(): Promise<void> {
       form: bundle['form'] ?? null,
       h2h: bundle['h2h'] ?? null,
       lineups: bundle['lineups'] ?? null,
-    });
+      standings: bundle['standings'] ?? null,
+      managers: bundle['managers'] ?? null,
+      players: bundle['players'] ?? null,
+      extras: bundle['extras'] ?? null,
+    } as never);
+    const c = verdict.candidate;
+    // The call as the site names it, which is what the slate gives the writer.
+    const call = describe({ market: c.market, outcome: c.outcome, line: c.line, home: row.home_team, away: row.away_team, odds: null, stake: 10 }).name as string;
 
     const result = await write({
       home: row.home_team,
       away: row.away_team,
       competition: bundle['league'] ?? 'this competition',
-      call: `${row.home_team} v ${row.away_team}`,
+      call,
       facts,
+      odds: c.odds ?? null,
     }, writer);
 
     console.log(`\n${'='.repeat(78)}`);
-    console.log(`${row.home_team} v ${row.away_team}   (${bundle['league'] ?? '?'})`);
+    console.log(`${row.home_team} v ${row.away_team}   (${bundle['league'] ?? '?'})   call: ${call}${c.odds ? ` at ${Number(c.odds).toFixed(2)}` : ''}`);
     console.log(`facts in: ${facts.length}`);
     console.log('-'.repeat(78));
 
