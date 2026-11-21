@@ -66,7 +66,7 @@ test('a played match leads with the score and how the call went', async () => {
     report: { events: [{ t: 'goal', side: 'away', player: 'K. Mbappé', minute: 54, kind: 'regular' }] } };
   const p = (await matchPage(env({ get_fixture: f }) as any, 212602, 'https://offside.win'))!;
   assert.match(p.title, /^Iceland 0–1 Estonia: result/);
-  assert.match(p.description, /landed/);
+  assert.match(p.description, /: won\./);
   assert.match(p.body, /Mbappé 54'/);
   assert.equal((p.jsonLd[0] as any).eventStatus, 'https://schema.org/EventCompleted');
 });
@@ -118,7 +118,8 @@ test('today\'s board counts what is on and names the surest call', async () => {
   const p = await todayPage(env({ get_board: { fixtures: [FIX, free] } }) as any, 'https://offside.win');
   assert.match(p.title, /2 calls/);
   assert.match(p.body, /Our surest call today is/);
-  assert.deepEqual(findBannedInProse(p.body.replace(/<[^>]+>/g, ' ')).map((v) => v.term), []);
+  // The bet's own line is allowed in its name ("Over 1.5 goals"), and nothing else.
+  assert.deepEqual(findBannedInProse(p.body.replace(/<[^>]+>/g, ' '), ['1.5']).map((v) => v.term), []);
 });
 
 test('the slip page gives the count and the odds, never the open legs', async () => {

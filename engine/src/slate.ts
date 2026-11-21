@@ -1,4 +1,6 @@
 import { backsRotatedSide } from './context/xi.ts';
+// @ts-expect-error -- plain JS module shared with the site
+import { describe } from '../../public/js/lib/markets.js';
 import { chanceInWords, openSlipLegs, refreshSlip } from './slip.ts';
 import { bsdList, bsdOrNull, byKind as bsdByKind, num, quota as bsdQuota, setNearFixtures, str, stats as bsdStats, toEpoch } from './bsd.ts';
 import { config } from './config.ts';
@@ -186,7 +188,8 @@ export function leagueRank(leagueId: number): number {
  * request.
  */
 export function narrativeKey(fixtureId: number, c: Candidate, news = ''): string {
-  return `narr:${fixtureId}:${c.market}:${c.outcome}:${c.line ?? ''}${news ? `:${fnv(news)}` : ''}`;
+  // v3: three paragraphs (21 November 2026); older entries are the preview and its why.
+  return `narr3:${fixtureId}:${c.market}:${c.outcome}:${c.line ?? ''}${news ? `:${fnv(news)}` : ''}`;
 }
 
 /**
@@ -221,12 +224,10 @@ const PREVIEW_RESERVE = 60;
  * so this is only context, and context reads better without HOME and AWAY in
  * it.
  */
+/** The call as the site names it (public/js/lib/markets.js), so the write-up and the page say the same bet. */
 function plainCall(c: Candidate, home: string, away: string): string {
-  return marketLabel(c)
-    .replace(/\bhome\b/gi, home)
-    .replace(/\baway\b/gi, away)
-    .replace(/\bHOME\b/g, home)
-    .replace(/\bAWAY\b/g, away);
+  try { return describe({ market: c.market, outcome: c.outcome, line: c.line, home, away, odds: null, stake: 10 }).name; }
+  catch { return marketLabel(c).replace(/\bhome\b/gi, home).replace(/\baway\b/gi, away); }
 }
 
 /**

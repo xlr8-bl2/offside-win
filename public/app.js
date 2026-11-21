@@ -57,17 +57,22 @@ const FRACTIONS = ['1/20', '1/16', '1/12', '1/10', '1/8', '1/7', '1/6', '1/5', '
   '13/2', '7/1', '15/2', '8/1', '9/1', '10/1', '11/1', '12/1', '14/1', '16/1', '20/1', '25/1', '33/1', '40/1', '50/1', '66/1', '100/1']
   .map((f) => { const [a, b] = f.split('/').map(Number); return [f, a / b]; });
 /*
- * The call the way a bookmaker's slip shows it: the selection as the button
- * reads, and the market's own name under it. "Switzerland -1" on its own is
- * two different bets -- the Asian handicap gives the stake back on a one-goal
- * win, the three-way handicap of the same name loses it -- so the market is
- * never left off. Quarter lines also carry the split spelling some books
- * print, so the button can be found either way (markets.js, betslip).
+ * The call in plain words first ("Argentina to win", "Two or more goals",
+ * "Jordan not to lose by three or more"), because most readers do not know a
+ * handicap from a match result (owner, 21 November 2026). Under it, small,
+ * the market as the bookmaker's coupon lists it, where that is a different
+ * spelling, so the bet can still be found: "Switzerland -1" is two different
+ * bets (the Asian handicap gives the stake back on a one-goal win, the
+ * three-way one loses it), so for a handicap the market is never left off.
+ * Quarter lines also carry the split spelling some books print.
  */
+/** Coupon names the plain name already says in full. */
+const SAYS_ITSELF = new Set(['Match Result', 'Total Goals', 'Both Teams to Score', 'Draw No Bet', 'Double Chance', 'Total Corners', 'Total Red Cards']);
 function betHTML(d) {
   const b = d.bet ?? { selection: d.name, market: '' };
-  return `<span class="bet"><span class="bet-sel">${esc(b.selection)}</span>${b.market
-    ? `<span class="bet-mkt">${esc(b.market)}${b.alt ? `<span class="bet-alt">Some books list it as ${esc(b.alt)}</span>` : ''}</span>` : ''}</span>`;
+  const coupon = b.market && !SAYS_ITSELF.has(b.market)
+    ? `<span class="bet-mkt">On the coupon: ${esc(b.market)}${b.selection !== d.name ? `, ${esc(b.selection)}` : ''}${b.alt ? `<span class="bet-alt">Some books list it as ${esc(b.alt)}</span>` : ''}</span>` : '';
+  return `<span class="bet"><span class="bet-sel">${esc(d.name)}</span>${coupon}</span>`;
 }
 
 /**
@@ -85,7 +90,7 @@ function paysHTML(d) {
 
 /** The same, as one line of plain text: for shares and short lists. */
 function betText(d) {
-  return d.bet?.market ? `${d.bet.selection} (${d.bet.market})` : d.name;
+  return d.name;
 }
 
 function showOdds(v) {
@@ -1273,7 +1278,7 @@ function freeCallHTML(hero, detail, free = null) {
     const landed = score
       ? (GRADE[free.called?.result] ?? didItLand({ market: v.market, outcome: v.outcome, line: v.line, homeGoals: score[0], awayGoals: score[1] }))
       : null;
-    const WORD = { won: 'Landed', lost: 'Missed', part: 'Half back', back: 'Stake back' };
+    const WORD = { won: 'Won', lost: 'Lost', part: 'Half back', back: 'Stake back' };
     const shown = score ?? (Array.isArray(free.live_score) ? free.live_score : null);
     return `
   <div class="freecall" data-href="#/fixture/${encodeURIComponent(tie.id)}">
@@ -1287,12 +1292,10 @@ function freeCallHTML(hero, detail, free = null) {
       : trackHTML(liveTrack(v, free))} <b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}
       ${shareButtonHTML({
         text: landed && shown
-          ? `Our surest call today ${landed === 'won' ? 'landed' : 'is in'}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}. ${tie.home} ${shown[0]}–${shown[1]} ${tie.away}.`
+          ? `Our surest call today ${landed === 'won' ? 'won' : 'is in'}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}. ${tie.home} ${shown[0]}–${shown[1]} ${tie.away}.`
           : `Our surest call today, ${tie.home} v ${tie.away}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}.`,
         url: matchUrl(tie.id, tie.home, tie.away), title: `${tie.home} v ${tie.away}` })}</p>
-    <p class="hero-blurb">${landed
-      ? `Free for everyone, as one call is every day.${isMember() ? '' : ' Members had every other call on the board.'}`
-      : `Free for everyone, and under way.${isMember() ? '' : ' Members get every other call the moment it goes up.'}`}</p>
+    <p class="hero-blurb">${landed ? 'Settled. Every call is on the results page, won or lost.' : 'Under way.'}</p>
   </div>`;
   }
 
@@ -1304,7 +1307,7 @@ function freeCallHTML(hero, detail, free = null) {
     <p class="freecall-meta" data-public-price><b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}
       ${shareButtonHTML({ text: `Our surest call today, ${tie.home} v ${tie.away}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}.`,
         url: matchUrl(tie.id, tie.home, tie.away), title: `${tie.home} v ${tie.away}` })}</p>
-    <p class="hero-blurb">The call we are surest of today, free for everyone.${isMember() ? '' : ' Members get every other call the moment it goes up.'}</p>
+    <p class="hero-blurb">The call we are surest of today.${isMember() ? '' : ' Members get every other call the moment it goes up.'}</p>
   </div>`;
 }
 
@@ -1712,7 +1715,7 @@ function chanceInWords(chance) {
 function slipHTML(data, fixtures = []) {
   const cur = data?.current;
   const rec = data?.record;
-  const record = rec?.n ? `<p class="slip-record">Slips so far: <b>${rec.won} of ${rec.n}</b> landed.</p>` : '';
+  const record = rec?.n ? `<p class="slip-record">Slips so far: <b>${rec.won} of ${rec.n}</b> won.</p>` : '';
   if (!cur) {
     return `
     <section class="panel slip">
@@ -1743,7 +1746,7 @@ function slipHTML(data, fixtures = []) {
    */
   const byId = new Map(fixtures.map((f) => [Number(f.id), f]));
   const GRADE = { WON: 'won', LOST: 'lost', HALF_WON: 'part', HALF_LOST: 'part', PUSH: 'back', VOID: 'back' };
-  const MARK = { won: 'Landed', lost: 'Missed', back: 'Void', part: 'Half' };
+  const MARK = { won: 'Won', lost: 'Lost', back: 'Void', part: 'Half' };
   const legState = (l) => {
     // A call taken down before its match drops out of the slip, as a void leg.
     if (l.withdrawn) return `<span class="mark back" title="The call was taken down before kick-off">Void</span>`;
@@ -1822,7 +1825,7 @@ function tickerHTML(fixtures, recent) {
     const lost = x.result === 'LOST' || x.result === 'HALF_LOST';
     if (!won && !lost) continue;
     const sc = Number.isInteger(x.home_goals) ? `${x.home_goals}–${x.away_goals}` : 'FT';
-    items.push({ tone: won ? 'won' : 'lost', href: `#/fixture/${x.fixture_id}`, text: `${won ? 'Landed' : 'Missed'}: ${x.home_team} ${sc} ${x.away_team}` });
+    items.push({ tone: won ? 'won' : 'lost', href: `#/fixture/${x.fixture_id}`, text: `${won ? 'Won' : 'Lost'}: ${x.home_team} ${sc} ${x.away_team}` });
   }
   const next = fixtures.filter((f) => hasCall(f) && f.kickoff > now).sort((a, b) => a.kickoff - b.kickoff).slice(0, 8);
   for (const f of next) {
@@ -1920,7 +1923,7 @@ async function viewSlip() {
         <div class="played-row">
           <div class="played-meta">
             <span>${esc(kickoffLabel(r.first_kickoff))}, ${(r.legs ?? []).length} legs at ${oddsOf(r.odds)}</span>
-            <span class="mark ${tone(r.result)}">${esc(({ won: 'Landed', lost: 'Missed', back: 'Void' })[tone(r.result)])}</span>
+            <span class="mark ${tone(r.result)}">${esc(({ won: 'Won', lost: 'Lost', back: 'Void' })[tone(r.result)])}</span>
           </div>
           <ul class="played-calls">${(r.legs ?? []).map((l) => {
             const d = market({ market: l.market, outcome: l.outcome, line: l.line, home: l.home, away: l.away, odds: l.odds });
@@ -2092,8 +2095,8 @@ function playedHTML(picks, { showOdds = false } = {}) {
       const losses = tones.filter((t) => t === 'lost').length;
       const overall = calls.length === 1 ? tones[0] : losses === 0 ? 'won' : wins === 0 ? 'lost' : 'back';
       const mark = calls.length === 1
-        ? ({ won: 'Landed', lost: 'Missed', back: 'Void' })[tones[0]]
-        : `${wins} of ${calls.length} landed`;
+        ? ({ won: 'Won', lost: 'Lost', back: 'Void' })[tones[0]]
+        : `${wins} of ${calls.length} won`;
       const hasScore = Number.isInteger(x.home_goals) && Number.isInteger(x.away_goals);
       return `
       <a class="played-row" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
@@ -2110,7 +2113,7 @@ function playedHTML(picks, { showOdds = false } = {}) {
         ${scorersHTML(x.goals, 'scorers played-scorers')}
         ${calls.length > 1 ? `<ul class="played-calls">${calls.map((c, i) => {
           const d = market({ market: c.market, outcome: c.outcome, line: c.line, home: c.home_team, away: c.away_team, odds: c.odds });
-          return `<li><span>${esc(betText(d))}</span><span class="mark ${tones[i]}">${esc(({ won: 'Landed', lost: 'Missed', back: 'Void' })[tones[i]])}</span></li>`;
+          return `<li><span>${esc(betText(d))}</span><span class="mark ${tones[i]}">${esc(({ won: 'Won', lost: 'Lost', back: 'Void' })[tones[i]])}</span></li>`;
         }).join('')}</ul>` : ''}
       </a>`;
     }).join('')}
@@ -2178,7 +2181,7 @@ function rowHTML(f) {
     ? (GRADE[pick.result] ?? didItLand({ market: pick.market, outcome: pick.outcome, line: pick.line,
                                           homeGoals: score[0], awayGoals: score[1] }))
     : null;
-  const MARK = { won: 'Landed', lost: 'Missed', back: 'Refunded', part: 'Half back' };
+  const MARK = { won: 'Won', lost: 'Lost', back: 'Refunded', part: 'Half back' };
 
   /*
    * A game we passed on is one line, not four.
@@ -2918,7 +2921,7 @@ async function viewLanding() {
   const graded = picks.filter((x) => isW(x) || isL(x));
   const last = graded.slice(0, 40);
   const fw = last.filter(isW).length;
-  if (last.length) put('proof', `<b>${fw} of our last ${last.length}</b> calls landed. Every one is on <a href="#/results">the results page</a>.`);
+  if (last.length) put('proof', `<b>${fw} of our last ${last.length}</b> calls won. Every one is on <a href="#/results">the results page</a>.`);
   else app.querySelector('[data-ld="proof"]')?.remove();
 
   // What's on every match page, shown on today's free call, as text.
@@ -2947,13 +2950,13 @@ async function viewLanding() {
   if (shown.length) {
     put('record', `
       <div class="ld-sec-head"><h2 class="ld-h2">The call, then the score</h2><a class="ld-more" href="#/results">Every result</a></div>
-      <p class="ld-sub">Our last ${last.length} calls: ${fw} landed. Every one stays on the record.</p>
+      <p class="ld-sub">Our last ${last.length} calls: ${fw} won. Every one stays on the record.</p>
       <ol class="ld-results">${shown.map((x) => `
         <li>
           <span class="ld-r-when">${esc(new Date(Number(x.kickoff) * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}</span>
           <a class="ld-r-match" href="#/fixture/${encodeURIComponent(x.fixture_id)}"><b>${esc(x.home_team)} ${Number(x.home_goals)}–${Number(x.away_goals)} ${esc(x.away_team)}</b>
             <span>${esc(betText(market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team })))}</span></a>
-          <span class="ld-r-out ${isW(x) ? 'is-w' : 'is-l'}">${isW(x) ? 'Landed' : 'Missed'}</span>
+          <span class="ld-r-out ${isW(x) ? 'is-w' : 'is-l'}">${isW(x) ? 'Won' : 'Lost'}</span>
         </li>`).join('')}</ol>`);
   } else app.querySelector('[data-ld="record"]')?.remove();
 
@@ -3221,16 +3224,16 @@ function todayStripHTML(fixtures, recent) {
   const link = (href, html) => `<a href="${href}">${html}</a>`;
   const sentences = [];
   const since = [];
-  if (t.landed) since.push(link('#/board?when=played', `${fig(t.landed, 'won')} landed`));
-  if (t.missed) since.push(link('#/board?when=played', `${fig(t.missed, 'lost')} missed`));
+  if (t.landed) since.push(link('#/board?when=played', `${fig(t.landed, 'won')} won`));
+  if (t.missed) since.push(link('#/board?when=played', `${fig(t.missed, 'lost')} lost`));
   if (t.live) since.push(link('#/board?when=live', `${fig(t.live, 'now')} ${t.live === 1 ? 'is' : 'are'} being played${t.onTrack ? `, ${t.onTrack} on track` : ''}`));
   if (t.calls) {
     sentences.push(`${link('#/board', `${fig(t.calls)} ${t.calls === 1 ? 'call' : 'calls'} today`)}${since.length ? `: ${andList(since)}.` : '.'}`);
   } else if (since.length) {
     sentences.push(`Today, ${andList(since)}.`);
   }
-  if (t.run >= 2) sentences.push(link('#/results', `The last ${fig(t.run, 'run')} in a row landed.`));
-  else if (t.recentN) sentences.push(link('#/results', `${fig(t.recentWon, 'won')} of the last ${t.recentN} landed.`));
+  if (t.run >= 2) sentences.push(link('#/results', `The last ${fig(t.run, 'run')} in a row won.`));
+  else if (t.recentN) sentences.push(link('#/results', `${fig(t.recentWon, 'won')} of the last ${t.recentN} won.`));
   return `<div class="wrap"><p class="figure-line" aria-label="Today so far">${sentences.join(' ')}</p></div>`;
 }
 
@@ -3240,8 +3243,8 @@ function paintTally(fixtures, recent) {
   if (!el) return;
   const t = todayTally(fixtures, recent);
   const parts = [];
-  if (t.landed) parts.push(`<b class="won">${t.landed}</b> landed`);
-  if (t.missed) parts.push(`<b>${t.missed}</b> missed`);
+  if (t.landed) parts.push(`<b class="won">${t.landed}</b> won`);
+  if (t.missed) parts.push(`<b>${t.missed}</b> lost`);
   if (!parts.length && t.live) parts.push(`<b class="live">${t.live}</b> on now`);
   el.hidden = !parts.length;
   el.innerHTML = parts.length ? `${parts.join(', ')} today` : '';
@@ -3517,7 +3520,7 @@ async function viewBoard(params = new URLSearchParams()) {
         judged++;
         if (r === 'won') landed++;
       }
-      return `${c ? calls : 'No call'} on ${games('already played')}.${judged ? ` ${landed} of ${judged} landed.` : ''}`;
+      return `${c ? calls : 'No call'} on ${games('already played')}.${judged ? ` ${landed} of ${judged} won.` : ''}`;
     }
 
     const next = called.map((f) => f.kickoff).filter(Boolean);
@@ -3764,7 +3767,7 @@ function lockedHTML(fixture = null) {
   <div class="locked is-closed">
     <div class="locked-body">
       <b>Closed at kick-off.</b>
-      <p>Calls are not sold once a match is on. This one goes up here at full time, with whether it landed.</p>
+      <p>Calls are not sold once a match is on. This one goes up here at full time, with whether it won.</p>
     </div>
   </div>`;
   }
@@ -3855,7 +3858,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
   const landed = stored ?? (played && hg !== null && ag !== null
     ? didItLand({ market: c.market, outcome: c.outcome, line: c.line, homeGoals: hg, awayGoals: ag })
     : null);
-  const VERDICT_WORD = { won: 'Landed', lost: 'Did not land', part: 'Half back', back: 'Stake back' };
+  const VERDICT_WORD = { won: 'Won', lost: 'Lost', part: 'Half back', back: 'Stake back' };
   // While the match is on: where the call stands against the running score.
   const track = landed ? null : liveTrack(c, fixture);
   const story = landed
@@ -3881,7 +3884,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
       : d.outcomes?.length ? paysHTML(d) : `<p class="wins">${esc(d.wins)}</p>`}
     ${landed && v.record?.postmortem ? postMortemHTML({ postmortem_json: v.record.postmortem }) : ''}
     ${track ? `<p class="track-line">${trackHTML(track)}<span>${esc(track.need)} It’s ${esc(track.score)}. ${esc(track.time)}</span></p>` : ''}
-    ${prose ? `<p class="narrative">${link(esc(prose))}</p>` : ''}
+    ${prose ? prose.split(/\n\s*\n/).map((para) => `<p class="narrative">${link(esc(para.trim()))}</p>`).join('') : ''}
     ${why ? `<div class="why"><p class="why-head">Why this call</p><p>${link(esc(why))}</p></div>` : ''}
     ${played && (prose || why) ? `<p class="aside">Written before kick-off, and left as it was.</p>` : ''}
     <div class="verdict-meta">
@@ -5332,8 +5335,8 @@ function pulledHTML(f) {
     // After the game: how it would have gone (settle.ts, gradePulled).
     const r = p.after_result;
     const score = p.after_home != null && p.after_away != null ? ` It finished ${p.after_home}–${p.after_away}.` : '';
-    const after = r === 'WON' || r === 'HALF_WON' ? ['won', `It would have landed.${score}`]
-      : r === 'LOST' || r === 'HALF_LOST' ? ['lost', `It would have missed.${score}`]
+    const after = r === 'WON' || r === 'HALF_WON' ? ['won', `It would have won.${score}`]
+      : r === 'LOST' || r === 'HALF_LOST' ? ['lost', `It would have lost.${score}`]
       : r === 'PUSH' ? ['void', `The stake would have come back.${score}`] : null;
     return `<div class="pulled">
       <p class="pulled-head"><span class="pulled-tag">Call pulled</span><span>${esc(at(p.pulled_at))}</span></p>
@@ -5416,7 +5419,7 @@ async function viewHowSure() {
     <h2 class="sure-h2">Every level, every call</h2>
     <div class="sure-wrap">
       <table class="tbl sure-tbl">
-        <thead><tr><th>We rated it</th><th class="num">Calls</th><th class="num">Should land</th><th class="num">Landed</th></tr></thead>
+        <thead><tr><th>We rated it</th><th class="num">Calls</th><th class="num">Should land</th><th class="num">Won</th></tr></thead>
         <tbody>
           ${bands.map((b) => `<tr>
             <td>About ${esc(sureWords(b.tenths))}<small>${esc(sureShort(b.n, b.landed, expect(b)))}</small></td>
@@ -5455,8 +5458,8 @@ function pulledListHTML(list) {
   };
   const after = (x) => {
     const score = x.after_home != null && x.after_away != null ? `, ${x.after_home}–${x.after_away}` : '';
-    if (x.after_result === 'WON' || x.after_result === 'HALF_WON') return ['won', `Would have landed${score}`];
-    if (x.after_result === 'LOST' || x.after_result === 'HALF_LOST') return ['lost', `Would have missed${score}`];
+    if (x.after_result === 'WON' || x.after_result === 'HALF_WON') return ['won', `Would have won${score}`];
+    if (x.after_result === 'LOST' || x.after_result === 'HALF_LOST') return ['lost', `Would have lost${score}`];
     if (x.after_result === 'PUSH') return ['void', `Stake would have come back${score}`];
     if (x.after_result === 'VOID') return ['void', 'Match not played'];
     return ['wait', 'Result to come'];
@@ -5610,7 +5613,7 @@ async function viewResults() {
         has always treated them, and the two disagreeing was the third time
         this page has contradicted itself about the same thing.
       -->
-      <p class="figure-line record-line">${stat(wins, 'won')} landed and ${stat(Math.max(0, n - wins - refunds), 'lost')} missed${
+      <p class="figure-line record-line">${stat(wins, 'won')} won and ${stat(Math.max(0, n - wins - refunds), 'lost')} lost${
         refunds ? `, with ${stat(refunds)} ${refunds === 1 ? 'stake' : 'stakes'} back` : ''}. That is ${stat(`${rate}%`)} of those graded.</p>
       ${formStringHTML(settled)}
       ${formBarHTML(won, voided, lost, ['won', 'stake back', 'lost'],
@@ -5834,7 +5837,7 @@ function dayHTML(g, total) {
   <section class="recap-day">
     <div class="recap-head">
       <h3>${esc(unshout(label))}</h3>
-      <span class="recap-tally">${won} of ${graded} landed${part ? ' that day' : ''}</span>
+      <span class="recap-tally">${won} of ${graded} won${part ? ' that day' : ''}</span>
     </div>
     ${graded && !part ? `<p class="hand recap-say">${esc(dayVerdict(won, graded))}</p>` : ''}
     ${sortedForDay(g.list).map(recapCardHTML).join('')}
@@ -5950,7 +5953,7 @@ const RESULT_TONE = {
   WON: 'won', HALF_WON: 'part', LOST: 'lost', HALF_LOST: 'part', PUSH: 'back', VOID: 'back',
 };
 const RESULT_WORD = {
-  WON: 'Landed', HALF_WON: 'Half landed', LOST: 'Missed', HALF_LOST: 'Half missed',
+  WON: 'Won', HALF_WON: 'Half won', LOST: 'Lost', HALF_LOST: 'Half lost',
   PUSH: 'Refunded', VOID: 'Void',
 };
 
@@ -6401,7 +6404,7 @@ async function viewLeague(id, params = new URLSearchParams()) {
   const recordHTML = rec.n ? `
     <div>
       <div class="section-head"><div><h2 class="display">Our calls here</h2></div></div>
-      ${formBarHTML(rec.wins, 0, rec.n - rec.wins, ['landed', 'void', 'missed'], `${rec.n} settled call${rec.n === 1 ? '' : 's'} in this competition.`)}
+      ${formBarHTML(rec.wins, 0, rec.n - rec.wins, ['won', 'void', 'lost'], `${rec.n} settled call${rec.n === 1 ? '' : 's'} in this competition.`)}
       ${playedHTML(recent.slice(0, 12))}
     </div>` : '';
 
@@ -6851,7 +6854,7 @@ function freeLineHTML(free) {
   if (!free?.home) return '';
   const st = matchState(free);
   const score = Array.isArray(free.score) ? free.score : Array.isArray(free.live_score) ? free.live_score : null;
-  const WORD = { WON: 'It landed.', HALF_WON: 'Half of it landed.', LOST: 'It missed.', HALF_LOST: 'Half of it missed.', PUSH: 'Stake back.', VOID: 'Stake back.' };
+  const WORD = { WON: 'It won.', HALF_WON: 'Half of it won.', LOST: 'It lost.', HALF_LOST: 'Half of it lost.', PUSH: 'Stake back.', VOID: 'Stake back.' };
   const tie = score && st.kind !== 'upcoming'
     ? `${esc(free.home)} ${esc(score[0])}–${esc(score[1])} ${esc(free.away)}`
     : `${esc(free.home)} v ${esc(free.away)}`;
@@ -7022,7 +7025,7 @@ async function viewPricing() {
           <li>One full call a day, with the reason: the call we are surest of</li>
           <li>Every preview: team news, who starts, who scores, the form</li>
           <li>The bet slip's size, its total odds and its record</li>
-          <li>Every settled call, with why it landed or did not</li>
+          <li>Every settled call, with why it won or lost</li>
         </ul>
       </section>
       <section class="tier tier-paid">

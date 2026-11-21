@@ -14,6 +14,100 @@ meaningful step, and commits it with that step, not at the end of the day.
 
 ## Right now
 
+### The engine's rule, tightened (20 November 2026)
+
+The owner asked for rounds of iteration until the engine is genuinely better
+than its best. `lab:dump` (pg.yml) writes the lab's whole finished-match
+history as a one-day artifact (5,923 fixtures, 13 August to 20 November), so
+studies run locally in seconds against the real lab code. The judge is the
+same A / B / C date split as `lab:tune`, plus 2,000 resamples of the newer
+half's days, plus two-week windows.
+
+Five rounds were tried. What lost or added nothing: our own ratings or the
+provider's model agreeing, recalibrated and learned probabilities (both made
+twice the calls and did worse), money since the open (steam and drift),
+minimum book counts, higher floors alone, growth or EV ranking, price caps,
+the diversity cap, and league-rank floors.
+
+What held in all three periods, and is now live (`config.confident`, with
+`PROD` in `lab/tune.ts` to match):
+- The price at or above the sharp book's fair price (`minSharpEv` 0, was
+  -0.01).
+- No double chance (`excludeMarkets`).
+- No Asian handicap at +1.5 for the backed side (`excludeBackedLines`, new;
+  `excludeBackedLines` in the lab's Policy). Production had lost on it in A,
+  B and C.
+
+| | landed (A / B / C) | return a call (A / B / C) | a day |
+|---|---|---|---|
+| before | 86.6 / 82.0 / 88.2% | +2.5 / -3.1 / +4.4% | ~15 |
+| now | 86.5 / 83.9 / 90.2% | +2.6 / -1.0 / +6.4% | ~14 |
+
+Ahead on return and on landing in 100% of resamples of B+C (+0.8 to +3.6
+points a call). The caveat: B and C were looked at while choosing, so the
+proof is the games after 20 November. Re-run `lab:dump` and score only those
+(the scripts are in the session's scratchpad: `bench.ts`, `r1`..`r6`). The lab
+returns use the best price across books, so they read higher than the
+published record, which uses one quoted book.
+
+### Plain picks, plain words, three-paragraph analysis (owner, 21 November 2026)
+
+- **Common bets first.** Most readers do not know what a handicap is. The lab
+  (rounds 7 to 9) found that dropping handicaps cuts the board to about four
+  calls a day, landing 82 to 84%, because most 78%+ chances at a fair price are
+  handicaps. So `config.confident.preferCommon` (0.03) prefers a result, goals,
+  corners or cards call that is within three points of a handicap. That moves
+  handicaps from 72% to 68% of calls at no measurable cost. The live
+  `rankConfident` and the lab's `ranked` share `preferCommonFirst`.
+- **No goal-margin handicaps (owner: "cut handicap picks to the least").**
+  `config.confident.maxHandicapMargin` (0.5): an Asian handicap is called only at
+  -0.5, 0 or +0.5 for the backed side, which read as "to win" or "to win or
+  draw"; never +1, +2 or -1.5, and never a three-way handicap. Lab round 11
+  (A / B / C), against the rule before:
+
+  | | a day | landed | return a call |
+  |---|---|---|---|
+  | before | 15.5 | 86.1 / 83.5 / 90.2% | +2.4 / -1.4 / +6.4% |
+  | now | 7.1 | 83.5 / 80.7 / 87.3% | +1.6 / -2.6 / +5.7% |
+  | no handicaps at all | 3.6 | 82.5 / 77.3 / 87.7% | +0.6 / -6.3 / +7.4% |
+
+  That is the cost, said plainly: about three points of landing and half the
+  board. Lower floors to win the volume back cost more landing than they gave.
+  The mix now: level-line "to win" 23%, two or more goals 20%, draw no bet
+  16%, "to win or draw" 11%, corners 10%, match result 7%. Locked by
+  `engine/test/handicap-limit.test.ts`, live and in the lab's `PROD`; loosening
+  it is the owner's decision.
+- **Bet-slip terms (owner, later the same day).** Names are the slip's own:
+  "Under 3.5 goals", "Over 9.5 corners", "Atlanta draw no bet" (also the level
+  handicap), "Atlanta double chance" (also +0.5; win or draw), "No draw (double chance 12)" for either side to win, "Atlanta to win" (also -0.5), and
+  "Atlanta +2.0" for any older margin handicap. The engine's writer uses the
+  same names (`plainCall` in slate.ts calls `describe`), and its no-decimals
+  rule allows the bet's own line (`quotesPrice`). The offside-voice skill
+  records the exception.
+- **Plain words.** A pick's main line is its plain name: "Argentina to win",
+  "Two or more goals", and for a handicap `handicapName` in
+  `public/js/lib/markets.js` ("Jordan not to lose by three or more", "Jordan
+  to win by two or more"). Under it, small, is "On the coupon: Asian
+  Handicap, Jordan +2.0", so the bet can be found. It is left off where the
+  plain name already says it all (match result, goals, both to score). The
+  Worker's pages use the same names.
+- **Won and lost** everywhere, on the site and on the SEO pages (was landed and
+  missed).
+- **The writer** (`writeAnalysis` in `engine/src/narrate/write.ts`). A match
+  with a call gets three labelled paragraphs, CALL / HOW / ONLY: the bet and
+  why; how the game goes to produce it; and what most previews miss, with
+  what would sink it. There is no warm-up preview and no separate `why`. It is
+  stored as the narrative with blank lines between paragraphs, which the
+  match page draws as separate paragraphs. It never quotes a price, because
+  the price moves after writing (a page showed "odds of 1.12" beside 1.09).
+  Cached under `narr3:`, so today's calls are rewritten. Matches with no
+  call keep the one-paragraph preview.
+- **Retired players.** A predicted starter who is on none of the side's last
+  four team sheets in our match reports (starters and substitutes, 18
+  months) is taken off the projected eleven (`pruneUnpicked` in
+  `context/xi.ts`, called from `gather.ts`). Argentina's projection still had
+  Messi; he is on neither of Argentina's last two sheets.
+
 ### The site is free (owner, 17 November 2026)
 
 The owner's new direction: a completely free product with no premium tier,

@@ -77,10 +77,10 @@ test('the weekend is Friday to Monday: this one from Friday on, the next from Tu
   assert.equal(day(b.to), 'Tue');
 });
 
-test('a kind of prediction: what it means, how many of ours landed, the latest', async () => {
+test('a kind of prediction: what it means, how many of ours won, the latest', async () => {
   const p = (await kindPage(env({ get_picks: { picks: PICKS } }) as any, 'over-1-5-goals', 'https://offside.win'))!;
   assert.match(p.title, /^Over 1.5 goals predictions/);
-  assert.match(p.body, /2 of our last 3 over 1.5 goals calls landed/);
+  assert.match(p.body, /2 of our last 3 over 1.5 goals calls won/);
   assert.doesNotMatch(p.body + p.description, /would have left you|£\d+\.\d\d (down|up)/, 'no staking sum');
   assert.match(p.body, /Two goals or more/);
   assert.deepEqual(findBannedInProse(prose(p.title + ' ' + p.description + ' ' + p.body)).map((v) => v.term), []);

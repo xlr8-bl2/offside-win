@@ -62,6 +62,16 @@ not the maths vocabulary.
 than to a second list somewhere — the writer's validator and the free-copy gate
 both read it, and two lists drift.
 
+## Bets are named in the slip's own terms
+
+Owner, 21 November 2026: a pick is named the way the bet slip names it, so a
+reader can place it. "Under 3.5 goals", "Over 9.5 corners", "Atlanta draw no
+bet", "Atlanta double chance", "No draw (double chance 12)", "Atlanta to win". Not "three goals or fewer". The
+line in the bet's name (3.5, 9.5) is the one decimal allowed outside the odds.
+The sentence under the name still says, in plain words, what wins, loses and
+comes back. Goal-margin handicaps are no longer called at all
+(`maxHandicapMargin`).
+
 ## What a pick shows
 
 Four things, and nothing else:

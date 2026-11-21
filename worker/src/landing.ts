@@ -261,7 +261,7 @@ export async function predictionsHub(env: SeoEnv, site: string): Promise<Page> {
     <p>Every call we make is one of these. Each page says what has to happen for it to land, and how our calls of that kind have gone.</p>
     <ul class="seo-list">${kinds.map((k) => {
       const r = record(picks.filter(k.match));
-      return `<li><a href="/predictions/${k.slug}">${esc(k.name)} predictions</a>: ${esc(k.what)} Of our last ${esc(word(r.n))}, ${esc(word(r.won))} landed.</li>`;
+      return `<li><a href="/predictions/${k.slug}">${esc(k.name)} predictions</a>: ${esc(k.what)} Of our last ${esc(word(r.n))}, ${esc(word(r.won))} won.</li>`;
     }).join('')}</ul>
     ${moreHTML()}
   </article>`,
@@ -281,7 +281,7 @@ export async function kindPage(env: SeoEnv, slugName: string, site: string): Pro
   if (mine.length < ENOUGH) return null;
   const r = record(mine);
   const c = crumbs([[SITE, '/'], ['Predictions', '/predictions'], [kind.name, `/predictions/${kind.slug}`]], site);
-  const line = `${r.won} of our last ${r.n} ${kind.name.toLowerCase()} calls landed.`;
+  const line = `${r.won} of our last ${r.n} ${kind.name.toLowerCase()} calls won.`;
   return {
     title: `${kind.name} predictions today, and how ours have gone`,
     description: clip(`${kind.name} predictions: ${kind.what} ${line}`),

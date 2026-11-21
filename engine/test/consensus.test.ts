@@ -140,3 +140,20 @@ test('a call already up holds through a twitch, and comes down on a real fall', 
   assert.ok(confidentHolds(at(0.8, 1.2), 0.78), 'four per cent under fair');
   assert.equal(standingGate(at(0.75, 1.1), 0.78), 'floor', 'a real fall still counts when the price is short too');
 });
+
+test('the 20 November rule: fair or better against the sharp book, no double chance, no +1.5 handicap', () => {
+  const ok = (c: Candidate) => ({ ...c, sharp_prob: c.model_prob } as Candidate);
+  // A point under the sharp book's fair price is no longer a call.
+  assert.equal(confidentGate({ ...cand('btts', 'no', 0.8, 1.3), sharp_prob: 0.76 } as Candidate, 0.78), 'value');
+  assert.equal(confidentGate({ ...cand('btts', 'no', 0.8, 1.3), sharp_prob: 0.77 } as Candidate, 0.78), null);
+  // Double chance, any side.
+  for (const side of ['1X', 'X2', '12']) assert.equal(confidentGate(ok(cand('double_chance', side, 0.85, 1.2)), 0.78), 'excluded');
+  // +1.5 for the backed side: the home side given 1.5, or the away side given 1.5 (stored as -1.5).
+  const ah = (outcome: string, line: number) => ok({ ...cand('asian_handicap', outcome, 0.85, 1.2), line, family: 'handicap' } as Candidate);
+  assert.equal(confidentGate(ah('HOME', 1.5), 0.78), 'excluded');
+  assert.equal(confidentGate(ah('AWAY', -1.5), 0.78), 'excluded');
+  // Since 21 November no goal-margin line is called at all (handicap-limit.test.ts);
+  // the half-goal and level lines still are.
+  assert.equal(confidentGate(ah('HOME', 0.5), 0.78), null);
+  assert.equal(confidentGate(ah('AWAY', 0), 0.78), null);
+});

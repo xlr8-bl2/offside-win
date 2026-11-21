@@ -407,6 +407,7 @@ export function validateWhy(text: string, req: WriteRequest): Rejection[] {
  * model makes different mistakes.
  */
 export async function write(req: WriteRequest, writer: Writer): Promise<WriteResult> {
+  if (!req.previewOnly) return writeAnalysis(req, writer);
   const rejections: Rejection[] = [];
   const unbacked: string[] = [];
   let prompt = buildPrompt(req);
@@ -468,6 +469,149 @@ export async function write(req: WriteRequest, writer: Writer): Promise<WriteRes
   }
 
   return { text: good, why: goodWhy, rejections, unbacked, provider: writer.name };
+}
+
+/*
+ * The analysis on a match we have a call on: three paragraphs, straight to
+ * it (owner, 21 November 2026). The site is free, so there is no preview to
+ * keep the call off and no members' paragraph after it. The old preview
+ * opened every page with seventy to a hundred and twenty words about the
+ * football before the call was even named; the reader came for the call.
+ *
+ *   CALL   the bet and the single best reason for it, the odds named once;
+ *   HOW    how this game goes to produce it: chances made and given up;
+ *   ONLY   what the usual preview misses, the read underneath the results
+ *          that the facts carry, and the one thing that would sink it.
+ *
+ * Stored as the narrative (the paragraphs joined by a blank line), with no
+ * separate `why`. The same checks as before: only the facts, no invented
+ * number, no banned word, the odds exactly as given.
+ */
+const PARA_MIN = 25;
+const PARA_MAX = 110;
+const ANALYSIS_MIN = 110;
+const ANALYSIS_MAX = 290;
+
+export function buildAnalysisPrompt(req: WriteRequest): string {
+  const facts = req.facts.slice(0, 18).map((f) => `- ${f.text}`).join('\n');
+  return `You are a football pundit telling a mate why you are backing ${req.call} in ${req.home} v ${req.away} (${req.competition}).
+
+These are the only facts you may use:
+${facts}
+
+Write exactly three short paragraphs, each introduced by its label on its own line, exactly like this:
+
+CALL:
+<paragraph one>
+HOW:
+<paragraph two>
+ONLY:
+<paragraph three>
+
+CALL: 35 to 80 words. Your first sentence names the bet, "${req.call}", and the biggest reason for it. No warm-up, no scene-setting, no "this match". Then back the reason with the strongest fact.
+HOW: 40 to 90 words. How this game actually goes to produce that result: who has the ball, where the chances come from, what each side gives up at the back. Argue it from the facts, in your own words.
+ONLY: 35 to 80 words. The thing most previews miss: what is happening underneath the results (a side doing better or worse than their football deserves, who is finishing above or below their chances, a referee, a tired squad, what the game means to one side). End with one sentence on what would have to go wrong for the bet to lose.
+
+Hard rules:
+- Use ONLY the facts listed. Do not invent a statistic, a result, a player, a score or a date.
+- Every number you write must appear in the facts, written the same way. When unsure, leave it out and say it in words.
+- No number with a decimal point, except in the bet's own name ("${req.call}"), written exactly like that.
+- Never use these words: ${NEVER}.
+- Never mention odds, a price or a bookmaker: the price sits beside the call and moves after you write. Never list who starts or who is out; mention an absence only for what it changes on the pitch.
+- Short sentences against longer ones, the way a pundit talks on the telly.
+- Never write: "this encounter", "this contest", "this clash", "this match", "ultimately", "set to", "look to", "navigate", "massive", "crippling", "relentless", "showing that", "it is worth noting", "in the final third".
+- No dashes between clauses. No headings beyond the three labels, no sign-off, no quotation marks round a paragraph.`;
+}
+
+/** Whether text names odds, or a decimal that is not the bet's own line. */
+export function quotesPrice(text: string, call: string): boolean {
+  if (/\bodds\b/i.test(text)) return true;
+  const own = new Set(call.match(/\b\d+\.\d+\b/g) ?? []);
+  return (text.match(/\b\d+\.\d+\b/g) ?? []).some((d) => !own.has(d));
+}
+
+/** The three labelled paragraphs, or null for any that is missing. */
+export function splitAnalysis(draft: string): { call: string | null; how: string | null; only: string | null } {
+  const grab = (label: string, next: string | null) => {
+    const re = new RegExp(`${label}:\\s*([\\s\\S]*?)${next ? `(?=\\n\\s*${next}:)` : '$'}`, 'i');
+    const m = re.exec(draft.trim());
+    return m && m[1]!.trim() ? m[1]!.trim() : null;
+  };
+  return { call: grab('CALL', 'HOW'), how: grab('HOW', 'ONLY'), only: grab('ONLY', null) };
+}
+
+/** Faults in a three-paragraph analysis, against the facts, the call and its odds. */
+export function validateAnalysis(paras: string[], req: WriteRequest): Rejection[] {
+  const out = new Set<Rejection>();
+  const allowed = [...backing(req), req.call];
+  const count = (t: string) => t.trim().split(/\s+/).filter(Boolean).length;
+  for (const p of paras) {
+    const n = count(p);
+    if (n < PARA_MIN) out.add('too-short');
+    if (n > PARA_MAX) out.add('too-long');
+    if (findBannedInProse(p, allowed).length) out.add('banned-term');
+    if (inventedNumber(p, allowed)) out.add('invented-number');
+    if (copiedFact(p, req.facts)) out.add('copied-fact');
+    if (notProse(p) || /\b(CALL|HOW|ONLY)\s*:/.test(p)) out.add('not-prose');
+  }
+  const total = paras.reduce((a, p) => a + count(p), 0);
+  if (total < ANALYSIS_MIN) out.add('too-short');
+  if (total > ANALYSIS_MAX) out.add('too-long');
+  // A price written into the text goes stale the moment the market moves. The
+  // bet's own line ("Under 3.5 goals") is the one decimal it may carry.
+  if (quotesPrice(paras.join(' '), req.call)) out.add('banned-term');
+  return [...out];
+}
+
+function analysisFeedback(paras: Array<string | null>, req: WriteRequest): string {
+  const allowed = [...backing(req), req.call];
+  const notes: string[] = [];
+  const labels = ['CALL', 'HOW', 'ONLY'];
+  paras.forEach((p, i) => { if (!p) notes.push(`${labels[i]} was missing. Write it, under its own label.`); });
+  const got = paras.filter((p): p is string => Boolean(p));
+  const nums = [...new Set(got.flatMap((p) => unbackedNumbers(p, allowed)))];
+  if (nums.length) notes.push(`It used ${nums.map((n) => `"${n}"`).join(', ')}, which ${nums.length === 1 ? 'is' : 'are'} not in the facts. Leave ${nums.length === 1 ? 'it' : 'them'} out entirely.`);
+  const banned = [...new Set(got.flatMap((p) => findBannedInProse(p, allowed)).map((v) => v.term))];
+  if (banned.length) notes.push(`It used ${banned.map((t) => `"${t}"`).join(', ')}, which ${banned.length === 1 ? 'is' : 'are'} not allowed. Say it another way.`);
+  if (quotesPrice(got.join(' '), req.call)) notes.push('It mentioned odds or a price. Leave them out: the price is shown beside the call.');
+  const words = got.map((p) => p.trim().split(/\s+/).filter(Boolean).length);
+  if (words.some((n) => n < PARA_MIN || n > PARA_MAX)) notes.push(`The paragraphs were ${words.join(', ')} words. Keep each between 35 and 90.`);
+  const copied = got.map((p) => copiedFact(p, req.facts)).find(Boolean);
+  if (copied) notes.push(`It copied a fact word for word ("${copied}"). Say every fact in your own words.`);
+  return notes.length ? `\n\nYour last draft was rejected:\n${notes.map((n) => `- ${n}`).join('\n')}\nWrite all three paragraphs again.` : '';
+}
+
+/** Write the three paragraphs, or return null text and let the caller fall back. */
+export async function writeAnalysis(req: WriteRequest, writer: Writer): Promise<WriteResult> {
+  const rejections: Rejection[] = [];
+  const unbacked: string[] = [];
+  const allowed = [...backing(req), req.call];
+  let prompt = buildAnalysisPrompt(req);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt === 2 && !writer.lastModel) break;
+    let draft: string;
+    try {
+      draft = (await writer.generate(prompt, attempt === 2 ? { avoid: writer.lastModel } : undefined)).trim();
+    } catch (err) {
+      rejections.push('error');
+      return { text: null, why: null, rejections, unbacked, provider: writer.name, error: err instanceof Error ? err.message : String(err) };
+    }
+    const parts = splitAnalysis(draft);
+    let paras = [parts.call, parts.how, parts.only];
+    unbacked.push(...paras.flatMap((p) => (p ? unbackedNumbers(p, allowed) : [])));
+    // A paragraph whose only fault is a number out of place loses that sentence.
+    paras = paras.map((p) => (p && unbackedNumbers(p, allowed).length ? withoutUnbacked(p, allowed) : p));
+    if (paras.every((p): p is string => Boolean(p))) {
+      const clean = paras.map((p) => tidy(p!));
+      const problems = validateAnalysis(clean, req);
+      if (!problems.length) return { text: clean.join('\n\n'), why: null, rejections, unbacked, provider: writer.name };
+      rejections.push(...problems);
+    } else {
+      rejections.push('not-prose');
+    }
+    prompt = buildAnalysisPrompt(req) + analysisFeedback(paras, req);
+  }
+  return { text: null, why: null, rejections, unbacked, provider: writer.name };
 }
 
 /** Strip the wrapper a model reaches for even when told not to. */

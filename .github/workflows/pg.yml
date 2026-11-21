@@ -13,7 +13,7 @@ on:
       command:
         description: 'Engine command to run against Postgres'
         type: choice
-        options: [migrate, history, 'history:cards', ratings, slate, 'slate:fresh', settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players', 'probe:profile', 'probe:reds', 'probe:extras', grant, plans, 'whop:check', 'whop:stop', 'gemini:check', trace, 'mail:setup', 'mail:route', 'cf:usage', 'db:export', 'db:verify', 'd1:create', 'db:import', 'db:accounts', 'mail:auth', 'record:reset', lab, 'lab:tune', 'lab:leans', 'lab:model', 'lab:losses', 'lab:slices', 'lab:live', 'lab:review', 'lab:record', 'lab:calib', 'lab:odds', 'lab:backfill', 'leagues:refresh']
+        options: [migrate, history, 'history:cards', ratings, slate, 'slate:fresh', settle, backtest, board:stats, eval:provider, h2h, market, 'probe:players', 'probe:profile', 'probe:reds', 'probe:extras', grant, plans, 'whop:check', 'whop:stop', 'gemini:check', trace, 'mail:setup', 'mail:route', 'cf:usage', 'db:export', 'db:verify', 'd1:create', 'db:import', 'db:accounts', 'mail:auth', 'record:reset', lab, 'lab:tune', 'lab:leans', 'lab:model', 'lab:losses', 'lab:slices', 'lab:live', 'lab:review', 'lab:dump', 'lab:record', 'lab:calib', 'lab:odds', 'lab:backfill', 'leagues:refresh']
         default: migrate
       arg:
         # Free text for the commands that take one. `grant` reads an email and
@@ -145,6 +145,14 @@ jobs:
           tar -C engine -cf - export | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:EXPORT_KEY -out offside-export.tar.enc
           rm -rf engine/export
           ls -la offside-export.tar.enc
+      # lab:dump only: the finished-match history (no personal data), kept a day.
+      - uses: actions/upload-artifact@v4
+        if: inputs.command == 'lab:dump'
+        with:
+          name: lab-history
+          path: engine/lab-history.json.gz
+          retention-days: 1
+          compression-level: 0
       - uses: actions/upload-artifact@v4
         if: inputs.command == 'db:export'
         with:

@@ -4,7 +4,7 @@ import { buildBookMarkets, fetchQuotes } from '../odds.ts';
 import { loadLeagueModel, loadRefereeRate } from '../ratings/fit.ts';
 import { kvGetJSON, kvSetJSON, select } from '../store.ts';
 import { profilesFor } from './players.ts';
-import { trackXi } from './xi.ts';
+import { pruneUnpicked, trackXi } from './xi.ts';
 import type { MatchRow } from '../types.ts';
 import type {
   FixtureContext, LineupInfo, LineupPlayer, ManagerInfo, ManagerTenure,
@@ -456,6 +456,9 @@ export async function gatherFixture(
 
   const leagueRow = await select<{ name: string }>('SELECT name FROM league WHERE id = ?', [leagueId]);
   const lineups = parseLineups(lineupsRaw);
+  // A projected starter nobody has picked lately (a retired player) is not expected to start (xi.ts).
+  const dropped = await pruneUnpicked(lineups, { home: home.team_id ?? null, away: away.team_id ?? null }, kickoff).catch(() => []);
+  if (dropped.length) console.log(`  lineups: ${fixtureId} predicted starters on no recent sheet, left out: ${dropped.length}`);
   // The predicted eleven kept, and the confirmed one compared with it (xi.ts).
   lineups.changes = await trackXi(fixtureId, lineups).catch(() => null);
 
