@@ -27,6 +27,7 @@
     "plans": "tsx src/run.ts plans",
     "whop:check": "tsx src/run.ts whop:check",
     "whop:stop": "tsx src/run.ts whop:stop",
+    "lab:dump": "tsx src/run.ts lab:dump",
     "gemini:check": "tsx src/run.ts gemini:check",
     "mail:route": "tsx src/run.ts mail:route",
     "cf:usage": "tsx src/run.ts cf:usage",

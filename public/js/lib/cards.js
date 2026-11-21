@@ -23,7 +23,7 @@ export function cardState(f) {
   return s ? `ft-${Number(s[0])}-${Number(s[1])}` : 'pre';
 }
 
-const RESULT = { WON: ['Landed', 'won'], HALF_WON: ['Half landed', 'won'], LOST: ['Missed', 'lost'], HALF_LOST: ['Half lost', 'lost'], PUSH: ['Stake back', 'void'], VOID: ['Void', 'void'] };
+const RESULT = { WON: ['Won', 'won'], HALF_WON: ['Half won', 'won'], LOST: ['Lost', 'lost'], HALF_LOST: ['Half lost', 'lost'], PUSH: ['Stake back', 'void'], VOID: ['Void', 'void'] };
 
 /**
  * The line along the foot of the card. Only what is public already: the free

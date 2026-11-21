@@ -186,7 +186,8 @@ export function leagueRank(leagueId: number): number {
  * request.
  */
 export function narrativeKey(fixtureId: number, c: Candidate, news = ''): string {
-  return `narr:${fixtureId}:${c.market}:${c.outcome}:${c.line ?? ''}${news ? `:${fnv(news)}` : ''}`;
+  // v3: three paragraphs (21 November 2026); older entries are the preview and its why.
+  return `narr3:${fixtureId}:${c.market}:${c.outcome}:${c.line ?? ''}${news ? `:${fnv(news)}` : ''}`;
 }
 
 /**

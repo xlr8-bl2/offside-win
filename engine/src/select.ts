@@ -1,4 +1,5 @@
 import { config } from './config.ts';
+import { preferCommonFirst } from './lab/markets.ts';
 import { expectedValue, kelly } from './devig.ts';
 import { findConflicts, topTierCoverage } from './ledger.ts';
 import { findBookMarket } from './odds.ts';
@@ -395,6 +396,8 @@ export function confidentGate(
   if (c.odds < config.confident.minOdds) return 'short';
   if (c.odds > config.confident.maxOdds) return 'long';
   if (config.confident.excludeMarkets.includes(bucketOf(c))) return 'excluded';
+  if (c.market === 'asian_handicap' && c.line !== null
+    && config.confident.excludeBackedLines.includes(c.outcome === 'HOME' ? c.line : -c.line)) return 'excluded';
   // Quarter handicap lines (-1.75, 0.25) are a split stake nobody can explain in a sentence.
   if (!config.confident.quarterLines && c.line !== null && Math.abs((c.line * 4) % 2) === 1) return 'excluded';
   if ((c.books ?? 0) < config.confident.minBooks) return 'excluded';
@@ -486,9 +489,13 @@ export function rankConfident(
   floor = config.confident.floor,
   calibration: CalibrationMap = new Map(),
 ): Candidate[] {
-  return candidates
+  const ranked = candidates
     .filter((c) => confidentEligible(c, floor, calibration))
     .sort((a, b) => confidentScore(b) - confidentScore(a));
+  // A bet people know ahead of a handicap that is barely likelier (lab/markets.ts preferCommonFirst).
+  return config.confident.preferCommon > 0
+    ? preferCommonFirst(ranked, (c) => MARKET_FAMILY[c.market] === 'handicap', (c) => c.model_prob, config.confident.preferCommon)
+    : ranked;
 }
 
 export function selectConfident(

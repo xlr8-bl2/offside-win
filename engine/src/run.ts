@@ -406,6 +406,21 @@ const commands: Record<string, () => Promise<unknown>> = {
     runReview(await loadHistory());
   },
 
+  // The lab's whole finished-match history, written to engine/lab-history.json.gz
+  // for the workflow to keep as a one-day artifact, so a study can be run
+  // against it outside Actions. Matches, prices and the provider's numbers
+  // only: no account, no email, nothing personal is in it.
+  async 'lab:dump'() {
+    requireEnv({ provider: false });
+    const { loadHistory } = await import('./lab/run.ts');
+    const { gzipSync } = await import('node:zlib');
+    const { writeFileSync } = await import('node:fs');
+    const rows = await loadHistory();
+    const json = JSON.stringify(rows, (_k, v) => (v instanceof Map ? { __map: [...v.entries()] } : v));
+    writeFileSync('lab-history.json.gz', gzipSync(json));
+    console.log(`lab:dump: ${rows.length} finished matches, ${Math.round(json.length / 1024)}KB of JSON.`);
+  },
+
   async 'lab:live'() {
     requireEnv({ provider: false });
     const { loadHistory } = await import('./lab/run.ts');

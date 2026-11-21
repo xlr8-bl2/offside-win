@@ -16,6 +16,9 @@ const REQ: WriteRequest = {
   ],
 };
 
+/** A match we passed on: the preview path, which keeps the PREVIEW label. */
+const PREVIEW_REQ: WriteRequest = { ...REQ, previewOnly: true };
+
 const stub = (reply: string | (() => string)): Writer => ({
   name: 'stub',
   generate: async () => (typeof reply === 'function' ? reply() : reply),
@@ -170,7 +173,7 @@ test('a valid draft is returned and tidied', async () => {
     + 'games in charge and it has changed nothing on the road. Sarpsborg have lost two of their last '
     + 'six, so nobody is claiming they are flying. They do not have to be. At home against this, '
     + 'avoiding defeat is the floor rather than the ceiling."';
-  const r = await write(REQ, stub(good));
+  const r = await write(PREVIEW_REQ, stub(good));
   assert.ok(r.text);
   assert.ok(!r.text!.startsWith('"'), 'the quote wrapper survived');
   assert.deepEqual(r.rejections, []);
@@ -178,7 +181,7 @@ test('a valid draft is returned and tidied', async () => {
 
 test('a bad draft is retried once, then given up on', async () => {
   let calls = 0;
-  const r = await write(REQ, stub(() => { calls++; return 'Our model says this is a clear edge with high confidence and real value in it.'; }));
+  const r = await write(PREVIEW_REQ, stub(() => { calls++; return 'Our model says this is a clear edge with high confidence and real value in it.'; }));
   assert.equal(calls, 2, 'should try exactly twice');
   assert.equal(r.text, null);
   assert.ok(r.rejections.includes('banned-term'));
@@ -186,7 +189,7 @@ test('a bad draft is retried once, then given up on', async () => {
 
 test('a second attempt can succeed', async () => {
   let calls = 0;
-  const r = await write(REQ, {
+  const r = await write(PREVIEW_REQ, {
     name: 'stub',
     generate: async () => {
       calls++;
@@ -203,7 +206,7 @@ test('a second attempt can succeed', async () => {
 });
 
 test('a provider failure falls back rather than throwing', async () => {
-  const r = await write(REQ, {
+  const r = await write(PREVIEW_REQ, {
     name: 'stub',
     generate: async () => { throw new Error('429 quota exhausted'); },
   });
@@ -235,10 +238,9 @@ test('one bad sentence is cut, and the rest stands when it is long enough', asyn
     + 'of their last six, so nobody is claiming they are flying, and they do not need to be. At home against a side '
     + 'this poor on its travels, avoiding defeat should be the floor rather than the ceiling for them tonight.';
   let calls = 0;
-  const r = await write(REQ, stub(() => { calls++; return draft; }));
-  // The preview is mended, not rewritten; the second request is only for the
-  // missing members' paragraph.
-  assert.equal(calls, 2, 'one more request, for the members\' paragraph only');
+  const r = await write(PREVIEW_REQ, stub(() => { calls++; return draft; }));
+  // The preview is mended, not rewritten: no second request.
+  assert.equal(calls, 1, 'mended in place');
   assert.ok(r.text);
   assert.ok(!/seven/.test(r.text!), 'the invented claim is gone');
   assert.match(r.text!, /four games in charge/);
@@ -248,7 +250,7 @@ test('one bad sentence is cut, and the rest stands when it is long enough', asyn
 test('the retry is told which numbers to leave out', async () => {
   const prompts: string[] = [];
   const short = 'PREVIEW: KFUM Oslo have lost seven of their last eight. That is all.';
-  await write(REQ, { name: 'stub', generate: async (p) => { prompts.push(p); return short; } });
+  await write(PREVIEW_REQ, { name: 'stub', generate: async (p) => { prompts.push(p); return short; } });
   assert.equal(prompts.length, 2);
   assert.ok(!prompts[0]!.includes('Your last draft'));
   assert.match(prompts[1]!, /Your last draft was rejected\. It used "seven", "eight", which are not in the facts/);
@@ -257,19 +259,19 @@ test('the retry is told which numbers to leave out', async () => {
 test('the retry is told which banned words it used, and how long it ran', async () => {
   const prompts: string[] = [];
   const draft = 'PREVIEW: KFUM Oslo are low on confidence. That is all there is to it.';
-  await write(REQ, { name: 'stub', generate: async (p) => { prompts.push(p); return draft; } });
+  await write(PREVIEW_REQ, { name: 'stub', generate: async (p) => { prompts.push(p); return draft; } });
   assert.match(prompts[1]!, /"confidence"/);
   assert.match(prompts[1]!, /PREVIEW was \d+ words/);
 });
 
-test('a good preview is kept while the members\' paragraph gets its second go', async () => {
+test('a good preview stands', async () => {
   const preview = 'PREVIEW: KFUM Oslo travel badly, and that is the whole story here. '
     + 'The new manager has had four games in charge and nothing on the road has changed yet. Sarpsborg have lost two '
     + 'of their last six, so nobody is claiming they are flying, and they do not need to be. At home against a side '
     + 'this poor on its travels, avoiding defeat should be the floor rather than the ceiling for them tonight, and '
     + 'nobody at the ground will expect anything less from them.';
   const drafts = [preview, 'PREVIEW: short.\nWHY: too short.'];
-  const r = await write(REQ, stub(() => drafts.shift() ?? ''));
+  const r = await write(PREVIEW_REQ, stub(() => drafts.shift() ?? ''));
   assert.ok(r.text && /travel badly/.test(r.text), 'the first preview stands');
 });
 
@@ -297,4 +299,33 @@ test('a single model is not asked a third time', async () => {
   const res = await write({ ...REQ, previewOnly: true }, { name: 'one', generate: async () => { n++; return 'Too short.'; } });
   assert.equal(n, 2);
   assert.equal(res.text, null);
+});
+
+/* ------------------------------------------------- the three-paragraph analysis */
+
+const CALL_REQ: WriteRequest = { ...REQ, odds: 1.29 };
+const para = (lead: string) => `${lead} ${'KFUM Oslo travel badly and Sarpsborg have lost two of their last six, which says enough about both. '.repeat(3).trim()}`;
+const THREE = `CALL:\n${para('Sarpsborg 08 to win or draw is the call, because KFUM Oslo travel badly.')}\nHOW:\n${para('Sarpsborg will have the ball.')}\nONLY:\n${para('Four games into the new man at KFUM Oslo and nothing has changed away from home.')}`;
+
+test('a call gets three straight paragraphs: the bet first, then how, then what others miss', async () => {
+  let prompt = '';
+  const r = await write(CALL_REQ, { name: 'stub', generate: async (p) => { prompt = p; return THREE; } });
+  assert.match(prompt, /CALL:[\s\S]*HOW:[\s\S]*ONLY:/);
+  assert.match(prompt, /Your first sentence names the bet/);
+  assert.doesNotMatch(prompt, /PREVIEW:/, 'no warm-up paragraph is asked for');
+  assert.ok(r.text, r.rejections.join(','));
+  const paras = r.text!.split('\n\n');
+  assert.equal(paras.length, 3);
+  assert.match(paras[0]!, /^Sarpsborg 08 to win or draw is the call/);
+  assert.match(prompt, /Never mention odds/);
+  assert.equal(r.why, null, 'no separate members\' paragraph on a free site');
+});
+
+test('a price never reaches the written analysis', async () => {
+  const prompts: string[] = [];
+  const bad = THREE.replace('is the call,', 'at odds of 1.29 is the call,');
+  const r = await write(CALL_REQ, { name: 'stub', generate: async (p) => { prompts.push(p); return prompts.length === 1 ? bad : THREE; } });
+  assert.ok(r.text);
+  // The sentence carrying the price is cut (it is a number no fact backs); the rest stands.
+  assert.doesNotMatch(r.text!, /odds|1\.29/);
 });

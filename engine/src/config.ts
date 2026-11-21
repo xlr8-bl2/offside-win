@@ -463,15 +463,53 @@ export const config = {
      * and leaving them out took the held-out quarter from +6.3% to +7.3%
      * (lab:tune, 3,077 fixtures). Comma-separated to override.
      */
-    excludeMarkets: (process.env.CONF_EXCLUDE_MARKETS ?? 'total_corners under').split(',').map((x) => x.trim()).filter(Boolean),
+    //
+    // Double chance joined it on 20 November 2026 (see minSharpEv for the study).
+    excludeMarkets: (process.env.CONF_EXCLUDE_MARKETS ?? 'total_corners under,double_chance 12,double_chance home,double_chance away').split(',').map((x) => x.trim()).filter(Boolean),
+    /**
+     * Asian handicap lines, as the backed side gets them, that are not called:
+     * +1.5 ("this side, given a goal and a half"). It lost in every period the
+     * lab has (A -1.1%, B -4.6%, C -6.8% a call under the old rule) while the
+     * whole lines either side of it, +1 and +2, did not; see minSharpEv.
+     * Comma-separated to override; empty for none.
+     */
+    /**
+     * Most readers do not know what a handicap is (owner, 21 November 2026),
+     * so when the likeliest call is a handicap and a result, goals, corners or
+     * cards call within this much probability also clears every test, that
+     * one is made instead. Measured at 3 points: handicaps from 72% of calls
+     * to 68%, return and landing unchanged within the lab's noise. Wider does
+     * not buy much more: on most fixtures nothing common clears the bar at
+     * all, and leaving handicaps out entirely cuts the board to about four
+     * calls a day. The handicaps that stay are written in plain words.
+     */
+    preferCommon: num('CONF_PREFER_COMMON', 0.03),
+    excludeBackedLines: (process.env.CONF_EXCLUDE_AH_LINES ?? '1.5').split(',').map((x) => x.trim()).filter(Boolean).map(Number).filter(Number.isFinite),
     /** Only markets at least this many books priced in full; 0 for any. */
     minBooks: num('CONF_MIN_BOOKS', 0),
     /**
      * The value test against the sharp book as well, where it priced the
-     * market: the best price must be within this of its fair price. Null
-     * skips it. A point below fair since 3 November 2026; see minEv.
+     * market: the best price must be at least its fair price. Null skips it.
+     *
+     * Back at fair (0) on 20 November 2026, with double chance and the +1.5
+     * handicap left out (excludeMarkets, excludeBackedLines). Measured on the
+     * lab's 5,923 finished fixtures (13 August to 20 November) in the same
+     * three date periods, against the rule before:
+     *
+     *                 landed (A / B / C)       return a call (A / B / C)   a day
+     *   before        86.6 / 82.0 / 88.2%      +2.5 / -3.1 / +4.4%         ~15
+     *   this          86.5 / 83.9 / 90.2%      +2.6 / -1.0 / +6.4%         ~14
+     *
+     * Ahead on return and on landing in every resampling of the newer half's
+     * days (2,000 draws; return +0.8 to +3.6 points a call). The three parts
+     * each hold on their own in all three periods: the sharp-fair test (+3.7
+     * / -2.3 / +5.5% alone), no double chance, no +1.5. Taking the price only
+     * at or above the sharpest book's fair odds is also the textbook value
+     * test, not a fitted number. Everything the lab tried on top (our own or
+     * the provider's model agreeing, recalibrated or learned probabilities,
+     * money since the open, more books, a higher floor) did no better.
      */
-    minSharpEv: process.env.CONF_MIN_SHARP_EV ? Number(process.env.CONF_MIN_SHARP_EV) : (-0.01 as number | null),
+    minSharpEv: process.env.CONF_MIN_SHARP_EV ? Number(process.env.CONF_MIN_SHARP_EV) : (0 as number | null),
     /**
      * Price movement: leave a call the money has gone against since the market
      * opened, by more than this (one point: 80% at the open, under 79% now).
