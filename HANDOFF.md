@@ -14,6 +14,41 @@ meaningful step, and commits it with that step, not at the end of the day.
 
 ## Right now
 
+### The engine audit (owner, 26 November 2026): calls follow the market; the analysis is not contextual
+
+Owner, after Lille 2-1 Bayern (our call: Bayern win or draw at 1.17, with Kane, Olise and Díaz out):
+the engine is not contextual, it is biased to chance creation, and the call ignores the analysis.
+What the audit found (scratchpad `audit/`; data from the public API, kick-off files as stored):
+- **The call is the bookmakers' number.** `model_prob` equals the consensus (0.8367); our own
+  injury-adjusted model had Bayern avoiding defeat at about 64%. `config.confident.source` is
+  'consensus'; our model only blends on goals markets. The injuries change our model and the
+  write-up, and nothing in the decision.
+- **The write-up is ranked, not reasoned.** `narrate/insight.ts` weights the chance-creation reads
+  90 to 98, above almost every lookup; facts are scored one by one, never connected ("their chance
+  creators are out, so that record does not apply").
+- **Last 200 settled calls (3 to 26 November):** 81.8% landed against 82.4% priced: no better than the
+  market. Read loss by loss (34). Checked on all 372 finished matches still holding a kick-off file
+  (the favourite, did it win / avoid defeat, against its price): own-model disagreement, absence size
+  and competition type show no stable signal (a cup-and-disagreement pattern in the calls, 71%, was
+  92% across all matches: noise). Heavy rotation (3+ changes to the favourite's expected eleven)
+  looked strong (71% vs 86% priced, 35 matches) but is not monotonic and flips between halves on 55
+  confirmed line-ups: not shipped. Red cards on the backed side: 56% (in-match, not fixable).
+- **Provider audit (OpenAPI at sports.bzzoiro.com/api/schema/; probe run 45854050918):** on the free
+  plan, `/events/{id}/player-stats/` (per player: xG, xA, key passes, big chances created,
+  progressive carries, crosses, opposition-half passes, touches, rating, and more), `/stats/`
+  (shot map with situation and body part, momentum, average positions, xG by minute), `/lineups/`
+  (confirmed elevens stay after the match, with `unavailable_players` and reasons), `/heatmaps/`,
+  `/commentary/`. Only bookmaker names are paid.
+- **Now collecting:** `history:deep` (`engine/src/deep.ts`, table `match_deep`): elevens, formations,
+  who was missing, and per-player numbers for each finished match, two requests a match, once. In
+  the ratings workflow (600 a run, reserve 3,000); first run 45854495771: 392 of 400 read. `lab:dump`
+  now writes `lab-deep.json.gz` beside the history.
+- **Next:** once a few thousand matches are in, test rotation (actual eleven against the usual one)
+  and missing creators (their share of the side's xG + xA) on the A / B / C split; rebuild the
+  write-up as a chain (situation, how each side makes its chances and who drives it, what changes
+  with who is missing, the matchup, the verdict), and have the call follow it.
+
+
 ### The engine's rule, tightened (20 November 2026)
 
 The owner asked for rounds of iteration until the engine is genuinely better
