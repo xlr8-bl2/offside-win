@@ -28,7 +28,7 @@ import { sessionAccount } from './auth.ts';
 import { adminCall } from './admindb.ts';
 import { accountEmail } from './paydb.ts';
 import { composeReply, replySubject, sendSupport } from './support.ts';
-import { accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, goodwillEndMail, goodwillStartMail, membershipMail, noticeMail, pulledMail, receiptMail, renewalStoppedMail, renewedMail, sendMail } from './mail.ts';
+import { accessEndedMail, accountDeletedMail, authMail, deliver, freeTimeMail, goodwillEndMail, goodwillStartMail, membershipMail, noticeMail, pulledMail, receiptMail, referralRewardMail, renewalStoppedMail, renewedMail, sendMail } from './mail.ts';
 
 export interface AdminEnv extends PayEnv {
   /** Comma-separated SHA-256 hex digests of the owner's lower-cased email. */
@@ -261,6 +261,7 @@ export async function admin(request: Request, env: AdminEnv, jwt: string | null,
       renewedMail({ plan: 'monthly', until }),
       renewalStoppedMail({ plan: 'monthly', until }),
       freeTimeMail({ days: 7, until: now + 7 * 86400 }),
+      referralRewardMail({ days: 14, until: now + 14 * 86400 }),
       accessEndedMail({ reason: 'refund' }),
       goodwillStartMail({ until: until + 86400, whop: true }),
       goodwillEndMail({ days: 9, until: until + 9 * 86400, whop: false }),
@@ -284,6 +285,13 @@ export async function admin(request: Request, env: AdminEnv, jwt: string | null,
     }
     if (!(await saveSocials(env as unknown as SocialEnv, next))) return refuse('Could not save just now. Nothing changed.', 503);
     return reply({ ok: true, socials: next });
+  }
+  if (post && route === 'score') {
+    // A match's final score, typed in by the owner when the provider cannot
+    // be asked (adminScore in admindb.ts). D1 only.
+    if (!env.DB) return refuse('Only on D1.', 400);
+    const b = await body(request);
+    return db(env, 'admin_score', { p_actor: who.id, p_fixture: int(b['fixture']), p_home: int(b['home']), p_away: int(b['away']) });
   }
   if (post && route === 'end') {
     const b = await body(request);

@@ -23,6 +23,7 @@
  * as a control.
  */
 
+import { clearRef, storedRef } from './referral.js';
 const CONFIG_URL = '/api/config';
 const KEY = 'ow.session';
 
@@ -203,7 +204,7 @@ function redirectTo() {
 }
 
 export async function signInWithEmail(email) {
-  await post('/api/auth/link', { email, redirect: redirectTo() });
+  await post('/api/auth/link', { email, redirect: redirectTo(), ref: storedRef() });
 }
 
 /** Google by redirect is the only Google there is now; kept under the old name for the sign-in page. */
@@ -213,7 +214,8 @@ export async function signInWithGoogle() {
 
 /** Google's ID token for a session. `nonce` is the original, whose hash Google signed. */
 async function googleSession(token, nonce) {
-  save(await post('/api/auth/google', { id_token: token, nonce }));
+  save(await post('/api/auth/google', { id_token: token, nonce, ref: storedRef() }));
+  clearRef();
 }
 
 /*
@@ -429,7 +431,8 @@ export async function completeSignIn() {
   history.replaceState(null, '', url.toString());
   if (!token) throw new Error('expired');
   try {
-    save(await post('/api/auth/verify', { token }));
+    save(await post('/api/auth/verify', { token, ref: storedRef() }));
+    clearRef();
   } catch (err) {
     throw new Error(err.status === 401 ? 'expired' : err.message);
   }

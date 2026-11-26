@@ -351,6 +351,14 @@ export interface Policy {
   floorBump?: Partial<Record<MarketFamily, number>>;
   /** Markets (bucketOf) and league ranks this rule leaves alone. */
   excludeBuckets?: string[];
+  /**
+   * Prefer a bet people know. When the likeliest call on a fixture is a
+   * handicap and a result, goals, corners or cards call that also qualifies
+   * is within this much probability of it, the common one goes first.
+   */
+  preferCommon?: number;
+  /** Asian handicap lines, as the backed side gets them (+1.5 = given a goal and a half), this rule does not call. */
+  excludeBackedLines?: number[];
   excludeRanks?: number[];
   /** Only markets at least this many books priced in full. */
   minBooks?: number;
@@ -486,6 +494,8 @@ export function ranked(policy: Policy, row: HistRow, options?: Option[]): Pick[]
     if (policy.maxHandicap !== undefined && o.family === 'handicap' && o.line !== null && Math.abs(o.line) > policy.maxHandicap) continue;
     if (policy.minBooks !== undefined && (o.books ?? 0) < policy.minBooks) continue;
     if (policy.excludeBuckets?.includes(bucketOf(o))) continue;
+    if (policy.excludeBackedLines && o.market === 'asian_handicap' && o.line !== null
+      && policy.excludeBackedLines.includes(o.outcome === 'HOME' ? o.line : -o.line)) continue;
     if (policy.excludeRanks?.includes(row.rank)) continue;
     if (policy.requireSharp && o.sharp === null) continue;
     if (policy.minOwnGap !== undefined && (o.own === null || o.own - (o.sharp ?? o.book) < policy.minOwnGap)) continue;
@@ -511,10 +521,25 @@ export function ranked(policy: Policy, row: HistRow, options?: Option[]): Pick[]
       : ev * Math.sqrt(p);
     out.push({ row, option: o, p, ev, score });
   }
-  const mine = out.sort((a, b) => b.score - a.score);
+  let mine = out.sort((a, b) => b.score - a.score);
+  if (policy.preferCommon !== undefined) mine = preferCommonFirst(mine, (x) => x.option.family === 'handicap', (x) => x.p, policy.preferCommon);
   if (!policy.fallback) return mine;
   const seen = new Set(mine.map((x) => `${x.option.market}|${x.option.line}|${x.option.outcome}`));
   return [...mine, ...ranked(policy.fallback, row, options).filter((x) => !seen.has(`${x.option.market}|${x.option.line}|${x.option.outcome}`))];
+}
+
+/**
+ * A ranked list with the best common bet moved to the front when the top is
+ * a handicap and the common one is within `within` of its probability. Most
+ * readers do not know what a handicap is (owner, 21 November 2026). Shared
+ * with the live engine (select.ts rankConfident) so the lab replays it.
+ */
+export function preferCommonFirst<T>(list: T[], isHandicap: (x: T) => boolean, prob: (x: T) => number, within: number): T[] {
+  const top = list[0];
+  if (!top || !isHandicap(top)) return list;
+  const i = list.findIndex((x) => !isHandicap(x));
+  if (i < 0 || prob(list[i]!) < prob(top) - within) return list;
+  return [list[i]!, ...list.slice(0, i), ...list.slice(i + 1)];
 }
 
 export function choose(policy: Policy, row: HistRow, options?: Option[]): Pick | null {

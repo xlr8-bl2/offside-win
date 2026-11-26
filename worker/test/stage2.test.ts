@@ -9,6 +9,11 @@ import { goodwillCredit, goodwillEnded, goodwillNoted, pulledClaim } from '../sr
 import { adminCall } from '../src/admindb.ts';
 import { webhook } from '../src/pay.ts';
 import { deleteAccount } from '../src/account.ts';
+import { setFree } from '../src/d1read.ts';
+
+// These check the wall and the checkout, which the free site switches off
+// (d1read.ts FREE); free-site.test.ts checks the site as it runs now.
+setFree(false);
 
 /**
  * Stage 2 of the move off Supabase: payments, the owner's dashboard, support

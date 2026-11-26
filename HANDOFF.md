@@ -1,7 +1,10 @@
 # Handoff: read this first
 
-**Last updated:** 7 October 2026, about 13:00 UTC, by the Claude Code session working on branch
-`claude/amazing-galileo-isfeue`.
+**Last updated:** 3 November 2026, about 16:35 UTC, by the Claude Code session on branch
+`claude/project-thread-b55ubz` (tell a friend; see Recent work).
+Also on 3 November: `claude/project-thread-5spo7d` (fit to the free plans; see Recent work), and
+`claude/project-thread-bbr97i` (calls graded at full time, and a hand-typed score showing at once;
+see the 3 November entries under "Other things in flight" and below).
 
 **Keep this file current.** The owner may move the work to a different coding agent or account
 at any time. Whoever is working updates the "Right now" section and the checklist after every
@@ -10,6 +13,209 @@ meaningful step, and commits it with that step, not at the end of the day.
 ---
 
 ## Right now
+
+### The engine's rule, tightened (20 November 2026)
+
+The owner asked for rounds of iteration until the engine is genuinely better
+than its best. `lab:dump` (pg.yml) writes the lab's whole finished-match
+history as a one-day artifact (5,923 fixtures, 13 August to 20 November), so
+studies run locally in seconds against the real lab code. The judge is the
+same A / B / C date split as `lab:tune`, plus 2,000 resamples of the newer
+half's days, plus two-week windows.
+
+Five rounds were tried. What lost or added nothing: our own ratings or the
+provider's model agreeing, recalibrated and learned probabilities (both made
+twice the calls and did worse), money since the open (steam and drift),
+minimum book counts, higher floors alone, growth or EV ranking, price caps,
+the diversity cap, and league-rank floors.
+
+What held in all three periods, and is now live (`config.confident`, with
+`PROD` in `lab/tune.ts` to match):
+- The price at or above the sharp book's fair price (`minSharpEv` 0, was
+  -0.01).
+- No double chance (`excludeMarkets`).
+- No Asian handicap at +1.5 for the backed side (`excludeBackedLines`, new;
+  `excludeBackedLines` in the lab's Policy). Production had lost on it in A,
+  B and C.
+
+| | landed (A / B / C) | return a call (A / B / C) | a day |
+|---|---|---|---|
+| before | 86.6 / 82.0 / 88.2% | +2.5 / -3.1 / +4.4% | ~15 |
+| now | 86.5 / 83.9 / 90.2% | +2.6 / -1.0 / +6.4% | ~14 |
+
+Ahead on return and on landing in 100% of resamples of B+C (+0.8 to +3.6
+points a call). The caveat: B and C were looked at while choosing, so the
+proof is the games after 20 November. Re-run `lab:dump` and score only those
+(the scripts are in the session's scratchpad: `bench.ts`, `r1`..`r6`). The lab
+returns use the best price across books, so they read higher than the
+published record, which uses one quoted book.
+
+### Plain picks, plain words, three-paragraph analysis (owner, 21 November 2026)
+
+- **Common bets first.** Most readers do not know what a handicap is. The lab
+  (rounds 7 to 9) found that dropping handicaps cuts the board to about four
+  calls a day, landing 82 to 84%, because most 78%+ chances at a fair price are
+  handicaps. So `config.confident.preferCommon` (0.03) prefers a result, goals,
+  corners or cards call that is within three points of a handicap. That moves
+  handicaps from 72% to 68% of calls at no measurable cost. The live
+  `rankConfident` and the lab's `ranked` share `preferCommonFirst`.
+- **No goal-margin handicaps (owner: "cut handicap picks to the least").**
+  `config.confident.maxHandicapMargin` (0.5): an Asian handicap is called only at
+  -0.5, 0 or +0.5 for the backed side, which read as "to win" or "to win or
+  draw"; never +1, +2 or -1.5, and never a three-way handicap. Lab round 11
+  (A / B / C), against the rule before:
+
+  | | a day | landed | return a call |
+  |---|---|---|---|
+  | before | 15.5 | 86.1 / 83.5 / 90.2% | +2.4 / -1.4 / +6.4% |
+  | now | 7.1 | 83.5 / 80.7 / 87.3% | +1.6 / -2.6 / +5.7% |
+  | no handicaps at all | 3.6 | 82.5 / 77.3 / 87.7% | +0.6 / -6.3 / +7.4% |
+
+  That is the cost, said plainly: about three points of landing and half the
+  board. Lower floors to win the volume back cost more landing than they gave.
+  The mix now: level-line "to win" 23%, two or more goals 20%, draw no bet
+  16%, "to win or draw" 11%, corners 10%, match result 7%. Locked by
+  `engine/test/handicap-limit.test.ts`, live and in the lab's `PROD`; loosening
+  it is the owner's decision.
+- **Bet-slip terms (owner, later the same day).** Names are the slip's own:
+  "Under 3.5 goals", "Over 9.5 corners", "Atlanta draw no bet" (also the level
+  handicap), "Atlanta double chance" (also +0.5; win or draw), "No draw (double chance 12)" for either side to win, "Atlanta to win" (also -0.5), and
+  "Atlanta +2.0" for any older margin handicap. The engine's writer uses the
+  same names (`plainCall` in slate.ts calls `describe`), and its no-decimals
+  rule allows the bet's own line (`quotesPrice`). The offside-voice skill
+  records the exception.
+- **Plain words.** A pick's main line is its plain name: "Argentina to win",
+  "Two or more goals", and for a handicap `handicapName` in
+  `public/js/lib/markets.js` ("Jordan not to lose by three or more", "Jordan
+  to win by two or more"). Under it, small, is "On the coupon: Asian
+  Handicap, Jordan +2.0", so the bet can be found. It is left off where the
+  plain name already says it all (match result, goals, both to score). The
+  Worker's pages use the same names.
+- **Won and lost** everywhere, on the site and on the SEO pages (was landed and
+  missed).
+- **The writer** (`writeAnalysis` in `engine/src/narrate/write.ts`). A match
+  with a call gets three labelled paragraphs, CALL / HOW / ONLY: the bet and
+  why; how the game goes to produce it; and what most previews miss, with
+  what would sink it. There is no warm-up preview and no separate `why`. It is
+  stored as the narrative with blank lines between paragraphs, which the
+  match page draws as separate paragraphs. It never quotes a price, because
+  the price moves after writing (a page showed "odds of 1.12" beside 1.09).
+  Cached under `narr3:`, so today's calls are rewritten. Matches with no
+  call keep the one-paragraph preview.
+- **Retired players.** A predicted starter who is on none of the side's last
+  four team sheets in our match reports (starters and substitutes, 18
+  months) is taken off the projected eleven (`pruneUnpicked` in
+  `context/xi.ts`, called from `gather.ts`). Argentina's projection still had
+  Messi; he is on neither of Argentina's last two sheets.
+
+### The site is free (owner, 17 November 2026)
+
+The owner's new direction: a completely free product with no premium tier,
+paid for by tidy, restrained ads (Google AdSense) rather than memberships.
+Accounts stay, but only as a nice-to-have: every call, the analysis and the
+slip must be usable without one. **Never bookmaker affiliate links or
+bookmaker deals of any kind; the owner said "never ever".**
+
+What has changed so far:
+
+- `FREE` in `worker/src/d1read.ts` opens every read for every reader. The wall
+  code is still there, and setting `FREE` to false brings it back; the wall's
+  own tests run with it off. `public/app.js` has the matching `FREE`:
+  `isMember()` is always true, the front page is the dashboard for everyone,
+  `#/pricing` and `#/checkout` go home, there are no promos, and no lock boxes
+  are drawn.
+- Nothing can be bought. `/api/pay/checkout` and `/api/pay/charge` answer 410,
+  and `/pricing` redirects (301) to `/`. Whop renewals for memberships
+  already held are not cancelled yet; that is the owner's call.
+- Speed: on a free site, public reads go without the token, so every reader,
+  signed in or not, gets the edge copy and the head's preloads. Signed-in
+  reads used to bypass both and go straight to D1.
+
+- Whop renewals: `whop:stop` (engine/src/whopstop.ts) counts the memberships
+  still set to renew, and with the argument `confirm` stops each one at the
+  end of its paid time. On 17 November there were 3 in all (1 cancelled, 2
+  expired), none renewing, so nothing needed cancelling.
+- Nothing needs an account now. Following works signed out: the list is kept
+  on the device (`ow.follows`, listed in the storage notice) and moves onto
+  the account at sign-in. "Today's free call" is now "our surest call today".
+  The international-break note and the big-moment cards no longer open over
+  the page by themselves; the note waits as its chip. Signing in on a new
+  browser now signs out the oldest only past ten devices
+  (`maxDevices()` in auth.ts; it was two, to stop shared memberships).
+
+- Colour and layout pass, first round (17 November): win and loss are now
+  teal-green `#2dd4bf` and coral `#f45d64`, so red-green colour-blind readers
+  can tell them apart (the old pair simulated to near-identical olives).
+  Violet text uses `--floodlight-ink` (`#a996ff`), because the fill colour
+  failed 4.5:1 on raised surfaces, and `--chalk-3` is lifted to pass
+  everywhere. 70 hard-coded rgba colours in base and components now come
+  from the tokens. The all-caps tracked labels and middle-dot fact strings
+  (results, tags, the book name) are sentence case. On phones the footer
+  drops its "This week" and "Next up" columns, the header says "1 live", and
+  the floating break chip is gone.
+
+- Front page on phones: the open calls are drawn again straight after the
+  day's tally (`openCallsHTML`, `.home-calls-top`; the side column's copy
+  hides below 1040px), and the masthead's match centre (countdown, table,
+  meetings) is hidden below 680px. Results: each card shows the score, the
+  call and one line on how it finished; the scorers, the post-mortem and the
+  reason we gave sit behind one tap (`.recap-more`). The phone page went from
+  about 13,200px to 9,400px.
+
+- Adverts, built and switched off (17 November). `public/js/lib/ads.js`
+  draws hidden markers (`adSlotHTML`) and fills them only when
+  `ADSENSE_CLIENT` and `ADSENSE_SLOT` in `worker/wrangler.toml` hold real
+  AdSense ids (`adsConfig` in index.ts checks the format). The places are
+  home after "Next up"; board after the 2nd call group and the 2nd and 6th
+  other groups; results after the 2nd and 5th day; fixture after the call
+  panel and at the end. All are below the first screen, labelled
+  "Advertisement", reserving 300px, and they close up when unfilled.
+  `/ads.txt` is served once a publisher is set. The privacy and cookie
+  notices describe Google's adverts.
+- To switch adverts on: the owner applies at adsense.google.com with
+  offside.win, then (1) turns on the European regulations message in
+  Privacy & messaging (Google's certified consent tool; needed for UK and EEA
+  readers), (2) under Blocking controls, keeps "Gambling & Betting" blocked
+  (never a bookmaker), and (3) creates one responsive display unit. Put the
+  `ca-pub-` id and the unit id in wrangler.toml and deploy.
+
+### Fitting the Workers free plan (17 November 2026)
+
+The paid Workers plan lapsed. On the free plan the limits that matter are
+100k requests/day, 10 ms CPU per request, 5M D1 rows read/day, 100k rows
+written/day and 500 MB per database. `npm run cf:usage` (pg.yml `cf:usage`)
+reads the live numbers and the top statements by rows read.
+
+Before this fix, reads ran at 8 to 14 million a day. Two-thirds of that came
+from `getPicks`: its summary counted every pick on each request, and its list
+had no `(kind, kickoff)` index. What changed:
+
+- The summary is kept in kv `picks:summary` for ten minutes
+  (`pickSummary` in `worker/src/d1read.ts`). `settle.ts` deletes the key after
+  any settle, so the count updates straight away.
+- New indexes in `schema.sql` (deploy applies them): `pick_kind_kickoff`,
+  `pick_kind_settled`, `schedule_home_team`, `schedule_away_team`.
+- `getLeagues` seeks each tracked league's next game, so it no longer scans
+  the whole schedule.
+- `clubSeasonStart` (`engine/src/context/players.ts`) reads one row per side
+  instead of every game the club has played.
+
+Still open:
+
+- Re-run `cf:usage` after a day to confirm reads are under 5M.
+- The DB is 377 of 500 MB and growing (probably `image`).
+
+### Ad test: lead events for Whop Ads (3 November 2026, branch `claude/project-thread-p7u2m5`)
+
+Whop Ads would not run a leads campaign on the homepage because the pixel had never sent a `lead`.
+`public/app.js` now sends, only with the reader's yes to ad measurement: `lead` when an email is
+typed in for a sign-in link (or on a brand-new account's first sign-in, which covers Google), and
+`complete_registration` on a new account's first session (`since` under 30 minutes). No email or
+name goes to Whop; `event_id` is `lead_<16 hex of sha256(email)>` and `reg_<account id>`, so repeats
+count once. The privacy and cookie notices say so (`legal.js`, regenerated `privacy.html` /
+`terms.html`, UPDATED 3 November 2026). The pixel still loads only after consent, so Whop sees
+nothing from a visitor who ignores the notice. Checked in Chromium against the local server: both
+events queue with consent, nothing loads without it.
 
 ### Stage 1 is live: the public site runs on Cloudflare D1
 
@@ -256,9 +462,9 @@ Stage 2, accounts:
 
 ### Design for D1, and why
 
-- **The Worker may parse now.** The "parse nothing, stream one Postgres function's bytes" rule in
-  older notes came from the free plan's 10 ms CPU limit. The account is on Workers Paid now
-  (30 seconds of CPU), so building a response in the Worker from D1 rows is fine. Keep large
+- **The Worker is on the free plan again (30 October 2026): 10 ms of CPU a request**, 50 D1
+  queries an invocation, 5M rows read and 100k written a day. Building a response from D1 rows is
+  still done, but keep it rare (the edge copies in `edge.ts`) and check `cf:usage` after changes. Keep large
   pre-rendered JSON as stored text (`fixture.bundle_json` and the like) and splice it in rather
   than re-serialising it.
 - **The engine reaches D1 through the Worker, not the REST API.** The plan is an internal
@@ -345,6 +551,134 @@ Stage 2, accounts:
 
 ## Recent work, newest first
 
+- **3 November (later): the free call spelled out large on the front page.** The owner wanted a hook
+  that keeps a visitor: the landing lead now shows today's free call as a pick in big type, in words
+  ("Two or more goals", with "Total Goals: Over 1.5" under it), linked to its match (`freePickHTML`,
+  `.ld-pick`). Still no odds on the front page, because ads land there; the price is one tap away.
+  Set in its own face, used nowhere else (owner's ask): Unbounded 800, uppercase, self-hosted
+  (`public/fonts/unbounded-latin.woff2`, 50 KB, loaded only when the pick is drawn).
+- **3 November: tell a friend** (branch `claude/project-thread-b55ubz`). Every account has a link,
+  `offside.win/?ref=<code>` (invite tab on `#/account`, share sheet or copy). A new account made
+  on it is stored in `referral` (new D1 tables `referral_code` and `referral`, `worker/src/referral.ts`).
+  The friend gets 7 free days as a Whop trial on Monthly or 3 months when they have never been a
+  member (`friendTrial` in `pay.ts`; stacks with a deal, never with a trial; Whop metadata
+  `referral: '1'`). The sharer gets 14 days once the friend's first real payment is in `payment`,
+  capped at 10 friends a year, applied by the 10-minute cron (`rewards()`): Whop `add_free_days`
+  for a renewing Whop member, a complimentary membership extension otherwise, then
+  `referralRewardMail`. The code rides on the email link (`&ref=`) and in the verify/Google body;
+  `ow.ref` (30 days) is in the cookie table. Tests: `worker/test/referral.test.ts`.
+  Known and not touched: at 390px a signed-in free account's header (Upgrade + menu) overflows
+  by 10px.
+- **3 November: engine review; the lab runs on D1 again; a point of price slack (thread "Improve
+  the prediction engine's picks").** Every lab command had failed since the 7 October move: `loadHistory`
+  (`engine/src/lab/run.ts`) used a Postgres LATERAL join for the referee record. It now reads the match
+  table once and looks the record up in memory (`refereeLookup`, tested in `test/lab-referee.test.ts`);
+  `lab:slices` skips its two Postgres-only slices on D1. New read-only `lab:review` (pg.yml): the
+  production rule by market, price band, handicap line, rank and probability over A/B/C, and candidate
+  rules scored against it with days resampled. Findings on 5,171 finished games: the lab replays the live
+  engine within half a point (`lab:live`); since late September the rule made 4 to 5 calls a day at
+  80-82% landed and -3.2% / +0.6% a call, because the value test (best price at or above fair) turned
+  away three fixtures in four. Every family at every probability loses 1-5% at the best price over the
+  whole history, so there is no edge to tune for, only volume and landing rate. Change: `minEv` -0.02
+  and `minSharpEv` -0.01 (was -0.01 and 0), `PROD` in `lab/tune.ts` to match: about 15 calls a day,
+  83-85% landed, -0.6% / -0.8% on B / C. Re-check with `lab:review` once a fortnight has settled.
+- **3 November: fitted to the free plans (Cloudflare Workers Free since 30 October; the provider's
+  7,500 a day).** `cf:usage` now also lists the D1 statements that read and write the most rows
+  (last 48 h). Before this change, a week of use: Worker requests 39k to 52k a day (free: 100k),
+  CPU p50 3 ms but p99 20 to 60 ms (free: 10 ms), D1 rows read 12M to 71M a day (free: 5M), rows
+  written 50k to 103k (free: 100k), database 309 MB (free: 500 MB). What changed:
+  - Match preview for an unknown id (`fixturePreview`) and the competitions list scanned the whole
+    `kv` table with `LIKE 'league:%:next'` (86M rows read in two days, mostly crawlers asking for
+    old match ids). Now a key range (`k >= 'league:' AND k < 'league;'`).
+  - Edge copies (`edge.ts`): fresh for 2 minutes (was 30 s), served stale for 30 (was 5) while
+    refreshed behind the reader, and 404s are kept too. Fewer refills, and a reader almost never
+    waits on the database (the "skeleton for a few seconds" on first load).
+  - `regradeSettled`'s score sync walked all of `match` (116k rows a settle): limited to fixtures
+    from the last 30 days.
+  - Schedule (`schedule.ts`): read every 4 h, not every pass (up to 20 provider requests each), and
+    an unchanged row is not rewritten (was ~40k rows written a day).
+  - Live scores (`live.ts`): each answer is shared through D1 (`kv` `live:*`), so one data centre's
+    copy serves the rest instead of each asking the provider; a match page every 2 min (was 1),
+    its stats every 6, and its score from the live list rather than a separate call. Old `live:*`
+    rows cleared by the daily cron.
+  - Engine door (`enginedb.ts`): at most 50 statements a request (D1's free limit per invocation);
+    the engine sends at most 1 MB a request (was 8 MB) so the JSON parse fits 10 ms of CPU.
+  - Not changed: `engine/test` cross-form test 86 fails on every branch since 2 November
+    (`narrate/facts.ts` uses `Date.now()`); fixed separately on PR #174.
+
+- **3 November: the front page always leads with a match, and draws it at once.** Two causes of
+  "no match in the hero": the members' front page (`viewDashboard`) dropped the headline for a plain
+  masthead whenever its call had been withdrawn, and the landing page (`viewLanding`) took its lead
+  card off when there was no free call yet or its write-up had nothing quotable. Now the lead is
+  tonight's biggest game (`/api/hero`, else `biggestOnBoard` from the board), with the free call named
+  under it when that is another match (`drawLandingLead`). Slow first load: the lead waited for the
+  board, the record (`limit=60`, never preloaded) and the prices, then made a second trip for the
+  write-up, about 3 to 5 s on a cold visit. Now the Worker writes the hero into `/` (`ow-boot` JSON,
+  `data-lead` on `<html>`, the star ball preloaded on a Champions League night: `homePage` and
+  `render` in `seo.ts`); the head preloads the landing's own reads and both write-ups; the 14 modules
+  `app.js` imports are `modulepreload`ed. Measured: the match shows in about 0.2 s (was 3 to 5 s),
+  its write-up in about 1.3 s. `get_hero`'s fallback now prefers the next 36 hours over rank. No new
+  reads on the Worker: `/` already read the hero, and every read stays edge-cached.
+- **3 November: calls graded within minutes of full time (branch `claude/project-thread-bbr97i`).**
+  Settlement ran from Actions at 25 past the hour, behind the slate, so a call on an 8pm kick-off
+  stayed ungraded on the front page, the results and its match page until 10:25 to 11:30. Now:
+  - `worker/src/fulltime.ts`, on a new two-minute cron (`*/2 * * * *`, `FULLTIME_CRON` in
+    `index.ts`): one indexed read for matches with an unsettled call 100 min to 6 h after
+    kick-off (most runs stop there); each asked about at most every 4 min, 3 a run
+    (`/api/v2/events/:id/`, a few dozen requests a day); once the provider says finished
+    (`isFinishedStatus`), goals-only calls are graded with the engine's own grader and
+    post-mortem, the fixture gets its score and `status = 'finished'`, and slips whose legs are all
+    in (or one lost) settle. Corners, cards and withdrawn slip legs stay with the engine, which
+    still re-grades on the nightly score and refreshes calibration.
+  - The pure grader moved to `engine/src/grade.ts` (settleSelection, isFinishedStatus,
+    isQuarterLine); `settle.ts` and `price.ts` re-export it, so imports elsewhere are unchanged.
+  - The page is told: kv `settled:recent` (`{at, ids}`, six hours, written by the Worker and by
+    the engine's settle via `markRecent`) rides on `/api/live` as `settled` (read once a minute per
+    data centre). `public/app.js` then adds `s=<at>` to every read address (a fresh edge key) and
+    re-reads any copy made before it (the edge now sends `x-edge-at`), redrawing the page.
+  - The front page lead and the members' masthead show the score and "Full time" (or live) in
+    place of the kick-off, and the free call or our call says Landed / Missed in its colour.
+  - **The provider allowance ran out that evening:** 6,770 left at 19:00 UTC, 0 by 19:54, with no
+    engine job asking, so nothing could read the final scores. The Worker's match pages were the
+    likely drain (`/api/live/:id`: timeline and team numbers, up to ~90 requests an hour per open
+    match). The owner chose to drop those: `/api/live/:id` now returns only the score and minute
+    from the live list and asks the provider nothing of its own; the timeline and numbers come
+    with the full-time report. Below 600 left (`RateLimit` header, `allowanceLow` in `live.ts`)
+    the changes feed stops too; the live list and the full-time check keep going. Check
+    `/api/live` and the slate log's "provider requests left" on the next big night.
+- **3 November: the sports API allowance has priorities and budgets** (after it ran out that
+  evening). Order, as floors (ask only while more than this is left), in `worker/src/allowance.ts`:
+  results 0 (full-time scores: `fulltime.ts`, and the engine's settle score reads inside
+  `asResults` in `bsd.ts`), live scores list 400, fixture changes 1,500, slate 1,800 (slate.yml),
+  anything else 2,500 (new engine default, was 500), ratings 3,000. The Worker's uses also have an
+  hourly budget for the whole site (results 45, live 40, changes 30, kv `bsd:worker`); over budget
+  or below floor, live scores come from the last shared copy (up to 15 min old) instead. What is
+  left is shared in kv `bsd:left` ({n, at, by}): the Worker writes it from every answer, slate
+  passes, settle and ratings start from it (`engine/src/allowance.ts` syncAllowance) and write it
+  back. The admin dashboard's Engine card shows it ("Sports API: N of 7,500 left", amber at 1,500,
+  red at 400). **Manual fallback:** `#/admin/calls` lists matches 90+ min past kick-off with calls
+  still open, each with a final-score form (`POST /api/admin/score`, `adminScore` in
+  `admindb.ts`, `setFinalScore` in `fulltime.ts`): graded with the same rules, logged as
+  `final_score` in admin_log; corners and cards calls still wait for the engine.
+- **3 November, late: a hand-typed score showed "under way".** The data was right (board and match
+  page read `finished` from D1), but `/api/live` answered `{"error":"provider 429"}` with the
+  allowance out, so open pages never got `settled` and kept their old copies, and the edge served a
+  board up to 30 min old. Now: a refused live list falls back to the last shared list and the body
+  still carries `settled` (`matchesNow`/`liveList` in `live.ts`); the edge does not serve a stale
+  copy made before the last grading (`gradedAt` passed to `edgeCached`, `edge.ts`); the slate's
+  fixture upsert keeps a written score when the feed has none (`slate.ts`, test in
+  `schema.test.ts`). When the provider is back, the nightly history's score in `match` wins:
+  `regradeSettled` corrects the fixture and goals calls, reopens slips with a leg on a re-graded
+  match (`reopenSlips`, so `settleSlips` re-settles them) and marks the matches recent; the
+  match report (goals, cards) comes from `writeMissingReports`. Full time (`fulltime.ts`) asks one
+  request per competition (`/api/v2/events/?league_id&status=finished`, up to 200 a page) rather
+  than one per match, and skips matches the last live list still shows in play.
+- **28 October: no engine talk on the public site.** The owner asked that the site stop saying an
+  engine or model does the analysis. A sweep of pages, meta tags, `llms.txt`, the Worker's prerendered
+  pages, emails and studio captions found two lines, both on `#/results` (`viewResults()`), now neutral.
+  Do not replace such wording with claims that people or tipsters make the calls: that would be untrue.
+  Left alone on purpose: the terms and privacy pages' AI-assistance disclosure (a legal disclosure, and
+  true), and admin-only text.
 - **20 October: the provider's free plan.** The owner dropped Football Unlimited ($5): 7,500 requests a
   day for everything, reset midnight UTC, and odds as one average price with no bookmaker named.
   `engine/src/bsd.ts`: a cache with a lifetime per kind of read (`ttlFor`: prices, line-ups and news

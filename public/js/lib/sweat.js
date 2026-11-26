@@ -123,7 +123,7 @@ export function sweat({ market, outcome, line, score, minute = null, status = nu
   let headline;
   let tone;
   if (locked) {
-    headline = landing ? 'Landed already' : now === 'lost' ? 'Gone' : 'Settled';
+    headline = landing ? 'Won already' : now === 'lost' ? 'Gone' : 'Settled';
     tone = landing ? 'won' : now === 'lost' ? 'lost' : 'off';
   } else if (landing) {
     headline = chance >= 0.88 ? 'Cruising' : chance >= 0.65 ? 'On course' : 'Hanging on';

@@ -160,6 +160,21 @@ function engineRow(label, at, okWithin, detail) {
   return `<li><i class="${fresh ? 'ok' : 'late'}" aria-hidden="true"></i><b>${esc(label)}</b><span>${at ? esc(ago(at)) : 'never'}${detail ? `. ${esc(detail)}` : ''}</span></li>`;
 }
 
+/**
+ * The sports API's allowance (worker/src/allowance.ts): what is left of the
+ * 7,500 a rolling day, and the site's live use this hour. Amber at 1,500 or
+ * fewer, where the changes feed stops; red at 400, where only results still ask.
+ */
+function allowanceRow(left, worker) {
+  if (!left) return '<li><i class="late" aria-hidden="true"></i><b>Sports API</b><span>no figure in the last half hour</span></li>';
+  const n = Number(left.n);
+  const tone = n <= 400 ? 'bad' : n <= 1500 ? 'late' : 'ok';
+  const hour = worker && Number(worker.hour) === Math.floor(Date.now() / 3600e3) ? worker.used ?? {} : {};
+  const live = Object.values(hour).reduce((a, b) => a + Number(b), 0);
+  const state = n <= 400 ? '. Only results are being read' : n <= 1500 ? '. Fixture changes paused' : '';
+  return `<li><i class="${tone}" aria-hidden="true"></i><b>Sports API</b><span>${count(n)} of 7,500 left, ${esc(ago(left.at))}${state}. The site used ${count(live)} this hour</span></li>`;
+}
+
 async function overview(main) {
   const o = await api('overview');
   const cur = o.money?.currency ?? 'GBP';
@@ -197,6 +212,7 @@ async function overview(main) {
           ${engineRow('Analysis', slate?.at, 3600, slate ? `${count(slate.analysed)} games, ${count(slate.picks)} calls` : '')}
           ${engineRow('Results', settle?.at, 6 * 3600, '')}
           ${engineRow('Board', health?.last_computed_minutes_ago != null ? Date.now() / 1000 - health.last_computed_minutes_ago * 60 : null, 3600, health ? `${count(health.fixtures)} games on it` : '')}
+          ${allowanceRow(o.engine?.allowance, o.engine?.worker)}
           <li><i class="${writer?.exhausted ? 'late' : 'ok'}" aria-hidden="true"></i><b>Writer</b><span>${writer ? `${count(writer.used)} of today's Gemini requests used${writer.exhausted ? ', allowance spent until 08:00 UK' : ''}` : 'no record yet'}</span></li>
         </ul>
       </section>
@@ -504,11 +520,37 @@ function pickWords(p) {
   return `${p.market.replace(/_/g, ' ')} ${String(p.outcome).toLowerCase()}${line}`;
 }
 
+/**
+ * A final score typed in, for a match whose calls are still open well after
+ * full time (the sports API's allowance spent, or the match missing from
+ * it). Graded with the same rules as a score from the API.
+ */
+function scoreForms(open) {
+  const now = Date.now() / 1000;
+  const byMatch = new Map();
+  for (const p of open ?? []) if (p.kickoff < now - 90 * 60 && !byMatch.has(p.fixture_id)) byMatch.set(p.fixture_id, p);
+  if (!byMatch.size) return '';
+  return `
+    <section class="adm-card">
+      <h2>Final scores</h2>
+      <p class="adm-quiet">Results are graded within minutes of full time. If a match here is over and its calls are still open, type the final score after 90 minutes, and extra time if it was played, and its calls are graded straight away. Check it first: it goes on the results page as it is.</p>
+      <ul class="adm-rows">${[...byMatch.values()].map((p) => `
+        <li><form class="adm-score" data-fixture="${esc(p.fixture_id)}">
+          <b>${esc(p.home_team)} v ${esc(p.away_team)}</b><small>${esc(when(p.kickoff))}</small>
+          <label class="adm-f"><span>${esc(p.home_team)}</span><input name="home" type="number" min="0" max="30" step="1" inputmode="numeric" required></label>
+          <label class="adm-f"><span>${esc(p.away_team)}</span><input name="away" type="number" min="0" max="30" step="1" inputmode="numeric" required></label>
+          <button class="btn btn-primary btn-sm" type="submit">Grade the calls</button>
+          <p class="adm-msg" role="status"></p>
+        </form></li>`).join('')}</ul>
+    </section>`;
+}
+
 async function calls(main) {
   const d = await api('picks');
   const totals = (d.days ?? []).reduce((a, x) => ({ n: a.n + Number(x.n), won: a.won + Number(x.won) }), { n: 0, won: 0 });
   main.innerHTML = `
     <header class="adm-head"><h1>Calls</h1><p>${count(d.open?.length)} open. ${totals.n ? `${count(totals.won)} of ${count(totals.n)} landed in 30 days.` : 'Nothing settled in 30 days.'}</p></header>
+    ${scoreForms(d.open)}
     <section class="adm-card">
       <h2>Open</h2>
       ${d.open?.length ? `<ul class="adm-rows">${d.open.map((p) => `
@@ -521,6 +563,21 @@ async function calls(main) {
         <li><a href="#/fixture/${esc(p.fixture_id)}"><b>${esc(p.home_team)} ${p.home_goals ?? ''}${p.home_goals != null ? '–' : 'v '}${p.away_goals ?? ''} ${esc(p.away_team)}</b></a><span>${esc(pickWords(p))}, ${esc(p.odds)}</span><small class="adm-res ${String(p.result).toLowerCase()}">${esc(RESULT[p.result] ?? p.result)}</small></li>`).join('')}</ul>`
         : '<p class="adm-quiet">Nothing settled yet.</p>'}
     </section>`;
+  for (const f of main.querySelectorAll('form.adm-score')) {
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(f);
+      const msg = f.querySelector('.adm-msg');
+      const btn = f.querySelector('button');
+      btn.disabled = true;
+      msg.textContent = 'Grading';
+      try {
+        const r = await api('score', { fixture: Number(f.dataset.fixture), home: Number(fd.get('home')), away: Number(fd.get('away')) });
+        msg.textContent = `${r.match}: ${count(r.settled)} call${r.settled === 1 ? '' : 's'} graded${r.slips ? `, the bet slip settled` : ''}${r.left ? `. ${count(r.left)} on corners or cards wait for the match numbers` : ''}.`;
+        setTimeout(() => calls(main), 2500);
+      } catch (err) { msg.textContent = err.message; btn.disabled = false; }
+    };
+  }
 }
 
 /* ---------------------------------------------------------------- plans */

@@ -29,20 +29,24 @@ import { bearer, jsonHeaders } from './http.ts';
 import { charge, checkout, confirm, payStatus, sweepWhop, renewal, webhook, type PayEnv } from './pay.ts';
 import { deleteAccount } from './account.ts';
 import { goodwill } from './goodwill.ts';
+import { referralRoute, rewards as referralRewards } from './referral.ts';
 import { pulledAlerts } from './pulled.ts';
 
 /** The daily run that gives quiet days back; listed in wrangler.toml beside the sweep. */
 const GOODWILL_CRON = '20 6 * * *';
+/** Every two minutes: calls graded at full time (fulltime.ts). */
+const FULLTIME_CRON = '*/2 * * * *';
 import { authEmailHook, type HookEnv } from './authhook.ts';
 import { admin, type AdminEnv } from './admin.ts';
 import { inbound, type InboundMessage } from './support.ts';
 import { engineDb, type EngineDbEnv } from './enginedb.ts';
-import { recordView, serve, type D1Read } from './d1read.ts';
+import { FREE, recordView, serve, type D1Read } from './d1read.ts';
 import { auth, authCleanup, boundToken, viewerFor, type AuthDb } from './auth.ts';
 import { accountWrite } from './profile.ts';
 import { socials, type SocialEnv } from './social.ts';
-import { fixtureChanges, liveList, liveMatch, type LiveEnv } from './live.ts';
+import { fixtureChanges, gradedAt, liveCleanup, liveList, liveMatch, type LiveEnv } from './live.ts';
 import { EDGE_PATHS, edgeCached } from './edge.ts';
+import { settleFinished, type FulltimeEnv } from './fulltime.ts';
 
 interface Env extends PayEnv, LiveEnv, AdminEnv, HookEnv {
   /** Cloudflare D1. When bound, the public reads come from here (d1read.ts), not Supabase. */
@@ -51,8 +55,15 @@ interface Env extends PayEnv, LiveEnv, AdminEnv, HookEnv {
   SUPABASE_ANON_KEY: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_REDIRECT?: string;
+  /** AdSense publisher (ca-pub-…) and display unit id; empty until the account is approved. Public. */
+  ADSENSE_CLIENT?: string;
+  ADSENSE_SLOT?: string;
   ASSETS: Fetcher;
 }
+
+/** The Apple Pay domain-association file, as the provider issued it. Public by design. */
+const APPLE_PAY_PATH = '/.well-known/apple-developer-merchantid-domain-association';
+const APPLE_PAY_ASSOCIATION = '7b2276657273696f6e223a312c227073704964223a2236343641384242363234393134464232453835354239443531364642353530333338314132444446383545414643463630323336443830413044434235334632222c22637265617465644f6e223a313736303636343737373433327d';
 
 function fail(message: string, status: number): Response {
   return new Response(JSON.stringify({ error: message }), {
@@ -145,14 +156,26 @@ const worker = {
   // Every ten minutes: ask Whop for paid memberships and switch on any the
   // webhook did not. See sweepWhop in pay.ts.
   async scheduled(event: { cron?: string }, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<void> {
+    // Calls on a match that has just ended, graded within minutes (fulltime.ts).
+    // Its own invocation, so its D1 queries and CPU are its own too.
+    if (event?.cron === FULLTIME_CRON) {
+      ctx.waitUntil(settleFinished(env as unknown as FulltimeEnv).then((r) => {
+        if (r.asked) console.log(`fulltime: ${r.candidates} due, ${r.asked} asked, ${r.settled} graded on ${r.matches.length} matches, ${r.slips} slips`);
+      }).catch((err) => console.error('fulltime:', err instanceof Error ? err.message : String(err))));
+      return;
+    }
     // Once a day, its own invocation: quiet days given back (goodwill.ts).
     if (event?.cron === GOODWILL_CRON) {
       ctx.waitUntil(goodwill(env).catch((err) => console.error('goodwill:', err instanceof Error ? err.message : String(err))));
+      // Live scores' shared copies of matches long over (live.ts).
+      ctx.waitUntil(liveCleanup(env).catch((err) => console.error('live cleanup:', err instanceof Error ? err.message : String(err))));
       return;
     }
     ctx.waitUntil(sweepWhop(env));
     // Spent sign-in links and sessions (auth.ts).
     ctx.waitUntil(authCleanup(env.DB as unknown as AuthDb | undefined).catch((err) => console.error('auth cleanup:', err instanceof Error ? err.message : String(err))));
+    // Friends who came on someone's link and have paid: the sharer's thank-you days (referral.ts).
+    ctx.waitUntil(referralRewards(env as never).catch((err) => console.error('referral:', err instanceof Error ? err.message : String(err))));
     // Calls pulled since the last run: tell the members (pulled.ts).
     ctx.waitUntil(pulledAlerts(env).catch((err) => console.error('pulled:', err instanceof Error ? err.message : String(err))));
   },
@@ -170,6 +193,25 @@ const worker = {
     if (!path.startsWith('/api/') && (url.hostname.endsWith('.workers.dev') || url.hostname.startsWith('www.')) && env.SITE_URL?.startsWith('https://')) {
       const to = new URL(url.pathname + url.search, env.SITE_URL);
       return Response.redirect(to.toString(), 301);
+    }
+
+    // Apple Pay's proof that this domain may take Apple Pay through the
+    // payment provider (owner, 30 October). Served by the Worker rather than
+    // as a file because the asset upload can leave out dot-folders, and Apple
+    // compares the bytes exactly: no trailing newline.
+    if (path === APPLE_PAY_PATH) {
+      return new Response(APPLE_PAY_ASSOCIATION, {
+        headers: { 'content-type': 'text/plain', 'cache-control': 'public, max-age=3600' },
+      });
+    }
+
+    // AdSense's list of who may sell adverts on this site. Only once a
+    // publisher is set (wrangler.toml); before that there is nothing to list.
+    if (path === '/ads.txt') {
+      const ads = adsConfig(env);
+      return ads
+        ? new Response(adsTxt(ads.client), { headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=3600' } })
+        : new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } });
     }
 
     if (!path.startsWith('/api/')) {
@@ -209,6 +251,8 @@ const worker = {
         const img = await storedImage(env, path.slice('/img/'.length), 86400);
         return img ?? new Response('Not found', { status: 404, headers: { 'cache-control': 'public, max-age=60' } });
       }
+      // Nothing is sold while the site is free: the old plans page goes home.
+      if (FREE && (path === '/pricing' || path === '/pricing/')) return Response.redirect(`${url.origin}/`, 301);
       try {
         // The readable pages are the same for everyone (the app adds the
         // reader's own view once it runs), so they come from the edge's copy
@@ -231,12 +275,14 @@ const worker = {
     // On D1 a session is tied to the kind of browser it was issued to (auth.ts).
     const jwt = env.DB ? boundToken(bearer(request), request) : bearer(request);
 
-    // A signed-out read of something every visitor sees the same: from the
-    // edge's copy (edge.ts). The inner call carries a marker so it goes to the
-    // database rather than round again.
-    if (request.method === 'GET' && !jwt && EDGE_PATHS.test(path) && !request.headers.has('x-edge-fill')) {
+    // A read every visitor sees the same: from the edge's copy (edge.ts). The
+    // inner call carries a marker so it goes to the database rather than round
+    // again. While the site is free (d1read.ts FREE) that is every reader's
+    // read, signed in or not, since nobody's copy differs any more.
+    if (request.method === 'GET' && (!jwt || FREE) && EDGE_PATHS.test(path) && !request.headers.has('x-edge-fill')) {
       const fill = new Request(request.url, { method: 'GET', headers: { 'x-edge-fill': '1' } });
-      return edgeCached(request, ctx, () => worker.fetch(fill, env, ctx));
+      return edgeCached(request, ctx, () => worker.fetch(fill, env, ctx), Date.now(),
+        () => gradedAt(env as unknown as LiveEnv, ctx));
     }
 
     try {
@@ -253,6 +299,8 @@ const worker = {
       // Deleting an account: the reader's token names the account, GoTrue
       // vouches for it, and the service key does the removing. account.ts.
       if (path === '/api/account/delete') return await deleteAccount(request, env, jwt);
+      // The reader's own tell-a-friend link and how it is going (referral.ts).
+      if (path === '/api/referral') return await referralRoute(request, env as never, jwt);
       // The account's own settings (profile.ts).
       if (path.startsWith('/api/account/')) return await accountWrite(request, env.DB as unknown as AuthDb | undefined, path.slice('/api/account/'.length), jwt);
 
@@ -269,6 +317,11 @@ const worker = {
         // Read-only: presence of the secrets, never their values.
         if (path === '/api/pay/status' && request.method === 'GET') return await payStatus(env);
         if (request.method !== 'POST') return fail('method not allowed', 405);
+        // Nothing is sold while the site is free. Renewals and the webhook
+        // still run for the memberships already held.
+        if (FREE && (path === '/api/pay/checkout' || path === '/api/pay/charge')) {
+          return fail('Everything on offside.win is free now. Nothing has been charged.', 410);
+        }
         if (path === '/api/pay/checkout') return await checkout(request, env, jwt);
         if (path === '/api/pay/confirm') return await confirm(request, env, jwt);
         if (path === '/api/pay/charge') return await charge(request, env, jwt);
@@ -348,9 +401,22 @@ const worker = {
  * second substitution step in the deploy, and sign-in happens browser-to-GoTrue
  * without the Worker in the path at all.
  */
+/**
+ * Adverts are on only when both the publisher and the unit are set and look
+ * like AdSense's own ids: they go into the page as attributes, so nothing
+ * else gets through.
+ */
+export function adsConfig(env: { ADSENSE_CLIENT?: string; ADSENSE_SLOT?: string }): { client: string; slot: string } | null {
+  const client = (env.ADSENSE_CLIENT ?? '').trim();
+  const slot = (env.ADSENSE_SLOT ?? '').trim();
+  return /^ca-pub-\d{10,20}$/.test(client) && /^\d{6,12}$/.test(slot) ? { client, slot } : null;
+}
+/** The ads.txt line Google asks for: its exchange, the publisher id, a direct seller, Google's certification id. */
+export const adsTxt = (client: string): string => `google.com, ${client.replace(/^ca-/, '')}, DIRECT, f08c47fec0942fa0\n`;
+
 function config(env: Env): Response {
   return new Response(
-    JSON.stringify({ supabaseUrl: env.SUPABASE_URL ?? '', anonKey: env.SUPABASE_ANON_KEY ?? '', googleClientId: env.GOOGLE_CLIENT_ID ?? '', googleRedirect: env.GOOGLE_REDIRECT === '1', whopAccount: env.WHOP_COMPANY_ID ?? '' }),
+    JSON.stringify({ supabaseUrl: env.SUPABASE_URL ?? '', anonKey: env.SUPABASE_ANON_KEY ?? '', googleClientId: env.GOOGLE_CLIENT_ID ?? '', googleRedirect: env.GOOGLE_REDIRECT === '1', whopAccount: env.WHOP_COMPANY_ID ?? '', ads: adsConfig(env) }),
     {
       headers: {
         'content-type': 'application/json; charset=utf-8',

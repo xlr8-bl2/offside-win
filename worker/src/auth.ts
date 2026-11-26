@@ -33,7 +33,8 @@
  */
 
 import { authMail, deliver, type MailEnv } from './mail.ts';
-import { hasMembership, sha256Hex, type D1Read, type Viewer } from './d1read.ts';
+import { FREE, hasMembership, sha256Hex, type D1Read, type Viewer } from './d1read.ts';
+import { cleanCode, recordReferral } from './referral.ts';
 
 export interface AuthStmt {
   bind(...values: unknown[]): AuthStmt;
@@ -62,6 +63,13 @@ const LINKS_PER_EMAIL = 5;
 const LINKS_PER_HOUR = 300;
 /** Browsers an account is signed in on at once. */
 export const MAX_DEVICES = 2;
+/**
+ * The limit in force. Two browsers was there so one membership could not be
+ * shared round a group; on a free site there is nothing to share, and being
+ * signed out by someone else's sign-in is only an interruption, so the limit
+ * is a generous ten (still a cap on sessions left lying about).
+ */
+export const maxDevices = (): number => (FREE ? 10 : MAX_DEVICES);
 /** New sign-ins an account may make in a day. */
 export const SIGNINS_PER_DAY = 6;
 
@@ -207,7 +215,7 @@ async function startSession(db: AuthDb, accountId: string, request: Request): Pr
     db.prepare(`UPDATE account_session SET ended_at = ?, ended_reason = 'device_limit'
       WHERE account_id = ? AND ended_at IS NULL AND token_sha256 NOT IN (
         SELECT token_sha256 FROM account_session WHERE account_id = ? AND ended_at IS NULL AND expires_at > ?
-         ORDER BY seen_at DESC, created_at DESC LIMIT ${MAX_DEVICES})`).bind(t, accountId, accountId, t),
+         ORDER BY seen_at DESC, created_at DESC LIMIT ${maxDevices()})`).bind(t, accountId, accountId, t),
     // Sessions from before browsers were checked count towards the limit by
     // simply ending: the next sign-in on those browsers is a fresh one.
     db.prepare('DELETE FROM auth_session WHERE account_id = ?').bind(accountId),
@@ -217,7 +225,7 @@ async function startSession(db: AuthDb, accountId: string, request: Request): Pr
 }
 
 /** The account for an address, made on first sign-in. */
-async function accountFor(db: AuthDb, email: string, extra: { name?: string | null; avatar?: string | null; provider?: string; googleSub?: string | null } = {}): Promise<Account> {
+async function accountFor(db: AuthDb, email: string, extra: { name?: string | null; avatar?: string | null; provider?: string; googleSub?: string | null } = {}): Promise<Account & { created?: boolean }> {
   const found = await db.prepare(`SELECT ${ACCOUNT_COLS}, a.google_sub FROM account a WHERE a.email = ?`).bind(email)
     .first<Account & { google_sub: string | null }>();
   if (found) {
@@ -234,11 +242,11 @@ async function accountFor(db: AuthDb, email: string, extra: { name?: string | nu
     provider: extra.provider ?? 'email', created_at: now(),
   };
   // Two first sign-ins racing: the unique email decides, and the loser reads the winner's row.
-  await db.prepare(`INSERT INTO account (id, email, name, avatar_url, provider, google_sub, created_at)
+  const made = await db.prepare(`INSERT INTO account (id, email, name, avatar_url, provider, google_sub, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (email) DO NOTHING`)
     .bind(a.id, a.email, a.name, a.avatar_url, a.provider, extra.googleSub ?? null, a.created_at).run();
   const row = await db.prepare(`SELECT ${ACCOUNT_COLS} FROM account a WHERE a.email = ?`).bind(email).first<Account>();
-  return row ?? a;
+  return { ...(row ?? a), created: Boolean(made.meta?.changes) };
 }
 
 async function body(request: Request): Promise<Record<string, unknown>> {
@@ -280,10 +288,25 @@ async function sendLink(request: Request, env: AuthEnv, db: AuthDb): Promise<Res
     .bind(await sha256Hex(token), email, t, t + LINK_SECONDS).run();
   const link = landing(env.SITE_URL || 'https://offside.win', b.redirect);
   link.searchParams.set('signin', token);
+  // A friend's link, carried on the email link so a sign-in finished on
+  // another device still counts it.
+  const ref = cleanCode(b.ref);
+  if (ref) link.searchParams.set('ref', ref);
   const via = await deliver(env, email, authMail({ action: 'magiclink', link: link.toString() }));
   console.log('auth link:', via ? `sent via ${via}` : 'not sent');
   if (!via) return refuse(502, 'The email could not be sent. Try again in a minute.');
   return answer({ sent: true });
+}
+
+/**
+ * A brand-new account that came on a friend's link (referral.ts). Never
+ * blocks the sign-in: a link that does not count is simply not counted.
+ */
+async function referred(db: AuthDb, account: Account & { created?: boolean }, ref: unknown): Promise<void> {
+  if (!account.created || !ref) return;
+  try { await recordReferral(db, ref, account); } catch (err) {
+    console.error('referral record:', err instanceof Error ? err.message : String(err));
+  }
 }
 
 /** A session answer for the page, or the reason there is none. */
@@ -298,7 +321,9 @@ async function signedIn(db: AuthDb, account: Account, request: Request): Promise
 }
 
 async function verifyLink(request: Request, db: AuthDb): Promise<Response> {
-  const token = String((await body(request)).token ?? '');
+  const b = await body(request);
+  const token = String(b.token ?? '');
+  const ref = b.ref;
   if (token.length < 20 || token.length > 100) return refuse(400, 'That sign-in link is not complete.');
   const hash = await sha256Hex(token);
   const t = now();
@@ -308,7 +333,9 @@ async function verifyLink(request: Request, db: AuthDb): Promise<Response> {
   if (!used.meta?.changes) return refuse(401, 'That sign-in link has been used or has run out. Ask for a new one.');
   const link = await db.prepare('SELECT email FROM auth_link WHERE token_sha256 = ?').bind(hash).first<{ email: string }>();
   if (!link) return refuse(401, 'That sign-in link has been used or has run out. Ask for a new one.');
-  return signedIn(db, await accountFor(db, link.email), request);
+  const account = await accountFor(db, link.email);
+  await referred(db, account, ref);
+  return signedIn(db, account, request);
 }
 
 /* ---------------------------------------------------------------- Google */
@@ -365,6 +392,7 @@ async function google(request: Request, env: AuthEnv, db: AuthDb): Promise<Respo
   const account = await accountFor(db, linked?.email ?? claims.email, {
     name: claims.name, avatar: claims.picture, provider: 'google', googleSub: claims.sub,
   });
+  await referred(db, account, b.ref);
   return signedIn(db, account, request);
 }
 
@@ -386,7 +414,7 @@ async function me(db: AuthDb, token: string | null): Promise<Response> {
       WHERE account_id = ? AND ended_at IS NULL AND expires_at > ? ORDER BY seen_at DESC`)
     .bind(a.id, t).all<{ device: string | null; seen_at: number; token_sha256: string }>()).results ?? [];
   return answer({
-    user: userOf(a), expires_at: expires, max_devices: MAX_DEVICES,
+    user: userOf(a), expires_at: expires, max_devices: maxDevices(),
     devices: devices.map((d) => ({ device: d.device, seen_at: d.seen_at, current: d.token_sha256 === a.token_sha256 })),
   });
 }

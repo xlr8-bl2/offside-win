@@ -10,7 +10,7 @@
  * page. One source, so the two can never disagree.
  */
 
-export const UPDATED = '9 October 2026';
+export const UPDATED = '3 November 2026';
 
 /*
  * The address on the contact page. It is referenced from the privacy policy and
@@ -121,8 +121,19 @@ export const LEGAL = {
       <p><b>Ad measurement.</b> Where you consent, the Site loads the Whop pixel, which reports to Whop
          each page of the Site you open, together with the technical information transmitted with the
          request (including your IP address and browser details) and any identifier Whop sets, so
-         that we can measure which of our advertisements led to visits and purchases. Where you do not
-         consent, the pixel is not loaded.</p>
+         that we can measure which of our advertisements led to visits and purchases. It also tells
+         Whop when you ask for a sign-in link and when you create an Account, marked with a code
+         derived from your email address or Account; your email address itself is not sent. Where you
+         do not consent, the pixel is not loaded and none of this is reported.</p>
+      <p><b>Advertising.</b> The Site is free and is paid for by advertising. Where the Site shows
+         adverts, they are served by Google (Google Ireland Limited, through Google AdSense), which
+         receives the page you are on and the technical information sent with the request, and may
+         read or store its own identifiers on your device to choose, show and measure adverts. In the
+         United Kingdom, the European Economic Area and Switzerland, Google’s consent message asks
+         you before any of this is used for personalised advertising, and you can change your answer
+         at any time from the link it shows; without your consent only non-personalised adverts are
+         shown. Gambling adverts are blocked on the Site. Google’s use of this information is
+         described at <a href="https://policies.google.com/technologies/partner-sites" target="_blank" rel="noopener noreferrer">policies.google.com/technologies/partner-sites</a>.</p>
       <p>We do not process special category data, do not acquire personal data from third parties for
          marketing purposes and do not use data brokers.</p>`,
       },
@@ -143,7 +154,7 @@ export const LEGAL = {
           <tr><td>Preventing fraud, abuse and payment disputes</td><td>Account, payment records, request logs</td><td>Legitimate interests (Art. 6(1)(f))</td></tr>
           <tr><td>Responding to correspondence and complaints</td><td>Correspondence</td><td>Legitimate interests (Art. 6(1)(f)) or performance of a contract</td></tr>
           <tr><td>Saved pages and visit counting</td><td>Storage on your device; aggregate count</td><td>Consent (Art. 6(1)(a)), which may be withdrawn at any time</td></tr>
-          <tr><td>Measuring our advertising (the Whop pixel)</td><td>Pages opened, technical request information, Whop’s identifier</td><td>Consent (Art. 6(1)(a)) and, for the device access involved, regulation 6 of PECR; consent may be withdrawn at any time</td></tr>
+          <tr><td>Measuring our advertising (the Whop pixel)</td><td>Pages opened, sign-ups (by code, not email address), technical request information, Whop’s identifier</td><td>Consent (Art. 6(1)(a)) and, for the device access involved, regulation 6 of PECR; consent may be withdrawn at any time</td></tr>
           <tr><td>Establishing, exercising or defending legal claims</td><td>Data relevant to the claim</td><td>Legitimate interests (Art. 6(1)(f))</td></tr>
         </tbody>
       </table></div>
@@ -234,6 +245,7 @@ export const LEGAL = {
         <thead><tr><th>Category</th><th>Retention period</th></tr></thead>
         <tbody>
           <tr><td>Account data and preferences</td><td>Until the Account is deleted</td></tr>
+          <tr><td>Friend links: your link's code, and which Account joined on whose link</td><td>Until either Account is deleted</td></tr>
           <tr><td>Payment records</td><td>Six years from the end of the tax year to which they relate, as required by tax law; following deletion of an Account, without the associated email address</td></tr>
           <tr><td>Whether a deleted Account had a Membership</td><td>Six years from deletion, held only as a one-way fingerprint of the email address, so that a free trial is given once per person</td></tr>
           <tr><td>Checkout confirmations</td><td>Six years from the end of the Membership concerned, being the limitation period for claims in contract</td></tr>
@@ -800,9 +812,11 @@ export const LEGAL = {
         <thead><tr><th>Item</th><th>Purpose</th><th>Duration</th></tr></thead>
         <tbody>
           <tr><td><code>ow.consent</code></td><td>Records your choice below, so that you are not asked again on each visit.</td><td>Until changed, or until the site’s data is cleared</td></tr>
+          <tr><td><code>ow.follows</code></td><td>The teams and competitions you follow while not signed in, stored only when you press Follow, so that their games are shown to you first. Moved onto your account if you sign in.</td><td>Until you unfollow, sign in, or clear the site’s data</td></tr>
           <tr><td><code>ow.session</code></td><td>Maintains your signed-in session. Stored only when you sign in.</td><td>Until you sign out</td></tr>
           <tr><td><code>ow.after-signin</code></td><td>Records the action in progress when you were asked to sign in, such as a purchase, so that you are returned to it.</td><td>Deleted once used</td></tr>
           <tr><td><code>offside.country</code></td><td>The country selected for bookmaker prices, where you have changed it.</td><td>Until changed</td></tr>
+          <tr><td><code>ow.ref</code></td><td>The friend link you arrived on, if any, so the free week it gives you is there when you make an account.</td><td>30 days, or until you make an account</td></tr>
           <tr><td><code>ow.promo</code></td><td>Which offers you have already been shown or have closed, so that the same one is not shown to you again.</td><td>Until the site’s data is cleared</td></tr>
         </tbody>
       </table></div>
@@ -813,12 +827,13 @@ export const LEGAL = {
         <tbody>
           <tr><td>Saved pages (<code>ow.c1:…</code>)</td><td>A copy of each page’s data, so that the Site opens immediately on your next visit and then updates.</td><td>Replaced as pages update; deleted if consent is withdrawn</td></tr>
           <tr><td>Visit counting</td><td>An anonymous count of each page opened, by category of page. Nothing is stored on your device for this purpose.</td><td>Not stored on your device</td></tr>
-          <tr><td>Ad measurement (the Whop pixel, from <code>t.whop.tw</code>)</td><td>Reports each page you open to Whop, so that we can tell which of our advertisements brought you to the Site. Whop may store its own identifier on your device for this purpose.</td><td>As set by Whop; the pixel stops loading as soon as consent is withdrawn</td></tr>
+          <tr><td>Ad measurement (the Whop pixel, from <code>t.whop.tw</code>)</td><td>Reports each page you open, and when you sign up, to Whop, so that we can tell which of our advertisements brought you to the Site. Whop may store its own identifier on your device for this purpose.</td><td>As set by Whop; the pixel stops loading as soon as consent is withdrawn</td></tr>
+          <tr><td>Advertising (Google AdSense, from <code>googlesyndication.com</code> and <code>doubleclick.net</code>)</td><td>Where the Site shows adverts: chooses, shows and measures them, and limits how often you see the same one. Personalised only with your consent, which Google’s own message asks for in the United Kingdom, the EEA and Switzerland.</td><td>As set by Google, up to 13 months; managed from Google’s consent message</td></tr>
         </tbody>
       </table></div>
 
       <h2>Other technologies</h2>
-      <p>Apart from the Whop pixel above, which runs only with your consent, the Site uses no
+      <p>Apart from the Whop pixel and Google’s advertising above, the Site uses no other
          advertising cookies, tracking pixels, social media plug-ins or third-party analytics services.
          Fonts are served from the Site itself. A Global Privacy Control signal sent
          by your browser is treated as a refusal of consent.</p>

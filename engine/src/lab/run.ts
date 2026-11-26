@@ -72,6 +72,10 @@ export async function loadHistory(): Promise<HistRow[]> {
   // book count, and markets our model does not price.
   const byId = new Map(out.map((r) => [r.id, r]));
   const seen = new Set(out.map((r) => r.id));
+  // Each referee's record before a match, from the match table read once.
+  // (It was a LATERAL join, which D1's SQLite does not have: every lab
+  // command failed on loading its history from the move to D1 on.)
+  const refBefore = await refereeHistory();
   let from = 0;
   for (;;) {
     // Corners and cards from the match table, which history:cards repaired,
@@ -79,19 +83,12 @@ export async function loadHistory(): Promise<HistRow[]> {
     const page = await select<{
       fixture_id: number; league_id: number; kickoff: number; home_goals: number; away_goals: number; snapshot: string;
       hc: number | null; ac: number | null; hr: number | null; ar: number | null;
-      ref_n: number | null; ref_reds: number | null; ref_yel: number | null;
+      ref_id: number | null; m_kickoff: number | null;
     }>(
-      // The referee's record from games before this one only.
       `SELECT s.fixture_id, s.league_id, s.kickoff, s.home_goals, s.away_goals, s.snapshot,
               m.home_corners AS hc, m.away_corners AS ac, m.home_reds AS hr, m.away_reds AS ar,
-              r.n AS ref_n, r.reds AS ref_reds, r.yel AS ref_yel
+              m.referee_id AS ref_id, m.kickoff AS m_kickoff
          FROM market_snapshot s LEFT JOIN match m ON m.id = s.fixture_id
-         LEFT JOIN LATERAL (
-           SELECT count(*) AS n, sum(p.home_reds + p.away_reds) AS reds, sum(coalesce(p.home_yellows, 0) + coalesce(p.away_yellows, 0)) AS yel
-             FROM match p
-            WHERE m.referee_id IS NOT NULL AND p.referee_id = m.referee_id AND p.kickoff < m.kickoff
-              AND p.home_reds IS NOT NULL AND p.away_reds IS NOT NULL
-         ) r ON true
         WHERE s.kickoff > $1 ORDER BY s.kickoff LIMIT 1000`,
       [from],
     );
@@ -102,8 +99,7 @@ export async function loadHistory(): Promise<HistRow[]> {
       try { s = JSON.parse(r.snapshot); } catch { continue; }
       if (r.hr !== null && r.ar !== null) s['reds'] = Number(r.hr) + Number(r.ar);
       if (r.hc !== null && r.ac !== null) s['corners'] = [Number(r.hc), Number(r.ac)];
-      const ref = r.ref_n && Number(r.ref_n) > 0
-        ? { n: Number(r.ref_n), reds: Number(r.ref_reds ?? 0), yellows: Number(r.ref_yel ?? 0) } : null;
+      const ref = r.ref_id !== null && r.m_kickoff !== null ? refBefore(Number(r.ref_id), Number(r.m_kickoff)) : null;
       if (seen.has(Number(r.fixture_id))) {
         const live = byId.get(Number(r.fixture_id));
         const snap = toHistRow({ ...s, id: r.fixture_id, league_id: r.league_id, kickoff: r.kickoff, score: [r.home_goals, r.away_goals] });
@@ -117,6 +113,52 @@ export async function loadHistory(): Promise<HistRow[]> {
     if (page.length < 1000) break;
   }
   return out.sort((a, b) => a.kickoff - b.kickoff);
+}
+
+/**
+ * A referee's games, red cards and yellows before a kick-off, from every match
+ * with the referee and the cards recorded. Read once (paged by id), then
+ * answered by binary search, so it costs one pass over the match table rather
+ * than one per fixture, and runs the same on D1 and on Postgres.
+ */
+export async function refereeHistory(): Promise<(refereeId: number, before: number) => { n: number; reds: number; yellows: number } | null> {
+  const by = new Map<number, Array<{ k: number; reds: number; yel: number }>>();
+  let after = 0;
+  for (;;) {
+    const page = await select<{ id: number; referee_id: number; kickoff: number; reds: number; yel: number }>(
+      `SELECT id, referee_id, kickoff, home_reds + away_reds AS reds, coalesce(home_yellows, 0) + coalesce(away_yellows, 0) AS yel
+         FROM match
+        WHERE id > $1 AND referee_id IS NOT NULL AND home_reds IS NOT NULL AND away_reds IS NOT NULL
+        ORDER BY id LIMIT 5000`,
+      [after],
+    );
+    for (const r of page) {
+      after = Math.max(after, Number(r.id));
+      const list = by.get(Number(r.referee_id)) ?? [];
+      list.push({ k: Number(r.kickoff), reds: Number(r.reds) || 0, yel: Number(r.yel) || 0 });
+      by.set(Number(r.referee_id), list);
+    }
+    if (page.length < 5000) break;
+  }
+  return refereeLookup(by);
+}
+
+/** The lookup refereeHistory returns, from each referee's games (any order). */
+export function refereeLookup(by: Map<number, Array<{ k: number; reds: number; yel: number }>>) {
+  const sums = new Map<number, { k: number[]; reds: number[]; yel: number[] }>();
+  for (const [id, list] of by) {
+    list.sort((a, b) => a.k - b.k);
+    const k: number[] = [], reds: number[] = [0], yel: number[] = [0];
+    for (const g of list) { k.push(g.k); reds.push(reds[reds.length - 1]! + g.reds); yel.push(yel[yel.length - 1]! + g.yel); }
+    sums.set(id, { k, reds, yel });
+  }
+  return (refereeId: number, before: number) => {
+    const s = sums.get(refereeId);
+    if (!s) return null;
+    let lo = 0, hi = s.k.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (s.k[mid]! < before) lo = mid + 1; else hi = mid; }
+    return lo > 0 ? { n: lo, reds: s.reds[lo]!, yellows: s.yel[lo]! } : null;
+  };
 }
 
 /** Fill in what the board's snapshot of a match lacks from the backfilled one. */

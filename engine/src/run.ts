@@ -5,6 +5,7 @@ import { config, requireEnv } from './config.ts';
 import { backfillHistory, repairCards } from './history.ts';
 import { probe, probeExtras, probePlayers, probeProfiles, probeReds, probeReport } from './probe.ts';
 import { grant, plans } from './grant.ts';
+import { whopStop } from './whopstop.ts';
 import { whopCheck } from './whopcheck.ts';
 import { geminiCheck } from './geminicheck.ts';
 import { mailSetup } from './mailsetup.ts';
@@ -17,6 +18,7 @@ import { fitAllLeagues } from './ratings/fit.ts';
 import { syncTeamShots } from './images/sync.ts';
 import { coinflowCharger, renewDue } from './membership/renew.ts';
 import { runSettle } from './settle.ts';
+import { shareAllowance, syncAllowance } from './allowance.ts';
 import { pruneBoard, runSlate } from './slate.ts';
 import { closeDb, dbStats, migrate, schemaFile, select } from './store.ts';
 
@@ -165,7 +167,10 @@ const commands: Record<string, () => Promise<unknown>> = {
     requireEnv();
     await ensureSchema();
     console.log('Fitting ratings...');
-    return fitAllLeagues();
+    await syncAllowance();
+    const r = await fitAllLeagues();
+    await shareAllowance('ratings');
+    return r;
   },
 
   async slate() {
@@ -222,6 +227,9 @@ const commands: Record<string, () => Promise<unknown>> = {
       // back: each pass asks afresh, and the first answer says where it stands.
       bsdQuota.exhausted = false;
       bsdQuota.remaining = null;
+      // Unless someone (the Worker, another job) has seen it lately: then
+      // start from that, so a pass below its floor asks for nothing.
+      await syncAllowance();
       try {
         await commands.slate!();
         failures = 0;
@@ -244,6 +252,7 @@ const commands: Record<string, () => Promise<unknown>> = {
         console.error('slate:loop: settle failed:', err instanceof Error ? err.message : err);
       }
       if (cacheFile) await saveCache(cacheFile).catch(() => {});
+      await shareAllowance('slate');
       console.log(`slate:loop: pass ${pass} took ${((Date.now() - t0) / 60_000).toFixed(1)} min`
         + `${bsdQuota.remaining !== null ? `, ${bsdQuota.remaining} provider requests left today` : ''}`);
       const next = t0 + every;
@@ -256,7 +265,10 @@ const commands: Record<string, () => Promise<unknown>> = {
   async settle() {
     requireEnv();
     await ensureSchema();
-    return runSettle();
+    await syncAllowance();
+    const r = await runSettle();
+    await shareAllowance('settle');
+    return r;
   },
 
   async plans() {
@@ -276,6 +288,11 @@ const commands: Record<string, () => Promise<unknown>> = {
 
   async 'whop:check'() {
     return whopCheck();
+  },
+
+  // The site is free: stop every Whop renewal (whopstop.ts). Counts unless ARG is "confirm".
+  async 'whop:stop'() {
+    return whopStop(process.argv[3] ?? process.env['ARG'] ?? '');
   },
 
   async 'gemini:check'() {
@@ -380,6 +397,30 @@ const commands: Record<string, () => Promise<unknown>> = {
 
   // The lab's replay of the production rule against what the live engine
   // actually published, over the period it has run that rule (lab/live.ts).
+  // Where the production rule is good and bad, and whether it can make
+  // more calls (lab/review.ts). Read-only.
+  async 'lab:review'() {
+    requireEnv({ provider: false });
+    const { loadHistory } = await import('./lab/run.ts');
+    const { runReview } = await import('./lab/review.ts');
+    runReview(await loadHistory());
+  },
+
+  // The lab's whole finished-match history, written to engine/lab-history.json.gz
+  // for the workflow to keep as a one-day artifact, so a study can be run
+  // against it outside Actions. Matches, prices and the provider's numbers
+  // only: no account, no email, nothing personal is in it.
+  async 'lab:dump'() {
+    requireEnv({ provider: false });
+    const { loadHistory } = await import('./lab/run.ts');
+    const { gzipSync } = await import('node:zlib');
+    const { writeFileSync } = await import('node:fs');
+    const rows = await loadHistory();
+    const json = JSON.stringify(rows, (_k, v) => (v instanceof Map ? { __map: [...v.entries()] } : v));
+    writeFileSync('lab-history.json.gz', gzipSync(json));
+    console.log(`lab:dump: ${rows.length} finished matches, ${Math.round(json.length / 1024)}KB of JSON.`);
+  },
+
   async 'lab:live'() {
     requireEnv({ provider: false });
     const { loadHistory } = await import('./lab/run.ts');
@@ -472,6 +513,12 @@ const commands: Record<string, () => Promise<unknown>> = {
   },
 
   // Mail to support@ and hello@, forwarded to the owner's inbox (Cloudflare Email Routing).
+  // Daily Cloudflare usage against the free plan's limits (cfusage.ts).
+  async 'cf:usage'() {
+    const { cfUsage } = await import('./cfusage.ts');
+    return cfUsage();
+  },
+
   async 'mail:route'() {
     const { mailRoute } = await import('./mailroute.ts');
     return mailRoute(process.argv[3] ?? (process.env['GRANT_EMAIL'] || undefined));

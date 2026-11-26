@@ -118,7 +118,7 @@ export function stateOf(f: Rec, now = Date.now() / 1000): 'upcoming' | 'live' | 
   return 'upcoming';
 }
 
-export const RESULT_WORD: Record<string, string> = { WON: 'landed', LOST: 'missed', HALF_WON: 'half landed', HALF_LOST: 'half lost', PUSH: 'stakes back', VOID: 'void' };
+export const RESULT_WORD: Record<string, string> = { WON: 'won', LOST: 'lost', HALF_WON: 'half won', HALF_LOST: 'half lost', PUSH: 'stakes back', VOID: 'void' };
 
 export function callName(p: Rec, home: string, away: string): string {
   try { return describeCall({ market: p.market, outcome: p.outcome, line: p.line, home, away, odds: null, stake: 10 }).name; }
@@ -182,6 +182,15 @@ export interface Page {
   image?: { url: string; alt: string };
   /** An image to start fetching from the head: the front page's masthead photograph. */
   preloadImage?: string;
+  /** The same, as a responsive set (imagesrcset and imagesizes): the Champions League ball. */
+  preloadSet?: { srcset: string; sizes: string };
+  /**
+   * Data the app draws its first screen from without waiting on a fetch: the
+   * front page's headline match. Public, the same as /api/hero.
+   */
+  boot?: Rec;
+  /** Matches whose /api/fixture the head starts fetching for a reader with no session. */
+  lead?: number[];
   /** The same thing as data: the API address an agent can read instead of the page. */
   json?: string;
 }
@@ -229,7 +238,7 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
   if (state === 'ft' && score) {
     title = matchTitle({ home, away, state, score });
     description = settledCall
-      ? `${vs} in the ${league}. Our call, ${callName(settledCall, home, away)}, ${RESULT_WORD[settledCall.result] ?? 'was settled'}. Scorers, the stats and how it went.`
+      ? `${vs} in the ${league}. Our call, ${callName(settledCall, home, away)}: ${RESULT_WORD[settledCall.result] ?? 'settled'}. Scorers, the stats and how it went.`
       : `${vs} in the ${league}: the result, the scorers and the stats.${hasCall ? '' : ' We did not have a call on this one.'}`;
     callHTML = settledCall
       ? `<p>Our call was <b>${esc(callName(settledCall, home, away))}</b>, at odds of ${esc(Number(settledCall.odds).toFixed(2))}${settledCall.bookmaker ? ` with ${esc(settledCall.bookmaker)}` : ''}. It ${esc(RESULT_WORD[settledCall.result] ?? 'was settled')}. Every settled call is on <a href="/results">the record</a>.</p>`
@@ -238,17 +247,17 @@ export async function matchPage(env: SeoEnv, id: number, site: string): Promise<
     title = matchTitle({ home, away, state, live });
     description = `${home} v ${away} is under way in the ${league}${live ? `, ${live[0]}–${live[1]}${f.live_minute ? ` after ${f.live_minute} minutes` : ''}` : ''}. ${hasCall ? 'Our call closed at kick-off and goes up with how it went at full time.' : 'Team news, form and the head-to-head.'}`;
     callHTML = hasCall
-      ? `<p>We have a call on this match. It closed at kick-off: calls are not sold once a match is on, and this one is shown here at full time with whether it landed.</p>`
+      ? `<p>We have a call on this match. It closed at kick-off: calls are not sold once a match is on, and this one is shown here at full time with whether it won.</p>`
       : `<p>We passed on this match before kick-off.</p>`;
   } else {
     title = matchTitle({ home, away, state });
     if (openCall) {
       const name = callName(openCall, home, away);
-      description = `${home} v ${away}, ${when.day} ${when.time} UK. Today's free call: ${name}. The reasoning, team news, form and head-to-head.`;
-      callHTML = `<p>This is today's free call, open to everyone: <b>${esc(name)}</b>, at odds of ${esc(Number(openCall.odds).toFixed(2))}${openCall.bookmaker ? ` with ${esc(openCall.bookmaker)}` : ''}. ${esc(MOVES)}</p>`;
+      description = `${home} v ${away}, ${when.day} ${when.time} UK. Our call: ${name}. The reasoning, team news, form and head-to-head.`;
+      callHTML = `<p>Our call: <b>${esc(name)}</b>, at odds of ${esc(Number(openCall.odds).toFixed(2))}${openCall.bookmaker ? ` with ${esc(openCall.bookmaker)}` : ''}. ${esc(MOVES)}</p>`;
     } else if (hasCall) {
       description = `${home} v ${away}, ${league}, ${when.day} ${when.time} UK. We have a call on this one. Team news, form and the head-to-head.`;
-      callHTML = `<p>We have a call on this match. Which market, the odds and the book are for <a href="/pricing">members</a>; the reading of the match is free. ${esc(MOVES)}</p>`;
+      callHTML = `<p>We have a call on this match: <a href="${esc(canonical)}">it is on the match page</a>, with the reasoning. ${esc(MOVES)}</p>`;
     } else {
       description = `${home} v ${away}, ${league}, ${when.day} ${when.time} UK. We looked and passed on this one. Team news, form, the table and the head-to-head.`;
       callHTML = `<p>We looked at this match and did not find a call worth making. That can change as team news comes in: ${esc(MOVES.toLowerCase())}</p>`;
@@ -352,7 +361,7 @@ function rowStatus(f: Rec): string {
   }
   if (state === 'live') return f.locked || f.top_pick ? 'Under way. Our call closed at kick-off.' : 'Under way.';
   if (f.later) return 'Analysed closer to kick-off.';
-  if (f.top_pick && f.free_call) return `Today's free call: ${callName(f.top_pick, f.home, f.away)}.`;
+  if (f.top_pick && f.free_call) return `Our surest call today: ${callName(f.top_pick, f.home, f.away)}.`;
   if (f.top_pick || f.locked) return 'We have a call on this one.';
   return 'No call.';
 }
@@ -393,15 +402,15 @@ export async function todayPage(env: SeoEnv, site: string): Promise<Page> {
   const c = crumbs([[SITE, '/'], ["Today's board", '/today']], site);
   return {
     title: todayTitle(day, calls),
-    description: clip(`${calls} calls across ${fixtures.length} matches in ${comps} competitions.${free ? ` Today's free call: ${free.home} v ${free.away}.` : ''} Team news, form and the reason behind every call.`),
+    description: clip(`${calls} calls across ${fixtures.length} matches in ${comps} competitions.${free ? ` Our surest call today: ${free.home} v ${free.away}.` : ''} Team news, form and the reason behind every call.`),
     canonical: `${site}/today`,
     json: `${site}/api/board?hours=48`,
     body: `
   <article class="wrap section narrow seo">
     ${c.html}
     <h1 class="display">Today's board</h1>
-    <p>${esc(`${fixtures.length} matches across ${comps} competitions, with ${calls} calls.`)} ${esc(MOVES)} One call a day is free; members get the rest.</p>
-    ${free ? `<p>Today's free call is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
+    <p>${esc(`${fixtures.length} matches across ${comps} competitions, with ${calls} calls.`)} ${esc(MOVES)} Every call is free.</p>
+    ${free ? `<p>Our surest call today is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
     ${byDayAndLeague(fixtures)}
   </article>`,
     jsonLd: [c.ld, {
@@ -420,7 +429,7 @@ export async function leaguePage(env: SeoEnv, id: number, site: string): Promise
   const ahead = fixtures.filter((f) => stateOf(f, now) !== 'ft').sort((a, b) => a.kickoff - b.kickoff);
   const played = fixtures.filter((f) => stateOf(f, now) === 'ft').sort((a, b) => b.kickoff - a.kickoff).slice(0, 12);
   const rows: Rec[] = Array.isArray(d.standings) ? d.standings : [];
-  const rec = d.record && Number(d.record.n) ? `Our calls in the ${name}: ${word(Number(d.record.wins))} of ${word(Number(d.record.n))} landed.` : '';
+  const rec = d.record && Number(d.record.n) ? `Our calls in the ${name}: ${word(Number(d.record.wins))} of ${word(Number(d.record.n))} won.` : '';
   const groups = new Map<string, Rec[]>();
   for (const r of rows) groups.set(String(r.group ?? ''), [...(groups.get(String(r.group ?? '')) ?? []), r]);
   const tables = [...groups].map(([g, rs]) => `
@@ -457,14 +466,14 @@ export async function resultsPage(env: SeoEnv, site: string): Promise<Page> {
   const c = crumbs([[SITE, '/'], ['Results', '/results']], site);
   return {
     title: TITLES.results,
-    description: `${won} of our last ${graded.length} calls landed. Every settled call, with the score that decided it.`,
+    description: `${won} of our last ${graded.length} calls won. Every settled call, with the score that decided it.`,
     canonical: `${site}/results`,
     json: `${site}/api/picks?settled=true&limit=60`,
     body: `
   <article class="wrap section narrow seo">
     ${c.html}
     <h1 class="display">The record</h1>
-    <p>${esc(`${won} of our last ${graded.length} calls landed.`)} Every one is below with the score that settled it, and the record stays public.</p>
+    <p>${esc(`${won} of our last ${graded.length} calls won.`)} Every one is below with the score that settled it, and the record stays public.</p>
     <ul class="seo-list">${picks.map((p) => {
       const home = String(p.home_team ?? p.home ?? '');
       const away = String(p.away_team ?? p.away ?? '');
@@ -478,9 +487,8 @@ export async function resultsPage(env: SeoEnv, site: string): Promise<Page> {
 }
 
 /**
- * The bet slip. While it is open its legs are for members, so the page says
- * how many there are, the total odds and when the first one kicks off, and
- * names the legs of settled slips, which are public.
+ * The bet slip: how many legs, the total odds and when the first one kicks
+ * off, and the legs of settled slips.
  */
 export async function slipPage(env: SeoEnv, site: string): Promise<Page> {
   const d = await read<Rec>(env, 'get_slip', {});
@@ -490,7 +498,7 @@ export async function slipPage(env: SeoEnv, site: string): Promise<Page> {
   const n = Number(cur?.legs_count ?? 0);
   const odds = Number(cur?.odds);
   const first = cur?.first_kickoff ? ukTime(Number(cur.first_kickoff)) : null;
-  const so = Number(rec.n) ? ` Slips so far: ${word(Number(rec.won))} of ${word(Number(rec.n))} landed.` : '';
+  const so = Number(rec.n) ? ` Slips so far: ${word(Number(rec.won))} of ${word(Number(rec.n))} won.` : '';
   const c = crumbs([[SITE, '/'], ["Today's bet slip", '/slip']], site);
   const now = cur && n && Number.isFinite(odds)
     ? `The slip on now has ${word(n)} legs at total odds of ${odds.toFixed(2)}${first ? `, the first kicking off ${first.day} at ${first.time} UK` : ''}. It is fixed as posted: the legs do not change once it is up.`
@@ -504,10 +512,10 @@ export async function slipPage(env: SeoEnv, site: string): Promise<Page> {
   <article class="wrap section narrow seo">
     ${c.html}
     <h1 class="display">The bet slip</h1>
-    <p>${esc(now)} Which matches and calls are on it is for <a href="/pricing">members</a> until it settles.${esc(so)}</p>
+    <p>${esc(now)}${esc(so)}</p>
     ${recent.length ? `<h2>Settled slips</h2><ul class="seo-list">${recent.slice(0, 10).map((r) => {
       const legs: Rec[] = Array.isArray(r.legs) ? r.legs : [];
-      return `<li>${esc(ukTime(Number(r.first_kickoff)).day)}, ${esc(word(legs.length))} legs at ${esc(Number(r.odds).toFixed(2))}: ${esc(r.result === 'WON' ? 'landed' : r.result === 'LOST' ? 'missed' : 'void')}. ${legs.map((l) => `<a href="${esc(matchPath({ id: l.fixture_id, home: l.home, away: l.away }))}">${esc(`${l.home} v ${l.away}`)}</a>`).join(', ')}</li>`;
+      return `<li>${esc(ukTime(Number(r.first_kickoff)).day)}, ${esc(word(legs.length))} legs at ${esc(Number(r.odds).toFixed(2))}: ${esc(r.result === 'WON' ? 'won' : r.result === 'LOST' ? 'lost' : 'void')}. ${legs.map((l) => `<a href="${esc(matchPath({ id: l.fixture_id, home: l.home, away: l.away }))}">${esc(`${l.home} v ${l.away}`)}</a>`).join(', ')}</li>`;
     }).join('')}</ul>` : ''}
     <p><a href="/today">Today's board</a> <span aria-hidden="true">/</span> <a href="/results">The record</a></p>
   </article>`,
@@ -530,11 +538,16 @@ export async function homePage(env: SeoEnv, site: string): Promise<Page> {
     read<Rec>(env, 'get_board', { p_from: now - 3 * 3600, p_to: now + 48 * 3600 }),
     read<Rec>(env, 'get_hero', {}).catch(() => null),
   ]);
-  // No masthead photograph to preload any more: the front page a visitor
-  // gets is the landing page (viewLanding), which has none. Members get the
-  // dashboard and its photograph loads as it always did on other pages.
-  void hero;
   const fixtures: Rec[] = Array.isArray(b?.fixtures) ? b!.fixtures : [];
+  // The headline match goes in the page itself, so the first screen leads
+  // with tonight's biggest game the moment the app runs rather than seconds
+  // later, once its fetches come back (owner, November 2026: "an empty
+  // skeleton of text, then after a few seconds the match pops up"). The
+  // matches it and the free call are about are fetched from the head.
+  const lead = [hero?.fixture_id, hero?.free_fixture_id].map(Number).filter((n, i, a) => n > 0 && a.indexOf(n) === i);
+  // A Champions League headline paints the competition's night and its ball:
+  // the picture starts with the page rather than after the app has drawn.
+  const ucl = Number(hero?.league_id) === 7 && lead.length > 0;
   const calls = fixtures.filter((f) => f.top_pick || f.locked || f.called).length;
   const comps = new Set(fixtures.map((f) => f.league)).size;
   const free = fixtures.find((f) => f.free_call && f.top_pick);
@@ -547,7 +560,7 @@ export async function homePage(env: SeoEnv, site: string): Promise<Page> {
     <h1 class="display">Football predictions for today's biggest games</h1>
     <p>${esc(LANDING_LEDE)}</p>
     <p>${esc(fixtures.length ? `${fixtures.length} matches in the next two days across ${comps} competitions, with ${calls} calls.` : 'The next matches go up as soon as they are analysed.')} <a href="/results">Every result stays on the record</a>. One call a day is free.</p>
-    ${free ? `<p>Today's free call is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
+    ${free ? `<p>Our surest call today is <a href="${esc(matchPath(free))}">${esc(`${free.home} v ${free.away}`)}</a>: ${esc(callName(free.top_pick, free.home, free.away))}.</p>` : ''}
     <h2>How it works</h2>
     <ol>${LANDING_STEPS.map(([h, p]) => `<li><b>${esc(h)}</b> ${esc(p)}</li>`).join('')}</ol>
     ${byDayAndLeague(fixtures)}
@@ -555,6 +568,9 @@ export async function homePage(env: SeoEnv, site: string): Promise<Page> {
     ${LANDING_FAQ.map(([q, a]) => `<h3>${esc(q)}</h3><p>${esc(a)}</p>`).join('')}
     ${moreHTML()}
   </article>`,
+    ...(hero?.fixture_id ? { boot: { hero } } : {}),
+    ...(lead.length ? { lead } : {}),
+    ...(ucl ? { preloadSet: { srcset: '/brand/starball-480.webp 480w, /brand/starball.webp 900w', sizes: '(max-width: 760px) 150vw, 64vw' } } : {}),
     jsonLd: [{
       '@context': 'https://schema.org',
       '@type': 'FAQPage',
@@ -665,7 +681,10 @@ export function render(shell: string, page: Page): string {
     .replace(/<meta property="og:image:alt" content="[^"]*">/, (m) => (page.image ? `<meta property="og:image:alt" content="${esc(page.image.alt)}">` : m))
     .replace(/<meta name="twitter:image" content="[^"]*">/, (m) => (page.image ? `<meta name="twitter:image" content="${esc(page.image.url)}">` : m))
     .replace(/<meta name="robots" content="[^"]*">/, page.noindex ? '<meta name="robots" content="noindex">' : '$&')
-    .replace('</head>', `<meta property="og:url" content="${esc(page.canonical)}">\n${page.json ? `<link rel="alternate" type="application/json" href="${esc(page.json)}">\n` : ''}${page.preloadImage ? `<link rel="preload" as="image" href="${esc(page.preloadImage)}" fetchpriority="high">\n` : ''}${ld}\n</head>`);
+    .replace('</head>', `<meta property="og:url" content="${esc(page.canonical)}">\n${page.json ? `<link rel="alternate" type="application/json" href="${esc(page.json)}">\n` : ''}${page.preloadImage ? `<link rel="preload" as="image" href="${esc(page.preloadImage)}" fetchpriority="high">\n` : ''}${page.preloadSet ? `<link rel="preload" as="image" imagesrcset="${esc(page.preloadSet.srcset)}" imagesizes="${esc(page.preloadSet.sizes)}" fetchpriority="high">\n` : ''}${page.boot ? `<script type="application/json" id="ow-boot">${JSON.stringify(page.boot).replace(/</g, '\\u003c')}</script>\n` : ''}${ld}\n</head>`);
+  // The matches the first screen is about, for the head's preload script
+  // (index.html), which reads them off the root element before the app runs.
+  if (page.lead?.length) html = html.replace(/<html(?=[\s>])/, `<html data-lead="${page.lead.map((n) => Math.trunc(n)).join(' ')}"`);
   // The loading skeleton stays, with the page's words beside it. Where the
   // app runs, the words are hidden (html.js, base.css) and the skeleton shows
   // until the app draws the page, so nobody sees a page of text that is then
@@ -774,7 +793,6 @@ export async function sitemap(env: SeoEnv, origin: string): Promise<Response> {
     [`${site}/weekend`, today, 'daily'],
     [`${site}/free-prediction`, today, 'hourly'],
     [`${site}/predictions`, today, 'daily'],
-    [`${site}/pricing`, today, 'monthly'],
     ...Object.keys(LEGAL_PATHS).map((p): [string, string, string] => [`${site}${p}`, today, 'monthly']),
   ];
   // The kinds of prediction with a page behind them (landing.ts: a few settled calls each).

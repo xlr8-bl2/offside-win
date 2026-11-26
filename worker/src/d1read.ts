@@ -261,8 +261,12 @@ export async function fixturePreview(db: D1Read, id: number): Promise<Rec | null
       home_id: s.home_team_id, away_id: s.away_team_id, hg: null, ag: null };
   } else {
     // The id must appear in the text for a row to hold it, which keeps this to the lists that matter.
+    // A range on the key, not LIKE 'league:%:next': a LIKE with a wildcard in
+    // the middle scans every kv row (16,000 a call, 86 million rows read in two
+    // days, mostly crawlers asking for old match ids), where the range reads
+    // only the league lists.
     const lists = await rows<{ k: string; v: string }>(db, `SELECT k, v FROM kv
-      WHERE (k LIKE 'league:%:next' OR k LIKE 'league:%:last') AND instr(v, ?) > 0`, String(id));
+      WHERE k >= 'league:' AND k < 'league;' AND (k LIKE '%:next' OR k LIKE '%:last') AND instr(v, ?) > 0`, String(id));
     for (const k of lists) {
       const list = field(tryJson(k.v), 'rows');
       const r = (Array.isArray(list) ? list : []).find((x) => text(field(x, 'id')) === String(id));
@@ -333,12 +337,35 @@ export async function getFixture(db: D1Read, id: number, member = false): Promis
   return b;
 }
 
+/**
+ * The record's summary ("552 of 700 landed"), kept ready-made in kv and
+ * recounted at most every ten minutes. Counting it on every request read
+ * every pick each time: 9.2 million rows in two days, the largest single
+ * reader of D1 (cf:usage, 17 November), and the free plan allows 5 million a day.
+ */
+const SUMMARY_KEY = 'picks:summary';
+const SUMMARY_FOR = 600;
+async function pickSummary(db: D1Read): Promise<Rec | null> {
+  const t = now();
+  const saved = await one<{ v: string; updated_at: number }>(db, 'SELECT v, updated_at FROM kv WHERE k = ?', SUMMARY_KEY);
+  if (saved && t - saved.updated_at < SUMMARY_FOR) {
+    const v = tryJson(saved.v);
+    if (isObj(v)) return v;
+  }
+  const sum = await one(db, `SELECT count(*) AS n, sum(CASE WHEN result IN ('WON', 'HALF_WON') THEN 1 ELSE 0 END) AS wins,
+      sum(pnl) AS pnl, avg(odds) AS avg_odds
+    FROM pick WHERE kind = 'CONFIDENT' AND settled_at IS NOT NULL AND result IS NOT 'VOID'`);
+  try {
+    await db.batch([db.prepare(`INSERT INTO kv (k, v, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT (k) DO UPDATE SET v = excluded.v, updated_at = excluded.updated_at`).bind(SUMMARY_KEY, JSON.stringify(sum ?? {}), t)]);
+  } catch { /* a failed save only means the next request counts again */ }
+  return sum;
+}
+
 /** get_picks(p_limit, p_settled). */
 export async function getPicks(db: D1Read, limit = 60, settled?: string | null, member = false): Promise<Rec> {
   const freeId = await freeFixtureId(db);
-  const sum = await one(db, `SELECT count(*) AS n, sum(CASE WHEN result IN ('WON', 'HALF_WON') THEN 1 ELSE 0 END) AS wins,
-      sum(pnl) AS pnl, avg(odds) AS avg_odds
-    FROM pick WHERE settled_at IS NOT NULL AND result IS NOT 'VOID' AND kind = 'CONFIDENT'`);
+  const sum = await pickSummary(db);
   const which = settled === 'true' ? 'AND pk.settled_at IS NOT NULL' : settled === 'false' ? 'AND pk.settled_at IS NULL' : '';
   const got = await rows(db, `SELECT pk.id, pk.fixture_id, coalesce(f.kickoff, pk.kickoff) AS kickoff, pk.market, pk.outcome, pk.line, pk.kind,
         pk.model_prob, pk.book_prob, pk.edge, pk.odds, pk.bookmaker, pk.kelly,
@@ -388,10 +415,12 @@ export async function getHero(db: D1Read): Promise<Rec> {
   // front page led with a match finished the day before. Then the biggest
   // match still to come, or in play, from the board takes its place.
   if (!live && (!isObj(hero) || !digits(hero.kickoff) || Number(text(hero.kickoff)) < t - 3 * 3600)) {
+    // Tonight's biggest first: a top-ranked game three days off used to beat
+    // the best of this evening's, so the window comes before the rank.
     const f = await one(db, `SELECT f.id, f.kickoff, f.league_id, f.home_team, f.away_team, f.home_team_id, f.away_team_id, l.name AS league
         FROM fixture f LEFT JOIN league l ON l.id = f.league_id
        WHERE f.kickoff > ? AND f.home_goals IS NULL
-       ORDER BY f.rank ASC, f.kickoff ASC LIMIT 1`, t - 2 * 3600);
+       ORDER BY (f.kickoff > ?) ASC, f.rank ASC, f.kickoff ASC LIMIT 1`, t - 2 * 3600, t + 36 * 3600);
     if (f) {
       hero = { fixture_id: f.id, kicker: f.league, headline: `${f.home_team} v ${f.away_team}`, kickoff: f.kickoff,
         league: f.league, league_id: f.league_id, home: f.home_team, away: f.away_team,
@@ -439,8 +468,11 @@ export async function getLeagues(db: D1Read): Promise<Rec[]> {
   const t = now();
   const [lg, sched, nexts] = await db.batch([
     db.prepare('SELECT id, name, country FROM league WHERE tracked = 1'),
-    db.prepare('SELECT league_id, min(kickoff) AS next FROM schedule WHERE kickoff > ? GROUP BY league_id').bind(t),
-    db.prepare(`SELECT k, v FROM kv WHERE k LIKE 'league:%:next'`),
+    // One index seek per covered league, rather than a pass over the whole
+    // schedule (about 670 thousand rows read in two days, cf:usage 17 November).
+    db.prepare(`SELECT l.id AS league_id, (SELECT min(s.kickoff) FROM schedule s WHERE s.league_id = l.id AND s.kickoff > ?) AS next
+      FROM league l WHERE l.tracked = 1`).bind(t),
+    db.prepare(`SELECT k, v FROM kv WHERE k >= 'league:' AND k < 'league;' AND k LIKE '%:next'`),
   ]);
   const fromSchedule = new Map<number, number>();
   for (const r of (sched?.results ?? []) as Rec[]) fromSchedule.set(r.league_id, r.next);
@@ -547,7 +579,7 @@ export async function getPlayer(db: D1Read, id: number, leagueArg?: number | nul
   const t = now();
   const key = String(id);
   const [lists, reports] = await db.batch([
-    db.prepare(`SELECT k, v FROM kv WHERE k LIKE 'league:%:scorers' AND instr(v, ?) > 0`).bind(key),
+    db.prepare(`SELECT k, v FROM kv WHERE k >= 'league:' AND k < 'league;' AND k LIKE '%:scorers' AND instr(v, ?) > 0`).bind(key),
     db.prepare(`SELECT f.id, f.kickoff, f.league_id, l.name AS league, f.home_team, f.away_team, f.home_team_id, f.away_team_id,
         f.home_goals, f.away_goals, f.report_json
       FROM fixture f LEFT JOIN league l ON l.id = f.league_id
@@ -764,11 +796,14 @@ export async function hasMembership(db: D1Read, id: string, email: string): Prom
 
 const PROFILE_COLS = `display_name, odds_format, avatar_style, avatar_color, club_id, club_name, clock, username, call_alerts`;
 
+/** Free days a friend's link gives a new member (referral.ts reads it from here). */
+export const FRIEND_DAYS = 7;
+
 /** get_account() for a signed-in reader. */
 export async function getAccount(db: D1Read, v: { id: string; email: string }): Promise<Rec> {
   const t = now();
   const email = v.email.toLowerCase();
-  const [live, card, whop, receipts, profile, follows, back] = await db.batch([
+  const [live, card, whop, receipts, profile, follows, back, invited] = await db.batch([
     db.prepare(`SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4, via, manage_url FROM (
         SELECT plan_id, expires_at, auto_renew, cancelled_at, card_brand, card_last4, 'card' AS via, NULL AS manage_url
           FROM membership WHERE user_id = ? AND expires_at > ?
@@ -793,6 +828,7 @@ export async function getAccount(db: D1Read, v: { id: string; email: string }): 
         OR EXISTS (SELECT 1 FROM entitlement WHERE email = ?)
         OR EXISTS (SELECT 1 FROM former_member WHERE email_sha256 = ?)) AS ok`)
       .bind(v.id, v.id, email, await sha256Hex(email.trim())),
+    db.prepare('SELECT 1 AS x FROM referral WHERE referred_id = ?').bind(v.id),
   ]);
   const first = (r: { results?: unknown[] } | undefined) => ((r?.results ?? [])[0] as Rec | undefined) ?? null;
   const w = first(whop);
@@ -801,6 +837,8 @@ export async function getAccount(db: D1Read, v: { id: string; email: string }): 
     email: v.email,
     membership: first(live) ?? first(card),
     returning: Boolean(first(back)?.ok),
+    // Came on a friend's link and never had a membership: the free days wait at checkout (referral.ts).
+    invite: first(invited) && !first(back)?.ok ? { friend_days: FRIEND_DAYS } : null,
     whop: w ? { renewing: true, manage_url: w.manage_url, until: w.expires_at } : null,
     receipts: (receipts?.results ?? []) as Rec[],
     profile: p ? { ...p, call_alerts: p.call_alerts === null ? null : Boolean(p.call_alerts) } : null,
@@ -817,6 +855,16 @@ export async function recordView(db: D1Read, page: string): Promise<void> {
 
 type Args = Record<string, string | number | undefined>;
 
+/**
+ * The site is free (owner, 17 November 2026): every call, the slip's legs and
+ * the reasoning are open to every reader, signed in or not. The membership
+ * machinery stays in place for the accounts that already hold one, but no
+ * read is walled any more. Set to false to bring the wall back.
+ */
+export let FREE = true;
+/** For the tests that check the wall itself, which is still there to switch back on. */
+export function setFree(on: boolean): void { FREE = on; }
+
 /** Who is reading: an account and whether it holds a live membership. */
 export interface Viewer { id: string; email: string; member: boolean }
 const int = (v: unknown) => (v === undefined || v === null || v === '' ? null : Number(v));
@@ -827,7 +875,7 @@ const int = (v: unknown) => (v === undefined || v === null || v === '' ? null : 
  * should say so rather than guess.
  */
 export async function serve(db: D1Read, fn: string, args: Args, viewer: Viewer | null = null): Promise<unknown> {
-  const member = viewer?.member ?? false;
+  const member = FREE || (viewer?.member ?? false);
   switch (fn) {
     case 'get_board': return getBoard(db, Number(args.p_from), Number(args.p_to), int(args.p_league), member);
     case 'get_fixture': return getFixture(db, Number(args.p_id), member);

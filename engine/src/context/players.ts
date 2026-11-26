@@ -233,8 +233,14 @@ export interface ProfileRequest {
  */
 async function clubSeasonStart(clubId: number, kickoff: number): Promise<number> {
   const r = await select<{ league_id: number }>(
-    `SELECT league_id FROM match WHERE (home_team_id = ? OR away_team_id = ?) AND kickoff < ? ORDER BY kickoff DESC LIMIT 1`,
-    [clubId, clubId, kickoff],
+    // Each side's last game by its own index, so this reads two rows rather
+    // than every game the club has played.
+    `SELECT league_id FROM (
+       SELECT * FROM (SELECT league_id, kickoff FROM match WHERE home_team_id = ? AND kickoff < ? ORDER BY kickoff DESC LIMIT 1)
+       UNION ALL
+       SELECT * FROM (SELECT league_id, kickoff FROM match WHERE away_team_id = ? AND kickoff < ? ORDER BY kickoff DESC LIMIT 1)
+     ) ORDER BY kickoff DESC LIMIT 1`,
+    [clubId, kickoff, clubId, kickoff],
   ).catch(() => []);
   if (r[0]) return seasonStart(Number(r[0].league_id), kickoff);
   const y = new Date(kickoff * 1000).getUTCFullYear();

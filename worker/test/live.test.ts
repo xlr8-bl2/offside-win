@@ -83,9 +83,10 @@ test('the live list and a match are read from the provider with the key, and the
     const parsed = JSON.parse(list) as { matches: Array<{ status: string; minute: number; score: number[] }>; changes: Array<{ id: number; to: string }> };
     assert.deepEqual([parsed.matches[0]!.status, parsed.matches[0]!.minute, parsed.matches[0]!.score], ['2nd_half', 71, [2, 1]]);
     assert.deepEqual(parsed.changes.map((c) => [c.id, c.to]), [[12, 'postponed']], 'the changes ride in the same body');
-    const one = JSON.parse(await (await liveMatch(env, 9)).text()) as { report: { events: Array<{ t: string }>; stats: { home: { possession: number } } } };
-    assert.deepEqual(one.report.events.map((e) => e.t), ['goal', 'card']);
-    assert.equal(one.report.stats.home.possession, 55);
+    const one = JSON.parse(await (await liveMatch(env, 9)).text()) as { match: { score: number[] }; report: unknown };
+    assert.deepEqual(one.match.score, [2, 1], 'the score from the list');
+    assert.equal(one.report, null, 'no timeline or numbers read live (owner, 3 November 2026)');
+    assert.ok(!seen.some((s) => /incidents|stats|events\/9\//.test(s)), 'a match page asks the provider nothing of its own');
     assert.ok(seen.every((s) => s.endsWith('Token secret-key-123')), 'every provider call carries the key');
   } finally {
     globalThis.fetch = realFetch;
@@ -107,6 +108,22 @@ test('a changes feed that fails costs the changes, not the scores', async () => 
   }
 });
 
+test('a live list the provider refuses still answers, so the page still hears what was graded', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => (String(input).includes('/events/live/')
+    ? new Response('{}', { status: 429 })
+    : new Response(JSON.stringify({ changes: [] })))) as typeof fetch;
+  try {
+    const res = await liveList({ BSD_API_KEY: 'k' });
+    assert.equal(res.status, 200, 'not {"error":"provider 429"}');
+    const body = await res.json() as { enabled: boolean; matches: unknown[] };
+    assert.equal(body.enabled, true);
+    assert.deepEqual(body.matches, []);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test('a half-time score is not one until half time, and the live list is read under any of its usual keys', async () => {
   const first = compactMatch({ id: 1, status: 'inprogress', period: '1st_half', current_minute: 36, home_score: 1, away_score: 0, home_score_ht: 1, away_score_ht: 0 });
   assert.equal(first!.ht, null);
@@ -122,4 +139,64 @@ test('a half-time score is not one until half time, and the live list is read un
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test('a second data centre takes the first one\'s copy from D1 instead of asking the provider again', async () => {
+  const kv = new Map<string, { v: string; updated_at: number }>();
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind(...v: unknown[]) {
+          return {
+            async first<T>() {
+              if (sql.startsWith('SELECT 1 AS x FROM fixture')) return { x: 1 } as T;
+              const row = kv.get(String(v[0]));
+              return (row && row.updated_at > Number(v[1]) ? { v: row.v } : null) as T | null;
+            },
+            async run() {
+              if (sql.startsWith('INSERT INTO kv')) kv.set(String(v[0]), { v: String(v[1]), updated_at: Number(v[3]) });
+              return {};
+            },
+          };
+        },
+      };
+    },
+  };
+  let asked = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    asked++;
+    if (String(input).includes('/fixtures/changes/')) return new Response(JSON.stringify({ changes: [] }));
+    return new Response(JSON.stringify({ results: [{ id: 7, status: 'inprogress', period: '1st_half', current_minute: 12, home_score: 1, away_score: 0 }] }));
+  }) as typeof fetch;
+  try {
+    const env = { BSD_API_KEY: 'k', DB: db };
+    const first = await (await liveList(env)).json() as { matches: Array<{ id: number }> };
+    assert.deepEqual(first.matches.map((m) => m.id), [7]);
+    const before = asked;
+    assert.ok(kv.has('live:list'), 'the list is kept for the whole site');
+    const second = await (await liveList(env)).json() as { matches: Array<{ id: number; minute: number }> };
+    assert.deepEqual(second.matches.map((m) => [m.id, m.minute]), [[7, 12]]);
+    assert.equal(asked, before, 'no second call to the provider');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('a match page for an id not on now asks the provider nothing', async () => {
+  const { liveMatch: lm } = await import('../src/live.ts');
+  const asked: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (url: string | URL) => {
+    asked.push(String(url));
+    return new Response(JSON.stringify({ results: [] }), { headers: { ratelimit: 'limit=7500;r=7000' } });
+  }) as typeof fetch;
+  const db = { prepare: () => ({ bind: () => ({ first: async () => null, run: async () => ({}) }) }) };
+  try {
+    const res = await lm({ BSD_API_KEY: 'k', DB: db as never }, 999_001);
+    const body = await res.json() as { match: unknown; report: unknown };
+    assert.equal(body.match, null);
+    assert.equal(body.report, null);
+    assert.ok(asked.every((u) => u.includes('/events/live/')), 'only the live list, never the match itself');
+  } finally { globalThis.fetch = real; }
 });

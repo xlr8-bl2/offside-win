@@ -30,9 +30,11 @@ export const config = {
     /**
      * Requests of the day's free allowance (7,500) this job leaves for the
      * others: below it, it asks for nothing and works from what it has
-     * (bsd.ts, quota). Each workflow sets its own.
+     * (bsd.ts, quota). Each workflow sets its own; the order of priorities is
+     * in worker/src/allowance.ts. 2,500 for anything that does not say: only
+     * results (bsd.ts asResults), live scores and the slate may go lower.
      */
-    reserve: num('BSD_RESERVE', 500),
+    reserve: num('BSD_RESERVE', 2500),
   },
 
   /**
@@ -426,8 +428,29 @@ export const config = {
      * own probability; -1 turns it off. Near zero the best price has to be
      * at or about the consensus's fair price: the one condition that separated
      * the rules that earned in the lab from the ones that did not.
+     *
+     * Loosened by a point, with minSharpEv, on 3 November 2026 (lab:review,
+     * 5,171 fixtures). Since late September this test and its sharp-book
+     * twin turned away about three fixtures in four, leaving 4 to 5 calls a
+     * day and a near-empty board, and the rule was not earning for it: the
+     * lab replays the live engine to within half a point (lab:live), and on
+     * the two newest periods (B, C: 23 September to 3 November) it returned
+     * -3.2% and +0.6% a call. Letting the best price sit up to a point below
+     * fair:
+     *
+     *                        calls a day   landed (B / C)   return (B / C)
+     *   production             4.6         80.2 / 82.0%     -3.2 / +0.6%
+     *   within 1% of fair     15.5         84.5 / 83.4%     -0.6 / -0.8%
+     *
+     * Three times the calls, landing more often, at the same return. Half a
+     * point (8 a day, -5.4 / -1.8%) and a point and a half (24 a day, -2.3 /
+     * -2.2%) did not line up in order, so read the return as "about -1%,
+     * as before", not as an improvement; the gain is volume and landing. Every
+     * family at every probability loses 1-5% at the best price over the
+     * whole history (lab deep, section 5), so no threshold here buys an edge;
+     * what it decides is how many calls the board has and how often they land.
      */
-    minEv: num('CONF_MIN_EV', -0.01),
+    minEv: num('CONF_MIN_EV', -0.02),
     /**
      * A best price this far above the consensus's fair odds (odds × fair
      * probability) is a book that has not moved, not an opportunity anyone
@@ -440,13 +463,67 @@ export const config = {
      * and leaving them out took the held-out quarter from +6.3% to +7.3%
      * (lab:tune, 3,077 fixtures). Comma-separated to override.
      */
-    excludeMarkets: (process.env.CONF_EXCLUDE_MARKETS ?? 'total_corners under').split(',').map((x) => x.trim()).filter(Boolean),
+    //
+    // Double chance joined it on 20 November 2026 (see minSharpEv for the study).
+    excludeMarkets: (process.env.CONF_EXCLUDE_MARKETS ?? 'total_corners under,double_chance 12,double_chance home,double_chance away').split(',').map((x) => x.trim()).filter(Boolean),
+    /**
+     * Asian handicap lines, as the backed side gets them, that are not called:
+     * +1.5 ("this side, given a goal and a half"). It lost in every period the
+     * lab has (A -1.1%, B -4.6%, C -6.8% a call under the old rule) while the
+     * whole lines either side of it, +1 and +2, did not; see minSharpEv.
+     * Comma-separated to override; empty for none.
+     */
+    /**
+     * Most readers do not know what a handicap is (owner, 21 November 2026),
+     * so when the likeliest call is a handicap and a result, goals, corners or
+     * cards call within this much probability also clears every test, that
+     * one is made instead. Measured at 3 points: handicaps from 72% of calls
+     * to 68%, return and landing unchanged within the lab's noise. Wider does
+     * not buy much more: on most fixtures nothing common clears the bar at
+     * all, and leaving handicaps out entirely cuts the board to about four
+     * calls a day. The handicaps that stay are written in plain words.
+     */
+    preferCommon: num('CONF_PREFER_COMMON', 0.03),
+    /**
+     * No goal-margin handicaps (owner, 21 November 2026: "cut handicap picks
+     * to the least"). An Asian handicap is called only at -0.5, 0 or +0.5 for
+     * the backed side, which the site names as an ordinary bet ("Jordan to
+     * win", "Jordan to win or draw"); never +1, +2, -1.5 and the rest ("not to
+     * lose by three or more"), and never a three-way handicap.
+     *
+     * The lab (round 11, 5,923 fixtures, A / B / C): 7 calls a day instead of
+     * 15, landed 83.5 / 80.7 / 87.3% (was 86.1 / 83.5 / 90.2%), return a call
+     * +1.6 / -2.6 / +5.7% (was +2.4 / -1.4 / +6.4%). That is the cost of it,
+     * stated: about three points of landing and half the board. Leaving out
+     * every handicap did worse still (3.6 a day, 82.5 / 77.3 / 87.7%), and
+     * lowering the floor to win the volume back cost more landing than it
+     * gave in calls. Locked by test/handicap-limit.test.ts.
+     */
+    maxHandicapMargin: num('CONF_MAX_HANDICAP_MARGIN', 0.5),
+    excludeBackedLines: (process.env.CONF_EXCLUDE_AH_LINES ?? '1.5').split(',').map((x) => x.trim()).filter(Boolean).map(Number).filter(Number.isFinite),
     /** Only markets at least this many books priced in full; 0 for any. */
     minBooks: num('CONF_MIN_BOOKS', 0),
     /**
      * The value test against the sharp book as well, where it priced the
-     * market: the best price must be within this of its fair price. Null
-     * skips it.
+     * market: the best price must be at least its fair price. Null skips it.
+     *
+     * Back at fair (0) on 20 November 2026, with double chance and the +1.5
+     * handicap left out (excludeMarkets, excludeBackedLines). Measured on the
+     * lab's 5,923 finished fixtures (13 August to 20 November) in the same
+     * three date periods, against the rule before:
+     *
+     *                 landed (A / B / C)       return a call (A / B / C)   a day
+     *   before        86.6 / 82.0 / 88.2%      +2.5 / -3.1 / +4.4%         ~15
+     *   this          86.5 / 83.9 / 90.2%      +2.6 / -1.0 / +6.4%         ~14
+     *
+     * Ahead on return and on landing in every resampling of the newer half's
+     * days (2,000 draws; return +0.8 to +3.6 points a call). The three parts
+     * each hold on their own in all three periods: the sharp-fair test (+3.7
+     * / -2.3 / +5.5% alone), no double chance, no +1.5. Taking the price only
+     * at or above the sharpest book's fair odds is also the textbook value
+     * test, not a fitted number. Everything the lab tried on top (our own or
+     * the provider's model agreeing, recalibrated or learned probabilities,
+     * money since the open, more books, a higher floor) did no better.
      */
     minSharpEv: process.env.CONF_MIN_SHARP_EV ? Number(process.env.CONF_MIN_SHARP_EV) : (0 as number | null),
     /**

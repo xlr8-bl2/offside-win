@@ -23,6 +23,8 @@ import { sweat } from './js/lib/sweat.js';
 import * as attention from './js/lib/attention.js';
 import { anchorClock, clockText, diffEvents, eachFixture, eventKey, fixtureIdOf, ingest, inPlayWindow, overlay, signature } from './js/lib/live.js';
 import { TITLES, fullTitle, leagueTitle, matchTitle, slipTitle, todayTitle, ukDay } from './js/lib/titles.js';
+import { captureRef, shareLink, storedRef } from './js/lib/referral.js';
+import { adSlotHTML, fillAds } from './js/lib/ads.js';
 import { accountRpc, authHeaders, completeSignIn, currentUser, endedReason, signedInDevices, renderGoogleButton, setViewAs, warmSignIn, googleRedirectReady, prepareGoogleRedirect, signInWithGoogleRedirect, isGoogleReturn, signInWithEmail, signInWithGoogle, signOut, siteConfig, viewingAsFree, hasStoredSession } from './js/lib/auth.js';
 
 const app = document.getElementById('app');
@@ -55,17 +57,22 @@ const FRACTIONS = ['1/20', '1/16', '1/12', '1/10', '1/8', '1/7', '1/6', '1/5', '
   '13/2', '7/1', '15/2', '8/1', '9/1', '10/1', '11/1', '12/1', '14/1', '16/1', '20/1', '25/1', '33/1', '40/1', '50/1', '66/1', '100/1']
   .map((f) => { const [a, b] = f.split('/').map(Number); return [f, a / b]; });
 /*
- * The call the way a bookmaker's slip shows it: the selection as the button
- * reads, and the market's own name under it. "Switzerland -1" on its own is
- * two different bets -- the Asian handicap gives the stake back on a one-goal
- * win, the three-way handicap of the same name loses it -- so the market is
- * never left off. Quarter lines also carry the split spelling some books
- * print, so the button can be found either way (markets.js, betslip).
+ * The call in plain words first ("Argentina to win", "Two or more goals",
+ * "Jordan not to lose by three or more"), because most readers do not know a
+ * handicap from a match result (owner, 21 November 2026). Under it, small,
+ * the market as the bookmaker's coupon lists it, where that is a different
+ * spelling, so the bet can still be found: "Switzerland -1" is two different
+ * bets (the Asian handicap gives the stake back on a one-goal win, the
+ * three-way one loses it), so for a handicap the market is never left off.
+ * Quarter lines also carry the split spelling some books print.
  */
+/** Coupon names the plain name already says in full. */
+const SAYS_ITSELF = new Set(['Match Result', 'Total Goals', 'Both Teams to Score', 'Draw No Bet', 'Double Chance', 'Total Corners', 'Total Red Cards']);
 function betHTML(d) {
   const b = d.bet ?? { selection: d.name, market: '' };
-  return `<span class="bet"><span class="bet-sel">${esc(b.selection)}</span>${b.market
-    ? `<span class="bet-mkt">${esc(b.market)}${b.alt ? `<span class="bet-alt">Some books list it as ${esc(b.alt)}</span>` : ''}</span>` : ''}</span>`;
+  const coupon = b.market && !SAYS_ITSELF.has(b.market)
+    ? `<span class="bet-mkt">On the coupon: ${esc(b.market)}${b.selection !== d.name ? `, ${esc(b.selection)}` : ''}${b.alt ? `<span class="bet-alt">Some books list it as ${esc(b.alt)}</span>` : ''}</span>` : '';
+  return `<span class="bet"><span class="bet-sel">${esc(d.name)}</span>${coupon}</span>`;
 }
 
 /**
@@ -83,7 +90,7 @@ function paysHTML(d) {
 
 /** The same, as one line of plain text: for shares and short lists. */
 function betText(d) {
-  return d.bet?.market ? `${d.bet.selection} (${d.bet.market})` : d.name;
+  return d.name;
 }
 
 function showOdds(v) {
@@ -156,8 +163,8 @@ function cacheRead(key) {
     return hit;
   } catch { return null; }
 }
-function cacheWrite(key, text) {
-  const hit = { at: Date.now(), text };
+function cacheWrite(key, text, made) {
+  const hit = { at: Date.now(), text, ...(made ? { made } : {}) };
   memo.set(key, hit);
   // On the device only with the reader's yes; in memory for this visit either way.
   if (!canSave()) return;
@@ -176,12 +183,14 @@ function cacheClear({ keepMemory = false } = {}) {
   try { for (const k of Object.keys(localStorage)) if (k.startsWith('ow.c1:')) localStorage.removeItem(k); } catch { /* nothing to clear */ }
 }
 
-async function fetchText(path, headers) {
+async function fetchText(path, headers, meta) {
   // A signed-in read never takes a preloaded (anonymous) response: Chrome
   // matches a preload on the address and credentials mode, not the headers,
   // and the token is a header. We use no cookies, so omitting them is free.
   const res = await fetch(path, headers.authorization ? { headers, credentials: 'omit' } : { headers });
   const text = await res.text();
+  // When the Worker's edge copy was made (worker/src/edge.ts), else now.
+  if (meta) meta.made = Number(res.headers.get('x-edge-at')) || Math.floor(Date.now() / 1000);
   if (!res.ok) {
     let msg = 'Something went wrong loading this.';
     try { msg = JSON.parse(text).error ?? msg; } catch { /* body was not json */ }
@@ -198,30 +207,56 @@ async function fetchText(path, headers) {
 const inflight = new Map();
 function fetchOnce(key, path, headers) {
   if (inflight.has(key)) return inflight.get(key);
-  const p = fetchText(path, headers).finally(() => inflight.delete(key));
+  const meta = {};
+  const p = fetchText(settledPath(path), headers, meta)
+    .then((text) => ({ text, made: meta.made }))
+    .finally(() => inflight.delete(key));
   inflight.set(key, p);
   return p;
 }
 
+/*
+ * Full time. A call is graded within minutes of the whistle now
+ * (worker/src/fulltime.ts), but the reads are edge copies up to two minutes
+ * fresh and this page keeps its own for thirty seconds. /api/live says when a
+ * call was last graded (`settled`). From then on, every read carries that
+ * moment in its address, which the edge has no copy of, so the first reader
+ * in each data centre gets the graded record and the rest share it; and a
+ * copy this page holds that was made before then is read again behind the
+ * page (getJSON), which redraws if anything changed.
+ */
+function settledPath(path) {
+  if (!gradedAt) return path;
+  return `${path}${path.includes('?') ? '&' : '?'}s=${gradedAt}`;
+}
+/** When a call was last graded, from /api/live (liveTick). */
+let gradedAt = 0;
+const madeBefore = (hit, t) => Boolean(t && hit && (hit.made ?? Math.floor(hit.at / 1000)) < t);
+
 async function getJSON(path, { fresh = false, quiet = false } = {}) {
-  const headers = await authHeaders();
+  // On a free site a public read is the same for everyone, so it goes without
+  // the token: it is then the edge's copy, the head's preload and the stored
+  // copy, all shared, and it never waits on a session refresh first.
+  const headers = FREE && CACHEABLE.test(path) ? {} : await authHeaders();
   if (!CACHEABLE.test(path)) return withLive(JSON.parse(await fetchText(path, headers)));
 
   const key = cacheKey(headers.authorization ? 'auth' : 'anon', path);
   const hit = fresh ? null : cacheRead(key);
   const age = hit ? Date.now() - hit.at : Infinity;
-  if (hit && age < FRESH_MS) return withLive(JSON.parse(hit.text));
+  // A copy from before the last call was graded is read again, however young.
+  const graded = madeBefore(hit, gradedAt);
+  if (hit && age < FRESH_MS && !graded) return withLive(JSON.parse(hit.text));
   if (hit && age < KEEP_MS) {
     // Serve the old copy now; fetch the new one behind it. A prefetch for
     // another page never redraws this one.
-    fetchOnce(key, path, headers).then((text) => {
-      cacheWrite(key, text);
+    fetchOnce(key, path, headers).then(({ text, made }) => {
+      cacheWrite(key, text, made);
       if (text !== hit.text && !quiet) softRefresh();
     }).catch(() => { /* the old copy stays up */ });
     return withLive(JSON.parse(hit.text));
   }
-  const text = await fetchOnce(key, path, headers);
-  cacheWrite(key, text);
+  const { text, made } = await fetchOnce(key, path, headers);
+  cacheWrite(key, text, made);
   return withLive(JSON.parse(text));
 }
 
@@ -268,6 +303,29 @@ function warm(hash) {
   }
 }
 const linkHash = (a) => a.dataset?.hash ?? a.getAttribute('href');
+
+/*
+ * A card that is about one match opens that match wherever it is tapped
+ * (owner, 17 November 2026): a result, the surest call, the trap, a slip leg.
+ * Each still has a real link inside it, which is what a keyboard or a screen
+ * reader uses; this only makes the rest of the card answer a tap too. Taps on
+ * the card's own controls (a link, a button, the "how it went" toggle) do
+ * their own job, and a tap that ends a text selection is left alone.
+ */
+document.addEventListener('click', (e) => {
+  if (e.defaultPrevented || e.button !== 0) return;
+  const card = e.target.closest?.('[data-href]');
+  if (!card || e.target.closest('a[href], button, summary, input, select, textarea, label')) return;
+  if (String(window.getSelection?.() ?? '').length) return;
+  const to = card.dataset.href;
+  if (!/^#\//.test(to)) return;
+  if (e.metaKey || e.ctrlKey || e.shiftKey) { window.open(`${location.pathname}${to}`, '_blank', 'noopener'); return; }
+  location.hash = to;
+});
+document.addEventListener('pointerdown', (e) => {
+  const card = e.target.closest?.('[data-href]');
+  if (card) warm(card.dataset.href);
+}, { passive: true, capture: true });
 document.addEventListener('pointerdown', (e) => {
   const a = e.target.closest?.('a[href^="#/"], a[data-hash]');
   if (a) warm(linkHash(a));
@@ -523,6 +581,13 @@ async function liveTick({ force = false } = {}) {
           toast(e);
         }
         for (const [id, sig] of before) if (signature(id, live) !== sig) redraw = true;
+        // A call graded since this page last heard: if one of its matches is
+        // on the page, read the page again (getJSON sees its copies are older).
+        const st = body.settled;
+        if (st && Number.isInteger(st.at) && st.at > gradedAt) {
+          gradedAt = st.at;
+          if (Array.isArray(st.ids) && st.ids.some((id) => live.seen.has(id))) redraw = true;
+        }
         // Views that keep a read between routes get the new state too.
         for (const o of [state.board, state.hero, state.heroDetail]) if (o) withLive(o);
         paintNavLive(state.board);
@@ -746,6 +811,14 @@ const READ_LABEL = {
 
 // ------------------------------------------------------------------ state
 
+/*
+ * The site is free (owner, 17 November 2026): every call, the slip and the
+ * reasoning are open to every reader, and nothing is sold. The Worker opens
+ * the reads (worker/src/d1read.ts FREE); this side stops drawing the wall and
+ * the plans. Accounts that already hold a membership keep their account page.
+ */
+const FREE = true;
+
 const state = {
   board: null, hours: 72, leagueName: '', heroVenue: [], hero: null,
   user: null, account: null, authError: null, tick: null, poll: null, onVisible: null,
@@ -779,6 +852,32 @@ const state = {
    */
   member: null,
 };
+
+/*
+ * The headline match, written into the front page by the Worker (seo.ts,
+ * homePage) so the first screen can lead with it before any fetch is back.
+ * Read once; the page asks /api/hero again behind it, as it always did.
+ */
+const BOOT = (() => {
+  try { return JSON.parse(document.getElementById('ow-boot')?.textContent || 'null'); } catch { return null; }
+})();
+const bootHero = () => (BOOT?.hero?.fixture_id ? BOOT.hero : null);
+
+/*
+ * The biggest game still to come, or being played, from the board itself:
+ * the headline when the stored one is missing (the hero read failed, or the
+ * slate never chose one). The front page always leads with a match.
+ */
+function biggestOnBoard(fixtures = []) {
+  const on = fixtures.filter((f) => ['live', 'upcoming'].includes(matchState(f).kind));
+  const soon = on.filter((f) => Number(f.kickoff) < Date.now() / 1000 + 36 * 3600);
+  const f = (soon.length ? soon : on).slice()
+    .sort((a, b) => (a.rank ?? 9) - (b.rank ?? 9) || (a.kickoff ?? 0) - (b.kickoff ?? 0))[0];
+  return f ? {
+    fixture_id: f.id, kickoff: f.kickoff, league: f.league, league_id: f.league_id,
+    home: f.home, away: f.away, home_id: f.home_id, away_id: f.away_id, venue_id: f.venue_id,
+  } : null;
+}
 
 /**
  * The hash, split into a path and a query.
@@ -1159,7 +1258,7 @@ function freeCallHTML(hero, detail, free = null) {
   }
   if (!v || !tie) {
     return hero
-      ? `<p class="hero-blurb">${esc(hero.league ?? '')}${hero.league ? '. ' : ''}Today's free call goes
+      ? `<p class="hero-blurb">${esc(hero.league ?? '')}${hero.league ? '. ' : ''}Our surest call of the day goes
       up once the calls are in.</p>`
       : '';
   }
@@ -1179,11 +1278,11 @@ function freeCallHTML(hero, detail, free = null) {
     const landed = score
       ? (GRADE[free.called?.result] ?? didItLand({ market: v.market, outcome: v.outcome, line: v.line, homeGoals: score[0], awayGoals: score[1] }))
       : null;
-    const WORD = { won: 'Landed', lost: 'Missed', part: 'Half back', back: 'Stake back' };
+    const WORD = { won: 'Won', lost: 'Lost', part: 'Half back', back: 'Stake back' };
     const shown = score ?? (Array.isArray(free.live_score) ? free.live_score : null);
     return `
-  <div class="freecall">
-    <span class="freecall-tag">Today's free call</span>
+  <div class="freecall" data-href="#/fixture/${encodeURIComponent(tie.id)}">
+    <span class="freecall-tag">Our surest call today</span>
     <a class="freecall-tie" href="#/fixture/${encodeURIComponent(tie.id)}">${crest(tie.home, 'xs', tie.home_id)}${esc(tie.home)}
       ${shown ? `<b>${esc(shown[0])}–${esc(shown[1])}</b>` : 'v'} ${crest(tie.away, 'xs', tie.away_id)}${esc(tie.away)}
       ${st.kind === 'live' ? liveBadge(st) : ''}</a>
@@ -1193,24 +1292,22 @@ function freeCallHTML(hero, detail, free = null) {
       : trackHTML(liveTrack(v, free))} <b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}
       ${shareButtonHTML({
         text: landed && shown
-          ? `Today's free call ${landed === 'won' ? 'landed' : 'is in'}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}. ${tie.home} ${shown[0]}–${shown[1]} ${tie.away}.`
-          : `Today's free call on ${tie.home} v ${tie.away}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}.`,
+          ? `Our surest call today ${landed === 'won' ? 'won' : 'is in'}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}. ${tie.home} ${shown[0]}–${shown[1]} ${tie.away}.`
+          : `Our surest call today, ${tie.home} v ${tie.away}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}.`,
         url: matchUrl(tie.id, tie.home, tie.away), title: `${tie.home} v ${tie.away}` })}</p>
-    <p class="hero-blurb">${landed
-      ? `Free for everyone, as one call is every day.${isMember() ? '' : ' Members had every other call on the board.'}`
-      : `Free for everyone, and under way.${isMember() ? '' : ' Members get every other call the moment it goes up.'}`}</p>
+    <p class="hero-blurb">${landed ? 'Settled. Every call is on the results page, won or lost.' : 'Under way.'}</p>
   </div>`;
   }
 
   return `
-  <div class="freecall">
-    <span class="freecall-tag">Today's free call</span>
+  <div class="freecall" data-href="#/fixture/${encodeURIComponent(tie.id)}">
+    <span class="freecall-tag">Our surest call today</span>
     ${elsewhere ? `<a class="freecall-tie" href="#/fixture/${encodeURIComponent(tie.id)}">${crest(tie.home, 'xs', tie.home_id)}${esc(tie.home)} v ${crest(tie.away, 'xs', tie.away_id)}${esc(tie.away)}<span>${esc(kickoffLabel(tie.kickoff))}</span></a>` : ''}
     <p class="freecall-sel">${elsewhere ? `<a href="#/fixture/${encodeURIComponent(tie.id)}">${betHTML(d)}</a>` : betHTML(d)}</p>
     <p class="freecall-meta" data-public-price><b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}
-      ${shareButtonHTML({ text: `Today's free call on ${tie.home} v ${tie.away}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}.`,
+      ${shareButtonHTML({ text: `Our surest call today, ${tie.home} v ${tie.away}: ${betText(d)}, at odds of ${Number(v.odds).toFixed(2)}.`,
         url: matchUrl(tie.id, tie.home, tie.away), title: `${tie.home} v ${tie.away}` })}</p>
-    <p class="hero-blurb">The call we are surest of today, free for everyone.${isMember() ? '' : ' Members get every other call the moment it goes up.'}</p>
+    <p class="hero-blurb">The call we are surest of today.${isMember() ? '' : ' Members get every other call the moment it goes up.'}</p>
   </div>`;
 }
 
@@ -1328,14 +1425,17 @@ function heroCallHTML(hero, row) {
   const v = row.top_pick ?? null;
   if (v) {
     const d = market({ market: v.market, outcome: v.outcome, line: v.line, home: hero.home, away: hero.away, odds: v.odds });
+    // Graded at full time (worker/src/fulltime.ts): how it went, in its colour.
+    const res = st.kind === 'ft' ? (row.called?.result ?? v.result ?? null) : null;
+    const out = RESULT_WORD[res] ? `<b class="freecall-out is-${RESULT_TONE[res]}">${esc(RESULT_WORD[res])}</b> ` : '';
     return `
-    <div class="freecall hero-call">
-      <span class="freecall-tag${row.free_call ? '' : ' is-ours'}">${row.free_call ? 'Our call, free today' : 'Our call'}</span>
+    <div class="freecall hero-call" data-href="#/fixture/${encodeURIComponent(hero.fixture_id)}">
+      <span class="freecall-tag${row.free_call ? '' : ' is-ours'}">${row.free_call ? 'Our surest call today' : 'Our call'}</span>
       <p class="freecall-sel">${betHTML(d)}</p>
-      <p class="freecall-meta" data-public-price>${st.kind === 'live' ? `${trackHTML(liveTrack(v, row))} ` : ''}<b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
+      <p class="freecall-meta" data-public-price>${out}${st.kind === 'live' ? `${trackHTML(liveTrack(v, row))} ` : ''}<b>${oddsTag(v.odds)}</b>${v.bookmaker ? ` at ${esc(bookName(v.bookmaker))}` : ''}</p>
     </div>`;
   }
-  if (!row.locked) return '';
+  if (!row.locked || FREE) return '';
   if (st.kind !== 'upcoming') {
     return `<p class="hero-closed">${liveBadge(st)} Our call closed at kick-off. It is not sold once a match is on;
       it goes up here with how it went at full time.</p>`;
@@ -1385,7 +1485,13 @@ function heroHTML(hero = null, venueIds = [], detail = null, free = null, row = 
     </section>`;
   }
 
-  const when = kickoffLabel(hero.kickoff);
+  // Under way or over, the chip says so and each side carries its goals: the
+  // board's row for the match has the score (and the live one laid over it).
+  const st = row ? matchState(row) : { kind: 'upcoming' };
+  const sc = st.kind === 'ft' && Array.isArray(row?.score) ? row.score
+    : st.kind === 'live' && Array.isArray(row?.live_score) ? row.live_score : null;
+  const goalsOf = (i) => (sc && Number.isInteger(sc[i]) ? `<b class="fx-goals" data-fx="${esc(hero.fixture_id)}">${sc[i]}</b>` : '');
+  const when = st.kind === 'ft' ? 'Full time' : st.kind === 'live' ? st.label : kickoffLabel(hero.kickoff);
   // The competition sits above the tie as a link to its page, in the same
   // face as everything else: a handwritten league name read as a
   // decoration rather than a fact, and could not be tapped. An occasion
@@ -1406,7 +1512,7 @@ function heroHTML(hero = null, venueIds = [], detail = null, free = null, row = 
     ${theme ? themeArt(theme) : `<div class="hero-media">${venueShot(queue, '', true)}</div>`}
     <div class="wrap hero-inner">
       <div class="hero-copy">
-        <span class="timechip${isSoon(hero.kickoff) ? ' soon' : ''}">${esc(when)}</span>
+        <span class="timechip${st.kind === 'upcoming' && isSoon(hero.kickoff) ? ' soon' : ''}${st.kind === 'live' ? ' is-live' : ''}">${esc(when)}</span>
         ${compHTML}
         <!-- The tie is the page's heading. Without this the home page had no
              h1 at all whenever a hero fixture was set, which is the one case
@@ -1414,10 +1520,10 @@ function heroHTML(hero = null, venueIds = [], detail = null, free = null, row = 
         <!-- The heading is words only; the stacked lines are its picture.
              With the crests' initials inside it, the page's heading read
              "G Germany G Greece" to anything that reads text. -->
-        <h1 class="visually-hidden">The biggest game we have a call on: ${esc(hero.home)} v ${esc(hero.away)}</h1>
+        <h1 class="visually-hidden">Today’s biggest game: ${esc(hero.home)} v ${esc(hero.away)}</h1>
         <div class="fx-stack" aria-hidden="true">
-          <span class="fx-line">${crest(hero.home, 'md', hero.home_id)}<span class="name">${esc(hero.home)}</span></span>
-          <span class="fx-line">${crest(hero.away, 'md', hero.away_id)}<span class="name">${esc(hero.away)}</span></span>
+          <span class="fx-line">${crest(hero.home, 'md', hero.home_id)}<span class="name">${esc(hero.home)}</span>${goalsOf(0)}</span>
+          <span class="fx-line">${crest(hero.away, 'md', hero.away_id)}<span class="name">${esc(hero.away)}</span>${goalsOf(1)}</span>
         </div>
         ${heroCallHTML(hero, row)}
         <div class="hero-cta">
@@ -1482,12 +1588,12 @@ function nextRailHTML(fixtures) {
 /**
  * The reader's own games: every match on the board involving a team they
  * follow or in a competition they follow, live first then soonest. Drawn
- * only for a signed-in reader who follows something, and above everything
- * else below the headline, because it is the reason they made an account.
+ * for anyone who follows something, signed in or not (myFollows), above
+ * everything else below the headline.
  */
 function yourGamesHTML(fixtures) {
-  const follows = state.account?.follows ?? [];
-  if (!state.user || !follows.length) return '';
+  const follows = myFollows();
+  if (!follows.length) return '';
   const teams = new Set(follows.filter((f) => f.kind === 'team').map((f) => Number(f.id)));
   const comps = new Set(follows.filter((f) => f.kind === 'league').map((f) => Number(f.id)));
   const rank = (f) => ({ live: 0, upcoming: 1 })[matchState(f).kind] ?? 2;
@@ -1496,12 +1602,14 @@ function yourGamesHTML(fixtures) {
     .filter((f) => rank(f) < 2)
     .sort((a, b) => rank(a) - rank(b) || (a.kickoff ?? 0) - (b.kickoff ?? 0))
     .slice(0, 8);
-  const name = accountName(state.user, state.account?.profile).split(' ')[0];
+  const name = state.user ? accountName(state.user, state.account?.profile).split(' ')[0] : '';
+  // Signed out, the follows are on this device: each is unfollowed from its
+  // own page, so there is no list to edit and no link to an account page.
   return `
   <div class="wrap section dense">
     <div class="section-head"><div><h2 class="display">Your games</h2>
-      <p>${esc(name)}, the teams and competitions you follow.</p></div>
-      <a class="btn btn-ghost btn-sm" href="#/account?tab=following">Edit</a></div>
+      <p>${name ? `${esc(name)}, the` : 'The'} teams and competitions you follow.</p></div>
+      ${state.user ? '<a class="btn btn-ghost btn-sm" href="#/account?tab=following">Edit</a>' : ''}</div>
     ${mine.length
       ? `<ol class="next-list">${mine.map(nextRowHTML).join('')}</ol>`
       : `<div class="empty-state"><b>Nothing from them in the next few days</b>
@@ -1525,7 +1633,7 @@ function nextRowHTML(f) {
   const lock = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>';
   const mark = f.top_pick ? '<small class="next-pick">Pick</small>'
     : f.locked && st.kind === 'live' ? '<small class="next-pick is-closed" title="Calls close at kick-off">Closed</small>'
-    : f.locked ? `<small class="next-pick" title="A pick for members">${lock}Pick</small>` : '';
+    : f.locked && !FREE ? `<small class="next-pick" title="A pick for members">${lock}Pick</small>` : '';
   return `
   <li><a class="next-row" href="#/fixture/${encodeURIComponent(f.id)}">
     <span class="next-side home"><span class="next-name">${esc(f.home)}</span>${crest(f.home, 'sm', f.home_id)}</span>
@@ -1535,7 +1643,16 @@ function nextRowHTML(f) {
 }
 
 /** Is the reader a member? The account says so once it has loaded; the board's own answer until then. */
-const isMember = () => Boolean(state.member ?? state.board?.member);
+const isMember = () => FREE || Boolean(state.member ?? state.board?.member);
+
+/**
+ * A list of page blocks with advert places between them: after the blocks
+ * counted in `at`, and only where more of the list follows, so an advert is
+ * never the last thing in a section. js/lib/ads.js.
+ */
+function withAds(parts, place, at = [2, 6]) {
+  return parts.map((html, i) => (at.includes(i + 1) && i + 1 < parts.length ? html + adSlotHTML(`${place}-${i + 1}`) : html)).join('');
+}
 
 /**
  * The membership, offered once on the front page, as a ticket: what it adds
@@ -1598,7 +1715,7 @@ function chanceInWords(chance) {
 function slipHTML(data, fixtures = []) {
   const cur = data?.current;
   const rec = data?.record;
-  const record = rec?.n ? `<p class="slip-record">Slips so far: <b>${rec.won} of ${rec.n}</b> landed.</p>` : '';
+  const record = rec?.n ? `<p class="slip-record">Slips so far: <b>${rec.won} of ${rec.n}</b> won.</p>` : '';
   if (!cur) {
     return `
     <section class="panel slip">
@@ -1629,7 +1746,7 @@ function slipHTML(data, fixtures = []) {
    */
   const byId = new Map(fixtures.map((f) => [Number(f.id), f]));
   const GRADE = { WON: 'won', LOST: 'lost', HALF_WON: 'part', HALF_LOST: 'part', PUSH: 'back', VOID: 'back' };
-  const MARK = { won: 'Landed', lost: 'Missed', back: 'Void', part: 'Half' };
+  const MARK = { won: 'Won', lost: 'Lost', back: 'Void', part: 'Half' };
   const legState = (l) => {
     // A call taken down before its match drops out of the slip, as a void leg.
     if (l.withdrawn) return `<span class="mark back" title="The call was taken down before kick-off">Void</span>`;
@@ -1668,13 +1785,13 @@ function slipHTML(data, fixtures = []) {
     ${legs ? `<ol class="slip-list">${legs.map((l) => {
       const d = market({ market: l.market, outcome: l.outcome, line: l.line, home: l.home, away: l.away, odds: l.odds });
       return `
-        <li><a href="#/fixture/${encodeURIComponent(l.fixture_id)}">
+        <li data-href="#/fixture/${encodeURIComponent(l.fixture_id)}"><a href="#/fixture/${encodeURIComponent(l.fixture_id)}">
           <span class="slip-tie">${esc(l.home)} v ${esc(l.away)}</span>
           <span class="slip-sel">${betHTML(d)}</span>
           <span class="slip-meta">${esc(kickoffLabel(l.kickoff))}<span class="slip-state">${legState(l)}<b>${oddsTag(l.odds)}</b></span></span>
         </a></li>`;
     }).join('')}</ol>`
-    : `<div class="slip-locked">
+    : FREE ? '' : `<div class="slip-locked">
         <p>The ${cur.legs_count} matches and the calls on them are for members.</p>
         <a class="btn btn-accent" href="#/pricing">See what membership costs</a>
       </div>`}
@@ -1708,7 +1825,7 @@ function tickerHTML(fixtures, recent) {
     const lost = x.result === 'LOST' || x.result === 'HALF_LOST';
     if (!won && !lost) continue;
     const sc = Number.isInteger(x.home_goals) ? `${x.home_goals}–${x.away_goals}` : 'FT';
-    items.push({ tone: won ? 'won' : 'lost', href: `#/fixture/${x.fixture_id}`, text: `${won ? 'Landed' : 'Missed'}: ${x.home_team} ${sc} ${x.away_team}` });
+    items.push({ tone: won ? 'won' : 'lost', href: `#/fixture/${x.fixture_id}`, text: `${won ? 'Won' : 'Lost'}: ${x.home_team} ${sc} ${x.away_team}` });
   }
   const next = fixtures.filter((f) => hasCall(f) && f.kickoff > now).sort((a, b) => a.kickoff - b.kickoff).slice(0, 8);
   for (const f of next) {
@@ -1806,11 +1923,11 @@ async function viewSlip() {
         <div class="played-row">
           <div class="played-meta">
             <span>${esc(kickoffLabel(r.first_kickoff))}, ${(r.legs ?? []).length} legs at ${oddsOf(r.odds)}</span>
-            <span class="mark ${tone(r.result)}">${esc(({ won: 'Landed', lost: 'Missed', back: 'Void' })[tone(r.result)])}</span>
+            <span class="mark ${tone(r.result)}">${esc(({ won: 'Won', lost: 'Lost', back: 'Void' })[tone(r.result)])}</span>
           </div>
           <ul class="played-calls">${(r.legs ?? []).map((l) => {
             const d = market({ market: l.market, outcome: l.outcome, line: l.line, home: l.home, away: l.away, odds: l.odds });
-            return `<li><span>${esc(l.home)} v ${esc(l.away)}: ${esc(betText(d))}</span><span>${oddsTag(l.odds)}</span></li>`;
+            return `<li data-href="#/fixture/${encodeURIComponent(l.fixture_id)}"><a href="#/fixture/${encodeURIComponent(l.fixture_id)}">${esc(l.home)} v ${esc(l.away)}: ${esc(betText(d))}</a><span>${oddsTag(l.odds)}</span></li>`;
           }).join('')}</ul>
         </div>`).join('')}
       </div>
@@ -1869,17 +1986,17 @@ function leaguesTodayHTML(fixtures) {
  * The column beside the record. It used to render only when a reader could
  * see calls, so for everyone not signed in it was a blank half of the page.
  */
-function sideHTML(fixtures, slip) {
+/**
+ * The calls still to play, with their odds: what a daily reader opens the
+ * site for. In the side column on a wide screen; on a phone the side column
+ * comes last, so the same list is drawn again near the top (dashboard) and
+ * each copy hides where the other shows (home-calls-side / home-calls-top).
+ */
+function openCallsHTML(fixtures, cls) {
   const withCall = fixtures.filter((f) => f.top_pick && matchState(f).kind === 'upcoming').slice(0, 8);
-  // The blocks that move while a match is on sit in named slots, so the
-  // front page's refresh can redraw them in place without touching the rest.
+  if (!withCall.length) return '';
   return `
-  <aside class="home-side">
-    <div data-live="slip">${slipHTML(slip, fixtures)}</div>
-    <div data-live="live">${liveNowHTML(fixtures)}</div>
-    ${leaguesTodayHTML(fixtures)}
-    ${withCall.length ? `
-    <section class="panel side-block">
+    <section class="panel side-block ${cls}">
       <p class="panel-head">Open calls <a href="#/board">All</a></p>
       <div class="side-list">
         ${withCall.map((f) => {
@@ -1887,18 +2004,28 @@ function sideHTML(fixtures, slip) {
             market: f.top_pick.market, outcome: f.top_pick.outcome, line: f.top_pick.line,
             home: f.home, away: f.away, odds: f.top_pick.odds,
           });
-          // The free call is public by design, and says so.
           return `
-          <a class="side-item" href="#/fixture/${encodeURIComponent(f.id)}"${f.free_call ? ' data-public-price' : ''}>
+          <a class="side-item" href="#/fixture/${encodeURIComponent(f.id)}">
             <span class="side-thumb">${crest(f.home, 'sm', f.home_id)}${crest(f.away, 'sm', f.away_id)}</span>
             <span class="side-body">
-              <span class="side-sel">${betHTML(d)}${f.free_call ? ' <span class="freecall-tag">Free</span>' : ''}</span>
+              <span class="side-sel">${betHTML(d)}${f.free_call ? ' <span class="freecall-tag">Surest</span>' : ''}</span>
               <span class="side-meta">${esc(kickoffLabel(f.kickoff))} <b>${oddsTag(f.top_pick.odds)}</b></span>
             </span>
           </a>`;
         }).join('')}
       </div>
-    </section>` : ''}
+    </section>`;
+}
+
+function sideHTML(fixtures, slip) {
+  // The blocks that move while a match is on sit in named slots, so the
+  // front page's refresh can redraw them in place without touching the rest.
+  return `
+  <aside class="home-side">
+    <div data-live="slip">${slipHTML(slip, fixtures)}</div>
+    <div data-live="live">${liveNowHTML(fixtures)}</div>
+    ${leaguesTodayHTML(fixtures)}
+    ${openCallsHTML(fixtures, 'home-calls-side')}
   </aside>`;
 }
 
@@ -1968,8 +2095,8 @@ function playedHTML(picks, { showOdds = false } = {}) {
       const losses = tones.filter((t) => t === 'lost').length;
       const overall = calls.length === 1 ? tones[0] : losses === 0 ? 'won' : wins === 0 ? 'lost' : 'back';
       const mark = calls.length === 1
-        ? ({ won: 'Landed', lost: 'Missed', back: 'Void' })[tones[0]]
-        : `${wins} of ${calls.length} landed`;
+        ? ({ won: 'Won', lost: 'Lost', back: 'Void' })[tones[0]]
+        : `${wins} of ${calls.length} won`;
       const hasScore = Number.isInteger(x.home_goals) && Number.isInteger(x.away_goals);
       return `
       <a class="played-row" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
@@ -1986,7 +2113,7 @@ function playedHTML(picks, { showOdds = false } = {}) {
         ${scorersHTML(x.goals, 'scorers played-scorers')}
         ${calls.length > 1 ? `<ul class="played-calls">${calls.map((c, i) => {
           const d = market({ market: c.market, outcome: c.outcome, line: c.line, home: c.home_team, away: c.away_team, odds: c.odds });
-          return `<li><span>${esc(betText(d))}</span><span class="mark ${tones[i]}">${esc(({ won: 'Landed', lost: 'Missed', back: 'Void' })[tones[i]])}</span></li>`;
+          return `<li><span>${esc(betText(d))}</span><span class="mark ${tones[i]}">${esc(({ won: 'Won', lost: 'Lost', back: 'Void' })[tones[i]])}</span></li>`;
         }).join('')}</ul>` : ''}
       </a>`;
     }).join('')}
@@ -2054,7 +2181,7 @@ function rowHTML(f) {
     ? (GRADE[pick.result] ?? didItLand({ market: pick.market, outcome: pick.outcome, line: pick.line,
                                           homeGoals: score[0], awayGoals: score[1] }))
     : null;
-  const MARK = { won: 'Landed', lost: 'Missed', back: 'Refunded', part: 'Half back' };
+  const MARK = { won: 'Won', lost: 'Lost', back: 'Refunded', part: 'Half back' };
 
   /*
    * A game we passed on is one line, not four.
@@ -2088,8 +2215,8 @@ function rowHTML(f) {
    */
   const kind = played ? null : f.free_call && pick ? 'free' : pick || f.locked ? 'members' : null;
   const kindTag = kind === 'free'
-    ? '<span class="row-kind is-free">Free today</span>'
-    : kind === 'members' && pick
+    ? '<span class="row-kind is-free">Surest today</span>'
+    : kind === 'members' && pick && !FREE
       ? `<span class="row-kind is-members"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>Members</span>`
       : '';
 
@@ -2400,6 +2527,7 @@ function spread(fixtures, limit) {
  * belongs to a member, and the board is the first thing either page needs.
  */
 async function viewHome() {
+  if (FREE) return viewDashboard();
   if (!hasStoredSession()) return viewLanding();
   const board = await loadBoard().catch(() => null);
   return isMember() || board?.member ? viewDashboard() : viewLanding();
@@ -2423,7 +2551,7 @@ function trapHTML(t, { on = 'landing' } = {}) {
     ${on === 'landing' ? `<div class="ld-sec-head"><h2 class="ld-h2">One to leave alone</h2></div>
     <p class="ld-sub">The trap of the day: a favourite everyone’s on that we wouldn’t touch. Free, every day.</p>`
       : '<div class="section-head"><div><h2 class="display">One to leave alone</h2></div></div>'}
-    <article class="trap">
+    <article class="trap" data-href="#/fixture/${encodeURIComponent(t.fixture_id)}">
       <div class="trap-tape" aria-hidden="true"></div>
       <div class="trap-who">
         ${crest(t.team, 'xl', teamId)}
@@ -2476,6 +2604,7 @@ function landingHTML() {
           <a class="ld-alt" href="#/board">See today’s games</a>
         </div>
         <p class="ld-assure">Free, no sign-up, no card. 18+, and no guaranteed winners, because there’s no such thing.</p>
+        ${storedRef() ? `<p class="ld-friend">A mate sent you here. <a href="#/pricing">Your first week of membership is free</a>, whenever you want it.</p>` : ''}
         <p class="ld-proof" data-ld="proof"></p>
       </div>
       <article class="ld-lead" data-ld="call" aria-label="Today’s free call"><div class="ld-lead-wait"></div></article>
@@ -2561,6 +2690,103 @@ function landingDepth() {
   move();
 }
 
+/** The football from a match's write-up, for the landing page's lead: no call, no price. */
+function landingWhy(fx) {
+  return excerpt((fx?.verdicts ?? []).map((v) => v.why ?? v.narrative).find(Boolean))
+    || excerpt((fx?.published ?? []).map((p) => p.why ?? p.narrative).find(Boolean));
+}
+
+/**
+ * Today's free call as a pick, spelled out large: "LASK to win", what kind
+ * of bet it is, and the match when it is not the headline. From the match's
+ * own published call, else the board's row. Empty when there is no pick yet.
+ */
+function freePickHTML(fx, row, named) {
+  const v = (fx?.published ?? []).find((x) => x?.market)
+    ?? (row && Number(row.id) === Number(fx.id) && row.free_call ? row.top_pick : null);
+  if (!v?.market) return '';
+  const d = market({ market: v.market, outcome: v.outcome, line: v.line, home: fx.home, away: fx.away });
+  // The words first ("Two or more goals"), the way a bookmaker lists it
+  // under them ("Total Goals: Over 1.5"), so it can be found on any slip.
+  const sel = d.name || d.bet?.selection;
+  if (!sel) return '';
+  const listed = d.bet?.market && d.bet?.selection && d.bet.selection !== sel ? `${d.bet.market}: ${d.bet.selection}` : d.bet?.market ?? '';
+  const href = `#/fixture/${encodeURIComponent(fx.id)}`;
+  // Graded at full time (worker/src/fulltime.ts): the result goes up with it.
+  const done = v.settled !== false && RESULT_WORD[v.result] ? v.result : null;
+  return `
+      <div class="ld-pick${done ? ` is-${RESULT_TONE[done]}` : ''}">
+        <p class="ld-pick-tag">Today’s free call${named ? `<span>${esc(fx.home)} v ${esc(fx.away)}</span>` : ''}${done ? `<b class="ld-pick-out">${esc(RESULT_WORD[done])}</b>` : ''}</p>
+        <a class="ld-pick-sel" href="${href}">${esc(sel)}</a>
+        ${listed ? `<p class="ld-pick-mkt">${esc(listed)}</p>` : ''}
+        <a class="ld-pick-go" href="${href}">${done ? 'How it went, and why we called it' : 'The odds and the reason, free'}</a>
+      </div>`;
+}
+
+/*
+ * The landing page's lead story: tonight's biggest game, every time there is
+ * a game on. With its write-up when that has come back (and a line of
+ * waiting text until then), the free call named under it when that is a
+ * different match, and the Champions League night behind the header when it
+ * is a Champions League game. Drawn up to three times as the reads land,
+ * each time from scratch, so it never shows half of an older one.
+ */
+function drawLandingLead(hero, leadFx, freeFx, freeRow = null) {
+  const lead = app.querySelector('[data-ld="call"]');
+  const ldHero = app.querySelector('.ld-hero');
+  if (!lead || !ldHero || !hero?.fixture_id) return;
+  ldHero.classList.remove('ld-solo');
+  const m = { ...hero, ...(leadFx ?? {}) };
+  m.id = hero.fixture_id;
+  const isFree = Number(hero.free_fixture_id) === Number(m.id);
+  const why = landingWhy(leadFx);
+  const other = !isFree && freeFx?.id && Number(freeFx.id) !== Number(m.id) && landingWhy(freeFx) ? freeFx : null;
+  // The free call itself, in words and in big type: the hook that keeps a
+  // stranger on the page (owner, November 2026). No price beside it: the
+  // front page is where ads land, and it carries no odds (offside-ui, "Two
+  // registers"). The odds and the book are one tap away on the match page.
+  const pickFx = isFree ? { ...m, ...(freeFx ?? {}) } : other ?? (freeFx?.id && Number(freeFx.id) !== Number(m.id) ? freeFx : null);
+  const pick = pickFx ? freePickHTML(pickFx, freeRow, !isFree) : '';
+  const soon = Number(m.kickoff) > Date.now() / 1000;
+  // Under way or over: the score beside each side, and the state in place of
+  // the kick-off time, so the header says what happened the moment it has.
+  const st = matchState(m);
+  const sc = st.kind === 'ft' && Array.isArray(m.score) ? m.score
+    : st.kind === 'live' && Array.isArray(m.live_score) ? m.live_score : null;
+  const goalsOf = (i) => (sc && Number.isInteger(sc[i]) ? `<b class="ld-lead-goals" data-fx="${esc(m.id)}">${sc[i]}</b>` : '');
+  const when = st.kind === 'ft' ? 'Full time'
+    : st.kind === 'live' ? (st.label === 'Half time' ? 'Half time' : 'Live')
+    : kickoffLabel(m.kickoff);
+  const occasion = unshout(hero.kicker);
+  const tag = isFree ? 'Today’s free call'
+    : occasion && occasion.toLowerCase() !== String(m.league ?? '').toLowerCase() ? occasion
+    : soon ? 'The biggest game today' : 'The biggest game on';
+  const href = `#/fixture/${encodeURIComponent(m.id)}`;
+  lead.innerHTML = `
+      <p class="ld-lead-tag">${esc(tag)}</p>
+      <p class="ld-lead-comp">${m.league ? `${crest(m.league, 'xs', m.league_id, 'league')}<span>${esc(m.league)}</span>` : ''}<span${st.kind === 'live' ? ' class="ld-lead-live"' : ''}>${esc(when)}</span></p>
+      <h2 class="ld-lead-teams${sc ? ' has-score' : ''}"><a href="${href}">
+        <span>${crest(m.home, 'md', m.home_id)}<i>${esc(m.home)}</i>${goalsOf(0)}</span>
+        <span>${crest(m.away, 'md', m.away_id)}<i>${esc(m.away)}</i>${goalsOf(1)}</span></a></h2>
+      ${isFree ? pick : ''}
+      ${soon ? `<p class="ld-lead-count">Kick-off in <b data-countdown="${Number(m.kickoff)}" data-done="now">—</b></p>` : ''}
+      ${why ? `<p class="ld-lead-why">${esc(why)}</p>`
+        : leadFx ? '<p class="ld-lead-why">Team news, form, the table and the last few meetings, all on the match page, free.</p>'
+        : '<div class="ld-lead-why ld-lead-why-wait" aria-hidden="true"><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-line"></span></div>'}
+      <a class="ld-lead-go" href="${href}">${isFree ? 'Read the whole call, free' : 'Read the match, free'}</a>
+      ${!isFree && pick ? pick
+        : other ? `<a class="ld-lead-free" href="#/fixture/${encodeURIComponent(other.id)}"><span>Today’s free call</span><b>${esc(other.home)} v ${esc(other.away)}</b></a>` : ''}`;
+  smartQuotes(lead);
+  const theme = themeOf(m.league_id);
+  for (const c of [...ldHero.classList]) if (c.startsWith('theme-') && c !== `theme-${theme}`) ldHero.classList.remove(c);
+  const shot = app.querySelector('[data-ld="shot"]');
+  if (theme && !ldHero.classList.contains(`theme-${theme}`)) {
+    ldHero.classList.add(`theme-${theme}`);
+    if (shot) shot.innerHTML = themeArt(theme);
+  } else if (!theme && shot?.querySelector('.comp-art')) shot.innerHTML = '';
+  tickCountdowns();
+}
+
 async function viewLanding() {
   const nav = navTicket;
   document.body.dataset.page = 'landing';
@@ -2578,12 +2804,43 @@ async function viewLanding() {
       { duration: 420, delay: 40 + i * 50, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'backwards' }));
   }
 
-  const [board, hero, picks, plans] = await Promise.all([
-    loadBoard().catch(() => null),
-    getJSON('/api/hero').catch(() => null),
-    getJSON('/api/picks?limit=60&settled=true').then((r) => r.picks ?? []).catch(() => []),
-    getJSON('/api/plans').catch(() => []),
-  ]);
+  /*
+   * The lead story is tonight's biggest game, and it draws the moment its
+   * match is known: from the page itself (the Worker writes the headline
+   * in), then from /api/hero and the match's own write-up, without waiting
+   * for the board, the record or the prices. It used to wait for all of
+   * those and then make a second trip for the write-up, so a cold phone
+   * visit sat on bare words for four or five seconds; and with no free call
+   * yet, or one whose write-up had nothing quotable, it was taken off and
+   * the header had no match in it at all (owner, November 2026).
+   */
+  const details = new Map();
+  const detailOf = (id) => {
+    if (!id) return Promise.resolve(null);
+    if (!details.has(Number(id))) {
+      details.set(Number(id), getJSON(`/api/fixture/${id}`).then((d) => d?.fixture ?? d).catch(() => null));
+    }
+    return details.get(Number(id));
+  };
+  const boot = again ? null : bootHero();
+  if (boot) { detailOf(boot.fixture_id); detailOf(boot.free_fixture_id); }
+  if (boot && !again) drawLandingLead(boot, null, null);
+  const heroReq = getJSON('/api/hero').catch(() => null);
+  const boardReq = loadBoard().catch(() => null);
+  const picksReq = getJSON('/api/picks?limit=60&settled=true').then((r) => r.picks ?? []).catch(() => []);
+  const plansReq = getJSON('/api/plans').catch(() => []);
+
+  const fresh = await heroReq;
+  if (nav !== navTicket) return;
+  let hero = fresh?.fixture_id ? fresh : (boot ? { ...boot, ...(fresh ?? {}), fixture_id: boot.fixture_id } : fresh);
+  let freeId = hero?.free_fixture_id ?? null;
+  // Started now, side by side: the headline's write-up and the free call's.
+  let [leadFx, freeFx] = await Promise.all([detailOf(hero?.fixture_id), detailOf(freeId)]);
+  if (nav !== navTicket) return;
+  // A headline with no write-up behind it yet still leads with its match.
+  if (hero?.fixture_id) drawLandingLead(hero, leadFx, freeFx);
+
+  const [board, picks, plans] = await Promise.all([boardReq, picksReq, plansReq]);
   /*
    * The record is the calls we published, and nothing else: the pick table,
    * the same rows the results page and the match pages read, so a reader who
@@ -2598,69 +2855,64 @@ async function viewLanding() {
   const put = (key, html) => { const el = app.querySelector(`[data-ld="${key}"]`); if (el) { el.innerHTML = html; smartQuotes(el); } return el; };
   if (ahead.length) put('count', `${ahead.length} games still to play`);
 
-  // Today's free call: the match and the reasoning, linked. No pick, no price.
-  const freeId = hero?.free_fixture_id ?? fixtures.find((f) => f.free_call)?.id ?? null;
-  const freeRow = freeId ? fixtures.find((f) => Number(f.id) === Number(freeId)) : null;
-  const detail = freeId ? await getJSON(`/api/fixture/${freeId}`).catch(() => null) : null;
+  // No headline and no free call from the hero read: the board decides.
+  if (!freeId) {
+    freeId = fixtures.find((f) => f.free_call)?.id ?? null;
+    if (freeId) freeFx = await detailOf(freeId);
+  }
+  if (!hero?.fixture_id) {
+    const big = biggestOnBoard(fixtures);
+    hero = big ? { ...(hero ?? {}), ...big } : hero;
+    if (hero?.fixture_id) leadFx = await detailOf(hero.fixture_id);
+  }
   if (nav !== navTicket) return;
-  const fx = detail?.fixture ?? detail ?? freeRow;
-  const why = excerpt((fx?.verdicts ?? []).map((v) => v.why ?? v.narrative).find(Boolean))
-    || excerpt((fx?.published ?? []).map((p) => p.why ?? p.narrative).find(Boolean));
+  if (hero?.fixture_id) drawLandingLead(hero, leadFx, freeFx, freeId ? fixtures.find((f) => Number(f.id) === Number(freeId)) : null);
+
+  // Today's free call, for the buttons and the examples below: the match and
+  // the reasoning, linked. No pick, no price.
+  const fx = freeFx ?? (freeId ? fixtures.find((f) => Number(f.id) === Number(freeId)) : null);
+  const why = fx ? landingWhy(fx) : '';
   if (fx && why) {
     for (const a of app.querySelectorAll('[data-ld="free"], [data-ld="end-go"]')) a.setAttribute('href', `#/fixture/${encodeURIComponent(fx.id)}`);
     const endTitle = app.querySelector('[data-ld="end-title"]');
     if (endTitle) endTitle.textContent = `Today’s free call is ${fx.home} v ${fx.away}.`;
-    const soon = fx.kickoff > Date.now() / 1000;
-    put('call', `
-      <p class="ld-lead-tag">Today’s free call</p>
-      <p class="ld-lead-comp">${fx.league ? `${crest(fx.league, 'xs', fx.league_id, 'league')}<span>${esc(fx.league)}</span>` : ''}<span>${esc(kickoffLabel(fx.kickoff))}</span></p>
-      <h2 class="ld-lead-teams"><a href="#/fixture/${encodeURIComponent(fx.id)}">
-        <span>${crest(fx.home, 'md', fx.home_id)}${esc(fx.home)}</span>
-        <span>${crest(fx.away, 'md', fx.away_id)}${esc(fx.away)}</span></a></h2>
-      ${soon ? `<p class="ld-lead-count">Kick-off in <b data-countdown="${Number(fx.kickoff)}" data-done="now">—</b></p>` : ''}
-      <p class="ld-lead-why">${esc(why)}</p>
-      <a class="ld-lead-go" href="#/fixture/${encodeURIComponent(fx.id)}">Read the whole call, free</a>`);
   }
   {
     /*
      * The ground behind the header, kept low so the words stay easy to read
      * (owner, October 2026). The engine names a ground it has a photograph
-     * for (shot_venue_id); then the free call's own, then the board's. The
+     * for (shot_venue_id); then the headline's own, then the board's. The
      * browser works down the list until one is a real photograph (venueShot).
+     * A Champions League headline has the competition's night instead
+     * (drawLandingLead).
      */
     const shot = app.querySelector('[data-ld="shot"]');
-    // A Champions League free call brings the competition's night and its
-    // ball in place of the ground.
-    const theme = fx && why ? themeOf(fx.league_id) : null;
     const ldHero = app.querySelector('.ld-hero');
-    if (theme && ldHero && !ldHero.classList.contains(`theme-${theme}`)) {
-      ldHero.classList.add(`theme-${theme}`);
-      if (shot) shot.innerHTML = themeArt(theme);
-    }
-    const venues = [...new Set([hero?.shot_venue_id, fx?.venue_id, ...fixtures.filter(hasCall).map((f) => f.venue_id), ...fixtures.map((f) => f.venue_id)].filter(Boolean))];
-    if (!theme && shot && !shot.querySelector('img') && venues.length) {
+    const themed = ldHero && [...ldHero.classList].some((c) => c.startsWith('theme-'));
+    const venues = [...new Set([hero?.shot_venue_id, hero?.venue_id, leadFx?.venue_id, fx?.venue_id, ...fixtures.filter(hasCall).map((f) => f.venue_id), ...fixtures.map((f) => f.venue_id)].filter(Boolean))];
+    if (!themed && shot && !shot.querySelector('img') && venues.length) {
       shot.innerHTML = venueShot(venues.slice(0, 6), 'ld-shot-img', true);
       const img = shot.querySelector('img');
       img?.addEventListener('load', () => img.classList.add('is-in'), { once: true });
     }
     landingDepth();
   }
-  if (!(fx && why)) {
+  if (!hero?.fixture_id && !(fx && why)) {
     app.querySelector('.ld-lead')?.remove();
     app.querySelector('.ld-hero')?.classList.add('ld-solo');
-    /*
-     * No free call yet today: the board can be empty of calls for hours
-     * before team news lands. Say what is there instead, and when the call
-     * usually arrives, rather than a button that leads to nothing.
-     */
-    if (!freeId) {
-      for (const a of app.querySelectorAll('[data-ld="free"], [data-ld="end-go"]')) {
-        a.textContent = 'See today’s games, free';
-        a.setAttribute('href', '#/board');
-      }
-      const assure = app.querySelector('.ld-assure');
-      if (assure) assure.textContent = 'No free call yet today. It goes up as team news lands, usually a few hours before kick-off. Every preview is free in the meantime, no sign-up.';
+  }
+  /*
+   * No free call yet today: the board can be empty of calls for hours
+   * before team news lands. Say what is there instead, and when the call
+   * usually arrives, rather than a button that leads to nothing.
+   */
+  if (!freeId) {
+    for (const a of app.querySelectorAll('[data-ld="free"], [data-ld="end-go"]')) {
+      a.textContent = 'See today’s games, free';
+      a.setAttribute('href', hero?.fixture_id ? `#/fixture/${encodeURIComponent(hero.fixture_id)}` : '#/board');
     }
+    const assure = app.querySelector('.ld-assure');
+    if (assure) assure.textContent = 'No calls yet today. They go up as team news lands, usually a few hours before kick-off. Every preview is up in the meantime.';
   }
 
   // The record: settled calls, newest first, voids aside.
@@ -2669,7 +2921,7 @@ async function viewLanding() {
   const graded = picks.filter((x) => isW(x) || isL(x));
   const last = graded.slice(0, 40);
   const fw = last.filter(isW).length;
-  if (last.length) put('proof', `<b>${fw} of our last ${last.length}</b> calls landed. Every one is on <a href="#/results">the results page</a>.`);
+  if (last.length) put('proof', `<b>${fw} of our last ${last.length}</b> calls won. Every one is on <a href="#/results">the results page</a>.`);
   else app.querySelector('[data-ld="proof"]')?.remove();
 
   // What's on every match page, shown on today's free call, as text.
@@ -2698,13 +2950,13 @@ async function viewLanding() {
   if (shown.length) {
     put('record', `
       <div class="ld-sec-head"><h2 class="ld-h2">The call, then the score</h2><a class="ld-more" href="#/results">Every result</a></div>
-      <p class="ld-sub">Our last ${last.length} calls: ${fw} landed. Every one stays on the record.</p>
+      <p class="ld-sub">Our last ${last.length} calls: ${fw} won. Every one stays on the record.</p>
       <ol class="ld-results">${shown.map((x) => `
         <li>
           <span class="ld-r-when">${esc(new Date(Number(x.kickoff) * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}</span>
           <a class="ld-r-match" href="#/fixture/${encodeURIComponent(x.fixture_id)}"><b>${esc(x.home_team)} ${Number(x.home_goals)}–${Number(x.away_goals)} ${esc(x.away_team)}</b>
             <span>${esc(betText(market({ market: x.market, outcome: x.outcome, line: x.line, home: x.home_team, away: x.away_team })))}</span></a>
-          <span class="ld-r-out ${isW(x) ? 'is-w' : 'is-l'}">${isW(x) ? 'Landed' : 'Missed'}</span>
+          <span class="ld-r-out ${isW(x) ? 'is-w' : 'is-l'}">${isW(x) ? 'Won' : 'Lost'}</span>
         </li>`).join('')}</ol>`);
   } else app.querySelector('[data-ld="record"]')?.remove();
 
@@ -2741,6 +2993,9 @@ async function viewLanding() {
 async function viewDashboard() {
   // Which navigation this page belongs to: a newer one makes it stand down (see route).
   const nav = navTicket;
+  // The headline the Worker wrote into the page, when this is the first draw:
+  // the masthead shows the match at once instead of a generic one.
+  if (!state.hero?.fixture_id && bootHero()) state.hero = bootHero();
   placeholder(heroHTML(state.hero, state.heroVenue) + skeletonHTML('rows'));
   // Everything the page needs, asked for at once. They used to go in three
   // rounds -- board and masthead, then the masthead's bundle, then the record
@@ -2754,10 +3009,12 @@ async function viewDashboard() {
   // no longer waits for it: a third round trip before anything drew was most
   // of a cold front page's wait on a phone. It is slotted in when it lands.
   const heroReq = getJSON('/api/hero').catch(() => null);
+  let fresh = null;
   const detailReq = heroReq.then((h) => (h?.fixture_id
     ? getJSON(`/api/fixture/${h.fixture_id}`).catch(() => null) : null));
   try {
-    [board, state.hero] = await Promise.all([loadBoard(), heroReq]);
+    [board, fresh] = await Promise.all([loadBoard(), heroReq]);
+    state.hero = fresh?.fixture_id ? fresh : (bootHero() ?? fresh);
     // Already here (a cached read, usually): draw with it. Otherwise without.
     state.heroDetail = await Promise.race([detailReq, new Promise((r) => setTimeout(() => r(null), 60))]);
   } catch (err) {
@@ -2794,23 +3051,27 @@ async function viewDashboard() {
   };
   // The free call's row, flagged by the board itself.
   const freeFx = fixtures.find((f) => f.free_call && f.top_pick) ?? null;
-  let heroRow = state.hero?.fixture_id ? fixtures.find((f) => Number(f.id) === Number(state.hero.fixture_id)) ?? null : null;
-  // A headline whose call was withdrawn since the slate chose it (calls are
-  // looked at again every fifteen minutes) stands down for the plain
-  // masthead rather than lead with a match we no longer have a call on.
-  if (heroRow && !hasCall(heroRow) && !heroRow.called && matchState(heroRow).kind === 'upcoming') {
-    state.hero = null;
-    state.heroDetail = null;
-    heroRow = null;
+  // No headline from the slate (or the read failed): the board's biggest game.
+  if (!state.hero?.fixture_id) {
+    const big = biggestOnBoard(fixtures);
+    if (big) state.hero = { ...(state.hero ?? {}), ...big };
   }
+  const heroRow = state.hero?.fixture_id ? fixtures.find((f) => Number(f.id) === Number(state.hero.fixture_id)) ?? null : null;
+  // A headline whose call was withdrawn since the slate chose it keeps the
+  // masthead: it is still the biggest game of the night, and the masthead
+  // simply carries no call (heroCallHTML). It used to stand down for a plain
+  // masthead with no match on it at all, which is what readers saw on the
+  // nights a call came down (owner, November 2026).
   if (nav !== navTicket) return;
   app.innerHTML =
     `<div data-live="ticker">${tickerHTML(fixtures, recent)}</div>` +
     heroHTML(state.hero, state.heroVenue, state.heroDetail, freeFx, heroRow) +
     freeBandHTML(freeFx, state.hero) +
     `<div data-live="today">${todayStripHTML(fixtures, recent)}</div>` +
+    ((c) => (c ? `<div class="wrap section dense home-calls-top">${c}</div>` : ''))(openCallsHTML(fixtures, '')) +
     `<div data-live="mine">${yourGamesHTML(fixtures)}</div>` +
     `<div data-live="rail">${nextRailHTML(rail())}</div>` +
+    `<div class="wrap">${adSlotHTML('home-1')}</div>` +
     ((t) => (t ? `<div class="wrap section dense">${t}</div>` : ''))(trapHTML(state.hero?.trap, { on: 'home' })) +
     `<div class="wrap section dense">
        <div class="with-side">
@@ -2836,7 +3097,11 @@ async function viewDashboard() {
 
   if (!state.heroDetail && state.hero?.fixture_id) {
     const heroId = state.hero.fixture_id;
-    detailReq.then((d) => {
+    // The headline may be the board's own pick (no stored one), whose bundle
+    // was not asked for with the hero's.
+    const req = Number(heroId) === Number(fresh?.fixture_id) ? detailReq
+      : getJSON(`/api/fixture/${heroId}`).catch(() => null);
+    req.then((d) => {
       const inner = app.querySelector('.hero .hero-inner');
       // The space was kept for it (the mc-wait box, its usual height): put in
       // after the first paint, it pushed everything under the masthead down
@@ -2959,16 +3224,16 @@ function todayStripHTML(fixtures, recent) {
   const link = (href, html) => `<a href="${href}">${html}</a>`;
   const sentences = [];
   const since = [];
-  if (t.landed) since.push(link('#/board?when=played', `${fig(t.landed, 'won')} landed`));
-  if (t.missed) since.push(link('#/board?when=played', `${fig(t.missed, 'lost')} missed`));
+  if (t.landed) since.push(link('#/board?when=played', `${fig(t.landed, 'won')} won`));
+  if (t.missed) since.push(link('#/board?when=played', `${fig(t.missed, 'lost')} lost`));
   if (t.live) since.push(link('#/board?when=live', `${fig(t.live, 'now')} ${t.live === 1 ? 'is' : 'are'} being played${t.onTrack ? `, ${t.onTrack} on track` : ''}`));
   if (t.calls) {
     sentences.push(`${link('#/board', `${fig(t.calls)} ${t.calls === 1 ? 'call' : 'calls'} today`)}${since.length ? `: ${andList(since)}.` : '.'}`);
   } else if (since.length) {
     sentences.push(`Today, ${andList(since)}.`);
   }
-  if (t.run >= 2) sentences.push(link('#/results', `The last ${fig(t.run, 'run')} in a row landed.`));
-  else if (t.recentN) sentences.push(link('#/results', `${fig(t.recentWon, 'won')} of the last ${t.recentN} landed.`));
+  if (t.run >= 2) sentences.push(link('#/results', `The last ${fig(t.run, 'run')} in a row won.`));
+  else if (t.recentN) sentences.push(link('#/results', `${fig(t.recentWon, 'won')} of the last ${t.recentN} won.`));
   return `<div class="wrap"><p class="figure-line" aria-label="Today so far">${sentences.join(' ')}</p></div>`;
 }
 
@@ -2978,8 +3243,8 @@ function paintTally(fixtures, recent) {
   if (!el) return;
   const t = todayTally(fixtures, recent);
   const parts = [];
-  if (t.landed) parts.push(`<b class="won">${t.landed}</b> landed`);
-  if (t.missed) parts.push(`<b>${t.missed}</b> missed`);
+  if (t.landed) parts.push(`<b class="won">${t.landed}</b> won`);
+  if (t.missed) parts.push(`<b>${t.missed}</b> lost`);
   if (!parts.length && t.live) parts.push(`<b class="live">${t.live}</b> on now`);
   el.hidden = !parts.length;
   el.innerHTML = parts.length ? `${parts.join(', ')} today` : '';
@@ -3255,7 +3520,7 @@ async function viewBoard(params = new URLSearchParams()) {
         judged++;
         if (r === 'won') landed++;
       }
-      return `${c ? calls : 'No call'} on ${games('already played')}.${judged ? ` ${landed} of ${judged} landed.` : ''}`;
+      return `${c ? calls : 'No call'} on ${games('already played')}.${judged ? ` ${landed} of ${judged} won.` : ''}`;
     }
 
     const next = called.map((f) => f.kickoff).filter(Boolean);
@@ -3346,14 +3611,14 @@ async function viewBoard(params = new URLSearchParams()) {
                ${!elsewhere.length && state.hours < 240 ? '<button type="button" class="btn btn-ghost" data-hours="240">Look ten days ahead</button>' : ''}
              </p></div>`
       : shown.length
-        ? `${callGroups.map((g) => block(g, 'call')).join('')}${
+        ? `${withAds(callGroups.map((g) => block(g, 'call')), 'board-calls', [2])}${
             !called.length ? `<p class="board-none">No call on any of these${state.when === 'played' ? '' : ' yet'}.${
               state.when === 'upcoming' ? ' Calls go up through the day as team news lands and prices settle, right up to kick-off.' : ''}</p>` : ''}${
             rest.length ? `
             <div class="board-rest">
               <h2 class="board-sub">${called.length ? 'Every other game we looked at' : 'Every game we looked at'}</h2>
               <p class="board-sub-note">${state.when === 'played' ? 'We passed on these.' : 'Nothing here was strong enough to back, so each carries our read instead: what we think happens, free, with no price, because we would not bet it.'} The preview, team news and form are on each match's page.</p>
-              ${restGroups.map((g) => block(g, 'game')).join('')}
+              ${withAds(restGroups.map((g) => block(g, 'game')), 'board-rest', [2, 6])}
             </div>` : ''}`
         : fixtures.length
           ? `<div class="empty-state"><b>No calls here yet</b>
@@ -3493,6 +3758,8 @@ async function viewBoard(params = new URLSearchParams()) {
  * and it does not nag.
  */
 function lockedHTML(fixture = null) {
+  // Free: no wall to draw, even from a copy cached before the switch.
+  if (FREE) return '';
   // Kick-off closes the call. Nothing is sold once a match is on, so the offer
   // gives way to what happens next: it is graded, and shown, at full time.
   if (fixture?.kickoff && matchState(fixture).kind === 'live') {
@@ -3500,7 +3767,7 @@ function lockedHTML(fixture = null) {
   <div class="locked is-closed">
     <div class="locked-body">
       <b>Closed at kick-off.</b>
-      <p>Calls are not sold once a match is on. This one goes up here at full time, with whether it landed.</p>
+      <p>Calls are not sold once a match is on. This one goes up here at full time, with whether it won.</p>
     </div>
   </div>`;
   }
@@ -3591,7 +3858,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
   const landed = stored ?? (played && hg !== null && ag !== null
     ? didItLand({ market: c.market, outcome: c.outcome, line: c.line, homeGoals: hg, awayGoals: ag })
     : null);
-  const VERDICT_WORD = { won: 'Landed', lost: 'Did not land', part: 'Half back', back: 'Stake back' };
+  const VERDICT_WORD = { won: 'Won', lost: 'Lost', part: 'Half back', back: 'Stake back' };
   // While the match is on: where the call stands against the running score.
   const track = landed ? null : liveTrack(c, fixture);
   const story = landed
@@ -3604,8 +3871,8 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
   return `
   <div class="verdict${landed ? ` settled ${landed}` : ''}${!played && isMember() && !isFreeFixture(fixture?.id) ? ' is-members' : ''}">
     ${played || landed ? '' : isFreeFixture(fixture?.id) || fixture?.free_call
-      ? '<span class="row-kind is-free">Free call today: open to everyone</span>'
-      : `<span class="row-kind is-members"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>Members' call</span>`}
+      ? '<span class="row-kind is-free">Our surest call today</span>'
+      : FREE ? '' : `<span class="row-kind is-members"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="4" y="10" width="16" height="10" rx="2"/></svg>Members' call</span>`}
     <div class="verdict-head">
       <span class="sel">${betHTML(d)}<span class="bet-tie">${esc(home)} v ${esc(away)}</span></span>
       ${landed
@@ -3617,7 +3884,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
       : d.outcomes?.length ? paysHTML(d) : `<p class="wins">${esc(d.wins)}</p>`}
     ${landed && v.record?.postmortem ? postMortemHTML({ postmortem_json: v.record.postmortem }) : ''}
     ${track ? `<p class="track-line">${trackHTML(track)}<span>${esc(track.need)} It’s ${esc(track.score)}. ${esc(track.time)}</span></p>` : ''}
-    ${prose ? `<p class="narrative">${link(esc(prose))}</p>` : ''}
+    ${prose ? prose.split(/\n\s*\n/).map((para) => `<p class="narrative">${link(esc(para.trim()))}</p>`).join('') : ''}
     ${why ? `<div class="why"><p class="why-head">Why this call</p><p>${link(esc(why))}</p></div>` : ''}
     ${played && (prose || why) ? `<p class="aside">Written before kick-off, and left as it was.</p>` : ''}
     <div class="verdict-meta">
@@ -3627,7 +3894,7 @@ function verdictHTML(v, home, away, fixture = null, when = {}) {
         const text = landed
           ? `${VERDICT_WORD[landed] ?? 'Settled'}: ${betText(d)}, at odds of ${Number(c.odds).toFixed(2)}. ${home} ${hg}–${ag} ${away}.`
           : isFreeFixture(fixture.id) || !isMember()
-            ? `Today's free call on ${tie}: ${betText(d)}, at odds of ${Number(odds).toFixed(2)}.`
+            ? `Our surest call today, ${tie}: ${betText(d)}, at odds of ${Number(odds).toFixed(2)}.`
             : `${tie}: we have a call on this one.`;
         return shareButtonHTML({ text, url, title: tie });
       })() : ''}
@@ -4862,6 +5129,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
               !played && f.read?.text ? `<div class="read-line"><small>Our read</small><b>${esc(f.read.text)}</b>
                   <p>What we think happens. It is a read, not a call: we would not bet it, so it has no price and it is not in our record.</p></div>` : ''}`}
         </div>
+        ${adSlotHTML('fixture-1')}
         ${reads.length ? `<div class="panel">
           <p class="panel-head">${verdicts.length ? (played ? 'What made us call it' : 'What made the call') : 'What stood out'}</p>
           <div class="reads">${reads.map((r) => `<div class="read"><b>${esc(r.label)}</b><p>${f._link(esc(r.note))}</p></div>`).join('')}</div>
@@ -4976,6 +5244,7 @@ async function viewFixture(id, params = new URLSearchParams()) {
         aria-selected="${k === open}">${esc(label)}</button>`).join('')}
     </div>` : ''}
     ${TABS.map(([k, , html]) => `<div class="tabpane" data-pane="${k}"${k === open ? '' : ' hidden'}>${html}</div>`).join('')}
+    ${adSlotHTML('fixture-2')}
   </div>`;
   // The locked call says when it closes; keep that count running.
   tickCountdowns();
@@ -5066,8 +5335,8 @@ function pulledHTML(f) {
     // After the game: how it would have gone (settle.ts, gradePulled).
     const r = p.after_result;
     const score = p.after_home != null && p.after_away != null ? ` It finished ${p.after_home}–${p.after_away}.` : '';
-    const after = r === 'WON' || r === 'HALF_WON' ? ['won', `It would have landed.${score}`]
-      : r === 'LOST' || r === 'HALF_LOST' ? ['lost', `It would have missed.${score}`]
+    const after = r === 'WON' || r === 'HALF_WON' ? ['won', `It would have won.${score}`]
+      : r === 'LOST' || r === 'HALF_LOST' ? ['lost', `It would have lost.${score}`]
       : r === 'PUSH' ? ['void', `The stake would have come back.${score}`] : null;
     return `<div class="pulled">
       <p class="pulled-head"><span class="pulled-tag">Call pulled</span><span>${esc(at(p.pulled_at))}</span></p>
@@ -5150,7 +5419,7 @@ async function viewHowSure() {
     <h2 class="sure-h2">Every level, every call</h2>
     <div class="sure-wrap">
       <table class="tbl sure-tbl">
-        <thead><tr><th>We rated it</th><th class="num">Calls</th><th class="num">Should land</th><th class="num">Landed</th></tr></thead>
+        <thead><tr><th>We rated it</th><th class="num">Calls</th><th class="num">Should land</th><th class="num">Won</th></tr></thead>
         <tbody>
           ${bands.map((b) => `<tr>
             <td>About ${esc(sureWords(b.tenths))}<small>${esc(sureShort(b.n, b.landed, expect(b)))}</small></td>
@@ -5189,8 +5458,8 @@ function pulledListHTML(list) {
   };
   const after = (x) => {
     const score = x.after_home != null && x.after_away != null ? `, ${x.after_home}–${x.after_away}` : '';
-    if (x.after_result === 'WON' || x.after_result === 'HALF_WON') return ['won', `Would have landed${score}`];
-    if (x.after_result === 'LOST' || x.after_result === 'HALF_LOST') return ['lost', `Would have missed${score}`];
+    if (x.after_result === 'WON' || x.after_result === 'HALF_WON') return ['won', `Would have won${score}`];
+    if (x.after_result === 'LOST' || x.after_result === 'HALF_LOST') return ['lost', `Would have lost${score}`];
     if (x.after_result === 'PUSH') return ['void', `Stake would have come back${score}`];
     if (x.after_result === 'VOID') return ['void', 'Match not played'];
     return ['wait', 'Result to come'];
@@ -5328,7 +5597,7 @@ async function viewResults() {
   <div class="wrap section">
     <div class="page-head">
       <h1 class="display xl">Results</h1>
-      <p class="page-sub">Every call we have published since 6 October 2026, when this engine went live,
+      <p class="page-sub">Every call we have published since 6 October 2026,
         marked against the real result. Nothing removed, nothing hidden.</p>
     </div>
 
@@ -5344,7 +5613,7 @@ async function viewResults() {
         has always treated them, and the two disagreeing was the third time
         this page has contradicted itself about the same thing.
       -->
-      <p class="figure-line record-line">${stat(wins, 'won')} landed and ${stat(Math.max(0, n - wins - refunds), 'lost')} missed${
+      <p class="figure-line record-line">${stat(wins, 'won')} won and ${stat(Math.max(0, n - wins - refunds), 'lost')} lost${
         refunds ? `, with ${stat(refunds)} ${refunds === 1 ? 'stake' : 'stakes'} back` : ''}. That is ${stat(`${rate}%`)} of those graded.</p>
       ${formStringHTML(settled)}
       ${formBarHTML(won, voided, lost, ['won', 'stake back', 'lost'],
@@ -5371,8 +5640,8 @@ async function viewResults() {
         : 'These are short prices, so winning most of them is not the same as being ahead.'}</p>
       <p class="record-sub"><a class="record-link" href="#/how-sure">When we’re confident, are we right? See how often our calls land against how sure we were.</a></p>
       ${n > 0 && n < 100
-        ? `<p class="record-note">That is ${n} results. It is not enough to tell a good run
-             from a good model, and we will say so until it is.</p>`
+        ? `<p class="record-note">That is ${n} results. It is not enough to tell a lucky run
+             from a real one, and we will say so until it is.</p>`
         : ''}`}
 
     <div class="with-side">
@@ -5453,8 +5722,10 @@ async function viewResults() {
       if (!host) return;
       host.innerHTML =
         groupByDay(ordered.slice((p - 1) * PER, p * PER))
-          .map((g) => dayHTML(g, dayTotals.get(new Date(g.at * 1000).toDateString()))).join('') +
+          .map((g) => dayHTML(g, dayTotals.get(new Date(g.at * 1000).toDateString())))
+          .map((html, i, all) => ((i === 1 || i === 4) && i + 1 < all.length ? html + adSlotHTML(`results-${i + 1}`) : html)).join('') +
         pagerHTML(p, pages, 'Results pages');
+      fillAds(host);
       for (const b of host.querySelectorAll('[data-page]')) {
         b.onclick = (e) => {
           e.preventDefault();
@@ -5566,7 +5837,7 @@ function dayHTML(g, total) {
   <section class="recap-day">
     <div class="recap-head">
       <h3>${esc(unshout(label))}</h3>
-      <span class="recap-tally">${won} of ${graded} landed${part ? ' that day' : ''}</span>
+      <span class="recap-tally">${won} of ${graded} won${part ? ' that day' : ''}</span>
     </div>
     ${graded && !part ? `<p class="hand recap-say">${esc(dayVerdict(won, graded))}</p>` : ''}
     ${sortedForDay(g.list).map(recapCardHTML).join('')}
@@ -5682,7 +5953,7 @@ const RESULT_TONE = {
   WON: 'won', HALF_WON: 'part', LOST: 'lost', HALF_LOST: 'part', PUSH: 'back', VOID: 'back',
 };
 const RESULT_WORD = {
-  WON: 'Landed', HALF_WON: 'Half landed', LOST: 'Missed', HALF_LOST: 'Half missed',
+  WON: 'Won', HALF_WON: 'Half won', LOST: 'Lost', HALF_LOST: 'Half lost',
   PUSH: 'Refunded', VOID: 'Void',
 };
 
@@ -5722,19 +5993,27 @@ function recapCardHTML(x) {
   });
 
   return `
-  <article class="recap is-${esc(tone)}">
+  <article class="recap is-${esc(tone)}" data-href="#/fixture/${encodeURIComponent(x.fixture_id)}">
     <a class="recap-tie" href="#/fixture/${encodeURIComponent(x.fixture_id)}">
       <span class="recap-side">${crest(x.home_team ?? '', 'sm', x.home_team_id)}<span>${esc(x.home_team ?? '')}</span>${
         hasScore ? `<b class="row-goals${hg > ag ? ' won' : ''}">${esc(hg)}</b>` : ''}</span>
       <span class="recap-side">${crest(x.away_team ?? '', 'sm', x.away_team_id)}<span>${esc(x.away_team ?? '')}</span>${
         hasScore ? `<b class="row-goals${ag > hg ? ' won' : ''}">${esc(ag)}</b>` : ''}</span>
-      ${scorersHTML(x.goals)}
     </a>
     <div class="recap-body">
       <p class="recap-call">We said <b>${esc(betText(d))}</b>${x.odds ? ` at ${oddsOf(x.odds)}` : ''}.</p>
       ${said ? `<p class="recap-what">${esc(said)}</p>` : ''}
-      ${disputed ? '' : postMortemHTML(x)}
       ${(() => {
+        /*
+         * Everything past the call and the score, closed until asked for: the
+         * scorers, how the game went against our reading and the reason we
+         * gave. All of it open made a hundred and twenty results about
+         * fourteen phone screens; closed, a day's results fit on one.
+         * Nothing is removed; every word is one tap away.
+         */
+        const scorers = scorersHTML(x.goals);
+        const pm = disputed ? '' : postMortemHTML(x);
+        const why = (() => {
         /*
          * The argument we made before kick-off, shown back against what
          * happened. On a loss it is the most useful thing on the page and the
@@ -5753,12 +6032,19 @@ function recapCardHTML(x) {
         // -- see verdictHTML).
         const templated = new RegExp(`\\b(?:at|priced)\\s+${dec(x.odds).replace('.', '\\.')}\\b`).test(String(x.narrative ?? ''));
         const allowed = [String(x.odds), dec(x.odds), String(x.line), x.line];
-        const why = cleanProse(x.why, allowed) ?? (templated ? null : cleanProse(x.narrative, allowed));
-        if (!why) return '';
+        const text = cleanProse(x.why, allowed) ?? (templated ? null : cleanProse(x.narrative, allowed));
+        if (!text) return '';
         return `
-        <details class="recap-why">
-          <summary>${tone === 'lost' ? 'The reason we gave' : 'Why we said it'}</summary>
-          <p>${esc(why)}</p>
+        <div class="recap-why">
+          <p class="recap-why-head">${tone === 'lost' ? 'The reason we gave' : 'Why we said it'}</p>
+          <p>${esc(text)}</p>
+        </div>`;
+        })();
+        if (!scorers && !pm && !why) return '';
+        return `
+        <details class="recap-more">
+          <summary>${tone === 'lost' ? 'What went wrong, and why we said it' : 'How it went, and why we said it'}</summary>
+          ${scorers}${pm}${why}
         </details>`;
       })()}
     </div>
@@ -6118,7 +6404,7 @@ async function viewLeague(id, params = new URLSearchParams()) {
   const recordHTML = rec.n ? `
     <div>
       <div class="section-head"><div><h2 class="display">Our calls here</h2></div></div>
-      ${formBarHTML(rec.wins, 0, rec.n - rec.wins, ['landed', 'void', 'missed'], `${rec.n} settled call${rec.n === 1 ? '' : 's'} in this competition.`)}
+      ${formBarHTML(rec.wins, 0, rec.n - rec.wins, ['won', 'void', 'lost'], `${rec.n} settled call${rec.n === 1 ? '' : 's'} in this competition.`)}
       ${playedHTML(recent.slice(0, 12))}
     </div>` : '';
 
@@ -6459,6 +6745,7 @@ const reading = () => { try { return sessionStorage.getItem(READING_KEY); } catc
  * sequence does for a magic link.
  */
 async function afterSignIn() {
+  adSignedUp();
   state.member = null;
   state.account = null;
   cacheClear();
@@ -6567,7 +6854,7 @@ function freeLineHTML(free) {
   if (!free?.home) return '';
   const st = matchState(free);
   const score = Array.isArray(free.score) ? free.score : Array.isArray(free.live_score) ? free.live_score : null;
-  const WORD = { WON: 'It landed.', HALF_WON: 'Half of it landed.', LOST: 'It missed.', HALF_LOST: 'Half of it missed.', PUSH: 'Stake back.', VOID: 'Stake back.' };
+  const WORD = { WON: 'It won.', HALF_WON: 'Half of it won.', LOST: 'It lost.', HALF_LOST: 'Half of it lost.', PUSH: 'Stake back.', VOID: 'Stake back.' };
   const tie = score && st.kind !== 'upcoming'
     ? `${esc(free.home)} ${esc(score[0])}–${esc(score[1])} ${esc(free.away)}`
     : `${esc(free.home)} v ${esc(free.away)}`;
@@ -6576,7 +6863,7 @@ function freeLineHTML(free) {
     : `${WORD[(free.published ?? []).find((x) => x?.market)?.result ?? free.called?.result] ?? 'Played.'} Read how it went.`;
   return `
     <a class="freecall-line" href="#/fixture/${encodeURIComponent(free.id ?? free.fixture_id)}">
-      <span class="freecall-tag">Today's free call</span>
+      <span class="freecall-tag">Our surest call today</span>
       <b>${tie}</b>
       <span>${esc(say)}</span>
     </a>`;
@@ -6617,6 +6904,9 @@ async function viewPricing() {
     if (account) state.account = account;
   }
   const mine = liveMembership(account);
+  // A mate's link (js/lib/referral.js): signed in, the Worker says whether it
+  // counts; signed out, the link this device arrived on, for a new account.
+  const friendDays = mine ? 0 : user ? Number(account?.invite?.friend_days) || 0 : storedRef() ? 7 : 0;
   // A deal or a free trial on a plan, when one is running and this reader
   // may have it (js/lib/promo.js). Checkout finds the same one by the plan.
   const promo = Array.isArray(running) && running.length && !mine ? await import('./js/lib/promo.js').catch(() => null) : null;
@@ -6696,7 +6986,8 @@ async function viewPricing() {
       ${callsToday > 1 ? `<li><b>${callsToday} calls</b> on the board still to kick off. One is free.</li>` : ''}
     </ul>` : ''}
     ${board?.fixtures?.length && !callsToday ? `<p class="plan-quiet" role="note">No calls are up yet today. They go up through the day as team news lands, and members get each one the moment it does.</p>` : ''}
-    ${freeLineHTML(free)}`}
+    ${freeLineHTML(free)}
+    ${friendDays ? `<p class="plan-friend-note" role="note"><b>You came on a mate's link.</b> Your first ${friendDays} days are free on the month or three months${user ? '' : ' once you make an account'}. A card is needed to start, and nothing is taken until they are up.</p>` : ''}`}
 
     <div class="plans" data-public-price>
       ${order.map((id) => {
@@ -6714,6 +7005,7 @@ async function viewPricing() {
             <span>then ${esc(money(p.amount_minor, p.currency))} ${esc(per(p))}</span></p>` : `<p class="plan-price"><b>${esc(money(p.amount_minor, p.currency))}</b>
             <span>${esc(per(p))}</span></p>`}
           ${o ? `<p class="plan-ends">Ends in <span class="plan-clock" data-ends="${esc(o.ends_at)}"></span></p>` : ''}
+          ${friendDays && c.renews && o?.kind !== 'trial' ? `<p class="plan-friend">First ${friendDays} days free on your mate's link</p>` : ''}
           ${perMonth(p) ? `<p class="plan-per">${esc(perMonth(p))}</p>` : ''}
           <p class="plan-blurb">${esc(c.blurb)}</p>
           ${b.note ? `<p class="plan-switch">${esc(b.note)}</p>` : ''}
@@ -6733,7 +7025,7 @@ async function viewPricing() {
           <li>One full call a day, with the reason: the call we are surest of</li>
           <li>Every preview: team news, who starts, who scores, the form</li>
           <li>The bet slip's size, its total odds and its record</li>
-          <li>Every settled call, with why it landed or did not</li>
+          <li>Every settled call, with why it won or lost</li>
         </ul>
       </section>
       <section class="tier tier-paid">
@@ -6910,9 +7202,15 @@ async function viewCheckout(params) {
   // id goes with the payment; the Worker checks it and sets the price.
   const promo = moving || block ? null : await import('./js/lib/promo.js').catch(() => null);
   const offer = promo ? await promo.offerForPlan(planId, { signedIn: true, member: !!m, returning: !!account?.returning }, promoId).catch(() => null) : null;
-  const trial = offer?.kind === 'trial' ? offer : null;
   const deal = offer?.kind === 'deal' ? offer : null;
   const amount = deal ? deal.price_minor : Number(plan.amount_minor);
+  // A mate's link (js/lib/referral.js): the first days free on a plan that
+  // renews, for someone who has never been a member, with a deal if one is
+  // running. The Worker applies it by itself; this only says so.
+  const friend = !moving && !block && renews && offer?.kind !== 'trial' && Number(account?.invite?.friend_days) > 0
+    ? { kind: 'trial', friend: true, trial_days: Number(account.invite.friend_days), title: deal ? `${deal.title}, and your first week free` : "Your mate's free week" }
+    : null;
+  const trial = offer?.kind === 'trial' ? offer : friend;
   const price = money(amount, plan.currency);
   if (offer) promo.ensureStyles();
   // Whop's card fields go on this page only for a straight payment; a switch,
@@ -6934,9 +7232,13 @@ async function viewCheckout(params) {
           starts now and its first payment waits until then. The ${esc((PLAN_NAME[moving.plan_id] ?? 'membership').toLowerCase())} stops renewing.
           You keep every day you already have and pay for none twice.</p>` : `
         ${trial ? `
-        <p class="co-price"><b>${esc(trial.trial_days)} days free</b> <span>then ${esc(money(plan.amount_minor, plan.currency))} ${esc(terms.per)}</span></p>
+        <p class="co-price"><b>${esc(trial.trial_days)} days free</b> <span>then ${deal ? `<s>${esc(money(plan.amount_minor, plan.currency))}</s> ` : ''}${esc(money(amount, plan.currency))} ${esc(terms.per)}</span></p>
+        ${trial.friend ? `
+        <p class="co-terms"><b>${esc(trial.title)}.</b> You came on a mate's link, so the first ${esc(trial.trial_days)} days are on us.
+          Then ${esc(money(amount, plan.currency))} ${esc(terms.per)} unless you cancel. A card is needed to start, and nothing is taken until the free days are up.</p>
+        ${deal ? `<p class="co-offer">The deal ends in <span class="co-clock" data-ends="${esc(deal.ends_at)}"></span></p>` : ''}` : `
         <p class="co-terms"><b>${esc(trial.title)}.</b> ${esc(promo.terms(trial))}</p>
-        <p class="co-offer">Ends in <span class="co-clock" data-ends="${esc(trial.ends_at)}"></span></p>` : deal ? `
+        <p class="co-offer">Ends in <span class="co-clock" data-ends="${esc(trial.ends_at)}"></span></p>`}` : deal ? `
         <p class="co-price"><s>${esc(money(plan.amount_minor, plan.currency))}</s> <b>${esc(price)}</b> <span>${esc(terms.per)}</span></p>
         <p class="co-terms"><b>${esc(deal.title)}.</b> ${esc(promo.terms(deal))}</p>
         <p class="co-offer">Ends in <span class="co-clock" data-ends="${esc(deal.ends_at)}"></span></p>` : `
@@ -6972,7 +7274,7 @@ async function viewCheckout(params) {
         <button class="btn btn-accent btn-lg co-button" id="co-pay" type="button" disabled>${trial ? `Start the ${esc(trial.trial_days)} free days` : moving ? 'Switch, nothing to pay today' : embedding ? `Pay ${esc(price)}` : 'Continue to payment'}</button>
         <p class="co-need" aria-live="polite">Tick both boxes above to go on.</p>
         <p class="co-error" role="alert" hidden></p>
-        <p class="co-note">${trial ? `By starting you agree to ${esc(money(plan.amount_minor, plan.currency))} ${esc(terms.per)} after the ${esc(trial.trial_days)} free days, until you cancel. ` : renews ? `By ${moving ? 'switching' : 'paying'} you agree to ${esc(price)} ${esc(terms.per)}${moving ? ` from ${esc(shortDate(moving.expires_at))}` : ''} until you cancel. ` : ''}Card details go
+        <p class="co-note">${trial ? `By starting you agree to ${esc(money(trial.friend ? amount : plan.amount_minor, plan.currency))} ${esc(terms.per)} after the ${esc(trial.trial_days)} free days, until you cancel. ` : renews ? `By ${moving ? 'switching' : 'paying'} you agree to ${esc(price)} ${esc(terms.per)}${moving ? ` from ${esc(shortDate(moving.expires_at))}` : ''} until you cancel. ` : ''}Card details go
           straight to Whop, who take the payment. They never reach offside.win.</p>`}
       </section>
 
@@ -7157,6 +7459,7 @@ async function viewSignin() {
     ? 'Sign in first and your membership will be waiting when you come back.'
     : intent === '#/account'
       ? 'Your account is behind this.'
+      : FREE ? 'Optional. Everything on offside.win works without an account; signing in keeps your teams and settings on every device.'
       : 'Your calls follow you, your slip is yours, and there is nothing to remember.';
 
   // The match the front page leads with, for the picture and a reason to be
@@ -7205,7 +7508,7 @@ async function viewSignin() {
 
         <ul class="auth-facts">
           <li>No password. A link by email, or your Google account.</li>
-          <li>One account is one person's. It stays signed in on two devices at a time.</li>
+          ${FREE ? '' : "<li>One account is one person's. It stays signed in on two devices at a time.</li>"}
         </ul>
         <p class="signin-fine">The link in the email signs you in on the device you open it on.
           By signing in you agree to our <a href="/terms">terms</a> and <a href="/privacy">privacy policy</a>. 18+.</p>
@@ -7280,6 +7583,7 @@ async function viewSignin() {
     const undo = busy(button, 'Sending the link…');
     try {
       await signInWithEmail(email);
+      adLead(email);
       /*
        * The sent state replaces the form. A form that stays on screen under
        * "check your email" invites a second tap, a second email, and a rate
@@ -7325,7 +7629,7 @@ const PLAN_DAYS = { matchday: 7, monthly: 30, quarter: 90, season: 365 };
  * Four tabs, in the address like the match page's, so a reload or a shared
  * link opens the same one.
  */
-const ACCOUNT_TABS = [['profile', 'Profile'], ['following', 'Following'], ['membership', 'Membership'], ['settings', 'Settings']];
+const ACCOUNT_TABS = [['profile', 'Profile'], ['following', 'Following'], ['membership', 'Membership'], ['invite', 'Invite'], ['settings', 'Settings']];
 
 /**
  * A face for the account, as the reader chose it on the account page:
@@ -7351,6 +7655,47 @@ function avatarHTML(user, name, size = 'md', profile = state.account?.profile) {
 /** The name to call someone by: what they saved, else what Google said, else their email's first part. */
 function accountName(user, profile) {
   return profile?.display_name || user?.name || String(user?.email ?? '').split('@')[0] || 'Your account';
+}
+
+/**
+ * The invite tab's link and its share button (worker/src/referral.ts). The
+ * phone's own share sheet where there is one; else the link is copied. The
+ * link is always shown too, selectable, for a device that can do neither.
+ */
+async function fillInvite(el) {
+  const box = el?.querySelector('.invite-link');
+  if (!box) return;
+  let r = null;
+  try { r = await getJSON('/api/referral', { fresh: true }); } catch { /* said below */ }
+  if (!el.isConnected) return;
+  if (!r?.link) {
+    box.innerHTML = '<p class="acct-hint">Your link could not be fetched just now. Open this tab again in a minute.</p>';
+    return;
+  }
+  const shown = r.link.replace(/^https?:\/\//, '');
+  const message = 'The football site I use. One call a day is free, and the reasoning behind every match is properly argued. Your first week of membership is free on my link:';
+  box.innerHTML = `
+    <label class="visually-hidden" for="invite-url">Your link</label>
+    <input class="invite-url" id="invite-url" type="text" readonly value="${esc(r.link)}" aria-label="Your link" size="${shown.length}">
+    <div class="acct-actions">
+      <button class="btn btn-accent" type="button" id="invite-share">${navigator.share ? 'Share your link' : 'Copy your link'}</button>
+      <span class="acct-note" id="invite-note" role="status"></span>
+    </div>
+    ${r.joined ? `<p class="invite-count">${r.joined === 1 ? 'One mate has' : `${esc(r.joined)} mates have`} joined on your link${r.paid ? `, ${r.paid === 1 ? 'one is' : `${esc(r.paid)} are`} members` : ''}${r.days_earned ? `, and you have had ${esc(r.days_earned)} days on us` : ''}. Thank you.</p>` : ''}
+    <p class="acct-hint">The free week is for people who have never been members. Your days go on once their first payment is through, and if you pay through Whop, your next payment moves back by the same.</p>`;
+  const input = box.querySelector('#invite-url');
+  input.onfocus = () => input.select();
+  const button = box.querySelector('#invite-share');
+  const note = box.querySelector('#invite-note');
+  button.onclick = async () => {
+    try {
+      const how = await shareLink(r.link, message);
+      note.textContent = how === 'copied' ? 'Link copied. Paste it wherever your mates are.' : how === 'shared' ? 'Sent. Thank you.' : '';
+    } catch {
+      input.focus();
+      note.textContent = 'Copy the link above and send it on.';
+    }
+  };
 }
 
 async function viewAccount() {
@@ -7388,7 +7733,10 @@ async function viewAccount() {
     : /^#\/fixture\//.test(came) ? { href: came, label: 'Back to the match you were reading' }
     : /^#\/slip/.test(came) ? { href: came, label: "Back to today's slip" }
     : { href: came, label: 'Back to where you were' };
-  const open = ACCOUNT_TABS.some(([k]) => k === asked) ? asked : justPaid ? 'membership' : 'profile';
+  // Free: no invitations (they offered a free week of membership), and the
+  // membership tab only for an account that has held one.
+  const tabs = ACCOUNT_TABS.filter(([k]) => !FREE || (k !== 'invite' && (k !== 'membership' || account.membership)));
+  const open = tabs.some(([k]) => k === asked) ? asked : justPaid && tabs.some(([k]) => k === 'membership') ? 'membership' : 'profile';
 
   const follows = Array.isArray(account.follows) ? account.follows : [];
 
@@ -7528,7 +7876,7 @@ async function viewAccount() {
                 : m.auto_renew
                   ? `<span>Renews ${m.card_last4 ? `on ${esc(m.card_brand ?? 'card')} ending ${esc(m.card_last4)}` : 'itself'}</span><button class="btn btn-quiet btn-sm" id="cancel">Stop renewing</button>`
                   : `<span>Does not renew</span><button class="btn btn-primary btn-sm" id="resume">Renew each month</button>`)
-          : `<a class="btn btn-accent" href="#/pricing">See the plans</a>`}
+          : FREE ? `<span>Everything on offside.win is free. There is nothing to buy.</span>` : `<a class="btn btn-accent" href="#/pricing">See the plans</a>`}
       </div>
     </section>
     ${active && m.via !== 'whop' && account.whop?.renewing ? `
@@ -7587,8 +7935,8 @@ async function viewAccount() {
     </fieldset>
 
     <h2 class="acct-sub">Signing in</h2>
-    <p class="acct-hint">An account is one person's. It stays signed in on two devices at a time; signing in on a third signs out the one you used least recently.
-      Signing out does not touch your membership. Sign back in with the same email and it is still yours.</p>
+    <p class="acct-hint">${FREE ? 'You can stay signed in on up to ten devices; signing in on an eleventh signs out the one you used least recently.' : "An account is one person's. It stays signed in on two devices at a time; signing in on a third signs out the one you used least recently."}
+      ${FREE ? 'Signing out keeps everything on your account; sign back in with the same email.' : 'Signing out does not touch your membership. Sign back in with the same email and it is still yours.'}</p>
     <ul class="acct-devices" id="devices" hidden></ul>
     <div class="acct-actions">
       <button class="btn btn-ghost" id="out">Sign out</button>
@@ -7609,7 +7957,19 @@ async function viewAccount() {
       </div>
     </div>`;
 
-  const panes = { profile: profileHTML, following: followingHTML, membership: membershipHTML, settings: settingsHTML };
+  // --- invite: the reader's own tell-a-friend link (js/lib/referral.js), filled in once it arrives.
+  const inviteHTML = `
+    <section class="invite" id="invite" aria-live="polite">
+      <h2 class="acct-sub">Tell a mate</h2>
+      <p class="invite-lead">Know someone who argues about football at the pub? Send them your link.</p>
+      <ul class="ticks invite-deal">
+        <li><b>They get their first week free</b> when they join for the month or for three months.</li>
+        <li><b>You get two weeks on us</b> once they become a member. Up to ten mates a year.</li>
+      </ul>
+      <div class="invite-link"><span class="muted">Getting your link…</span></div>
+    </section>`;
+
+  const panes = { profile: profileHTML, following: followingHTML, membership: membershipHTML, invite: inviteHTML, settings: settingsHTML };
 
   if (nav !== navTicket) return;
   app.innerHTML = `
@@ -7627,14 +7987,15 @@ async function viewAccount() {
       ? 'Payment received. You are in: every call is open.'
       : 'Payment received. Switching your membership on, which usually takes a few seconds.'}</p>
     ${active && paidBack ? `<p class="member-actions"><a class="btn btn-accent" href="${esc(paidBack.href)}">${esc(paidBack.label)}</a></p>` : ''}
+    ${active ? `<p class="invite-nudge">Know someone who would want this? <a href="#/account?tab=invite">Send them your link</a>: their first week is free, and you get two weeks on us when they join.</p>` : ''}
     <p class="paid-confirm">As you asked at checkout, your membership started straight away, and you
       accepted that this ends the 14-day right to cancel for a change of mind. If anything of ours
       fails, you still get it put right or your money back. The <a href="#/legal/terms">terms of use</a>
       (in force from ${esc(TERMS_DATE)}) apply.</p>` : ''}
     <div class="tabs" role="tablist">
-      ${ACCOUNT_TABS.map(([k, label]) => `<button class="tab${k === open ? ' on' : ''}" data-tab="${k}" role="tab" aria-selected="${k === open}">${esc(label)}</button>`).join('')}
+      ${tabs.map(([k, label]) => `<button class="tab${k === open ? ' on' : ''}" data-tab="${k}" role="tab" aria-selected="${k === open}">${esc(label)}</button>`).join('')}
     </div>
-    ${ACCOUNT_TABS.map(([k]) => `<div class="tabpane acct-pane" data-pane="${k}"${k === open ? '' : ' hidden'}>${panes[k]}</div>`).join('')}
+    ${tabs.map(([k]) => `<div class="tabpane acct-pane" data-pane="${k}"${k === open ? '' : ' hidden'}>${panes[k]}</div>`).join('')}
   </div>`;
 
   if (justPaid && !active) {
@@ -7668,6 +8029,8 @@ async function viewAccount() {
       if (Array.isArray(r?.results) && r.results.includes('granted')) { cacheClear(); viewAccount(); headerAuth(); }
     }).catch(() => {});
   }
+
+  fillInvite(app.querySelector('#invite'));
 
   for (const t of app.querySelectorAll('.tab')) {
     t.onclick = () => {
@@ -7892,16 +8255,55 @@ function humaneError(err) {
  * next time it draws.
  */
 async function toggleFollow(kind, id, label, on) {
+  if (!state.user) {
+    const rest = deviceFollows().filter((f) => !(f.kind === kind && Number(f.id) === Number(id)));
+    const list = on ? [...rest, { kind, id: Number(id), label }].slice(-100) : rest;
+    saveDeviceFollows(list);
+    return list;
+  }
   const list = await accountRpc('set_follow', { p_kind: kind, p_ref: Number(id), p_label: label, p_on: on });
   if (state.account) state.account.follows = list ?? [];
   return list ?? [];
 }
-const isFollowing = (kind, id) => Boolean(state.account?.follows?.some((f) => f.kind === kind && Number(f.id) === Number(id)));
+
+/*
+ * Following without an account. The site is free and an account is a nice
+ * extra, so a reader who is not signed in follows on this device: the list
+ * sits in this browser and nowhere else. It is kept whatever the cookie
+ * choice, because the reader asked for it by pressing Follow (a setting they
+ * chose, not tracking), and it moves onto the account if they ever sign in
+ * (mergeDeviceFollows).
+ */
+const FOLLOWS_KEY = 'ow.follows';
+function deviceFollows() {
+  try {
+    const v = JSON.parse(localStorage.getItem(FOLLOWS_KEY) || '[]');
+    return Array.isArray(v) ? v.filter((f) => f && (f.kind === 'team' || f.kind === 'league') && Number.isFinite(Number(f.id))) : [];
+  } catch { return []; }
+}
+function saveDeviceFollows(list) {
+  try { if (list.length) localStorage.setItem(FOLLOWS_KEY, JSON.stringify(list)); else localStorage.removeItem(FOLLOWS_KEY); }
+  catch { /* private mode: this visit only, then */ }
+}
+/** What the reader follows: the account's list signed in, this device's otherwise. */
+const myFollows = () => (state.user ? state.account?.follows ?? [] : deviceFollows());
+/** Signed in with follows made on this device: put them on the account, once. */
+async function mergeDeviceFollows() {
+  const local = deviceFollows();
+  if (!state.user || !local.length || !state.account) return;
+  const have = state.account.follows ?? [];
+  for (const f of local) {
+    if (have.some((h) => h.kind === f.kind && Number(h.id) === Number(f.id))) continue;
+    try { state.account.follows = await accountRpc('set_follow', { p_kind: f.kind, p_ref: Number(f.id), p_label: f.label ?? '', p_on: true }) ?? state.account.follows; }
+    catch { return; }
+  }
+  saveDeviceFollows([]);
+}
+const isFollowing = (kind, id) => myFollows().some((f) => f.kind === kind && Number(f.id) === Number(id));
 
 /**
- * A Follow button for a team or competition page. Signed out, it goes to
- * sign-in and comes back here, because following is a reason to have an
- * account and the button should say so rather than disappear.
+ * A Follow button for a team or competition page. It works for everyone:
+ * signed out, the follow is kept on this device (deviceFollows).
  */
 const followText = (on, label, named) => `${on ? 'Following' : 'Follow'}${named ? ` ${label}` : ''}`;
 function followButtonHTML(kind, id, label, { named = false } = {}) {
@@ -7913,7 +8315,6 @@ function followButtonHTML(kind, id, label, { named = false } = {}) {
 function wireFollowButtons() {
   for (const b of app.querySelectorAll('.follow-btn')) {
     b.onclick = async () => {
-      if (!state.user) { setIntent(location.hash); location.hash = '#/signin'; return; }
       const on = b.getAttribute('aria-pressed') !== 'true';
       b.disabled = true;
       try {
@@ -8248,6 +8649,46 @@ function loadAdPixel() {
 }
 function adPageView() {
   if (adPixelOn && canMeasureAds()) { try { window.whop?.track('page'); } catch { /* a lost view is fine */ } }
+}
+
+/*
+ * Sign-ups, for an ad campaign that optimises for leads (Whop Ads asks for a
+ * `lead` event before it will run one). Same consent as the page views: no
+ * yes to ad measurement, no pixel, nothing sent.
+ *
+ *   lead                   an email typed in for a sign-in link, or a first
+ *                          sign-in with Google (which has no email step)
+ *   complete_registration  a brand-new account's first session
+ *
+ * No email address or name goes to Whop. Each event carries an event_id, so a
+ * resend of the link, a reload or the same person on a second tab counts once:
+ * the lead is keyed on a hash of the address, the registration on the account.
+ */
+async function adEventId(prefix, text) {
+  try {
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return `${prefix}_${[...new Uint8Array(hash)].slice(0, 8).map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+  } catch { return null; }
+}
+function adEvent(name, params) {
+  if (!adPixelOn || !canMeasureAds()) return;
+  try { window.whop?.track(name, params); } catch { /* a lost event is fine */ }
+}
+async function adLead(email) {
+  if (!adPixelOn || !canMeasureAds() || !email) return;
+  const id = await adEventId('lead', String(email).trim().toLowerCase());
+  adEvent('lead', id ? { event_id: id } : undefined);
+}
+/** After a sign-in: a lead and a registration if the account was made just now. */
+async function adSignedUp() {
+  if (!adPixelOn || !canMeasureAds()) return;
+  try {
+    const user = await currentUser({ real: true });
+    const since = Date.parse(user?.since ?? '');
+    if (!user?.id || !(Date.now() - since < 30 * 60 * 1000)) return;
+    await adLead(user.email);
+    adEvent('complete_registration', { event_id: `reg_${user.id}`, external_id: user.id });
+  } catch { /* a lost event is fine */ }
 }
 
 function applyConsent(value) {
@@ -8718,6 +9159,7 @@ function finishRoute(name, soft, keepY, backTo) {
     if (state.board) paintFooter(state.board);
     enhanceSelects(app);
     readAhead();
+    fillAds(app);
     if (state.liveFixture) markLiveEvents(Number(state.liveFixture.id), document.getElementById('live-centre'));
     smartQuotes(app);
     crawlable(app);
@@ -8812,6 +9254,10 @@ async function scheduleSeason() {
     if (document.getElementById('season-note') || document.getElementById('moment')) return;
     const fresh = moment && !moments.seen(moment.key) ? moment : null;
     if (!fresh && !reading) { season.removeSeason(); return; }
+    // No interruptions (owner, 17 November 2026): nothing opens or floats over
+    // the page by itself. The chip sat fixed in the corner on top of the
+    // content, where the ads will sit too, so it goes as well.
+    if (FREE) { season.removeSeason(); return; }
     if (!fresh && season.dismissed(reading.key)) { season.showChip(reading, helpers); return; }
     const go = () => {
       if ((parseHash().parts[0] || 'home') !== name || landing()) return;
@@ -8904,6 +9350,8 @@ async function footerSocials() {
 }
 
 async function schedulePromos() {
+  // No offers on a free site: nothing to sell, and no read for them either.
+  if (FREE) { document.getElementById('promo-bar')?.remove(); return; }
   try {
     const running = await getJSON('/api/promos').catch(() => []);
     if (!Array.isArray(running) || !running.length) { document.getElementById('promo-bar')?.remove(); sellOffer(null); return; }
@@ -8956,6 +9404,8 @@ async function render(name, parts, params) {
     if (name === 'search') return await viewSearch(params);
     if (name === 'results') return await viewResults();
     if (name === 'how-sure') return await viewHowSure();
+    // Nothing to buy: the plans and the checkout go to the front page.
+    if (FREE && (name === 'pricing' || name === 'checkout')) { location.replace('#/'); return; }
     if (name === 'pricing') return await viewPricing();
     if (name === 'checkout') return await viewCheckout(params);
     if (name === 'slip') return await viewSlip();
@@ -9009,7 +9459,9 @@ addEventListener('ow:signedout', async () => {
   state.member = null;
   state.board = null;
   state.account = null;
-  location.hash = '#/signin';
+  // Free: nothing on the page was the account's, so the reader stays where
+  // they are, signed out, rather than being sent to the sign-in page.
+  if (!FREE) location.hash = '#/signin';
   headerAuth();
 });
 
@@ -9053,14 +9505,14 @@ function accountMenuHTML() {
     </div>
     <a class="am-plan${m ? ' on' : ''}" href="#/account?tab=membership" role="menuitem">
       ${m ? `<b>${esc(PLAN_NAME[m.plan_id] ?? 'Membership')}</b><span>Runs to ${esc(until)}${renewsItself(m) ? ', renews by itself' : ''}</span>`
-          : `<b>Free account</b><span>One call a day. See the plans for every call.</span>`}
+          : `<b>Your account</b><span>${FREE ? 'Every call is free. Follow your teams to see their games first.' : 'One call a day. See the plans for every call.'}</span>`}
     </a>
     <nav class="am-links" aria-label="Your account">
       <a href="#/account?tab=profile" role="menuitem">Your profile</a>
       <a href="#/account?tab=following" role="menuitem">Teams you follow</a>
       <a href="#/account?tab=membership" role="menuitem">${m ? 'Membership and payments' : 'Membership'}</a>
       <a href="#/account?tab=settings" role="menuitem">Settings</a>
-      <a class="am-cta" href="#/pricing" role="menuitem">${m ? 'See all plans' : 'See the plans'}</a>
+      ${FREE ? '' : `<a class="am-cta" href="#/pricing" role="menuitem">${m ? 'See all plans' : 'See the plans'}</a>`}
       ${state.isAdmin ? '<a class="am-admin" href="#/admin" role="menuitem">Admin dashboard</a>' : ''}
     </nav>
     <button class="am-out" type="button" id="am-out" role="menuitem">Sign out</button>`;
@@ -9156,7 +9608,7 @@ async function headerAuth() {
         state.member = Boolean(state.account.membership?.expires_at * 1000 > Date.now());
         // If the account says otherwise (an advert shown to a member, a call
         // drawn without its member marks), draw it again with the right one.
-        if (was !== state.member) softRefresh();
+        if (!FREE && was !== state.member) softRefresh();
         const f = state.account.profile?.odds_format;
         const c = state.account.profile?.clock;
         const oddsChanged = (f && f !== oddsFormat) || (c && c !== clockFormat);
@@ -9164,6 +9616,7 @@ async function headerAuth() {
         if (c && c !== clockFormat) setClock(c);
         // The page may have drawn before the account arrived: redraw it once
         // so the odds and "Your games" are the reader's own.
+        if (deviceFollows().length) await mergeDeviceFollows();
         if (oddsChanged || state.account.follows?.length) softRefresh();
       } catch { state.member = Boolean(state.board?.member); }
     }
@@ -9490,6 +9943,8 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
     app.innerHTML = `<div class="wrap section narrow"><div class="signing" role="status">
       <span class="spin" aria-hidden="true"></span><p>Signing you in with Google…</p></div></div>`;
   }
+  // A friend's link (js/lib/referral.js): kept before anything reads the address.
+  captureRef();
   try {
     signedInJustNow = await completeSignIn();
   } catch (err) {
@@ -9527,7 +9982,7 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
    */
   if (signedInJustNow) {
     const intent = takeIntent();
-    if (intent?.startsWith('buy')) {
+    if (!FREE && intent?.startsWith('buy')) {
       location.hash = '#/pricing';
       await faces;
       await route();
@@ -9536,6 +9991,7 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
       headerAuth();
       cookieNotice();
       loadAdPixel();
+      adSignedUp();
       return;
     }
     if (intent && intent.startsWith('#/')) location.hash = intent;
@@ -9553,4 +10009,5 @@ addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); }
   cookieNotice();
   // After the first page has drawn: the pixel records that page itself.
   loadAdPixel();
+  if (signedInJustNow) adSignedUp();
 })();

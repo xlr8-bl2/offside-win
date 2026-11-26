@@ -123,6 +123,13 @@
 .adm-engine i { width: 8px; height: 8px; border-radius: 50%; transform: translateY(-1px); }
 .adm-engine i.ok { background: var(--won); }
 .adm-engine i.late { background: var(--sodium); }
+.adm-engine i.bad { background: var(--lost); }
+/* A final score typed in (Calls, scoreForms): the match, its two boxes, the button. */
+.adm-score { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-3) var(--space-4); width: 100%; }
+.adm-score > b { flex: 1 1 100%; }
+.adm-score > small { flex: 1 1 100%; margin-top: calc(var(--space-3) * -1); color: var(--chalk-3); }
+.adm-score .adm-f { flex: 1 1 7rem; min-width: 0; }
+.adm-score .adm-msg { flex: 1 1 100%; margin: 0; }
 .adm-engine b { color: var(--chalk); font-weight: var(--weight-medium); }
 .adm-engine span { color: var(--chalk-3); }
 

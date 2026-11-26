@@ -66,7 +66,7 @@ test('a played match leads with the score and how the call went', async () => {
     report: { events: [{ t: 'goal', side: 'away', player: 'K. Mbappé', minute: 54, kind: 'regular' }] } };
   const p = (await matchPage(env({ get_fixture: f }) as any, 212602, 'https://offside.win'))!;
   assert.match(p.title, /^Iceland 0–1 Estonia: result/);
-  assert.match(p.description, /landed/);
+  assert.match(p.description, /: won\./);
   assert.match(p.body, /Mbappé 54'/);
   assert.equal((p.jsonLd[0] as any).eventStatus, 'https://schema.org/EventCompleted');
 });
@@ -113,12 +113,13 @@ test('the sitemap lists the matches on the board and their competitions', async 
   assert.match(xml, /<loc>https:\/\/offside.win\/today<\/loc>/);
 });
 
-test('today\'s board counts what is on and names the free call', async () => {
+test('today\'s board counts what is on and names the surest call', async () => {
   const free = { ...FIX, id: 9, free_call: true, locked: false, top_pick: { market: 'over_under_15', outcome: 'OVER', line: 1.5 } };
   const p = await todayPage(env({ get_board: { fixtures: [FIX, free] } }) as any, 'https://offside.win');
   assert.match(p.title, /2 calls/);
-  assert.match(p.body, /Today's free call is/);
-  assert.deepEqual(findBannedInProse(p.body.replace(/<[^>]+>/g, ' ')).map((v) => v.term), []);
+  assert.match(p.body, /Our surest call today is/);
+  // The bet's own line is allowed in its name ("Over 1.5 goals"), and nothing else.
+  assert.deepEqual(findBannedInProse(p.body.replace(/<[^>]+>/g, ' '), ['1.5']).map((v) => v.term), []);
 });
 
 test('the slip page gives the count and the odds, never the open legs', async () => {
@@ -178,7 +179,7 @@ test('a card that is not drawn yet falls back to the site picture instead of a b
   assert.equal(hit.headers.get('content-type'), 'image/jpeg');
 });
 
-test('the front page is written for a crawler: a heading, the free call and a link to every match', async () => {
+test('the front page is written for a crawler: a heading, the surest call and a link to every match', async () => {
   const free = { ...FIX, id: 7, home: 'Real Madrid', away: 'Barcelona', free_call: true, top_pick: { market: 'match_result', outcome: 'home', line: null, odds: 1.9 } };
   const e = env({ get_board: { fixtures: [FIX, free] } });
   const res = await seoResponse(new Request('https://offside.win/'), e as any);
@@ -187,7 +188,7 @@ test('the front page is written for a crawler: a heading, the free call and a li
   assert.match(html, /<title>Offside\.win: football predictions for today(&#39;|')s biggest games<\/title>/, 'the front page keeps its own title');
   assert.match(html, /<link rel="canonical" href="https:\/\/offside\.win\/">/);
   assert.match(html, /href="\/match\/212602\/iceland-v-estonia"/);
-  assert.match(html, /Today's free call is <a href="\/match\/7\/real-madrid-v-barcelona">/);
+  assert.match(html, /Our surest call today is <a href="\/match\/7\/real-madrid-v-barcelona">/);
   const p = await homePage(e as any, 'https://offside.win');
   assert.deepEqual(findBannedInProse(p.body.replace(/<[^>]+>/g, ' ')), []);
 });
@@ -214,6 +215,27 @@ test('the front page is the landing page: its words and FAQ data, and no photogr
   assert.match(html, /How it works/);
   assert.match(html, /"@type":"FAQPage"/);
   assert.match(html, /Do your calls always come in\?/);
+});
+
+test('the front page carries its headline match, so the first screen can draw it before any fetch', async () => {
+  const hero = { fixture_id: 212602, free_fixture_id: 7, home: 'Iceland', away: 'Estonia', league_id: 7, kicker: '</script><b>' };
+  const e = env({ get_board: { fixtures: [FIX] }, get_hero: hero });
+  const html = await (await seoResponse(new Request('https://offside.win/'), e as any))!.text();
+  const boot = html.match(/<script type="application\/json" id="ow-boot">([\s\S]*?)<\/script>/);
+  assert.ok(boot, 'the headline is in the page');
+  assert.doesNotMatch(boot![1]!, /<\//, 'nothing in it can close the script early');
+  assert.equal(JSON.parse(boot![1]!).hero.fixture_id, 212602);
+  // The head's preload script reads the matches off the root element.
+  assert.match(html, /<html data-lead="212602 7"[\s>]/);
+  // A Champions League headline starts the ball's picture with the page.
+  assert.match(html, /rel="preload" as="image" imagesrcset="\/brand\/starball-480\.webp 480w/);
+});
+
+test('the front page with no headline carries no headline data and no picture', async () => {
+  const html = await (await seoResponse(new Request('https://offside.win/'), env({ get_board: { fixtures: [FIX] }, get_hero: {} }) as any))!.text();
+  assert.doesNotMatch(html, /id="ow-boot"/);
+  assert.doesNotMatch(html, /data-lead=/);
+  assert.doesNotMatch(html, /rel="preload" as="image"/);
 });
 
 test('the match event carries everything Google requires, and nests no other event', async () => {

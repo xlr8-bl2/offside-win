@@ -250,9 +250,13 @@ test('the slate freezes a write-up at kick-off', () => {
       `${col}: a played match's write-up can still be rewritten`,
     );
   }
-  for (const col of ['home_goals', 'away_goals', 'status']) {
-    assert.match(clause, new RegExp(`${col} = excluded\\.${col}`), `${col}: stops updating after kick-off`);
+  for (const col of ['home_goals', 'away_goals']) {
+    assert.match(clause, new RegExp(`${col} = COALESCE\\(excluded\\.${col}, fixture\\.${col}\\)`), `${col}: stops updating after kick-off, or a feed without one takes a final score back`);
   }
+  // A final score already written (by full time or the owner's hand) is not
+  // taken back by a feed that still says "not started" (3 November 2026).
+  assert.match(clause, /status = CASE WHEN fixture\.home_goals IS NOT NULL AND excluded\.home_goals IS NULL [\s\S]{0,40}THEN fixture\.status ELSE excluded\.status END/,
+    'status: stops updating after kick-off, or a written result goes back to "not started"');
 });
 
 test('the fixture page and the board read calls from the record', () => {

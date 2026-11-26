@@ -61,6 +61,27 @@ export const kindOf = (url: URL) => url.pathname.replace(/\/\d+(?=\/)/g, '/:id')
 export const quota = { remaining: null as number | null, exhausted: false };
 
 /**
+ * Asks made for results (a finished match's final score) come first and have
+ * no floor: the job's reserve is set aside while `fn` runs, so a slate pass
+ * that has reached its own floor can still grade the calls on what finished
+ * (worker/src/allowance.ts has the whole order). Only the provider saying
+ * nothing is left stops them.
+ */
+let floor: number | null = null;
+const floorNow = () => floor ?? config.bsd.reserve;
+export async function asResults<T>(fn: () => Promise<T>): Promise<T> {
+  const wasExhausted = quota.exhausted;
+  floor = 0;
+  if (quota.remaining !== 0) quota.exhausted = false;
+  try {
+    return await fn();
+  } finally {
+    floor = null;
+    if (wasExhausted || (quota.remaining !== null && quota.remaining <= config.bsd.reserve)) quota.exhausted = true;
+  }
+}
+
+/**
  * Response cache, with a lifetime per kind of read.
  *
  * Caching the outcome rather than the payload means a 403 or 404 is
@@ -158,7 +179,7 @@ export async function bsdRaw<T = unknown>(
   }
   // Out of allowance, or down to what is kept for the other jobs: an old
   // answer is better than none, and nothing is asked.
-  if (quota.exhausted || (quota.remaining !== null && quota.remaining <= config.bsd.reserve)) {
+  if (quota.exhausted || (quota.remaining !== null && quota.remaining <= floorNow())) {
     quota.exhausted = true;
     if (hit) { stats.cacheHits++; return hit.out as FetchOutcome<T>; }
     return spent();

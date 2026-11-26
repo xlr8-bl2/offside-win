@@ -241,6 +241,27 @@ export function betslip(market, outcome, line, H, A) {
   }
 }
 
+/**
+ * A handicap in the bet slip's own terms (owner, 21 November 2026: "write
+ * direct betting terms"). The lines the engine still calls read as the bets
+ * they are, and anything else as the book prints it:
+ *
+ *    0    Jordan draw no bet       (a draw gives the stake back)
+ *   +0.5  Jordan double chance     (win or draw)
+ *   -0.5  Jordan to win
+ *   +2    Jordan +2.0              (no longer called; older results)
+ *
+ * The line under the name (handicapWins) says what wins, loses or comes back.
+ */
+export function handicapName(own, team) {
+  if (own === null || own === undefined || !Number.isFinite(Number(own))) return `${team} on the handicap`;
+  const v = Number(own);
+  if (v === 0) return `${team} draw no bet`;
+  if (v === 0.5) return `${team} double chance`;
+  if (v === -0.5) return `${team} to win`;
+  return `${team} ${handicapLine(v)}`;
+}
+
 /** "-1.0", "+0.5", "0.0", "-0.75": a handicap the way the books print it. */
 export function handicapLine(n) {
   const v = Math.round(n * 100) / 100;
@@ -261,14 +282,14 @@ function plainly({ market, outcome, line, home, away, odds, stake = purse().stak
       return out('Draw', 'The match to end level', 'The match must finish level.');
 
     case 'double_chance':
-      if (outcome === '1X') return out(`${H} to win or draw`, `Two results out of three`, `${H} must win or draw. Only ${article(A)} ${A} win loses.`);
-      if (outcome === 'X2') return out(`${A} to win or draw`, `Two results out of three`, `${A} must win or draw. Only ${article(H)} ${H} win loses.`);
-      return out('Either team to win', 'Anything but a draw', 'Someone must win. A draw loses.');
+      if (outcome === '1X') return out(`${H} double chance`, `Two results out of three`, `${H} must win or draw. Only ${article(A)} ${A} win loses.`);
+      if (outcome === 'X2') return out(`${A} double chance`, `Two results out of three`, `${A} must win or draw. Only ${article(H)} ${H} win loses.`);
+      return out('No draw (double chance 12)', 'Anything but a draw', 'Someone must win. A draw loses.');
 
     case 'draw_no_bet': {
       const t = outcome === 'HOME' ? H : A;
       const o = outcome === 'HOME' ? A : H;
-      return out(`${t} to win`, `${t} to win, with a draw refunded`,
+      return out(`${t} draw no bet`, `${t} to win, with a draw refunded`,
         `${t} must win. If it finishes level your stake comes back, so only ${article(o)} ${o} win loses.`);
     }
 
@@ -281,7 +302,7 @@ function plainly({ market, outcome, line, home, away, odds, stake = purse().stak
       const own = outcome === 'HOME' ? line : -line;
       const start = -own;
       return out(
-        `${t} ${handicapLine(own)}`,
+        handicapName(own, t),
         start > 0 ? `${t}, giving a ${fmtStart(start)} start` : `${t}, with a ${fmtStart(-start)} start`,
         handicapWins(own, t),
         { outcomes: handicapOutcomes(own, t) },
@@ -300,11 +321,10 @@ function plainly({ market, outcome, line, home, away, odds, stake = purse().stak
       // thing, and nobody has ever watched half a goal.
       const words = ['no', 'one', 'two', 'three', 'four', 'five', 'six'];
       const say = (k) => words[k] ?? String(k);
-      const name = Number.isInteger(n)
-        ? `${OVER_UNDER[String(outcome).toLowerCase()]} ${n} goals`
-        : isOver
-          ? `${say(need).replace(/^./, (c) => c.toUpperCase())} or more goals`
-          : need === 0 ? 'No goals' : `${say(need).replace(/^./, (c) => c.toUpperCase())} goal${need === 1 ? '' : 's'} or fewer`;
+      // The bet slip's own words (owner, 21 November 2026): "Under 3.5 goals",
+      // not "three goals or fewer". The line under it says what it needs.
+      void say;
+      const name = `${isOver ? 'Over' : 'Under'} ${n} goals`;
       return out(
         name,
         `Total goals by both sides`,
@@ -318,7 +338,7 @@ function plainly({ market, outcome, line, home, away, odds, stake = purse().stak
       const n = line ?? 0;
       const isOver = String(outcome).toLowerCase() === 'over';
       return out(
-        `${OVER_UNDER[String(outcome).toLowerCase()]} ${n} corners`,
+        `${isOver ? 'Over' : 'Under'} ${n} corners`,
         `Corners taken by both sides`,
         isOver ? `${Math.ceil(n)} corners or more in total.` : `${Math.floor(n)} corners or fewer in total.`,
       );
@@ -337,7 +357,7 @@ function plainly({ market, outcome, line, home, away, odds, stake = purse().stak
       const n = line ?? 0.5;
       const isOver = String(outcome).toLowerCase() === 'over';
       return out(
-        `${OVER_UNDER[String(outcome).toLowerCase()]} ${n} red cards`,
+        `${isOver ? 'Over' : 'Under'} ${n} red cards`,
         'Red cards shown in the match',
         isOver ? `${Math.ceil(n)} red card${Math.ceil(n) === 1 ? '' : 's'} or more.` : 'No red card shown.',
       );

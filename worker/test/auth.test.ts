@@ -5,6 +5,11 @@ import { localD1 } from './d1.ts';
 import worker from '../src/index.ts';
 import { cleanEmail, landing, verifyGoogle } from '../src/auth.ts';
 import { sha256Hex } from '../src/d1read.ts';
+import { setFree } from '../src/d1read.ts';
+
+// These check the wall and the checkout, which the free site switches off
+// (d1read.ts FREE); free-site.test.ts checks the site as it runs now.
+setFree(false);
 
 /**
  * Signing in without Supabase (auth.ts, profile.ts), end to end through the

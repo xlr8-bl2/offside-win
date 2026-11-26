@@ -1,6 +1,11 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/index.ts';
+import { setFree } from '../src/d1read.ts';
+
+// These check the wall and the checkout, which the free site switches off
+// (d1read.ts FREE); free-site.test.ts checks the site as it runs now.
+setFree(false);
 
 /**
  * The routing and header wiring, driven end to end.
@@ -118,7 +123,7 @@ test('/api/config serves what the browser needs to reach Supabase Auth', async (
   assert.equal(calls.length, 0, 'it answers from env and must not touch the database');
   // The Google client ID is public too (it is in every Google sign-in link);
   // the client secret is never in the Worker at all.
-  assert.deepEqual(await res.json(), { supabaseUrl: ENV.SUPABASE_URL, anonKey: ANON, googleClientId: '', googleRedirect: false, whopAccount: '' });
+  assert.deepEqual(await res.json(), { supabaseUrl: ENV.SUPABASE_URL, anonKey: ANON, googleClientId: '', googleRedirect: false, whopAccount: '', ads: null });
   assert.match(res.headers.get('cache-control')!, /public/, 'it is the same for everyone');
 });
 

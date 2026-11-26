@@ -208,6 +208,8 @@ export interface WhopCheckoutInput {
   trialDays?: number;
   /** The dashboard offer this purchase used, if any: kept in Whop's metadata. */
   promo?: string;
+  /** The free days are a friend's link's (referral.ts), not a plan switch's. */
+  referral?: boolean;
 }
 
 /**
@@ -246,7 +248,8 @@ export function inlinePlan(input: WhopCheckoutInput): Record<string, unknown> {
 
 const whopMetadata = (input: WhopCheckoutInput) =>
   ({ user_id: input.user.id, plan: input.plan.id, ...(input.user.email ? { email: input.user.email } : {}),
-     ...(input.trialDays && !input.promo ? { switch: '1' } : {}),
+     ...(input.trialDays && !input.promo && !input.referral ? { switch: '1' } : {}),
+     ...(input.referral ? { referral: '1' } : {}),
      ...(input.promo ? { promo: input.promo } : {}) });
 
 /**

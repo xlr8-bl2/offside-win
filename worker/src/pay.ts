@@ -13,6 +13,7 @@
  */
 
 import { sessionAccount, type AuthDb } from './auth.ts';
+import { friendDays } from './referral.ts';
 import * as pdb from './paydb.ts';
 import { getAccount, getPromos, type D1Read } from './d1read.ts';
 import { accessEndedMail, membershipMail, receiptMail, renewalStoppedMail, renewedMail, sendMail, type MailEnv } from './mail.ts';
@@ -339,6 +340,12 @@ export async function offerFor(
   return null;
 }
 
+/** Free days from a friend's link for this buyer, or 0 (referral.ts). */
+async function friendTrial(env: PayEnv, user: { id: string; email: string | null }): Promise<number> {
+  if (!env.DB) return 0;
+  return friendDays(env.DB, user, await hadMembership(env, user));
+}
+
 /** Whether an account has ever had a membership, by any route. */
 async function hadMembership(env: PayEnv, user: { id: string; email: string | null }): Promise<boolean> {
   if (env.DB) return pdb.hadMembership(env.DB, user);
@@ -412,6 +419,10 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
     // switching is never shown one, so one asked for here is set aside.
     const offer = sw ? null : await offerFor(env, promoId, { id: String(plan.id), amount_minor: plan.amount_minor }, user);
     if (offer && 'error' in offer) return json({ error: offer.error }, 409);
+    // A friend's link (referral.ts): the first days free on a plan that
+    // renews, for a new member, alongside a deal if one is running. Never on
+    // top of a trial, and never for someone switching.
+    const friend = !sw && renews && !offer?.trialDays ? await friendTrial(env, user) : 0;
     // Stop the old plan first. Only then is the new one offered.
     if (sw && !(await stopRenewals(env, user))) return json({ error: SWITCH_CLOSED }, 503);
     // The card form on our own page: a checkout configuration made here, with
@@ -433,8 +444,9 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
           },
           user: { id: user.id, email: user.email },
           returnUrl: `${site}/#/account?paid=1`,
-          trialDays: sw?.trialDays ?? offer?.trialDays,
+          trialDays: sw?.trialDays ?? offer?.trialDays ?? (friend || undefined),
           promo: offer?.id,
+          referral: friend > 0,
         });
         return json({ checkout: made.id, link: made.link, returnUrl: `${site}/#/account?paid=1`, switch: sw });
       } catch (err) {
@@ -447,7 +459,7 @@ export async function checkout(request: Request, env: PayEnv, jwt: string | null
     // so the webhook can find the account. It charges the full price at once,
     // so it is never used for a switch.
     if (sw) return json({ error: SWITCH_CLOSED }, 503);
-    if (offer) return json({ error: 'The offer could not be applied here. Nothing has been charged. Try again in a minute.' }, 503);
+    if (offer || friend) return json({ error: 'The offer could not be applied here. Nothing has been charged. Try again in a minute.' }, 503);
     if (typeof plan.checkout_url !== 'string' || !plan.checkout_url) {
       return json({ error: 'That plan has no checkout yet.' }, 503);
     }
@@ -1041,6 +1053,9 @@ export async function charge(request: Request, env: PayEnv, jwt: string | null):
   // A free trial takes nothing today, so it is never a card charge here: the
   // page opens the checkout, which starts the free days.
   if (offer?.trialDays) return json({ error: 'A free trial starts in Whop\'s checkout. Nothing has been charged.', fallback: true }, 409);
+  if (String(plan.id) !== 'matchday' && await friendTrial(env, user)) {
+    return json({ error: 'Your free week starts in Whop\'s checkout. Nothing has been charged.', fallback: true }, 409);
+  }
   await recordConsent(env, jwt!, String(plan.id), consent);
 
   const site = env.SITE_URL ?? new URL(request.url).origin;

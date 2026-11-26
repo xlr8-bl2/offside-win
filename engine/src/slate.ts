@@ -1,4 +1,6 @@
 import { backsRotatedSide } from './context/xi.ts';
+// @ts-expect-error -- plain JS module shared with the site
+import { describe } from '../../public/js/lib/markets.js';
 import { chanceInWords, openSlipLegs, refreshSlip } from './slip.ts';
 import { bsdList, bsdOrNull, byKind as bsdByKind, num, quota as bsdQuota, setNearFixtures, str, stats as bsdStats, toEpoch } from './bsd.ts';
 import { config } from './config.ts';
@@ -186,7 +188,8 @@ export function leagueRank(leagueId: number): number {
  * request.
  */
 export function narrativeKey(fixtureId: number, c: Candidate, news = ''): string {
-  return `narr:${fixtureId}:${c.market}:${c.outcome}:${c.line ?? ''}${news ? `:${fnv(news)}` : ''}`;
+  // v3: three paragraphs (21 November 2026); older entries are the preview and its why.
+  return `narr3:${fixtureId}:${c.market}:${c.outcome}:${c.line ?? ''}${news ? `:${fnv(news)}` : ''}`;
 }
 
 /**
@@ -221,12 +224,10 @@ const PREVIEW_RESERVE = 60;
  * so this is only context, and context reads better without HOME and AWAY in
  * it.
  */
+/** The call as the site names it (public/js/lib/markets.js), so the write-up and the page say the same bet. */
 function plainCall(c: Candidate, home: string, away: string): string {
-  return marketLabel(c)
-    .replace(/\bhome\b/gi, home)
-    .replace(/\baway\b/gi, away)
-    .replace(/\bHOME\b/g, home)
-    .replace(/\bAWAY\b/g, away);
+  try { return describe({ market: c.market, outcome: c.outcome, line: c.line, home, away, odds: null, stake: 10 }).name; }
+  catch { return marketLabel(c).replace(/\bhome\b/gi, home).replace(/\baway\b/gi, away); }
 }
 
 /**
@@ -1313,8 +1314,13 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
           'ON CONFLICT (id) DO UPDATE SET ' +
           'league_id = excluded.league_id, kickoff = excluded.kickoff, ' +
           'home_team = excluded.home_team, away_team = excluded.away_team, ' +
-          'status = excluded.status, provisional = excluded.provisional, ' +
-          'home_goals = excluded.home_goals, away_goals = excluded.away_goals, ' +
+          // A final score already written (full time, or the owner's own
+          // from the admin page) is a fact too: a feed that still says "not
+          // started" with no score does not take it back.
+          'status = CASE WHEN fixture.home_goals IS NOT NULL AND excluded.home_goals IS NULL ' +
+          'THEN fixture.status ELSE excluded.status END, provisional = excluded.provisional, ' +
+          'home_goals = COALESCE(excluded.home_goals, fixture.home_goals), ' +
+          'away_goals = COALESCE(excluded.away_goals, fixture.away_goals), ' +
           'live_home = excluded.live_home, live_away = excluded.live_away, live_minute = excluded.live_minute, ' +
           'home_team_id = excluded.home_team_id, away_team_id = excluded.away_team_id, ' +
           'rank = excluded.rank, computed_at = excluded.computed_at, ' +
@@ -1493,7 +1499,8 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
   // The next two weeks of matches, for search. Never allowed to fail the slate.
   try {
     const listed = await refreshSchedule(fitted);
-    console.log(`  listed ${listed} upcoming match${listed === 1 ? '' : 'es'} for search`);
+    if (listed === null) console.log('  search list: read within the last four hours, not due');
+    else console.log(`  listed ${listed} upcoming match${listed === 1 ? '' : 'es'} for search`);
   } catch (err) {
     console.log(`  schedule skipped: ${err instanceof Error ? err.message : String(err)}`);
   }
