@@ -558,6 +558,22 @@ CREATE TABLE IF NOT EXISTS team_shot (
   updated_at INTEGER NOT NULL
 );
 
+-- A finished match underneath its score (engine/src/deep.ts): the starting
+-- elevens and formations, who was missing and why, and each player's numbers
+-- (chances, creation, carrying the ball), compact. One row per match, written
+-- once; the provider's free plan allows that, not a fresh look every pass.
+CREATE TABLE IF NOT EXISTS match_deep (
+  match_id INTEGER PRIMARY KEY,
+  home_formation TEXT,
+  away_formation TEXT,
+  home_xi TEXT,
+  away_xi TEXT,
+  home_out TEXT,
+  away_out TEXT,
+  players TEXT,
+  fetched_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS venue (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,

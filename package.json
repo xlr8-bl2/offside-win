@@ -38,6 +38,7 @@
     "whop:check": "npm -w engine run whop:check",
     "whop:stop": "npm -w engine run whop:stop",
     "lab:dump": "npm -w engine run lab:dump",
+    "history:deep": "npm -w engine run history:deep",
     "gemini:check": "npm -w engine run gemini:check",
     "mail:route": "npm -w engine run mail:route",
     "cf:usage": "npm -w engine run cf:usage",

@@ -49,6 +49,20 @@ jobs:
           # queries. Set the LEAGUES repository variable to narrow it again.
           LEAGUES: ${{ vars.LEAGUES }}
         run: npm run history
+      # Line-ups and each player's numbers for finished matches, once each
+      # (engine/src/deep.ts): two requests a match, most recent first, at most
+      # DEEP_LIMIT a run, and never below 3,000 of the day's allowance, which
+      # stays the slate's. A backfill of the past months is spread over days.
+      - name: Line-ups and player numbers
+        continue-on-error: true
+        env:
+          BSD_API_KEY: ${{ secrets.BSD_API_KEY }}
+          DB_BACKEND: d1
+          ENGINE_DB_URL: https://offside.win/api/internal/db
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          BSD_RESERVE: '3000'
+          DEEP_LIMIT: '600'
+        run: npm run history:deep
       - name: Fit ratings
         env:
           BSD_API_KEY: ${{ secrets.BSD_API_KEY }}
