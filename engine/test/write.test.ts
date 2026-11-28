@@ -305,18 +305,19 @@ test('a single model is not asked a third time', async () => {
 
 const CALL_REQ: WriteRequest = { ...REQ, odds: 1.29 };
 const para = (lead: string) => `${lead} ${'KFUM Oslo travel badly and Sarpsborg have lost two of their last six, which says enough about both. '.repeat(3).trim()}`;
-const THREE = `CALL:\n${para('Sarpsborg 08 to win or draw is the call, because KFUM Oslo travel badly.')}\nHOW:\n${para('Sarpsborg will have the ball.')}\nONLY:\n${para('Four games into the new man at KFUM Oslo and nothing has changed away from home.')}`;
+const THREE = `SETUP:\n${para('Four games into the new man at KFUM Oslo and nothing has changed away from home.')}\nHOW:\n${para('Sarpsborg will have the ball.')}\nCALL:\n${para('Sarpsborg 08 to win or draw is the call, because KFUM Oslo travel badly.')}`;
 
-test('a call gets three straight paragraphs: the bet first, then how, then what others miss', async () => {
+test('a call gets three paragraphs built as an argument: where they are, how they play, then the call', async () => {
   let prompt = '';
   const r = await write(CALL_REQ, { name: 'stub', generate: async (p) => { prompt = p; return THREE; } });
-  assert.match(prompt, /CALL:[\s\S]*HOW:[\s\S]*ONLY:/);
-  assert.match(prompt, /Your first sentence names the bet/);
+  assert.match(prompt, /SETUP:[\s\S]*HOW:[\s\S]*CALL:/);
+  assert.match(prompt, /the honest case against it/);
+  assert.match(prompt, /Be fair to both sides/);
   assert.doesNotMatch(prompt, /PREVIEW:/, 'no warm-up paragraph is asked for');
   assert.ok(r.text, r.rejections.join(','));
   const paras = r.text!.split('\n\n');
   assert.equal(paras.length, 3);
-  assert.match(paras[0]!, /^Sarpsborg 08 to win or draw is the call/);
+  assert.match(paras[2]!, /^Sarpsborg 08 to win or draw is the call/);
   assert.match(prompt, /Never mention odds/);
   assert.equal(r.why, null, 'no separate members\' paragraph on a free site');
 });

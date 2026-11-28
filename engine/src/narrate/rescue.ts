@@ -189,7 +189,20 @@ export function fromReads(home: string, away: string, facts: PubFact[], call: Ca
       `That is the risk in this one. But ${S} only have to ${call.cushion}, which is a long way short of winning it.`,
     ], seed);
   }
-  const text = [take, ...body, close].join(' ');
+  /*
+   * What is riding on it comes first, as the chain does (chain.ts): a side
+   * bottom of the table or in a title race is the frame every read sits in.
+   * Only the stakes and the table, not the form lookups, which a reader can
+   * find anywhere and which the reads already say better.
+   */
+  const RIDING = /\b(table|relegation|title race|Europe|drop zone|derby|six-pointer|nothing left to play for|off the top|level on points with the leaders)\b/;
+  const riding = facts
+    .filter((f) => f.lean === undefined && RIDING.test(f.text) && !f.text.includes(' in the table'))
+    .sort((a, b) => b.weight - a.weight);
+  const r0 = riding[0];
+  const r1 = r0 && riding.find((f) => f.side !== r0.side && f.side !== 'match');
+  const setting = r0 ? sentence(r1 ? `${r0.text}, and ${r1.text}` : r0.text) : null;
+  const text = [...(setting ? [setting] : []), take, ...body, close].join(' ');
   if (text.split(/\s+/).length < MIN_WORDS) return null;
   // Every read is already said in the pub's words; this only makes sure.
   if (findBannedInProse(text, [home, away, ...facts.map((f) => f.text)]).length) return null;

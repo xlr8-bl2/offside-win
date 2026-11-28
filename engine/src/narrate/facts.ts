@@ -49,7 +49,19 @@ export interface PubFact {
   lean?: -1 | 0 | 1;
   /** On the read that puts both sides together: whose game it is. */
   decides?: 'home' | 'away';
+  /**
+   * Where the fact sits in the argument (chain.ts): what is riding on it and
+   * the state of each side, how each side plays and makes its chances, who
+   * drives it, who is missing and what that changes, the conditions, and the
+   * luck in the results. The writer is handed the facts in that order and in
+   * proportion, so no one kind of fact can be the whole analysis.
+   */
+  topic?: Topic;
 }
+
+export type Topic = 'situation' | 'play' | 'people' | 'missing' | 'conditions' | 'luck';
+
+const tag = (topic: Topic, facts: PubFact[]): PubFact[] => facts.map((f) => (f.topic ? f : { ...f, topic }));
 
 interface LedgerEntry {
   id: string;
@@ -412,6 +424,11 @@ const ORD = (v: number): string => {
 function tableFacts(b: Bundle): PubFact[] {
   const out: PubFact[] = [];
   const size = num(b.standings?.size);
+  // A cup or a league phase is not a league table: "35th, in the bottom three"
+  // was Lille in a Champions League phase of thirty-six. The same line as the
+  // stakes read (context/stakes.ts) is drawn here.
+  const deepest = Math.max(num(b.standings?.home?.position) ?? 0, num(b.standings?.away?.position) ?? 0);
+  if ((size ?? 0) > 24 || deepest > 24) return out;
   for (const [side, team] of [['home', b.home], ['away', b.away]] as const) {
     const pos = num(b.standings?.[side]?.position);
     if (!pos) continue;
@@ -869,12 +886,93 @@ function onePlayer(p: BundlePlayer, team: string, side: 'home' | 'away', now: nu
  * recording that it looked and found nothing, which is a note to us and not a
  * fact about the football.
  */
+/**
+ * The facts that join the others up.
+ *
+ * Every fact was scored on its own, so "Bayern have created the better chances
+ * in eight of their last nine" led the write-up at Lille with Kane, Olise and
+ * Díaz out, the players who made those chances. The record and the absence
+ * were both in the list and nothing said that one undoes the other. That is
+ * the difference between a list of facts and an argument.
+ *
+ * So: a side's chance-making record is said to have come with the players who
+ * are now missing, and stops being the lead; a missing top scorer, creator,
+ * first-choice keeper or the defender holding the back line is said for what
+ * it takes out of the side; and a confirmed team sheet without a side's main
+ * man in it says so (Caen's stars rested at Saint-Omer, LASK's forwards
+ * benched at Bodø). Facts only: who is out comes from the team news and the
+ * player profiles, and nothing is guessed about a player we have no record of.
+ */
+const DRIVES: Array<[string, string]> = [
+  ['top_scorer', 'their top scorer'],
+  ['top_creator', 'the player who sets up most of their goals'],
+  ['chance_creator', 'the player who makes most of their chances'],
+];
+
+function linkFacts(b: Bundle, out: PubFact[]): void {
+  const players = (b.players ?? []).filter((p) => str(p.name) && (p.side === 'home' || p.side === 'away'));
+  const confirmed = b.lineups?.status === 'confirmed';
+  for (const side of ['home', 'away'] as const) {
+    const team = side === 'home' ? b.home : b.away;
+    const tags = (p: BundlePlayer) => new Set(p.tags ?? []);
+    const role = (p: BundlePlayer) => DRIVES.find(([t]) => tags(p).has(t))?.[1] ?? null;
+
+    // Out, or fit and left out of a confirmed eleven.
+    const xi = new Set((b.lineups?.[side]?.players ?? []).filter((p) => p.starting && p.name).map((p) => threatKey(p.name!)));
+    const benched = confirmed && xi.size >= 9
+      ? players.filter((p) => p.side === side && p.status === 'fit' && role(p) && !xi.has(threatKey(p.name!)))
+      : [];
+    const out0 = players.filter((p) => p.side === side && p.status === 'out' && role(p));
+    const drivers = [...out0, ...benched];
+
+    for (const p of benched) {
+      out.push({ text: `${p.name}, ${role(p)}, is not in the ${team} eleven`, side, weight: 97, lean: -1, topic: 'missing' });
+    }
+
+    if (drivers.length) {
+      const creating = out.find((f) => f.side === side && f.topic === 'play' && f.lean === 1 && /created the better chances/.test(f.text));
+      const names = list(drivers.slice(0, 2).map((p) => p.name!));
+      if (creating) {
+        out.push({
+          text: `${team}'s run of making the better chances came with ${names} in the side, and ${drivers.length === 1 ? 'he is not' : 'they are not'} playing here`,
+          side, weight: 99, lean: -1, topic: 'missing',
+        });
+        // The record no longer leads, and neither does the line that called
+        // the match on it.
+        creating.weight = Math.min(creating.weight, 80);
+        for (let i = out.length - 1; i >= 0; i--) if (out[i]!.decides === side) out.splice(i, 1);
+      } else {
+        for (const p of out0.slice(0, 2)) {
+          const what = tags(p).has('top_scorer') ? 'goals' : 'chances';
+          out.push({ text: `${team} are without ${p.name}, ${role(p)}, so the ${what} have to come from somewhere else`, side, weight: 92, lean: -1, topic: 'missing' });
+        }
+      }
+    }
+
+    // A player the links name is said there, for what he takes out of the
+    // side, and not a second time as a bare "is out for".
+    for (const p of drivers) {
+      const lead = `${p.name} is `;
+      for (let i = out.length - 1; i >= 0; i--) {
+        const f = out[i]!;
+        if (f.side === side && f.topic === 'missing' && f.text.startsWith(lead) && !/not in the/.test(f.text)) out.splice(i, 1);
+      }
+    }
+
+    for (const p of players.filter((x) => x.side === side && x.status === 'out')) {
+      const t = tags(p);
+      if (t.has('first_choice_keeper')) out.push({ text: `${team} are without their first-choice keeper, ${p.name}`, side, weight: 88, lean: -1, topic: 'missing' });
+      else if (t.has('defensive_rock')) out.push({ text: `${team} are without ${p.name}, the defender who holds their back line together`, side, weight: 85, lean: -1, topic: 'missing' });
+    }
+  }
+}
+
 export function pubFacts(bundle: Bundle): PubFact[] {
   const { home, away } = bundle;
   const out: PubFact[] = [];
 
-  out.push(...formFacts(bundle.form?.home, home, 'home'));
-  out.push(...formFacts(bundle.form?.away, away, 'away'));
+  out.push(...tag('situation', formFacts(bundle.form?.home, home, 'home')));
+  out.push(...tag('situation', formFacts(bundle.form?.away, away, 'away')));
 
   for (const entry of bundle.ledger ?? []) {
     if (entry.state !== 'COMPUTED') continue;
@@ -883,36 +981,36 @@ export function pubFacts(bundle: Bundle): PubFact[] {
     const side: 'home' | 'away' = id.includes('.away') ? 'away' : 'home';
     const team = side === 'home' ? home : away;
 
-    if (id.endsWith('.absences')) out.push(...absenceFacts(ev, team, side));
-    else if (id.startsWith('manager.')) out.push(...managerFacts(id, ev, team, side));
-    else if (id.startsWith('fatigue.') && !id.includes('travel')) out.push(...fatigueFacts(ev, team, side));
-    else if (id === 'stakes.season') out.push(...stakesFacts(ev, home, away));
-    else if (id === 'environment.weather') out.push(...weatherFacts(ev));
-    else if (id === 'referee.tendency') out.push(...refereeFacts(ev));
+    if (id.endsWith('.absences')) out.push(...tag('missing', absenceFacts(ev, team, side)));
+    else if (id.startsWith('manager.')) out.push(...tag('situation', managerFacts(id, ev, team, side)));
+    else if (id.startsWith('fatigue.') && !id.includes('travel')) out.push(...tag('situation', fatigueFacts(ev, team, side)));
+    else if (id === 'stakes.season') out.push(...tag('situation', stakesFacts(ev, home, away)));
+    else if (id === 'environment.weather') out.push(...tag('conditions', weatherFacts(ev)));
+    else if (id === 'referee.tendency') out.push(...tag('conditions', refereeFacts(ev)));
     else if (id === 'fixture.revenge') {
       const w = str(ev['reverse_winner']);
       const sc = str(ev['reverse_score']);
       if (w && sc) {
         const [a, b] = sc.split('-').map(Number);
         const loser = w === home ? away : home;
-        out.push({ text: `${w} beat ${loser} ${Math.max(a!, b!)}-${Math.min(a!, b!)} when they met earlier this season`, side: w === home ? 'home' : 'away', weight: 50 });
+        out.push({ text: `${w} beat ${loser} ${Math.max(a!, b!)}-${Math.min(a!, b!)} when they met earlier this season`, side: w === home ? 'home' : 'away', weight: 50, topic: 'situation' });
       }
     }
     else if (id === 'fixture.derby' && ev['derby'] === true) {
-      out.push({ text: 'this is a local derby', side: 'match', weight: 80 });
+      out.push({ text: 'this is a local derby', side: 'match', weight: 80, topic: 'situation' });
     }
   }
 
   // This season's meeting, with who won it, says what "the last meeting
   // finished 1-0" says and more, so it is said once.
   const reverse = out.some((f) => f.text.endsWith('when they met earlier this season'));
-  out.push(...h2hFacts(bundle.h2h, home, away).filter((f) => !(reverse && f.text.startsWith('the last meeting'))));
-  out.push(...tableFacts(bundle));
-  out.push(...lineupFacts(bundle));
-  out.push(...scorerFacts(bundle));
-  out.push(...playerFacts(bundle));
-  out.push(...managerNameFacts(bundle));
-  out.push(...extrasFacts(bundle));
+  out.push(...tag('situation', h2hFacts(bundle.h2h, home, away).filter((f) => !(reverse && f.text.startsWith('the last meeting')))));
+  out.push(...tag('situation', tableFacts(bundle)));
+  out.push(...tag('people', lineupFacts(bundle)));
+  out.push(...tag('people', scorerFacts(bundle)));
+  out.push(...playerFacts(bundle).map((f) => (f.threat ? { ...f, topic: 'people' as const } : { ...f, topic: 'missing' as const })));
+  out.push(...tag('people', managerNameFacts(bundle)));
+  out.push(...tag('people', extrasFacts(bundle)));
 
   // The reads underneath the results, which lead (insight.ts).
   const m = bundle.matches;
@@ -920,8 +1018,11 @@ export function pubFacts(bundle: Bundle): PubFact[] {
     out.push(...matchInsights(
       { name: home, games: teamGames(m.home, m.homeId) },
       { name: away, games: teamGames(m.away, m.awayId) },
-    ));
+    ).map((f) => ({ ...f, topic: f.lean === 0 ? 'luck' as const : 'play' as const })));
   }
+
+  // What the absences do to the rest of the argument (chain.ts).
+  linkFacts(bundle, out);
 
   // Rest is news only when one side has had clearly less of it. Both sides
   // "played only three days ago" is the international calendar, not a reason.
@@ -929,7 +1030,7 @@ export function pubFacts(bundle: Bundle): PubFact[] {
   if (rested.length === 2) for (const f of rested) out.splice(out.indexOf(f), 1);
 
   if (bundle.lineups?.status === 'confirmed') {
-    out.push({ text: 'the team sheets are confirmed', side: 'match', weight: 20 });
+    out.push({ text: 'the team sheets are confirmed', side: 'match', weight: 20, topic: 'people' });
   }
 
   // Deduplicate, keeping the highest-weighted phrasing of anything repeated.

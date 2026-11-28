@@ -135,3 +135,16 @@ test('callNeed reads the handicap from the side it is on', async () => {
   assert.deepEqual(callNeed('asian_handicap', 'AWAY', -0.5), { side: 'away', cushion: 'avoid defeat' });
   assert.equal(callNeed('over_under_15', 'over', 1.5), null);
 });
+
+test('the reads paragraph opens on what is riding on it, and still leaves the lookups out', async () => {
+  const { fromReads } = await import('../src/narrate/rescue.ts');
+  const facts = [
+    { text: 'Preston are bottom of the table', side: 'away', weight: 78, topic: 'situation' },
+    { text: 'Cardiff have won four of their last six', side: 'home', weight: 85, topic: 'situation' },
+    { text: 'Cardiff have created the better chances in six of their last eight games', side: 'home', lean: 1, weight: 96 },
+    { text: 'Preston have been out-created in five of their last seven games', side: 'away', lean: -1, weight: 96 },
+  ] as any;
+  const t = fromReads('Cardiff', 'Preston', facts)!;
+  assert.match(t, /^Preston are bottom of the table\./, t);
+  assert.doesNotMatch(t, /won four of their last six/);
+});

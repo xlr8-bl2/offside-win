@@ -49,6 +49,32 @@ What the audit found (scratchpad `audit/`; data from the public API, kick-off fi
   with who is missing, the matchup, the verdict), and have the call follow it.
 
 
+### The analysis as an argument (owner, 28 November 2026)
+
+The owner: the write-up is "biased towards chance creation... who created the chances, why, what
+changes". The writer used to get the eighteen heaviest facts in one list, and the chance-creation
+reads weigh 96 to 99, so they led nearly everything, with nothing joining them to the team news.
+- **Every fact has a step** (`PubFact.topic`, set in `pubFacts`): situation, play, people, missing,
+  conditions, luck. `narrate/chain.ts` hands the writer the facts in that order, with a cap per step
+  and per side (situation 8 / 4, play 4 / 2, team news 6 / 3, the rest 3 / 2), so no one kind of
+  fact can fill the brief and both sides are in every step.
+- **Facts that join the others** (`linkFacts` in `facts.ts`, from the player profiles' tags): a
+  side's run of making the better chances "came with" a top scorer or creator who is out, and stops
+  leading (the deciding line built on it is dropped); a missing top scorer, creator, first-choice
+  keeper or the defender holding the back line is said for what it takes out; a fit top scorer or
+  creator missing from a confirmed eleven is said (Caen at Saint-Omer, LASK at Bodø). Facts only.
+- **The prompt** (`buildAnalysisPrompt`) is now SETUP (both sides: what it means, the state they
+  are in), HOW (how each side makes chances, who makes them, what the team news changes), CALL (the
+  matchup, the bet named, and the honest case against it). "Be fair to both sides" is a rule. The
+  preview prompt follows the same steps.
+- **The paragraph from the reads** (`rescue.ts`) opens on what is riding on it (table, stakes, a
+  derby) and picks up the links, which carry a lean.
+- **Tables:** the writer's table line now skips cups and league phases, as stakes does (Lille were
+  "35th, in the bottom three" of a Champions League phase).
+- Checked on the stored kick-off files of the November losses: Lille v Bayern now leads on Kane and
+  Olise out; Villa v Sunderland on Sunderland 19th without Brobbey and Xhaka; Cardiff v Preston on
+  Preston bottom and Lang not in their eleven.
+
 ### The lost calls, researched (owner, 27–28 November 2026)
 
 The owner: "research most lost matches like an actual analysis... we have been on the decline". All 17
