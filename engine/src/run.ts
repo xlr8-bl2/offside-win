@@ -140,6 +140,14 @@ const commands: Record<string, () => Promise<unknown>> = {
     return backfillHistory({ full: process.env.FULL_BACKFILL === 'true' });
   },
 
+  // Line-ups and each player's numbers for finished matches, once each (deep.ts).
+  async 'history:deep'() {
+    requireEnv();
+    await ensureSchema();
+    const { fetchDeep } = await import('./deep.ts');
+    return fetchDeep();
+  },
+
   // Card counts the provider's stats left blank because nothing was shown.
   async 'history:cards'() {
     requireEnv();
@@ -419,6 +427,18 @@ const commands: Record<string, () => Promise<unknown>> = {
     const json = JSON.stringify(rows, (_k, v) => (v instanceof Map ? { __map: [...v.entries()] } : v));
     writeFileSync('lab-history.json.gz', gzipSync(json));
     console.log(`lab:dump: ${rows.length} finished matches, ${Math.round(json.length / 1024)}KB of JSON.`);
+    // And the matches underneath (deep.ts), with each match's teams, for the
+    // studies of line-ups and who makes a side tick.
+    const { select } = await import('./store.ts');
+    const deep = [];
+    for (let off = 0; ; off += 500) {
+      const page = await select(`SELECT d.*, m.kickoff, m.league_id, m.home_team_id, m.away_team_id, m.home_goals, m.away_goals
+        FROM match_deep d JOIN match m ON m.id = d.match_id ORDER BY d.match_id LIMIT 500 OFFSET ?`, [off]);
+      deep.push(...page);
+      if (page.length < 500) break;
+    }
+    writeFileSync('lab-deep.json.gz', gzipSync(JSON.stringify(deep)));
+    console.log(`lab:dump: ${deep.length} matches with line-ups and player numbers.`);
   },
 
   async 'lab:live'() {

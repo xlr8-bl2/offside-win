@@ -106,3 +106,60 @@ test('fromReads never says the deciding line after the reads it is made of', asy
   const t = fromReads('Inter', 'Parma', facts);
   if (t) assert.doesNotMatch(t, /This is where it is decided/);
 });
+
+test('under a call, the reads never end by arguing the other side', async () => {
+  // Troyes v Le Havre, 22 November: "If that carries on, Troyes should have the
+  // better of it" above a pick on Le Havre +1.
+  const { fromReads, callNeed } = await import('../src/narrate/rescue.ts');
+  const facts = [
+    { text: 'Troyes have created the better chances in six of their last eight games', side: 'home', lean: 1, weight: 10 },
+    { text: 'Troyes have kept three clean sheets in their last five', side: 'home', lean: 1, weight: 8 },
+    { text: 'Le Havre have been out-created in five of their last seven games', side: 'away', lean: -1, weight: 9 },
+  ] as any;
+  // The handicap line is the home one: AWAY at -1 is Le Havre getting a goal.
+  const cushion = fromReads('Troyes', 'Le Havre', facts, callNeed('asian_handicap', 'AWAY', -1))!;
+  assert.ok(cushion, 'a paragraph');
+  assert.doesNotMatch(cushion, /Troyes should have the better of it|favours Troyes/, cushion);
+  assert.match(cushion, /Le Havre .*only have to avoid losing by two or more/, cushion);
+  assert.deepEqual(findBannedInProse(cushion, facts.map((f: any) => f.text)), []);
+  // A bet that needs Le Havre to win has no case in these reads.
+  assert.equal(fromReads('Troyes', 'Le Havre', facts, callNeed('1x2', 'AWAY', null)), null);
+  // Backing the side the reads favour is unchanged.
+  assert.equal(fromReads('Troyes', 'Le Havre', facts, callNeed('1x2', 'HOME', null)), fromReads('Troyes', 'Le Havre', facts));
+});
+
+test('callNeed reads the handicap from the side it is on', async () => {
+  const { callNeed } = await import('../src/narrate/rescue.ts');
+  assert.deepEqual(callNeed('asian_handicap', 'HOME', 0.5), { side: 'home', cushion: 'avoid defeat' });
+  assert.deepEqual(callNeed('asian_handicap', 'AWAY', 0.5), { side: 'away', cushion: null });
+  assert.deepEqual(callNeed('asian_handicap', 'AWAY', -0.5), { side: 'away', cushion: 'avoid defeat' });
+  assert.equal(callNeed('over_under_15', 'over', 1.5), null);
+});
+
+test('the reads paragraph opens on what is riding on it, and still leaves the lookups out', async () => {
+  const { fromReads } = await import('../src/narrate/rescue.ts');
+  const facts = [
+    { text: 'Preston are bottom of the table', side: 'away', weight: 78, topic: 'situation' },
+    { text: 'Cardiff have won four of their last six', side: 'home', weight: 85, topic: 'situation' },
+    { text: 'Cardiff have created the better chances in six of their last eight games', side: 'home', lean: 1, weight: 96 },
+    { text: 'Preston have been out-created in five of their last seven games', side: 'away', lean: -1, weight: 96 },
+  ] as any;
+  const t = fromReads('Cardiff', 'Preston', facts)!;
+  assert.match(t, /^Preston are bottom of the table\./, t);
+  assert.doesNotMatch(t, /won four of their last six/);
+});
+
+test('a record the team news has undone does not carry the paragraph', async () => {
+  const { fromReads } = await import('../src/narrate/rescue.ts');
+  const facts = [
+    { text: "FC Bayern München's run of making the better chances came with Harry Kane and Michael Olise in the side, and they are not playing here", side: 'away', lean: -1, weight: 99 },
+    { text: 'FC Bayern München have created the better chances in seven of their last nine games', side: 'away', lean: 1, weight: 80 },
+    { text: 'FC Bayern München have had most of the ball in seven of their last eight games, and they turn it into chances', side: 'away', lean: 1, weight: 74 },
+    { text: 'Hamburger SV are without Miro Muheim, their top scorer, so the goals have to come from somewhere else', side: 'home', lean: -1, weight: 92 },
+    { text: 'Hamburger SV have faced six or more efforts on target in four of their last six games. They are getting opened up', side: 'home', lean: -1, weight: 88 },
+  ] as any;
+  const t = fromReads('Hamburger SV', 'FC Bayern München', facts)!;
+  assert.ok(t);
+  assert.doesNotMatch(t, /all FC Bayern München|Bayern München should have the better of it|favours FC Bayern München/, t);
+  assert.match(t, /came with Harry Kane/);
+});

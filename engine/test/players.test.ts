@@ -283,3 +283,26 @@ test('a minor absentee is named in the team news, without a highlight reel', () 
   const texts = playerFacts({ home: 'England', away: 'Czechia', players: [{ ...saka, name: 'John Stones', importance: 0.02, tags: [] }] }).map((f) => f.text);
   assert.ok(!texts.some((t) => /John Stones (scored|had scored|had \w+ goals)/.test(t)), texts.join('\n'));
 });
+
+test('absences are named, and two forwards out at once is said', () => {
+  // Athletic without both centre-forwards read "none of them central to how
+  // the side plays". Weighed one at a time, neither cleared the line.
+  const ctx = {
+    home: {
+      team_id: 10, team_name: 'Athletic Club', squad: [
+        { id: 1, name: 'Gorka Guruzeta', position: 'F', availability: 'injured', injury_type: 'Hamstring', injury_expected_return: null },
+        { id: 2, name: 'Maroan Sannadi', position: 'F', availability: 'injured', injury_type: 'Knee', injury_expected_return: null },
+        { id: 3, name: 'Nico Williams', position: 'F', availability: null, injury_type: null, injury_expected_return: null },
+        { id: 4, name: 'Iñaki Williams', position: 'F', availability: null, injury_type: null, injury_expected_return: null },
+        { id: 5, name: 'Unai Simón', position: 'G', availability: null, injury_type: null, injury_expected_return: null },
+      ], scorers: [], manager: null, standing: null, recent: [], lastLineupIds: null, schedule: null,
+    },
+    away: { team_id: 20, team_name: 'Sevilla', squad: [], scorers: [], manager: null, standing: null, recent: [], lastLineupIds: null, schedule: null },
+    lineups: { status: 'predicted', confidence: 0.8, home: null, away: null, unavailable: [] },
+    players: [], event: {},
+  } as never;
+  const f = availabilityFactors(ctx).find((x) => x.id === 'availability.home.absences')!;
+  assert.doesNotMatch(f.note, /none of them central/);
+  assert.match(f.note, /Guruzeta|Sannadi/);
+  assert.match(f.note, /two forwards out at once|fit forward/);
+});

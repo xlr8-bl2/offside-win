@@ -88,3 +88,20 @@ test('a group stage is not read as a league table', async () => {
   assert.equal(table!.state, 'UNAVAILABLE');
   assert.ok(!/games remaining|mid-table/.test(table!.note), table!.note);
 });
+
+test('early in the season the table is still said, not "nothing riding"', async () => {
+  // Preston at Cardiff, Sunderland at Villa, Brighton at Hull (November): all
+  // read "Nothing much riding on this one for either side yet".
+  const { tableLine } = await import('../src/context/stakes.ts');
+  const t = table().map((r) => ({ ...r, played: 13 }));
+  const d = (row: StandingRow) => classifySide(row, t, 25, 38).detail;
+  assert.equal(tableLine('Preston', d(bottom(t))), 'Preston are bottom of the table');
+  assert.equal(tableLine('Sunderland', d(t[18]!)), 'Sunderland are in the drop zone');
+  assert.equal(tableLine('Leeds', d(t[16]!)), 'Leeds are only just above the drop zone');
+  assert.equal(tableLine('Arsenal', d(top(t))), 'Arsenal are top of the table');
+  assert.equal(tableLine('Brighton', d(t[1]!)), 'Brighton are second, two points off the top');
+  assert.equal(tableLine('Everton', d(t[9]!)), null, 'mid-table is not worth a line');
+  // Before six games the table is noise.
+  const early = table().map((r) => ({ ...r, played: 3 }));
+  assert.equal(tableLine('Preston', classifySide(bottom(early), early, 35, 38).detail), null);
+});

@@ -67,6 +67,12 @@ export class MissingEvidence extends Error {
  * a frame may state the range it is valid over, and falls out of the pool the
  * same way a frame with missing evidence does.
  */
+/** A new manager whose side has gone backwards since he came: no bounce to speak of. */
+function backwards(c: Claim): boolean {
+  const d = c.evidence.appointment_delta;
+  return typeof d === 'number' && d <= -0.25 && Number(c.evidence.matches_in_charge) >= 3;
+}
+
 function only(condition: boolean): void {
   if (!condition) throw new MissingEvidence('frame precondition');
 }
@@ -439,9 +445,15 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
     (c) => `${n(c.evidence.travel_km).toLocaleString('en-GB')} km of travel sits between ${c.subject} and kick-off, and away form flatters nobody after that.`,
   ],
 
+  // The bounce frames only hold inside the first five games and only for a side
+  // the change is helping: the settling read carries this predicate too, and
+  // so does a new man whose side is going backwards (context/manager.ts).
+  // Read from the evidence, not the polarity, which the case for a bet on the
+  // other side turns over (compose.ts, sideOriented).
   regime_new: [
     (c) => {
       const g = n(c.evidence.matches_in_charge);
+      only(g <= 5 && !backwards(c));
       return `${s(c.evidence.manager, 'The new manager')} is ${g} ${plural(g, 'game')} into the job at ${c.subject}, inside the window where a change of voice still lifts output.`;
     },
     (c) => {
@@ -449,17 +461,18 @@ export const FRAMES: Record<ClaimPredicate, Frame[]> = {
       const g = n(c.evidence.matches_in_charge);
       return typeof d === 'number'
         ? `${c.subject} have moved ${d >= 0 ? '+' : ''}${d.toFixed(2)} points per match since ${s(c.evidence.manager, 'the appointment')}, measured against the same number of games before it.`
-        : `${c.subject} are ${g} ${plural(g, 'game')} into a new regime, and the early bounce has not yet reverted.`;
+        : (only(g <= 5 && !backwards(c)), `${c.subject} are ${g} ${plural(g, 'game')} into a new regime, and the early bounce has not yet reverted.`);
     },
     (c) => {
       const g = n(c.evidence.matches_in_charge);
+      only(g <= 5);
       return `A new manager at ${c.subject} ${g} ${plural(g, 'match', 'matches')} ago means the market is still pricing the old side.`;
     },
     (c) => {
       const d = c.evidence.appointment_delta;
       return typeof d === 'number' && d < 0
         ? `The appointment at ${c.subject} has not taken: ${d.toFixed(2)} points per match against what the club was managing before it.`
-        : `${c.subject} are early enough into a new regime that recent form describes a different team.`;
+        : (only(n(c.evidence.matches_in_charge) <= 5), `${c.subject} are early enough into a new regime that recent form describes a different team.`);
     },
     (c) => {
       const g = n(c.evidence.matches_in_charge);

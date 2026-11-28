@@ -54,6 +54,13 @@ use. Only the account whose email hashes to `ADMIN_EMAIL_SHA256`
 - The site is free and paid for by ads (owner, 17 November 2026). Never add
   bookmaker affiliate links or bookmaker deals of any kind.
 
+- No fitting and no bias in the engine (owner, 28 November 2026). A change to how calls are made
+  ships only if it holds on matches it was not built from: every period of the A / B / C date
+  split in `lab:tune`, on all finished matches (never only the calls, never only the losses), and
+  for a reason in the football, not just a pattern in the numbers. A rule found by looking at
+  losses is a hypothesis, not a fix. A signal that flips between periods or needs its threshold
+  hunted for is noise and is left out, and the write-up is held to the same standard: it argues
+  from evidence for both sides, never for whichever side the call is on.
 - The owner works from a phone only. Trigger workflows and read logs yourself;
   never hand back steps that need a computer.
 - Secrets go in GitHub Actions secrets, never in chat. The repo is public, so

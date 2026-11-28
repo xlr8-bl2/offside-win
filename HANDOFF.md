@@ -14,6 +14,110 @@ meaningful step, and commits it with that step, not at the end of the day.
 
 ## Right now
 
+### The engine audit (owner, 26 November 2026): calls follow the market; the analysis is not contextual
+
+Owner, after Lille 2-1 Bayern (our call: Bayern win or draw at 1.17, with Kane, Olise and Díaz out):
+the engine is not contextual, it is biased to chance creation, and the call ignores the analysis.
+What the audit found (scratchpad `audit/`; data from the public API, kick-off files as stored):
+- **The call is the bookmakers' number.** `model_prob` equals the consensus (0.8367); our own
+  injury-adjusted model had Bayern avoiding defeat at about 64%. `config.confident.source` is
+  'consensus'; our model only blends on goals markets. The injuries change our model and the
+  write-up, and nothing in the decision.
+- **The write-up is ranked, not reasoned.** `narrate/insight.ts` weights the chance-creation reads
+  90 to 98, above almost every lookup; facts are scored one by one, never connected ("their chance
+  creators are out, so that record does not apply").
+- **Last 200 settled calls (3 to 26 November):** 81.8% landed against 82.4% priced: no better than the
+  market. Read loss by loss (34). Checked on all 372 finished matches still holding a kick-off file
+  (the favourite, did it win / avoid defeat, against its price): own-model disagreement, absence size
+  and competition type show no stable signal (a cup-and-disagreement pattern in the calls, 71%, was
+  92% across all matches: noise). Heavy rotation (3+ changes to the favourite's expected eleven)
+  looked strong (71% vs 86% priced, 35 matches) but is not monotonic and flips between halves on 55
+  confirmed line-ups: not shipped. Red cards on the backed side: 56% (in-match, not fixable).
+- **Provider audit (OpenAPI at sports.bzzoiro.com/api/schema/; probe run 45854050918):** on the free
+  plan, `/events/{id}/player-stats/` (per player: xG, xA, key passes, big chances created,
+  progressive carries, crosses, opposition-half passes, touches, rating, and more), `/stats/`
+  (shot map with situation and body part, momentum, average positions, xG by minute), `/lineups/`
+  (confirmed elevens stay after the match, with `unavailable_players` and reasons), `/heatmaps/`,
+  `/commentary/`. Only bookmaker names are paid.
+- **Now collecting:** `history:deep` (`engine/src/deep.ts`, table `match_deep`): elevens, formations,
+  who was missing, and per-player numbers for each finished match, two requests a match, once. In
+  the ratings workflow (600 a run, reserve 3,000); first run 45854495771: 392 of 400 read. `lab:dump`
+  now writes `lab-deep.json.gz` beside the history.
+- **Next:** once a few thousand matches are in, test rotation (actual eleven against the usual one)
+  and missing creators (their share of the side's xG + xA) on the A / B / C split; rebuild the
+  write-up as a chain (situation, how each side makes its chances and who drives it, what changes
+  with who is missing, the matchup, the verdict), and have the call follow it.
+
+
+### The analysis as an argument (owner, 28 November 2026)
+
+The owner: the write-up is "biased towards chance creation... who created the chances, why, what
+changes". The writer used to get the eighteen heaviest facts in one list, and the chance-creation
+reads weigh 96 to 99, so they led nearly everything, with nothing joining them to the team news.
+- **Every fact has a step** (`PubFact.topic`, set in `pubFacts`): situation, play, people, missing,
+  conditions, luck. `narrate/chain.ts` hands the writer the facts in that order, with a cap per step
+  and per side (situation 8 / 4, play 4 / 2, team news 6 / 3, the rest 3 / 2), so no one kind of
+  fact can fill the brief and both sides are in every step.
+- **Facts that join the others** (`linkFacts` in `facts.ts`, from the player profiles' tags): a
+  side's run of making the better chances "came with" a top scorer or creator who is out, and stops
+  leading (the deciding line built on it is dropped); a missing top scorer, creator, first-choice
+  keeper or the defender holding the back line is said for what it takes out; a fit top scorer or
+  creator missing from a confirmed eleven is said (Caen at Saint-Omer, LASK at Bodø). Facts only.
+- **The prompt** (`buildAnalysisPrompt`) is now SETUP (both sides: what it means, the state they
+  are in), HOW (how each side makes chances, who makes them, what the team news changes), CALL (the
+  matchup, the bet named, and the honest case against it). "Be fair to both sides" is a rule. The
+  preview prompt follows the same steps.
+- **The paragraph from the reads** (`rescue.ts`) opens on what is riding on it (table, stakes, a
+  derby) and picks up the links, which carry a lean.
+- **Tables:** the writer's table line now skips cups and league phases, as stakes does (Lille were
+  "35th, in the bottom three" of a Champions League phase).
+- Checked on the stored kick-off files of the November losses: Lille v Bayern now leads on Kane and
+  Olise out; Villa v Sunderland on Sunderland 19th without Brobbey and Xhaka; Cardiff v Preston on
+  Preston bottom and Lang not in their eleven.
+
+### The lost calls, researched (owner, 27–28 November 2026)
+
+The owner: "research most lost matches like an actual analysis... we have been on the decline". All 17
+losses from 20 to 27 November were researched from previews, match reports and team news (four
+research passes; reports in the session, sources cited per match).
+- **The decline is one week.** Settled calls: W45 49 of 58 landed (46.9 priced), W46 29/33 (28.2),
+  W47 57/72 (59.4), W48 14/21 (17.6, about two standard deviations short). Over all 184, 152 landed
+  against 148 priced. Of the 17 losses, about seven were plain luck (Hull's red card at 89' and two
+  stoppage-time goals, VAR at Slavia, Brest's keeper, a 30-yard winner at Cluj, City's ruled-out
+  goal); the rest had public warnings (Bayern without Kane and Olise, Caen rotating at an amateur
+  side, Preston improving under Alexander, Valencia's defence under Aguirre, Alavés strong at home).
+- **None of those warnings beats the price across all matches.** Tested on the 377 finished matches
+  with a kick-off file and a 1X2 price (favourite wins, and avoids defeat, against its price): opponent
+  under a new manager, opponent improving under one, favourite without a win in four, favourite poor
+  at the venue, two or more attackers out, a big share of goals out, opponent in or near the drop
+  zone. The largest is 1.8 standard deviations on 13 matches. Our own model disagreeing with the
+  price does not predict losses either (flat at every threshold, 187 calls). So the call rule is
+  unchanged: the bookmakers already price team news and form, and a rule built on 17 losses would
+  be fitted to them.
+- **What was wrong is the analysis, and that is fixed** (all in the write-up and the factor notes;
+  no rate moved except the bounce lift on a side going backwards):
+  - The case for a bet on a side counted good news for the opponent as support (Pogoń "covering the
+    line" because Śląsk's new manager was lifting them). `sideOriented` in `narrate/compose.ts` turns
+    the opponent's claims round and leaves out claims about neither team.
+  - The paragraph built from the reads when the writer is out of allowance did not know the call and
+    ended "Troyes should have the better of it" above Le Havre +1. `fromReads` now takes `callNeed`:
+    a cushioned bet says what the cushion is for; a bet needing a win the reads argue against goes
+    to the grammar.
+  - "Nothing much riding" for sides bottom of the table and second in the title race: the season
+    states only switch on late, so every November match was mid-table. `tableLine` in
+    `context/stakes.ts` says where a side sits (top, a few points off it, bottom, in or just above the
+    drop zone). The writer's facts never knew `european_chase`; they do now.
+  - The manager read said "an early lift usually fades" whatever had happened. The provider leaves
+    `delta` null beside before and after; it is worked out now, and the note and the writer's fact
+    say whether the side is picking up more or fewer points since he came. A side going backwards in
+    the first games gets no bounce lift.
+  - The reverse fixture note now says who won it (Sepsi had beaten U Cluj), and replaces "the last
+    meeting finished 1-0" when both would be said.
+  - Absences name the players and say when forwards are out together, in place of "none of them
+    central" (Athletic without both centre-forwards; Valencia's suspended captain).
+- **Not fixable from here:** stale absence data from the provider (Aubameyang listed out and
+  playing). The rotation and missing-creator tests wait on `match_deep` (above).
+
 ### The engine's rule, tightened (20 November 2026)
 
 The owner asked for rounds of iteration until the engine is genuinely better
@@ -703,6 +807,15 @@ Stage 2, accounts:
 - **13 October:** the Champions League star ball is a picture now (`comptheme.js`, starball.webp with
   the 480 for phones); the live shader stuttered on phones however it was tuned, and moved to
   `scripts/hero/starball.js`, where it only renders stills. The full-screen twinkle is still too.
+- **22 October:** studio slides redone as a broadcaster's results graphic (owner: the poster look was
+  "hot garbage"): club colours split on the diagonal with their crests or the owner's photo, score
+  bars in club colours, "Our call landed" with a tick, a violet brand bar (offside.win, LINK IN BIO) on
+  every slide. Then redone again on the owner's reference (a frosted card over a match photo:
+  competition badge, crests "vs", the score, scorers, our call with odds, OFFSIDE.WIN / LINK IN BIO).
+  Photos are found automatically through Openverse (Flickr and Wikimedia, licences allowing
+  commercial use only), passed through the Worker's `/media/cc` (those two hosts only), with the
+  photographer's credit on the slide; "Next photo" steps through the rest. The owner asked for
+  agency photos scraped from anywhere, and for their social cookies to post with; both declined.
 - **13 October:** the studio (`#/admin/studio`, `public/js/studio.js`): a day's results as a carousel
   to post, drawn on canvas at 1080x1350 (post) or 1080x1920 (story). Cover gives the day's true
   count ("12 of 13 landed"); one slide per landed call (crests, score, scorers, the call, its odds

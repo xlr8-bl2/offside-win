@@ -37,8 +37,48 @@ function seedOf(s: string): number {
   return h >>> 0;
 }
 
-export function fromReads(home: string, away: string, facts: PubFact[]): string | null {
+/**
+ * What a call needs from the side it backs, said plainly. Null for a bet with
+ * no side (goals, both to score), where who is better says nothing either way.
+ */
+export interface CallNeed {
+  side: 'home' | 'away';
+  /** Follows "only have to": "avoid defeat". Null when the bet needs a win. */
+  cushion: string | null;
+}
+
+export function callNeed(market: string, outcome: string, line: number | null): CallNeed | null {
+  const side = outcome === 'HOME' || outcome === '1X' ? 'home' : outcome === 'AWAY' || outcome === 'X2' ? 'away' : null;
+  if (!side) return null;
+  switch (market) {
+    case '1x2':
+      return { side, cushion: null };
+    case 'double_chance':
+      return { side, cushion: 'avoid defeat' };
+    case 'draw_no_bet':
+      return { side, cushion: 'avoid defeat, with the stake back on a draw' };
+    case 'asian_handicap': {
+      // `line` is the home handicap, market-wide: the away side of -1 is +1.
+      if (line === null) return { side, cushion: null };
+      const own = side === 'home' ? line : -line;
+      if (own < 0) return { side, cushion: null };
+      if (own === 0) return { side, cushion: 'avoid defeat, with the stake back on a draw' };
+      if (own < 1) return { side, cushion: 'avoid defeat' };
+      return { side, cushion: 'avoid losing by two or more' };
+    }
+    default:
+      return null;
+  }
+}
+
+export function fromReads(home: string, away: string, facts: PubFact[], call: CallNeed | null = null): string | null {
+  // A side whose chance-making record came with players who are out (the
+  // link in facts.ts) is not scored on that record: the link has undone it.
+  // Hamburg v Bayern read "the other half is all Bayern", then that their
+  // record came with Kane and Olise, then "Bayern should have the better of it".
+  const undercut = new Set(facts.filter((f) => /run of making the better chances came with/.test(f.text)).map((f) => f.side));
   const reads = facts.filter((f) => f.lean !== undefined && f.side !== 'match')
+    .filter((f) => !(undercut.has(f.side) && f.lean === 1 && /better chances|turn it into chances/.test(f.text)))
     .sort((a, b) => b.weight - a.weight);
   if (reads.length < MIN_READS) return null;
   const decides = facts.find((f) => f.decides);
@@ -65,17 +105,21 @@ export function fromReads(home: string, away: string, facts: PubFact[]): string 
   let close: string;
   // The side the take is about, whose reads come first.
   let first = better;
+  // The side the paragraph ends up arguing for, if it argues for one.
+  let favours: 'home' | 'away' | null = null;
   if (decides || (score[better] > 0 && score[worse] < 0) || (score[better] > 0 && gap >= 2)) {
     take = pick([
       `Look past the results and this is ${B}'s game.`,
       `Everything underneath the results points to ${B}.`,
       `The results only tell half of this one, and the other half is all ${B}.`,
     ], seed);
+    favours = better;
     close = decides ? sentence(decides.text) : pick([
       `If that carries on, ${B} should have the better of it.`,
       `That is the pattern to trust here, and it favours ${B}.`,
     ], seed);
   } else if (score[better] > 0) {
+    if (!said[worse]) favours = better;
     take = said[worse]
       ? `Two sides doing the right things underneath the results, and ${B} doing a little more of them.`
       : `${B} are the side doing the right things underneath the results.`;
@@ -87,6 +131,7 @@ export function fromReads(home: string, away: string, facts: PubFact[]): string 
     close = 'The side that stops giving up the better chances first takes this one.';
   } else if (score[worse] < 0) {
     first = worse;
+    favours = better;
     take = `${W} are in trouble, and not only on results.`;
     close = `Until ${W} sort that out, they are there to be got at.`;
   } else {
@@ -132,7 +177,38 @@ export function fromReads(home: string, away: string, facts: PubFact[]): string 
       `That is the pattern to trust here, and it favours ${B}.`,
     ], seed);
   }
-  const text = [take, ...body, close].join(' ');
+  /*
+   * The paragraph is under a call, so it cannot end by arguing the other side.
+   *
+   * It used to know nothing of the call: Troyes v Le Havre (22 November) closed
+   * "If that carries on, Troyes should have the better of it" above a pick on
+   * Le Havre. When the reads favour the side the call is against, a bet that
+   * needs a win has no case here and the grammar writes it instead; a bet with
+   * a cushion says what the cushion is for, which is the honest version of the
+   * same argument.
+   */
+  if (call && favours && favours !== call.side) {
+    if (!call.cushion) return null;
+    const S = name(call.side);
+    close = pick([
+      `${S} do not have to beat them, though. They only have to ${call.cushion}, and that is a lower bar than these reads set.`,
+      `That is the risk in this one. But ${S} only have to ${call.cushion}, which is a long way short of winning it.`,
+    ], seed);
+  }
+  /*
+   * What is riding on it comes first, as the chain does (chain.ts): a side
+   * bottom of the table or in a title race is the frame every read sits in.
+   * Only the stakes and the table, not the form lookups, which a reader can
+   * find anywhere and which the reads already say better.
+   */
+  const RIDING = /\b(table|relegation|title race|Europe|drop zone|derby|six-pointer|nothing left to play for|off the top|level on points with the leaders)\b/;
+  const riding = facts
+    .filter((f) => f.lean === undefined && RIDING.test(f.text) && !f.text.includes(' in the table'))
+    .sort((a, b) => b.weight - a.weight);
+  const r0 = riding[0];
+  const r1 = r0 && riding.find((f) => f.side !== r0.side && f.side !== 'match');
+  const setting = r0 ? sentence(r1 ? `${r0.text}, and ${r1.text}` : r0.text) : null;
+  const text = [...(setting ? [setting] : []), take, ...body, close].join(' ');
   if (text.split(/\s+/).length < MIN_WORDS) return null;
   // Every read is already said in the pub's words; this only makes sure.
   if (findBannedInProse(text, [home, away, ...facts.map((f) => f.text)]).length) return null;

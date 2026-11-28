@@ -24,6 +24,7 @@
  *      publishing when it happens.
  */
 
+import { brief } from './chain.ts';
 import { findBannedInProse } from '../vocabulary.ts';
 import type { PubFact } from './facts.ts';
 
@@ -108,7 +109,7 @@ const NEVER = [
 ].join(', ');
 
 export function buildPrompt(req: WriteRequest): string {
-  const facts = req.facts.slice(0, 18).map((f) => `- ${f.text}`).join('\n');
+  const facts = brief(req.facts);
   const odds = oddsPhrase(req.odds);
   const rules = `Hard rules:
 - Use ONLY the facts listed. Do not invent a statistic, a result, a player, a score or a date.
@@ -123,9 +124,11 @@ export function buildPrompt(req: WriteRequest): string {
 - Never say how long a manager has been in charge, and never list who starts or who is out. A reader can look those up; they are paying for what they cannot.
 - Rest only matters when one side has had clearly less of it than the other. Otherwise leave it out.`;
 
-  // What the reader pays for: the read underneath the results, not the lookups.
-  const analysis = `- Lead with what is happening underneath the results: who makes the better chances, whose results are ahead of or behind their football, who is finishing above or below their chances, what each side gives up at the back. The facts that say this come first in the list. Build on at least two of them.
-- Join them into an argument about how this game goes: who controls it, where the chances come from, and what that means for the score.
+  // What the reader pays for: an argument that joins the facts up (chain.ts),
+  // not the heaviest read restated.
+  const analysis = `- The facts come in steps: where the sides are, how they play, who is playing and who is not, and everything else. Use facts from at least three of the steps, and from both sides.
+- Join them into one argument with because, so and which means: what each side needs, how each one makes its chances and who makes them, what the team news changes about that, and how the two match up.
+- No one kind of fact is the whole analysis. How many good chances a side makes is one thing among several, and it means little if the players who made them are missing.
 - Mention an absence only when you can say what it changes on the pitch for that side, and never as a list of names.
 - The facts are your evidence, not your sentences. Say each one in your own words and tie it to the next; never copy a fact, and never repeat a line from these instructions.
 - Have a take, and back it. Be willing to say a side's results are flattering them, or that they are better than the table says.`;
@@ -493,24 +496,23 @@ const ANALYSIS_MIN = 110;
 const ANALYSIS_MAX = 290;
 
 export function buildAnalysisPrompt(req: WriteRequest): string {
-  const facts = req.facts.slice(0, 18).map((f) => `- ${f.text}`).join('\n');
   return `You are a football pundit telling a mate why you are backing ${req.call} in ${req.home} v ${req.away} (${req.competition}).
 
-These are the only facts you may use:
-${facts}
+These are the only facts you may use, in the order an argument is built:
+${brief(req.facts)}
 
 Write exactly three short paragraphs, each introduced by its label on its own line, exactly like this:
 
-CALL:
+SETUP:
 <paragraph one>
 HOW:
 <paragraph two>
-ONLY:
+CALL:
 <paragraph three>
 
-CALL: 35 to 80 words. Your first sentence names the bet, "${req.call}", and the biggest reason for it. No warm-up, no scene-setting, no "this match". Then back the reason with the strongest fact.
-HOW: 40 to 90 words. How this game actually goes to produce that result: who has the ball, where the chances come from, what each side gives up at the back. Argue it from the facts, in your own words.
-ONLY: 35 to 80 words. The thing most previews miss: what is happening underneath the results (a side doing better or worse than their football deserves, who is finishing above or below their chances, a referee, a tired squad, what the game means to one side). End with one sentence on what would have to go wrong for the bet to lose.
+SETUP: 35 to 80 words. Where both sides are: what the game means to each, the state each one is in, and anything that has changed around them. Both teams, not just the one you are backing. No warm-up, no scene-setting, no "this match".
+HOW: 40 to 90 words. How each side plays and where its chances come from, who makes them, and what the team news changes about that. Join the facts with because and so: a strong record means little if the players who built it are missing. Both teams.
+CALL: 35 to 80 words. How the two match up, and so why "${req.call}": name it in those words in this paragraph. Then the honest case against it from the facts: what the other side has going for it, and what would have to happen for the bet to lose.
 
 Hard rules:
 - Use ONLY the facts listed. Do not invent a statistic, a result, a player, a score or a date.
@@ -518,6 +520,7 @@ Hard rules:
 - No number with a decimal point, except in the bet's own name ("${req.call}"), written exactly like that.
 - Never use these words: ${NEVER}.
 - Never mention odds, a price or a bookmaker: the price sits beside the call and moves after you write. Never list who starts or who is out; mention an absence only for what it changes on the pitch.
+- Be fair to both sides. Do not leave out a fact because it cuts against the bet; say it, and say why the bet still stands.
 - Short sentences against longer ones, the way a pundit talks on the telly.
 - Never write: "this encounter", "this contest", "this clash", "this match", "ultimately", "set to", "look to", "navigate", "massive", "crippling", "relentless", "showing that", "it is worth noting", "in the final third".
 - No dashes between clauses. No headings beyond the three labels, no sign-off, no quotation marks round a paragraph.`;
@@ -531,13 +534,13 @@ export function quotesPrice(text: string, call: string): boolean {
 }
 
 /** The three labelled paragraphs, or null for any that is missing. */
-export function splitAnalysis(draft: string): { call: string | null; how: string | null; only: string | null } {
+export function splitAnalysis(draft: string): { setup: string | null; how: string | null; call: string | null } {
   const grab = (label: string, next: string | null) => {
     const re = new RegExp(`${label}:\\s*([\\s\\S]*?)${next ? `(?=\\n\\s*${next}:)` : '$'}`, 'i');
     const m = re.exec(draft.trim());
     return m && m[1]!.trim() ? m[1]!.trim() : null;
   };
-  return { call: grab('CALL', 'HOW'), how: grab('HOW', 'ONLY'), only: grab('ONLY', null) };
+  return { setup: grab('SETUP', 'HOW'), how: grab('HOW', 'CALL'), call: grab('CALL', null) };
 }
 
 /** Faults in a three-paragraph analysis, against the facts, the call and its odds. */
@@ -552,7 +555,7 @@ export function validateAnalysis(paras: string[], req: WriteRequest): Rejection[
     if (findBannedInProse(p, allowed).length) out.add('banned-term');
     if (inventedNumber(p, allowed)) out.add('invented-number');
     if (copiedFact(p, req.facts)) out.add('copied-fact');
-    if (notProse(p) || /\b(CALL|HOW|ONLY)\s*:/.test(p)) out.add('not-prose');
+    if (notProse(p) || /\b(SETUP|HOW|CALL)\s*:/.test(p)) out.add('not-prose');
   }
   const total = paras.reduce((a, p) => a + count(p), 0);
   if (total < ANALYSIS_MIN) out.add('too-short');
@@ -566,7 +569,7 @@ export function validateAnalysis(paras: string[], req: WriteRequest): Rejection[
 function analysisFeedback(paras: Array<string | null>, req: WriteRequest): string {
   const allowed = [...backing(req), req.call];
   const notes: string[] = [];
-  const labels = ['CALL', 'HOW', 'ONLY'];
+  const labels = ['SETUP', 'HOW', 'CALL'];
   paras.forEach((p, i) => { if (!p) notes.push(`${labels[i]} was missing. Write it, under its own label.`); });
   const got = paras.filter((p): p is string => Boolean(p));
   const nums = [...new Set(got.flatMap((p) => unbackedNumbers(p, allowed)))];
@@ -597,7 +600,7 @@ export async function writeAnalysis(req: WriteRequest, writer: Writer): Promise<
       return { text: null, why: null, rejections, unbacked, provider: writer.name, error: err instanceof Error ? err.message : String(err) };
     }
     const parts = splitAnalysis(draft);
-    let paras = [parts.call, parts.how, parts.only];
+    let paras = [parts.setup, parts.how, parts.call];
     unbacked.push(...paras.flatMap((p) => (p ? unbackedNumbers(p, allowed) : [])));
     // A paragraph whose only fault is a number out of place loses that sentence.
     paras = paras.map((p) => (p && unbackedNumbers(p, allowed).length ? withoutUnbacked(p, allowed) : p));

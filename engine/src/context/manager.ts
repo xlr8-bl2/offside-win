@@ -58,6 +58,17 @@ function sideManagerFactor(side: SideContext, which: 'home' | 'away'): Factor {
   const games = mgr.matchesInCharge;
   const days = mgr.tenureDays ?? 0;
   const ae = mgr.current.appointment_effect;
+  // The provider fills before and after and often leaves the difference null
+  // (Misiura at Motor: 1.2 before, 1.4 after, delta null). Without it the
+  // settling read never knew which way the appointment had gone, and wrote
+  // "an early lift usually fades" over Graham Alexander's Preston while they
+  // were picking up more points every week.
+  const delta: number | null =
+    typeof ae?.delta === 'number'
+      ? ae.delta
+      : typeof ae?.after_ppm === 'number' && typeof ae?.before_ppm === 'number'
+        ? ae.after_ppm - ae.before_ppm
+        : null;
   const name = mgr.name ?? 'the manager';
   // Every note below opens on the manager, and the fallback is lowercase
   // because it also travels into claim evidence where frames use it
@@ -76,18 +87,20 @@ function sideManagerFactor(side: SideContext, which: 'home' | 'away'): Factor {
   // §1.1's bounce window.
   if (games <= BOUNCE_WINDOW) {
     const k = 1 - games / (BOUNCE_WINDOW + 1);
+    // Three games in, the record says which way it is going; before that the
+    // lift is the read. A side going backwards under the new man is not on a
+    // bounce, whatever the window says.
+    const goingBackwards = games >= 3 && delta !== null && delta <= -0.25;
     const claims: Claim[] = [
       {
         subject: side.team_name,
         predicate: 'regime_new',
-        polarity: 1,
+        polarity: goingBackwards ? -1 : 1,
         magnitude: clamp(k, 0.3, 1),
         evidence: {
           manager: name,
           matches_in_charge: games,
-          ...(ae?.delta !== null && ae?.delta !== undefined
-            ? { appointment_delta: Number(ae.delta.toFixed(2)) }
-            : {}),
+          ...(delta !== null ? { appointment_delta: Number(delta.toFixed(2)) } : {}),
         },
         section: '§1.1',
         tier: 3,
@@ -100,13 +113,17 @@ function sideManagerFactor(side: SideContext, which: 'home' | 'away'): Factor {
       tier: 3,
       note:
         `${Name} is ${games} game${games === 1 ? '' : 's'} into the job at ${side.team_name}` +
-        (ae && ae.delta !== null
-          ? `, with the club running ${ae.delta >= 0 ? '+' : ''}${ae.delta.toFixed(2)} points per match against its form immediately before the appointment.`
-          : '. The new-manager bounce window is live but reverts by around game six.'),
+        (delta !== null && games >= 3
+          ? Math.abs(delta) < 0.25
+            ? ', and results are much as they were before he came.'
+            : delta > 0
+              ? ', and the side are picking up more points than they were before he came.'
+              : ', and the side are picking up fewer points than they were before he came.'
+          : '. Early days, when a new voice usually lifts a side for a few games.'),
       evidence,
       // The bounce is a short-term lift, and §1.1 says it is most pronounced at
       // home against manageable opposition.
-      adjustments: [adj('goals', which, effect(0.35 * k * (which === 'home' ? 1.2 : 0.8)))],
+      adjustments: goingBackwards ? [] : [adj('goals', which, effect(0.35 * k * (which === 'home' ? 1.2 : 0.8)))],
       claims,
       strength: clamp(k * 0.7, 0.2, 0.8),
     });
@@ -114,7 +131,7 @@ function sideManagerFactor(side: SideContext, which: 'home' | 'away'): Factor {
 
   // Past the bounce, into the window where §1.1 expects reversion.
   if (games <= REVERSION_WINDOW) {
-    const appointmentDelta = ae?.delta ?? null;
+    const appointmentDelta = delta;
     const claims: Claim[] =
       appointmentDelta !== null && Math.abs(appointmentDelta) > 0.25
         ? [
@@ -138,12 +155,18 @@ function sideManagerFactor(side: SideContext, which: 'home' | 'away'): Factor {
       id: `manager.${which}.settling`,
       section: '§1.1',
       tier: 3,
+      // Said from what has happened under him, not from a rule about game
+      // counts: Aguirre's Valencia and Alexander's Preston were both written
+      // off as a fading bounce while their results were going up.
       note:
-        `${Name} is ${games} games into the job at ${side.team_name}, past the bounce window, ` +
-        `where an early lift usually fades back toward the side's real level` +
-        (appointmentDelta !== null
-          ? `. The appointment has moved the club ${appointmentDelta >= 0 ? '+' : ''}${appointmentDelta.toFixed(2)} points per match.`
-          : '.'),
+        `${Name} is ${games} games into the job at ${side.team_name}` +
+        (appointmentDelta === null
+          ? ', long enough for the early lift to have worn off, so this is close to the side as it really is.'
+          : appointmentDelta >= 0.25
+            ? ', and they are picking up more points than they were before he came. That is past the point where it is only a bounce.'
+            : appointmentDelta <= -0.25
+              ? ', and they are picking up fewer points than they were before he came.'
+              : ', and results are much as they were before he came.'),
       evidence,
       // No rate adjustment: the honest read here is uncertainty, not direction.
       claims,
