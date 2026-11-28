@@ -148,3 +148,18 @@ test('the reads paragraph opens on what is riding on it, and still leaves the lo
   assert.match(t, /^Preston are bottom of the table\./, t);
   assert.doesNotMatch(t, /won four of their last six/);
 });
+
+test('a record the team news has undone does not carry the paragraph', async () => {
+  const { fromReads } = await import('../src/narrate/rescue.ts');
+  const facts = [
+    { text: "FC Bayern München's run of making the better chances came with Harry Kane and Michael Olise in the side, and they are not playing here", side: 'away', lean: -1, weight: 99 },
+    { text: 'FC Bayern München have created the better chances in seven of their last nine games', side: 'away', lean: 1, weight: 80 },
+    { text: 'FC Bayern München have had most of the ball in seven of their last eight games, and they turn it into chances', side: 'away', lean: 1, weight: 74 },
+    { text: 'Hamburger SV are without Miro Muheim, their top scorer, so the goals have to come from somewhere else', side: 'home', lean: -1, weight: 92 },
+    { text: 'Hamburger SV have faced six or more efforts on target in four of their last six games. They are getting opened up', side: 'home', lean: -1, weight: 88 },
+  ] as any;
+  const t = fromReads('Hamburger SV', 'FC Bayern München', facts)!;
+  assert.ok(t);
+  assert.doesNotMatch(t, /all FC Bayern München|Bayern München should have the better of it|favours FC Bayern München/, t);
+  assert.match(t, /came with Harry Kane/);
+});

@@ -15,6 +15,7 @@ import { pubFacts } from '../narrate/facts.ts';
 import { matchInsights, teamGames } from '../narrate/insight.ts';
 import { write } from '../narrate/write.ts';
 import { fromReads } from '../narrate/rescue.ts';
+import { brief } from '../narrate/chain.ts';
 import { geminiWriter } from '../narrate/gemini.ts';
 import type { MatchRow } from '../types.ts';
 
@@ -69,8 +70,8 @@ export async function runInsightPreview({ draft = false }: { draft?: boolean } =
     console.log(`  FROM THE READS: ${fromReads(f.home_team, f.away_team, facts) ?? '(too few reads; the grammar keeps it)'}`);
     if (!writer || drafted >= 4 || reads.length < 2) continue;
     drafted++;
-    console.log('  facts the writer gets, in order:');
-    for (const x of facts.slice(0, 18)) console.log(`    - ${x.text}`);
+    console.log('  the brief the writer gets (chain.ts):');
+    for (const line of brief(facts).split('\n')) console.log(`    ${line}`);
     let res = await write({ home: f.home_team, away: f.away_team, competition: String(b['league'] ?? 'this competition'), call: '', facts, previewOnly: true }, writer);
     for (const other of writers.slice(1)) {
       if (res.text || !res.error) break;

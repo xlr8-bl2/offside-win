@@ -72,7 +72,13 @@ export function callNeed(market: string, outcome: string, line: number | null): 
 }
 
 export function fromReads(home: string, away: string, facts: PubFact[], call: CallNeed | null = null): string | null {
+  // A side whose chance-making record came with players who are out (the
+  // link in facts.ts) is not scored on that record: the link has undone it.
+  // Hamburg v Bayern read "the other half is all Bayern", then that their
+  // record came with Kane and Olise, then "Bayern should have the better of it".
+  const undercut = new Set(facts.filter((f) => /run of making the better chances came with/.test(f.text)).map((f) => f.side));
   const reads = facts.filter((f) => f.lean !== undefined && f.side !== 'match')
+    .filter((f) => !(undercut.has(f.side) && f.lean === 1 && /better chances|turn it into chances/.test(f.text)))
     .sort((a, b) => b.weight - a.weight);
   if (reads.length < MIN_READS) return null;
   const decides = facts.find((f) => f.decides);
