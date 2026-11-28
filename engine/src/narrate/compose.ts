@@ -547,6 +547,46 @@ function causalJoin(sentence: string, nouns: Set<string>, rng: Rng): string {
   return choose(CONNECTIVES.causal as unknown as string[], rng).item + joinAfterConnective(sentence, nouns);
 }
 
+/**
+ * The team a claim is about, if it is about one.
+ *
+ * Team claims carry the name as their subject or as `evidence.team` (an
+ * absence is about the player, and names his side there). A price move names
+ * the outcome it moved on instead.
+ */
+export function claimTeam(c: Claim, home: string, away: string): string | null {
+  const team = String(c.evidence.team ?? '');
+  if (team === home || team === away) return team;
+  if (c.subject === home || c.subject === away) return c.subject;
+  if (c.predicate === 'market_move' || c.predicate === 'market_sharp' || c.predicate === 'market_crowd') {
+    const o = String(c.evidence.outcome ?? '');
+    if (o === 'HOME') return home;
+    if (o === 'AWAY') return away;
+  }
+  return null;
+}
+
+/**
+ * A claim read from the side of the team being backed.
+ *
+ * A claim's polarity is about its own subject: a new manager lifting a side is
+ * +1 for that side. The case for a bet on one team used to take every +1 claim
+ * as support, whoever it was about, and so argued Pogoń to cover the line
+ * because Śląsk's new manager was "inside the window where a change of voice
+ * still lifts output" (Pogoń v Śląsk, 23 November). Good news for the
+ * opponent is a reason against the bet, and it is read as one.
+ *
+ * Claims about neither team (the weather, the referee, a derby) say something
+ * about goals and cards, not about who wins, so a bet on a side leaves them out.
+ */
+export function sideOriented(c: Claim, backed: string | null, home: string, away: string): Claim[] {
+  if (!backed) return [c];
+  const team = claimTeam(c, home, away);
+  if (!team) return [];
+  if (team === backed) return [c];
+  return [{ ...c, polarity: (c.polarity * -1) as Claim['polarity'] }];
+}
+
 /** The side a selection backs, or null for a bet with no side. */
 function backedTeam(c: Candidate, home: string, away: string): string | null {
   if (c.outcome === 'HOME' || c.outcome === '1X') return home;
@@ -610,12 +650,15 @@ export function narrateConfident(input: ConfidentInput): string {
   const orient = (c: Claim): Claim =>
     flip === 1 ? c : { ...c, polarity: (c.polarity * -1) as Claim['polarity'] };
 
-  const all = drivers.flatMap((d) => d.claims).map(orient);
-
   // Beat one is the form of the side being backed, which is a different pool
   // from the rest: it opens the argument rather than supporting it, so it is
   // pulled out before the supporting claims are selected.
   const backed = backedTeam(candidate, input.homeTeam, input.awayTeam);
+
+  const all = drivers
+    .flatMap((d) => d.claims)
+    .map(orient)
+    .flatMap((c) => sideOriented(c, backed, input.homeTeam, input.awayTeam));
   const formClaims = all.filter((c) => c.predicate === 'form_run');
   const opener =
     formClaims.find((c) => backed && String(c.evidence.team ?? '') === backed) ??

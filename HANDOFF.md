@@ -49,6 +49,49 @@ What the audit found (scratchpad `audit/`; data from the public API, kick-off fi
   with who is missing, the matchup, the verdict), and have the call follow it.
 
 
+### The lost calls, researched (owner, 27–28 November 2026)
+
+The owner: "research most lost matches like an actual analysis... we have been on the decline". All 17
+losses from 20 to 27 November were researched from previews, match reports and team news (four
+research passes; reports in the session, sources cited per match).
+- **The decline is one week.** Settled calls: W45 49 of 58 landed (46.9 priced), W46 29/33 (28.2),
+  W47 57/72 (59.4), W48 14/21 (17.6, about two standard deviations short). Over all 184, 152 landed
+  against 148 priced. Of the 17 losses, about seven were plain luck (Hull's red card at 89' and two
+  stoppage-time goals, VAR at Slavia, Brest's keeper, a 30-yard winner at Cluj, City's ruled-out
+  goal); the rest had public warnings (Bayern without Kane and Olise, Caen rotating at an amateur
+  side, Preston improving under Alexander, Valencia's defence under Aguirre, Alavés strong at home).
+- **None of those warnings beats the price across all matches.** Tested on the 377 finished matches
+  with a kick-off file and a 1X2 price (favourite wins, and avoids defeat, against its price): opponent
+  under a new manager, opponent improving under one, favourite without a win in four, favourite poor
+  at the venue, two or more attackers out, a big share of goals out, opponent in or near the drop
+  zone. The largest is 1.8 standard deviations on 13 matches. Our own model disagreeing with the
+  price does not predict losses either (flat at every threshold, 187 calls). So the call rule is
+  unchanged: the bookmakers already price team news and form, and a rule built on 17 losses would
+  be fitted to them.
+- **What was wrong is the analysis, and that is fixed** (all in the write-up and the factor notes;
+  no rate moved except the bounce lift on a side going backwards):
+  - The case for a bet on a side counted good news for the opponent as support (Pogoń "covering the
+    line" because Śląsk's new manager was lifting them). `sideOriented` in `narrate/compose.ts` turns
+    the opponent's claims round and leaves out claims about neither team.
+  - The paragraph built from the reads when the writer is out of allowance did not know the call and
+    ended "Troyes should have the better of it" above Le Havre +1. `fromReads` now takes `callNeed`:
+    a cushioned bet says what the cushion is for; a bet needing a win the reads argue against goes
+    to the grammar.
+  - "Nothing much riding" for sides bottom of the table and second in the title race: the season
+    states only switch on late, so every November match was mid-table. `tableLine` in
+    `context/stakes.ts` says where a side sits (top, a few points off it, bottom, in or just above the
+    drop zone). The writer's facts never knew `european_chase`; they do now.
+  - The manager read said "an early lift usually fades" whatever had happened. The provider leaves
+    `delta` null beside before and after; it is worked out now, and the note and the writer's fact
+    say whether the side is picking up more or fewer points since he came. A side going backwards in
+    the first games gets no bounce lift.
+  - The reverse fixture note now says who won it (Sepsi had beaten U Cluj), and replaces "the last
+    meeting finished 1-0" when both would be said.
+  - Absences name the players and say when forwards are out together, in place of "none of them
+    central" (Athletic without both centre-forwards; Valencia's suspended captain).
+- **Not fixable from here:** stale absence data from the provider (Aubameyang listed out and
+  playing). The rotation and missing-creator tests wait on `match_deep` (above).
+
 ### The engine's rule, tightened (20 November 2026)
 
 The owner asked for rounds of iteration until the engine is genuinely better

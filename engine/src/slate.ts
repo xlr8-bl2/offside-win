@@ -20,7 +20,7 @@ import { forBundle } from './context/players.ts';
 import { gatherExtras, type Extras } from './context/extras.ts';
 import { refreshLeagueInfo } from './leagueinfo.ts';
 import { geminiWriter } from './narrate/gemini.ts';
-import { fromReads } from './narrate/rescue.ts';
+import { callNeed, fromReads } from './narrate/rescue.ts';
 import { budgeted, keyId, left, spent, todays, type BudgetState } from './narrate/budget.ts';
 import { write, type Writer } from './narrate/write.ts';
 import { freeBoard, freeBundle } from './membership/redact.ts';
@@ -847,7 +847,8 @@ export async function runSlate({ fresh = false }: { fresh?: boolean } = {}): Pro
       // (narrate/rescue.ts). Not cached: the writer replaces it when it can.
       for (const v of confidentVerdicts) {
         if (written.has(v)) continue;
-        const r = fromReads(analysis.home_team, analysis.away_team, factsFor());
+        const c = v.candidate;
+        const r = fromReads(analysis.home_team, analysis.away_team, factsFor(), callNeed(c.market, c.outcome, c.line));
         if (r) { v.narrative = r; narrateRescued++; }
       }
 

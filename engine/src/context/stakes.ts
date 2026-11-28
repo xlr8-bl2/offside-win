@@ -98,6 +98,9 @@ export function classifySide(
   const detail = {
     position: standing.position,
     points: standing.points,
+    size,
+    rel_places: relegationPlaces(size),
+    played: standing.played ?? null,
     games_left: gamesLeft,
     gap_to_leader: gapToLeader,
     gap_to_safety: gapToSafety,
@@ -133,6 +136,43 @@ export function classifySide(
   }
 
   return { state: 'mid_table', intensity: 0.2, detail };
+}
+
+const ORDINAL = ['', 'top', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
+const WORD = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+const points = (n: number) => (n <= 10 ? WORD[n]! : String(n)) + (n === 1 ? ' point' : ' points');
+const placed = (p: number) => (p <= 10 ? ORDINAL[p]! : `${p}th`);
+
+/**
+ * Where a side sits, said the way a supporter would, when it is worth saying.
+ *
+ * The season states above only switch on late, on purpose: a relegation
+ * "fight" in round six is noise. But a side bottom of the table in November is
+ * not "nothing riding", which is what the page said of Preston at Cardiff,
+ * Sunderland at Villa and Valencia at Rayo, all in or by the drop zone, and of
+ * Brighton, second in the title race, at Hull. This says where they are and
+ * leaves the season's verdict to the states. It moves no rate: on the fixtures
+ * we hold, a bottom-half opponent was already in the price.
+ *
+ * Null for a side in the middle, and before six games, when the table is noise.
+ */
+export function tableLine(team: string, d: Record<string, unknown> | undefined): string | null {
+  if (!d) return null;
+  const pos = Number(d['position']);
+  const size = Number(d['size']);
+  const rel = Number(d['rel_places']);
+  const played = d['played'] === null || d['played'] === undefined ? null : Number(d['played']);
+  const lead = Number(d['gap_to_leader']);
+  const safe = d['gap_to_safety'] === null || d['gap_to_safety'] === undefined ? null : Number(d['gap_to_safety']);
+  if (!pos || !size || size < 8 || (played !== null && played < 6)) return null;
+  if (pos === 1) return `${team} are top of the table`;
+  if (pos <= 3 && Number.isFinite(lead) && lead <= 6) {
+    return lead === 0 ? `${team} are level on points with the leaders` : `${team} are ${placed(pos)}, ${points(lead)} off the top`;
+  }
+  if (pos === size) return `${team} are bottom of the table`;
+  if (rel && pos > size - rel) return `${team} are in the drop zone`;
+  if (safe !== null && safe >= 0 && safe <= 2) return `${team} are only just above the drop zone`;
+  return null;
 }
 
 const STATE_LABEL: Record<StakeState, string> = {
@@ -298,8 +338,13 @@ function stakeFactor(
     // Two sides with nothing riding on it is not a sentence worth two clauses
     // and a games-remaining count. Say it once, quietly, and carry no weight.
     const bothMid = home.state === 'mid_table' && away.state === 'mid_table';
+    // "Nothing much riding" was said of a side bottom of the table. Where
+    // either side sits somewhere worth naming, the note names it.
+    const where = [tableLine(ctx.home.team_name, home.detail), tableLine(ctx.away.team_name, away.detail)].filter(Boolean);
     note = bothMid
-      ? 'Nothing much riding on this one for either side yet.'
+      ? where.length
+        ? `${where.join(', and ')}, with too much of the season left for the table to decide anything yet.`
+        : 'Both sides are in the pack in the table, with plenty of the season left.'
       : `${parts.join('; ')}, with ${gamesLeft} game${gamesLeft === 1 ? '' : 's'} remaining.`;
     strength = bothMid ? 0 : clamp(Math.max(home.intensity, away.intensity), 0.1, 0.8);
   }
@@ -390,12 +435,24 @@ function revengeFactor(ctx: FixtureContext): Factor {
   const margin = ourHomeScored - ourHomeConceded;
 
   if (Math.abs(margin) < 3) {
+    // Who won it is the part a supporter remembers, and the note used to drop
+    // it: U Cluj v Sepsi read "finished 1-0, too close to carry a revenge
+    // motive" with no word that Sepsi had won it.
+    const winner = margin > 0 ? ctx.home.team_name : margin < 0 ? ctx.away.team_name : null;
+    const big = Math.max(ourHomeScored, ourHomeConceded);
+    const small = Math.min(ourHomeScored, ourHomeConceded);
     return computed({
       id: 'fixture.revenge',
       section: '§5.3',
       tier: 2,
-      note: `The reverse fixture finished ${ourHomeConceded}-${ourHomeScored}, too close to carry a revenge motive.`,
-      evidence: { reverse_margin: margin },
+      note: winner
+        ? `${winner} won the reverse fixture ${big}-${small}, too close a game to carry a revenge motive.`
+        : `The reverse fixture was a ${big}-${small} draw.`,
+      evidence: {
+        reverse_margin: margin,
+        reverse_score: `${rev.home_goals}-${rev.away_goals}`,
+        ...(winner ? { reverse_winner: winner } : {}),
+      },
       strength: 0,
     });
   }

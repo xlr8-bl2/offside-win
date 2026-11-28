@@ -292,6 +292,20 @@ function managerFacts(id: string, ev: Record<string, unknown>, team: string, sid
   if (id.includes('.bounce') && games <= 3) {
     return [{ text: games <= 1 ? `${who} has only just taken over at ${team}` : `${who} took over at ${team} only ${n(games)} games ago`, side, weight: 30 }];
   }
+  // Which way it has gone under him is the fact, once there are games enough
+  // to say. "Still settling in" was all the writer had on Alexander's Preston,
+  // who were picking up points every week (context/manager.ts).
+  const ae = (ev['appointment_effect'] ?? {}) as Record<string, unknown>;
+  const before = num(ae['before_ppm']);
+  const after = num(ae['after_ppm']);
+  const d = num(ae['delta']) ?? (before !== null && after !== null ? after - before : null);
+  if (games >= 3 && games <= 20 && d !== null && Math.abs(d) >= 0.25) {
+    return [{
+      text: `${team} are picking up ${d > 0 ? 'more' : 'fewer'} points under ${who} than they were before he took over`,
+      side,
+      weight: 45,
+    }];
+  }
   if ((id.includes('.bounce') || id.includes('.settling')) && games <= 14) {
     return [{ text: `${who} is still settling in at ${team}`, side, weight: 15 }];
   }
@@ -325,6 +339,7 @@ function stakesFacts(ev: Record<string, unknown>, home: string, away: string): P
   const phrase: Record<string, string> = {
     title_race: 'are in the title race',
     chasing_europe: 'are chasing Europe',
+    european_chase: 'are chasing Europe',
     relegation: 'are fighting relegation',
     fighting_relegation: 'are fighting relegation',
     dead_rubber: 'have nothing left to play for',
@@ -874,12 +889,24 @@ export function pubFacts(bundle: Bundle): PubFact[] {
     else if (id === 'stakes.season') out.push(...stakesFacts(ev, home, away));
     else if (id === 'environment.weather') out.push(...weatherFacts(ev));
     else if (id === 'referee.tendency') out.push(...refereeFacts(ev));
+    else if (id === 'fixture.revenge') {
+      const w = str(ev['reverse_winner']);
+      const sc = str(ev['reverse_score']);
+      if (w && sc) {
+        const [a, b] = sc.split('-').map(Number);
+        const loser = w === home ? away : home;
+        out.push({ text: `${w} beat ${loser} ${Math.max(a!, b!)}-${Math.min(a!, b!)} when they met earlier this season`, side: w === home ? 'home' : 'away', weight: 50 });
+      }
+    }
     else if (id === 'fixture.derby' && ev['derby'] === true) {
       out.push({ text: 'this is a local derby', side: 'match', weight: 80 });
     }
   }
 
-  out.push(...h2hFacts(bundle.h2h, home, away));
+  // This season's meeting, with who won it, says what "the last meeting
+  // finished 1-0" says and more, so it is said once.
+  const reverse = out.some((f) => f.text.endsWith('when they met earlier this season'));
+  out.push(...h2hFacts(bundle.h2h, home, away).filter((f) => !(reverse && f.text.startsWith('the last meeting'))));
   out.push(...tableFacts(bundle));
   out.push(...lineupFacts(bundle));
   out.push(...scorerFacts(bundle));

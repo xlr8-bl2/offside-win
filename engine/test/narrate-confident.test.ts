@@ -230,3 +230,31 @@ test('the backed side is never called "the better side" when it is not', () => {
   assert.doesNotMatch(out, /better side at 1\.21|stronger side on expected goals, 1\.21/,
     `called the weaker side the better one: ${out}`);
 });
+
+test("good news for the opponent is a reason against the bet, not for it", () => {
+  // Pogoń v Śląsk, 23 November: Śląsk's new manager was argued as the case for
+  // Pogoń covering the line. A claim is about its own subject; for a bet on the
+  // other side it cuts against.
+  const out = narrateConfident({
+    ...base,
+    candidate: cand('asian_handicap', 'HOME', -0.5, 0.8, 1.25),
+    drivers: [factor([
+      claim('regime_new', 'Degerfors IF', 1, { manager: 'Toni Golem', matches_in_charge: 1 }),
+    ])],
+    ledger: ledger(),
+  });
+  const at = out.indexOf('Golem');
+  assert.ok(at >= 0, `the opponent's manager went unmentioned: ${out}`);
+  assert.match(out.slice(0, at + 80), /not a clean case|Against that|other way|does not see|reservation|risk|but /i,
+    `the opponent's new manager was read as support: ${out}`);
+});
+
+test('a bet on a side leaves out claims about neither team', () => {
+  const out = narrateConfident({
+    ...base,
+    candidate: cand('double_chance', '1X', null, 0.86, 1.16),
+    drivers: [factor([claim('weather', 'the pitch', -1, { temp_c: 2, wind_kph: 38, rain_mm: 9 })])],
+    ledger: ledger(),
+  });
+  assert.doesNotMatch(out, /wind|rain/i, `weather argued a double chance: ${out}`);
+});

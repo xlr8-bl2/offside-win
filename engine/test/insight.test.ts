@@ -106,3 +106,32 @@ test('fromReads never says the deciding line after the reads it is made of', asy
   const t = fromReads('Inter', 'Parma', facts);
   if (t) assert.doesNotMatch(t, /This is where it is decided/);
 });
+
+test('under a call, the reads never end by arguing the other side', async () => {
+  // Troyes v Le Havre, 22 November: "If that carries on, Troyes should have the
+  // better of it" above a pick on Le Havre +1.
+  const { fromReads, callNeed } = await import('../src/narrate/rescue.ts');
+  const facts = [
+    { text: 'Troyes have created the better chances in six of their last eight games', side: 'home', lean: 1, weight: 10 },
+    { text: 'Troyes have kept three clean sheets in their last five', side: 'home', lean: 1, weight: 8 },
+    { text: 'Le Havre have been out-created in five of their last seven games', side: 'away', lean: -1, weight: 9 },
+  ] as any;
+  // The handicap line is the home one: AWAY at -1 is Le Havre getting a goal.
+  const cushion = fromReads('Troyes', 'Le Havre', facts, callNeed('asian_handicap', 'AWAY', -1))!;
+  assert.ok(cushion, 'a paragraph');
+  assert.doesNotMatch(cushion, /Troyes should have the better of it|favours Troyes/, cushion);
+  assert.match(cushion, /Le Havre .*only have to avoid losing by two or more/, cushion);
+  assert.deepEqual(findBannedInProse(cushion, facts.map((f: any) => f.text)), []);
+  // A bet that needs Le Havre to win has no case in these reads.
+  assert.equal(fromReads('Troyes', 'Le Havre', facts, callNeed('1x2', 'AWAY', null)), null);
+  // Backing the side the reads favour is unchanged.
+  assert.equal(fromReads('Troyes', 'Le Havre', facts, callNeed('1x2', 'HOME', null)), fromReads('Troyes', 'Le Havre', facts));
+});
+
+test('callNeed reads the handicap from the side it is on', async () => {
+  const { callNeed } = await import('../src/narrate/rescue.ts');
+  assert.deepEqual(callNeed('asian_handicap', 'HOME', 0.5), { side: 'home', cushion: 'avoid defeat' });
+  assert.deepEqual(callNeed('asian_handicap', 'AWAY', 0.5), { side: 'away', cushion: null });
+  assert.deepEqual(callNeed('asian_handicap', 'AWAY', -0.5), { side: 'away', cushion: 'avoid defeat' });
+  assert.equal(callNeed('over_under_15', 'over', 1.5), null);
+});

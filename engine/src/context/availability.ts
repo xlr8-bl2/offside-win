@@ -188,6 +188,41 @@ function depthDamping(side: SideContext, role: Role): { damping: number; cover: 
   return { damping: clamp(1 - (cover - 1) / target, 0.3, 1), cover };
 }
 
+/**
+ * Who is out, by name, when none of them is a big enough loss to call one.
+ *
+ * The note used to say "none of them central to how the side plays", which is
+ * a claim the numbers cannot make: they measure goals and minutes, and
+ * Valencia's captain, suspended at Rayo, measured as nobody. Naming them is
+ * true and is what a reader wants; whether they matter is the reader's call.
+ */
+function outNamed(names: string[], measured: number): string {
+  const shown = names.slice(0, 2);
+  if (!shown.length) return '.';
+  const who = shown.length === 1 ? shown[0]! : `${shown[0]} and ${shown[1]}`;
+  if (names.length === shown.length) return `: ${who}.`;
+  return measured > 0 ? `, ${who} among them.` : `, including ${who}.`;
+}
+
+/**
+ * Said when the absences leave a side short of forwards.
+ *
+ * Athletic at home without both their centre-forwards read "none of them
+ * central". Each absence is weighed alone, so two strikers out at once, each
+ * under the line, never added up to anything. The cover left at the position
+ * is the plain fact.
+ */
+function shortUpFront(detail: Array<Record<string, unknown>>, squadKnown: boolean): string {
+  const att = detail.filter((d) => d['role'] === 'ATT' && !d['doubtful']);
+  if (!att.length) return '';
+  // With no squad list the cover is unknown, not nil.
+  const cover = squadKnown ? Math.min(...att.map((d) => Number(d['cover_at_position'] ?? 99))) : Infinity;
+  if (cover === 0) return ' That leaves them with no fit forward.';
+  if (cover === 1) return ' That leaves them with one fit forward.';
+  if (att.length >= 2) return ` That is ${att.length === 2 ? 'two' : att.length === 3 ? 'three' : att.length} forwards out at once.`;
+  return '';
+}
+
 export function availabilityFactors(ctx: FixtureContext): Factor[] {
   const out: Factor[] = [];
 
@@ -316,9 +351,8 @@ export function availabilityFactors(ctx: FixtureContext): Factor[] {
           `${side.team_name} are without ${absences.length} player${absences.length === 1 ? '' : 's'}` +
           (key.length
             ? `, and ${key.length === 1 ? `${key[0]} is a real loss.` : `${key.slice(0, -1).join(', ')} and ${key[key.length - 1]} are real losses.`}`
-            : measuredCount > 0
-              ? ', none of them central to how the side plays.'
-              : ', none of whom register in the scoring records.'),
+            : outNamed(sized.map((x) => x.a.name), measuredCount)) +
+          shortUpFront(detail, (side.squad ?? []).length > 0),
         evidence: {
           count: absences.length,
           measured: measuredCount,
